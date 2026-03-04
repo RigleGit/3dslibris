@@ -688,7 +688,7 @@ bool Text::PrintNewLine(void) {
   int height = GetHeight();
   // Use actual screen height: 400 for left (top), 320 for right (bottom)
   int maxHeight = (screen == screenleft) ? 400 : 320;
-  int y = pen.y + height * linespacing;
+  int y = pen.y + height + linespacing;
   if (y > (maxHeight - margin.bottom)) {
     if (screen == screenleft) {
       screen = screenright;
@@ -697,7 +697,7 @@ bool Text::PrintNewLine(void) {
     } else
       return false;
   } else {
-    pen.y += height * linespacing;
+    pen.y += height + linespacing;
     return true;
   }
 }
@@ -759,8 +759,8 @@ void Text::BlitToFramebuffer() {
   u8 *fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fbW, &fbH);
   if (fbBottom && screenright) {
     memset(fbBottom, 0xFF, fbW * fbH * 3);
-    for (u16 sy = 0; sy < (u16)display.height; sy++) {
-      for (u16 sx = 0; sx < (u16)display.width; sx++) {
+    for (u16 sy = 0; sy < (u16)display.height && sy < fbH; sy++) {
+      for (u16 sx = 0; sx < (u16)display.width && sx < fbW; sx++) {
         u16 pixel = screenright[sy * display.height + sx];
         // Don't draw background pixels if we already cleared to white
         if (pixel == 0xFFFF)
@@ -788,8 +788,8 @@ void Text::BlitToFramebuffer() {
     memset(fbTop, 0xFF, fbW * fbH * 3);
     u16 xOff =
         (fbH > (u16)display.height) ? (fbH - (u16)display.height) / 2 : 0;
-    for (u16 sy = 0; sy < (u16)display.height; sy++) {
-      for (u16 sx = 0; sx < (u16)display.width; sx++) {
+    for (u16 sy = 0; sy < (u16)display.height && sy < fbH; sy++) {
+      for (u16 sx = 0; sx < (u16)display.width && sx < fbW; sx++) {
         u16 pixel = screenleft[sy * display.height + sx];
         if (pixel == 0xFFFF)
           continue;

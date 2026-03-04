@@ -45,6 +45,7 @@ public:
   int coverWidth;
   int coverHeight;
   std::string coverImagePath; //! path inside EPUB zip
+  bool coverTried;
 
   Book(App *app);
   ~Book();

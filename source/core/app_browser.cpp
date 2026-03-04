@@ -188,9 +188,11 @@ void App::browser_draw(void) {
     int btnX = GRID_X0 + col * CELL_W;
     int btnY = GRID_Y0 + row * CELL_H;
 
-    if (!books[i]->coverPixels && books[i]->format == FORMAT_EPUB) {
+    if (!books[i]->coverPixels && !books[i]->coverTried &&
+        books[i]->format == FORMAT_EPUB) {
       std::string path = bookdir + "/" + books[i]->GetFileName();
       epub_extract_cover(books[i], path);
+      books[i]->coverTried = true;
     }
 
     if (books[i]->coverPixels) {

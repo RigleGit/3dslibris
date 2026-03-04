@@ -449,6 +449,7 @@ Book::Book(App *a) {
   coverWidth = 0;
   coverHeight = 0;
   coverImagePath.clear();
+  coverTried = false;
 }
 
 Book::~Book() { Close(); }
