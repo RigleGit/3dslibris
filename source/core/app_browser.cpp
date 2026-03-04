@@ -196,7 +196,7 @@ void App::browser_draw(void) {
     if (books[i]->coverPixels) {
       int cx = btnX + 2 + (COVER_W - books[i]->coverWidth) / 2;
       int cy = btnY + 2 + (COVER_H - books[i]->coverHeight) / 2;
-      int w = ts->display.width; // buffer stride
+      int w = ts->display.height; // buffer stride
       for (int py = 0; py < books[i]->coverHeight && (cy + py) < 320; py++) {
         for (int px = 0; px < books[i]->coverWidth && (cx + px) < 240; px++) {
           ts->screenright[(cy + py) * w + (cx + px)] =

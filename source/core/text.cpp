@@ -344,8 +344,7 @@ void Text::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
   for (u16 y = yl; y < yh; y++) {
     for (u16 x = xl; x < xh; x++) {
       if (y < maxHeight && x < (u16)display.width)
-        screen[y * display.width + x] =
-            clearcolor; // array stride is display.width
+        screen[y * display.height + x] = clearcolor;
     }
   }
 }
@@ -370,7 +369,7 @@ void Text::FillRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
   for (u16 y = yl; y < yh; y++) {
     for (u16 x = xl; x < xh; x++) {
       if (y < (u16)display.height && x < (u16)display.width)
-        screen[y * display.width + x] = color;
+        screen[y * display.height + x] = color;
     }
   }
 }
@@ -379,15 +378,15 @@ void Text::DrawRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
   int maxHeight = (screen == screenleft ? 400 : 320);
   for (u16 x = xl; x < xh; x++) {
     if (yl < maxHeight && x < (u16)display.width)
-      screen[yl * display.width + x] = color;
+      screen[yl * display.height + x] = color;
     if (yh - 1 < maxHeight && x < (u16)display.width)
-      screen[(yh - 1) * display.width + x] = color;
+      screen[(yh - 1) * display.height + x] = color;
   }
   for (u16 y = yl; y < yh; y++) {
     if (y < maxHeight && xl < (u16)display.width)
-      screen[y * display.width + xl] = color;
+      screen[y * display.height + xl] = color;
     if (y < maxHeight && xh - 1 < (u16)display.width)
-      screen[y * display.width + xh - 1] = color;
+      screen[y * display.height + xh - 1] = color;
   }
 }
 
@@ -634,7 +633,7 @@ void Text::PrintChar(u32 ucs, FT_Face face) {
 
 #ifdef DRAW_PEN_POSITION
   // Mark the pen position.
-  screen[pen.y * display.width + pen.x] = RGB15(0, 0, 0) | BIT(15);
+  screen[pen.y * display.height + pen.x] = RGB15(0, 0, 0) | BIT(15);
 #endif
 
   u16 gx, gy;
@@ -672,7 +671,7 @@ void Text::PrintChar(u32 ucs, FT_Face face) {
       u16 sy = (pen.y + gy - by);
       // Bounds check to prevent buffer overrun
       if (sy < (u16)maxY && sx < display.width)
-        screen[sy * display.width + sx] = pixel;
+        screen[sy * display.height + sx] = pixel;
     }
   }
 
@@ -762,7 +761,7 @@ void Text::BlitToFramebuffer() {
     memset(fbBottom, 0xFF, fbW * fbH * 3);
     for (u16 sy = 0; sy < (u16)display.height; sy++) {
       for (u16 sx = 0; sx < (u16)display.width; sx++) {
-        u16 pixel = screenright[sy * display.width + sx];
+        u16 pixel = screenright[sy * display.height + sx];
         // Don't draw background pixels if we already cleared to white
         if (pixel == 0xFFFF)
           continue;
@@ -791,7 +790,7 @@ void Text::BlitToFramebuffer() {
         (fbH > (u16)display.height) ? (fbH - (u16)display.height) / 2 : 0;
     for (u16 sy = 0; sy < (u16)display.height; sy++) {
       for (u16 sx = 0; sx < (u16)display.width; sx++) {
-        u16 pixel = screenleft[sy * display.width + sx];
+        u16 pixel = screenleft[sy * display.height + sx];
         if (pixel == 0xFFFF)
           continue;
 
