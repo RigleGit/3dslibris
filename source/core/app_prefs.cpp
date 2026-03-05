@@ -290,14 +290,14 @@ void App::PrefsRefreshButton(int index) {
     break;
   }
   case PREFS_BUTTON_INDEX:
-    prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(
-        (prefs_book_context && bookcurrent) ? std::string(">")
-                                            : std::string("(open book first)"));
+    prefsButtons[PREFS_BUTTON_INDEX].SetLabel2((prefs_book_context && bookcurrent)
+                                                   ? std::string(">")
+                                                   : std::string("(open selected book)"));
     break;
   case PREFS_BUTTON_BOOKMARKS:
     prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
         (prefs_book_context && bookcurrent) ? std::string(">")
-                                            : std::string("(open book first)"));
+                                            : std::string("(open selected book)"));
     break;
   }
   prefs_view_dirty = true;
@@ -333,6 +333,8 @@ void App::PrefsHandlePress() {
   if (prefsSelected == PREFS_BUTTON_INDEX) {
     if (prefs_book_context && bookcurrent) {
       ShowChaptersView();
+    } else if (!prefs_book_context && bookselected) {
+      OpenBook();
     }
     return;
   }
@@ -340,6 +342,8 @@ void App::PrefsHandlePress() {
   if (prefsSelected == PREFS_BUTTON_BOOKMARKS) {
     if (prefs_book_context && bookcurrent) {
       ShowBookmarksView();
+    } else if (!prefs_book_context && bookselected) {
+      OpenBook();
     }
     return;
   }

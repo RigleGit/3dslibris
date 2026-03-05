@@ -48,6 +48,8 @@ void end(void *userdata, const char *el) {
 
 namespace xml::book {
 
+void chardata(void *data, const XML_Char *txt, int txtlen);
+
 void linefeed(parsedata_t *p) {
   p->buf[p->buflen++] = '\n';
   p->pen.x = MARGINLEFT;
@@ -159,6 +161,40 @@ void start(void *data, const char *el, const char **attr) {
     } else {
       app->ts->SetStyle(TEXT_STYLE_ITALIC);
     }
+  } else if (!strcmp(el, "img") || !strcmp(el, "image")) {
+    parse_push(p, TAG_UNKNOWN);
+
+    // dslibris has no inline bitmap renderer in page flow. Emit a readable
+    // placeholder so image-only sections are not blank.
+    const char *src = NULL;
+    const char *alt = NULL;
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (!strcmp(attr[i], "src") || !strcmp(attr[i], "href") ||
+          !strcmp(attr[i], "xlink:href")) {
+        src = attr[i + 1];
+      } else if (!strcmp(attr[i], "alt")) {
+        alt = attr[i + 1];
+      }
+    }
+
+    std::string label = "[illustration";
+    if (alt && *alt) {
+      label += ": ";
+      label += alt;
+    } else if (src && *src) {
+      std::string s(src);
+      size_t slash = s.find_last_of('/');
+      if (slash != std::string::npos)
+        s = s.substr(slash + 1);
+      label += ": ";
+      label += s;
+    }
+    label += "]";
+
+    if (!blankline(p))
+      linefeed(p);
+    chardata(p, label.c_str(), (int)label.size());
+    linefeed(p);
   } else
     parse_push(p, TAG_UNKNOWN);
 }

@@ -120,10 +120,12 @@ void BookmarkMenu::HandleInput(u32 keys) {
     handleButtonPress();
   } else if (keys & (KEY_B | KEY_START | KEY_SELECT)) {
     returnToBook();
-  } else if (keys & (key.down | KEY_DOWN | key.right | KEY_RIGHT)) {
+  } else if (keys & (key.down | KEY_DOWN | key.right | KEY_RIGHT |
+                     KEY_CPAD_DOWN | KEY_CPAD_RIGHT)) {
     // next item
     selectNext();
-  } else if (keys & (key.up | KEY_UP | key.left | KEY_LEFT)) {
+  } else if (keys & (key.up | KEY_UP | key.left | KEY_LEFT | KEY_CPAD_UP |
+                     KEY_CPAD_LEFT)) {
     // prev item
     selectPrevious();
   } else if (keys & (key.r | KEY_R)) {
@@ -219,6 +221,28 @@ void BookmarkMenu::handleTouchInput() {
     } else {
       nextPage();
     }
+    return;
+  }
+
+  // Coarse row hit-test fallback: robust even if button hitboxes drift.
+  for (int i = 0; i < 4; i++) {
+    int x = candidates[i][0];
+    int y = candidates[i][1];
+    if (x < BOOKMARK_ROW_X || x >= BOOKMARK_ROW_X + BOOKMARK_ROW_W)
+      continue;
+    if (y < BOOKMARK_ROW_Y0)
+      continue;
+    int row = (y - BOOKMARK_ROW_Y0) / (BOOKMARK_ROW_H + BOOKMARK_ROW_GAP);
+    if (row < 0 || row >= (int)pagesize)
+      continue;
+    int row_y = BOOKMARK_ROW_Y0 + row * (BOOKMARK_ROW_H + BOOKMARK_ROW_GAP);
+    if (y >= row_y + BOOKMARK_ROW_H)
+      continue;
+    int idx = (int)(page * pagesize) + row;
+    if (idx < 0 || idx >= (int)buttons.size())
+      continue;
+    selected = (u8)idx;
+    handleButtonPress();
     return;
   }
 
