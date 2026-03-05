@@ -184,7 +184,95 @@ static std::string BuildFallbackTitle(Book *book) {
     compact.push_back(name[i]);
     prev_space = is_space;
   }
-  return TrimSpaces(compact);
+  compact = TrimSpaces(compact);
+
+  // Browser cover labels must remain robust across font files and odd filename
+  // encodings. Normalize common accented/punctuation code points to a safe
+  // ASCII subset to avoid tofu squares in fallback titles.
+  std::string safe;
+  safe.reserve(compact.size());
+  for (size_t i = 0; i < compact.size();) {
+    unsigned char c0 = (unsigned char)compact[i];
+    if (c0 < 0x80) {
+      safe.push_back((char)c0);
+      i++;
+      continue;
+    }
+
+    if (i + 1 < compact.size()) {
+      unsigned char c1 = (unsigned char)compact[i + 1];
+      // Remove combining marks U+0300..U+030F (common in decomposed filenames).
+      if (c0 == 0xCC && c1 >= 0x80 && c1 <= 0x8F) {
+        i += 2;
+        continue;
+      }
+      if (c0 == 0xC3) {
+        switch (c1) {
+        case 0xA1:
+        case 0x81:
+          safe.push_back('a');
+          i += 2;
+          continue; // á Á
+        case 0xA9:
+        case 0x89:
+          safe.push_back('e');
+          i += 2;
+          continue; // é É
+        case 0xAD:
+        case 0x8D:
+          safe.push_back('i');
+          i += 2;
+          continue; // í Í
+        case 0xB3:
+        case 0x93:
+          safe.push_back('o');
+          i += 2;
+          continue; // ó Ó
+        case 0xBA:
+        case 0x9A:
+        case 0xBC:
+        case 0x9C:
+          safe.push_back('u');
+          i += 2;
+          continue; // ú Ú ü Ü
+        case 0xB1:
+        case 0x91:
+          safe.push_back('n');
+          i += 2;
+          continue; // ñ Ñ
+        default:
+          break;
+        }
+      }
+    }
+
+    if (i + 2 < compact.size()) {
+      unsigned char c1 = (unsigned char)compact[i + 1];
+      unsigned char c2 = (unsigned char)compact[i + 2];
+      if (c0 == 0xE2 && c1 == 0x80) {
+        if (c2 == 0x98 || c2 == 0x99) {
+          safe.push_back('\'');
+          i += 3;
+          continue; // ‘ ’
+        }
+        if (c2 == 0x9C || c2 == 0x9D) {
+          safe.push_back('"');
+          i += 3;
+          continue; // “ ”
+        }
+        if (c2 == 0x93 || c2 == 0x94) {
+          safe.push_back('-');
+          i += 3;
+          continue; // – —
+        }
+      }
+    }
+
+    // Drop unknown multi-byte sequence byte-by-byte as '?'.
+    safe.push_back('?');
+    i++;
+  }
+  return TrimSpaces(safe);
 }
 
 static size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
@@ -222,8 +310,15 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
   if (!ts || title.empty() || w <= 8 || h <= 8)
     return;
 
+  const int kPadX = 6;
+  const int kPadY = 6;
+  const int inner_w = w - kPadX * 2;
+  const int inner_h = h - kPadY * 2;
+  if (inner_w <= 8 || inner_h <= 8)
+    return;
+
   int line_h = ts->GetHeight();
-  int max_lines = (h - 8) / MAX(1, line_h);
+  int max_lines = inner_h / MAX(1, line_h);
   if (max_lines < 1)
     return;
 
@@ -235,7 +330,7 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
     if (pos >= title.size())
       break;
 
-    u8 fit = ts->GetCharCountInsideWidth(title.c_str() + pos, style, w - 8);
+    u8 fit = ts->GetCharCountInsideWidth(title.c_str() + pos, style, inner_w);
     if (!fit)
       break;
 
@@ -253,7 +348,8 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
       continue;
     }
 
-    ts->SetPen(x + 4, y + 4 + drawn * line_h);
+    // Set baseline below top padding to avoid clipping accents/ascenders.
+    ts->SetPen(x + kPadX, y + kPadY + (drawn + 1) * line_h);
     ts->PrintString(line.c_str(), style);
     drawn++;
     pos += take;
