@@ -22,6 +22,7 @@ public:
 private:
   void handleButtonPress();
   void handleTouchInput();
+  void returnToBook();
   void nextPage();
   void previousPage();
   void selectNext();

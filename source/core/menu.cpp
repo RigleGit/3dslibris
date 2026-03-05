@@ -17,11 +17,14 @@ u8 Menu::GetCurrentPage() const {
 }
 
 u8 Menu::GetPageCount() const {
-    return buttons.size() / pagesize + 1; // Pages are 1-indexed
+    if (pagesize == 0 || buttons.empty()) {
+        return 1;
+    }
+    return (buttons.size() + pagesize - 1) / pagesize;
 }
 
 void Menu::SelectItem(u8 index) {
-    if (index < 0 || index >= buttons.size()) {
+    if (index >= buttons.size()) {
         return; // Invalid index
     }
     selected = index;
