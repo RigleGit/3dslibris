@@ -178,15 +178,11 @@ void App::browser_draw(void) {
   ts->SetColorMode(0); // Normal for browser text
   ts->ClearScreen();
 
-  // Lazy metadata indexing: do at most one visible EPUB per frame to keep
-  // startup and scrolling responsive.
-  for (int i = browserstart;
-       (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT); i++) {
-    if (books[i]->format == FORMAT_EPUB && !books[i]->metadataIndexTried) {
-      books[i]->Index();
-      browser_view_dirty = true;
-      break;
-    }
+  // Metadata/cover work only for the selected book to avoid startup stalls.
+  if (bookselected && bookselected->format == FORMAT_EPUB &&
+      !bookselected->metadataIndexTried) {
+    bookselected->Index();
+    browser_view_dirty = true;
   }
 
   for (int i = browserstart;
@@ -199,8 +195,8 @@ void App::browser_draw(void) {
     int btnX = GRID_X0 + col * CELL_W;
     int btnY = GRID_Y0 + row * CELL_H;
 
-    if (!books[i]->coverPixels && !books[i]->coverTried &&
-        books[i]->format == FORMAT_EPUB) {
+    if (books[i] == bookselected && !books[i]->coverPixels &&
+        !books[i]->coverTried && books[i]->format == FORMAT_EPUB) {
       if (books[i]->metadataIndexTried) {
         if (!books[i]->coverImagePath.empty()) {
           std::string path = bookdir + "/" + books[i]->GetFileName();
@@ -278,13 +274,9 @@ void App::browser_draw(void) {
   }
 
   bool pendingLazyWork = false;
-  for (int i = browserstart;
-       (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT); i++) {
-    if (books[i]->format == FORMAT_EPUB &&
-        (!books[i]->metadataIndexTried || !books[i]->coverTried)) {
-      pendingLazyWork = true;
-      break;
-    }
+  if (bookselected && bookselected->format == FORMAT_EPUB &&
+      (!bookselected->metadataIndexTried || !bookselected->coverTried)) {
+    pendingLazyWork = true;
   }
 
   // restore state

@@ -64,10 +64,8 @@ void App::HandleEventInBook() {
       }
     }
   } else if (keys & KEY_START) {
-    bookcurrent->Close();
-    bookcurrent = nullptr;
-
-    // return to browser.
+    // Return to browser without reparsing the current book later.
+    // Keep one parsed book resident in memory for fast reopen.
     ts->SetStyle(TEXT_STYLE_BROWSER);
     ts->PrintSplash(ts->screenleft);
     ShowLibraryView();
@@ -164,7 +162,24 @@ u8 App::OpenBook(void) {
   gfxFlushBuffers();
   gfxSwapBuffers();
 
-  if (bookcurrent)
+  // Fast path: selected book is already parsed and resident.
+  if (bookselected->GetPageCount() > 0) {
+    bookcurrent = bookselected;
+    if (mode == APP_MODE_BROWSER) {
+      if (orientation) {
+        // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
+      }
+      mode = APP_MODE_BOOK;
+      PrintStatus("OpenBook: reused parsed book");
+    }
+    if (bookcurrent->GetPosition() >= bookcurrent->GetPageCount())
+      bookcurrent->SetPosition(0);
+    bookcurrent->GetPage()->Draw(ts);
+    prefs->Write();
+    return 0;
+  }
+
+  if (bookcurrent && bookcurrent != bookselected)
     bookcurrent->Close();
   if (int err = bookselected->Open()) {
     char msg[64];
