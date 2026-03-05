@@ -61,34 +61,101 @@ void App::browser_handleevent() {
   }
 
   else if (keys & KEY_TOUCH) {
+    const int kGridCols = 2;
+    const int kGridRows = 2;
+    const int kCellW = 115;
+    const int kCellH = 140;
+    const int kGridX0 = 5;
+    const int kGridY0 = 3;
+
     touchPosition coord = TouchRead();
     // TouchRead() now maps to buffer coords: coord.px=sx (origin.x),
     // coord.py=sy (origin.y)
     int tx = coord.px;
     int ty = coord.py;
+    touchPosition raw;
+    hidTouchRead(&raw);
 
-    if (buttonnext.EnclosesPoint(tx, ty)) {
-      browser_nextpage();
-    } else if (buttonprev.EnclosesPoint(tx, ty)) {
-      browser_prevpage();
-    } else if (buttonprefs.EnclosesPoint(tx, ty)) {
-      ShowSettingsView(false);
-    } else {
-      // Check if a book cover was tapped
-      for (int i = browserstart;
-           (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT);
-           i++) {
-        if (buttons[i]->EnclosesPoint(tx, ty)) {
-          if (bookselected == books[i]) {
-            // Already selected, so open it
-            OpenBook();
-          } else {
-            // First tap, select it
-            bookselected = books[i];
-            browser_view_dirty = true;
-          }
-          break;
+    const int candidates[4][2] = {
+        {tx, ty},
+        {(int)raw.py, (int)raw.px},
+        {239 - (int)raw.py, (int)raw.px},
+        {(int)raw.py, 319 - (int)raw.px},
+    };
+
+    auto enclosesWithSlack = [&](Button &button, int x, int y) {
+      for (int dy = -4; dy <= 4; dy += 4) {
+        for (int dx = -4; dx <= 4; dx += 4) {
+          int sx = x + dx;
+          int sy = y + dy;
+          if (sx < 0 || sy < 0 || sx > 239 || sy > 319)
+            continue;
+          if (button.EnclosesPoint((u16)sx, (u16)sy))
+            return true;
         }
+      }
+      return false;
+    };
+
+    auto hitsButton = [&](Button &button) {
+      for (int i = 0; i < 4; i++) {
+        if (enclosesWithSlack(button, candidates[i][0], candidates[i][1]))
+          return true;
+      }
+      return false;
+    };
+
+    if (hitsButton(buttonnext)) {
+      browser_nextpage();
+      return;
+    }
+    if (hitsButton(buttonprev)) {
+      browser_prevpage();
+      return;
+    }
+    if (hitsButton(buttonprefs)) {
+      ShowSettingsView(false);
+      return;
+    }
+
+    // Prefer coarse cell hit-test (cover + title/progress area):
+    // single tap selects, tapping selected book opens.
+    for (int i = 0; i < 4; i++) {
+      int x = candidates[i][0];
+      int y = candidates[i][1];
+      if (x < kGridX0 || y < kGridY0)
+        continue;
+      int col = (x - kGridX0) / kCellW;
+      int row = (y - kGridY0) / kCellH;
+      if (col < 0 || col >= kGridCols || row < 0 || row >= kGridRows)
+        continue;
+      int page_idx = row * kGridCols + col;
+      if (page_idx < 0 || page_idx >= APP_BROWSER_BUTTON_COUNT)
+        continue;
+      int book_idx = browserstart + page_idx;
+      if (book_idx < 0 || book_idx >= bookcount)
+        continue;
+
+      if (bookselected == books[book_idx]) {
+        OpenBook();
+      } else {
+        bookselected = books[book_idx];
+        browser_view_dirty = true;
+      }
+      return;
+    }
+
+    // Fallback to original cover hitboxes.
+    for (int i = browserstart;
+         (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT); i++) {
+      if (hitsButton(*buttons[i])) {
+        if (bookselected == books[i]) {
+          OpenBook();
+        } else {
+          bookselected = books[i];
+          browser_view_dirty = true;
+        }
+        return;
       }
     }
   }
