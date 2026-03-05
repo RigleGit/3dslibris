@@ -120,6 +120,7 @@ static bool TryRepairMojibakeUtf8(const std::string &in, std::string *out) {
   std::string collapsed;
   collapsed.reserve(in.size());
 
+  bool changed = false;
   for (size_t i = 0; i < in.size();) {
     unsigned char c = (unsigned char)in[i];
     if (c < 0x80) {
@@ -134,17 +135,55 @@ static bool TryRepairMojibakeUtf8(const std::string &in, std::string *out) {
     unsigned char c2 = (unsigned char)in[i + 1];
     if (c == 0xC2 && c2 >= 0x80 && c2 <= 0xBF) {
       collapsed.push_back((char)c2);
+      changed = true;
       i += 2;
       continue;
     }
     if (c == 0xC3 && c2 >= 0x80 && c2 <= 0xBF) {
       collapsed.push_back((char)(c2 + 0x40));
+      changed = true;
       i += 2;
       continue;
     }
-    return false;
+
+    // Keep any valid UTF-8 sequence untouched so mixed strings
+    // (partially mojibake, partially proper UTF-8) are still repairable.
+    size_t step = 0;
+    if ((c & 0xE0) == 0xC0)
+      step = 2;
+    else if ((c & 0xF0) == 0xE0)
+      step = 3;
+    else if ((c & 0xF8) == 0xF0)
+      step = 4;
+
+    if (step > 1 && i + step <= in.size()) {
+      bool ok = true;
+      for (size_t j = 1; j < step; j++) {
+        unsigned char cc = (unsigned char)in[i + j];
+        if ((cc & 0xC0) != 0x80) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) {
+        collapsed.append(in, i, step);
+        i += step;
+        continue;
+      }
+    }
+
+    // Unknown non-ASCII byte: keep as-is and continue.
+    collapsed.push_back((char)c);
+    i++;
   }
 
+  if (!changed)
+    return false;
+
+  if (!LooksLikeValidUtf8(collapsed)) {
+    // Collapsed bytes may now be legacy single-byte text.
+    collapsed = LegacyBytesToUtf8(collapsed);
+  }
   if (!LooksLikeValidUtf8(collapsed))
     return false;
   *out = collapsed;
@@ -186,9 +225,8 @@ static std::string BuildFallbackTitle(Book *book) {
   }
   compact = TrimSpaces(compact);
 
-  // Browser cover labels must remain robust across font files and odd filename
-  // encodings. Normalize common accented/punctuation code points to a safe
-  // ASCII subset to avoid tofu squares in fallback titles.
+  // Normalize punctuation/combining marks but preserve letters to avoid
+  // destructive replacements ('?') in titles with accents.
   std::string safe;
   safe.reserve(compact.size());
   for (size_t i = 0; i < compact.size();) {
@@ -205,44 +243,6 @@ static std::string BuildFallbackTitle(Book *book) {
       if (c0 == 0xCC && c1 >= 0x80 && c1 <= 0x8F) {
         i += 2;
         continue;
-      }
-      if (c0 == 0xC3) {
-        switch (c1) {
-        case 0xA1:
-        case 0x81:
-          safe.push_back('a');
-          i += 2;
-          continue; // á Á
-        case 0xA9:
-        case 0x89:
-          safe.push_back('e');
-          i += 2;
-          continue; // é É
-        case 0xAD:
-        case 0x8D:
-          safe.push_back('i');
-          i += 2;
-          continue; // í Í
-        case 0xB3:
-        case 0x93:
-          safe.push_back('o');
-          i += 2;
-          continue; // ó Ó
-        case 0xBA:
-        case 0x9A:
-        case 0xBC:
-        case 0x9C:
-          safe.push_back('u');
-          i += 2;
-          continue; // ú Ú ü Ü
-        case 0xB1:
-        case 0x91:
-          safe.push_back('n');
-          i += 2;
-          continue; // ñ Ñ
-        default:
-          break;
-        }
       }
     }
 
@@ -268,9 +268,18 @@ static std::string BuildFallbackTitle(Book *book) {
       }
     }
 
-    // Drop unknown multi-byte sequence byte-by-byte as '?'.
-    safe.push_back('?');
-    i++;
+    // Preserve UTF-8 bytes for letters/symbols to avoid destructive fallback.
+    size_t step = 1;
+    if ((c0 & 0xE0) == 0xC0)
+      step = 2;
+    else if ((c0 & 0xF0) == 0xE0)
+      step = 3;
+    else if ((c0 & 0xF8) == 0xF0)
+      step = 4;
+    if (i + step > compact.size())
+      step = 1;
+    safe.append(compact, i, step);
+    i += step;
   }
   return TrimSpaces(safe);
 }
