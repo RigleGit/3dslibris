@@ -21,6 +21,7 @@
 
 #include "book.h"
 #include "bookmark_menu.h"
+#include "chapter_menu.h"
 #include "button.h"
 #include "font.h"
 #include "main.h"
@@ -71,6 +72,7 @@ App::App() {
 
   fontmenu = new FontMenu(this);
   bookmarkmenu = new BookmarkMenu(this);
+  chaptermenu = new ChapterMenu(this);
 }
 
 App::~App() {
@@ -84,6 +86,7 @@ App::~App() {
   books.clear();
   delete fontmenu;
   delete bookmarkmenu;
+  delete chaptermenu;
 }
 
 // std::sort comparator: books by title
@@ -235,6 +238,12 @@ int App::Run(void) {
       if (bookmarkmenu->IsDirty())
         bookmarkmenu->Draw();
       break;
+
+    case APP_MODE_CHAPTERS:
+      chaptermenu->HandleInput(hidKeysDown());
+      if (chaptermenu->IsDirty())
+        chaptermenu->Draw();
+      break;
     }
 
     // Copy software buffers to 3DS framebuffer
@@ -341,6 +350,12 @@ void App::ShowBookmarksView() {
   mode = APP_MODE_BOOKMARKS;
   ts->SetScreen(ts->screenright);
   bookmarkmenu->Init();
+}
+
+void App::ShowChaptersView() {
+  mode = APP_MODE_CHAPTERS;
+  ts->SetScreen(ts->screenright);
+  chaptermenu->Init();
 }
 
 void App::UpdateStatus() {

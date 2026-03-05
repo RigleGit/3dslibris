@@ -25,6 +25,11 @@ void chardata(void *userdata, const char *txt, int txtlen);
 void end(void *userdata, const char *el);
 } // namespace xml::book::metadata
 
+struct ChapterEntry {
+  u16 page; // page index where chapter starts
+  std::string title;
+};
+
 //! Encapsulates metadata and Page vector for a single book.
 
 //! Bookmarks are in here too.
@@ -37,6 +42,7 @@ class Book {
   std::string author;
   int position;             //! as page index.
   std::list<u16> bookmarks; //! as page indices.
+  std::vector<ChapterEntry> chapters;
   std::vector<class Page *> pages;
   App *app; //! pointer to the App instance.
 public:
@@ -55,6 +61,9 @@ public:
   inline App *GetApp() { return app; }
   inline std::string GetAuthor() { return author; }
   std::list<u16> *GetBookmarks(void);
+  const std::vector<ChapterEntry> &GetChapters() const;
+  void AddChapter(u16 page, const std::string &title);
+  void ClearChapters();
   int GetNextBookmark(void);
   int GetPreviousBookmark(void);
   int GetNextBookmarkedPage(void);

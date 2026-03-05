@@ -30,9 +30,50 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "unzip.h"
 #include "zlib.h"
 #include <3ds.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
+
+static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
+  std::string base = path;
+  size_t slash = base.find_last_of('/');
+  if (slash != std::string::npos)
+    base = base.substr(slash + 1);
+  size_t dot = base.find_last_of('.');
+  if (dot != std::string::npos)
+    base = base.substr(0, dot);
+
+  for (size_t i = 0; i < base.size(); i++) {
+    if (base[i] == '_' || base[i] == '-')
+      base[i] = ' ';
+  }
+
+  // Normalize consecutive spaces.
+  std::string normalized;
+  normalized.reserve(base.size());
+  bool prev_space = true;
+  for (size_t i = 0; i < base.size(); i++) {
+    char c = base[i];
+    bool is_space = (c == ' ');
+    if (is_space && prev_space)
+      continue;
+    normalized.push_back(c);
+    prev_space = is_space;
+  }
+  while (!normalized.empty() && normalized.back() == ' ')
+    normalized.pop_back();
+
+  if (normalized.empty()) {
+    char fallback[32];
+    snprintf(fallback, sizeof(fallback), "chapter %d", chapter_num);
+    normalized = fallback;
+  }
+
+  char label[160];
+  snprintf(label, sizeof(label), "%02d - %s", chapter_num, normalized.c_str());
+  return std::string(label);
+}
 
 void epub_data_delete(epub_data_t *d);
 
@@ -289,6 +330,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
   parsedata.ctx.clear();
   parsedata.book = book;
   parsedata.type = PARSE_CONTENT;
+  book->ClearChapters();
   std::vector<std::string *> href;
   if (parsedata.spine.size()) {
     // Use spine for reading order.
@@ -311,6 +353,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
       href.push_back(new std::string((*item)->href));
   }
 
+  int chapter_num = 1;
   std::vector<std::string *>::iterator it;
   for (it = href.begin(); it != href.end(); it++) {
     size_t pos = (*it)->find_last_of('.');
@@ -337,9 +380,14 @@ int epub(Book *book, std::string name, bool metadataonly) {
 
       rc = unzLocateFile(uf, path.c_str(), 2); // 2 = case insensitive
       if (rc == UNZ_OK) {
+        u16 chapter_start_page = book->GetPageCount();
+        std::string chapter_label = BuildChapterLabel(path, chapter_num++);
         rc = unzOpenCurrentFile(uf);
         epub_parse_currentfile(uf, &parsedata);
         rc = unzCloseCurrentFile(uf);
+        if (book->GetPageCount() > 0) {
+          book->AddChapter(chapter_start_page, chapter_label);
+        }
       } else {
         char msg[256];
         sprintf(msg, "NOT FOUND IN ZIP: %s", path.c_str());

@@ -1,0 +1,272 @@
+#include "chapter_menu.h"
+
+#include <3ds.h>
+#include <string>
+#include <vector>
+
+#include "app.h"
+#include "book.h"
+#include "button.h"
+
+#define MIN(x, y) (x < y ? x : y)
+
+static const int CHAPTER_HEADER_X = 6;
+static const int CHAPTER_HEADER_Y = 14;
+static const int CHAPTER_ROW_X = 5;
+static const int CHAPTER_ROW_Y0 = 24;
+static const int CHAPTER_ROW_W = 230;
+static const int CHAPTER_ROW_H = 34;
+static const int CHAPTER_ROW_GAP = 2;
+static const int CHAPTER_FOOTER_Y = 292;
+
+static void LayoutFooterButtons(App *app) {
+  app->buttonprev.Move(6, CHAPTER_FOOTER_Y);
+  app->buttonprev.Resize(68, 22);
+  app->buttonprev.Label("prev");
+
+  app->buttonprefs.Move(86, CHAPTER_FOOTER_Y);
+  app->buttonprefs.Resize(68, 22);
+  app->buttonprefs.Label("back");
+
+  app->buttonnext.Move(166, CHAPTER_FOOTER_Y);
+  app->buttonnext.Resize(68, 22);
+  app->buttonnext.Label("next");
+}
+
+ChapterMenu::ChapterMenu(App *_app) : Menu(_app) { pagesize = 7; }
+
+void ChapterMenu::Init() {
+  for (auto button : buttons) {
+    delete button;
+  }
+  buttons.clear();
+  chapter_pages.clear();
+
+  if (!app || !app->bookcurrent)
+    return;
+
+  const std::vector<ChapterEntry> &chapters = app->bookcurrent->GetChapters();
+  int idx = 0;
+  for (const auto &ch : chapters) {
+    chapter_pages.push_back(ch.page);
+
+    Button *b = new Button(app->ts);
+    b->Init();
+    b->Resize(CHAPTER_ROW_W, CHAPTER_ROW_H);
+    b->Move(CHAPTER_ROW_X,
+            CHAPTER_ROW_Y0 + (idx % pagesize) * (CHAPTER_ROW_H + CHAPTER_ROW_GAP));
+    b->SetLabel1(ch.title);
+    buttons.push_back(b);
+    idx++;
+  }
+
+  selected = 0;
+  page = 0;
+  dirty = true;
+}
+
+ChapterMenu::~ChapterMenu() {
+  for (auto button : buttons) {
+    delete button;
+  }
+  buttons.clear();
+}
+
+void ChapterMenu::Draw() {
+  app->ts->SetScreen(app->ts->screenright);
+  app->ts->SetColorMode(0);
+  app->ts->ClearScreen();
+
+  app->ts->SetPen(CHAPTER_HEADER_X, CHAPTER_HEADER_Y);
+  app->ts->PrintString("index");
+
+  u8 start = page * pagesize;
+  u8 end = MIN(start + pagesize, buttons.size());
+  for (int i = start; i < end; i++) {
+    buttons[i]->Draw(i == selected);
+  }
+
+  char label[32];
+  sprintf(label, "Pg %d/%d", GetCurrentPage(), GetPageCount());
+  app->ts->SetPen(6, 282);
+  app->ts->PrintString(label);
+
+  LayoutFooterButtons(app);
+  if (page > 0)
+    app->buttonprev.Draw();
+  app->buttonprefs.Draw();
+  if (page < GetPageCount() - 1)
+    app->buttonnext.Draw();
+
+  dirty = false;
+}
+
+void ChapterMenu::HandleInput(u32 keys) {
+  auto key = app->key;
+
+  if (keys & KEY_TOUCH) {
+    handleTouchInput();
+  } else if (keys & KEY_A) {
+    handleButtonPress();
+  } else if (keys & (KEY_B | KEY_START | KEY_SELECT)) {
+    returnToBook();
+  } else if (keys & (key.down | KEY_DOWN | key.right | KEY_RIGHT)) {
+    selectNext();
+  } else if (keys & (key.up | KEY_UP | key.left | KEY_LEFT)) {
+    selectPrevious();
+  } else if (keys & (key.r | KEY_R)) {
+    nextPage();
+  } else if (keys & (key.l | KEY_L)) {
+    previousPage();
+  }
+}
+
+void ChapterMenu::selectNext() {
+  if (buttons.empty())
+    return;
+  if ((size_t)selected + 1 < buttons.size()) {
+    selected++;
+    page = selected / pagesize;
+    dirty = true;
+  }
+}
+
+void ChapterMenu::selectPrevious() {
+  if (buttons.empty())
+    return;
+  if (selected > 0) {
+    selected--;
+    page = selected / pagesize;
+    dirty = true;
+  }
+}
+
+void ChapterMenu::nextPage() {
+  if (buttons.empty())
+    return;
+  if (page < GetPageCount() - 1) {
+    page++;
+    u8 next_selected = page * pagesize;
+    selected = (next_selected < buttons.size()) ? next_selected
+                                                : (u8)(buttons.size() - 1);
+    dirty = true;
+  }
+}
+
+void ChapterMenu::previousPage() {
+  if (buttons.empty())
+    return;
+  if (page > 0) {
+    page--;
+    selected = page * pagesize;
+    dirty = true;
+  }
+}
+
+void ChapterMenu::handleButtonPress() {
+  if (buttons.empty() || selected >= chapter_pages.size() || !app->bookcurrent)
+    return;
+
+  u16 targetPage = chapter_pages[selected];
+  app->bookcurrent->SetPosition(targetPage);
+  returnToBook();
+}
+
+void ChapterMenu::handleTouchInput() {
+  LayoutFooterButtons(app);
+  touchPosition touch = app->TouchRead();
+  touchPosition raw;
+  hidTouchRead(&raw);
+
+  const int candidates[4][2] = {
+      {(int)touch.px, (int)touch.py},
+      {(int)raw.py, (int)raw.px},
+      {239 - (int)raw.py, (int)raw.px},
+      {(int)raw.py, 319 - (int)raw.px},
+  };
+
+  int footerX = -1;
+  for (int i = 0; i < 4; i++) {
+    int x = candidates[i][0];
+    int y = candidates[i][1];
+    if (x < 0 || y < 0)
+      continue;
+    if (x > 239 || y > 319)
+      continue;
+    if (y >= 284) {
+      footerX = x;
+      break;
+    }
+  }
+  if (footerX >= 0) {
+    if (footerX < 80) {
+      previousPage();
+    } else if (footerX < 160) {
+      returnToBook();
+    } else {
+      nextPage();
+    }
+    return;
+  }
+
+  auto enclosesWithSlack = [&](Button &button, int x, int y) {
+    for (int dy = -4; dy <= 4; dy += 4) {
+      for (int dx = -4; dx <= 4; dx += 4) {
+        int tx = x + dx;
+        int ty = y + dy;
+        if (tx < 0 || ty < 0)
+          continue;
+        if (button.EnclosesPoint((u16)tx, (u16)ty))
+          return true;
+      }
+    }
+    return false;
+  };
+
+  auto hitsButton = [&](Button &button) {
+    for (int i = 0; i < 4; i++) {
+      int x = candidates[i][0];
+      int y = candidates[i][1];
+      if (x < 0 || y < 0)
+        continue;
+      if (x > 239 || y > 319)
+        continue;
+      if (enclosesWithSlack(button, x, y))
+        return true;
+    }
+    return false;
+  };
+
+  if (hitsButton(app->buttonprefs)) {
+    returnToBook();
+    return;
+  }
+  if (hitsButton(app->buttonnext)) {
+    nextPage();
+    return;
+  }
+  if (hitsButton(app->buttonprev)) {
+    previousPage();
+    return;
+  }
+
+  u8 start = page * pagesize;
+  u8 end = MIN(start + pagesize, buttons.size());
+  for (int i = start; i < end; i++) {
+    if (hitsButton(*buttons[i])) {
+      selected = i;
+      handleButtonPress();
+      return;
+    }
+  }
+}
+
+void ChapterMenu::returnToBook() {
+  app->mode = APP_MODE_BOOK;
+  if (app->bookcurrent) {
+    app->bookcurrent->GetPage()->Draw(app->ts);
+  }
+  app->ts->SetScreen(app->ts->screenleft);
+  app->ts->PrintSplash(app->ts->screenright);
+}
+

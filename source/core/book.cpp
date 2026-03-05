@@ -487,6 +487,16 @@ void Book::SetAuthor(std::string &name) {
 void Book::SetFolderName(std::string &name) { foldername = name; }
 
 std::list<u16> *Book::GetBookmarks() { return &bookmarks; }
+const std::vector<ChapterEntry> &Book::GetChapters() const { return chapters; }
+
+void Book::AddChapter(u16 page, const std::string &title) {
+  ChapterEntry entry;
+  entry.page = page;
+  entry.title = title;
+  chapters.push_back(entry);
+}
+
+void Book::ClearChapters() { chapters.clear(); }
 
 int Book::GetNextBookmark() {
   //! nyi
@@ -690,5 +700,6 @@ void Book::Close() {
     ++it;
   }
   pages.clear();
+  chapters.clear();
   // pages.erase(pages.begin(), pages.end());
 }

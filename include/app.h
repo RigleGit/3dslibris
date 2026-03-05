@@ -68,6 +68,7 @@ https://github.com/rhaleblian/dslibris
 #define APP_MODE_PREFS_FONT_BOLDITALIC 6
 #define APP_MODE_QUIT 7
 #define APP_MODE_BOOKMARKS 8
+#define APP_MODE_CHAPTERS 9
 
 enum prefsbuttonindex {
   PREFS_BUTTON_FONT_CONFIG,
@@ -76,6 +77,7 @@ enum prefsbuttonindex {
   PREFS_BUTTON_ORIENTATION,
   PREFS_BUTTON_TIME24H,
   PREFS_BUTTON_COLORMODE,
+  PREFS_BUTTON_INDEX,
   PREFS_BUTTON_BOOKMARKS,
   PREFS_BUTTON_COUNT
 };
@@ -130,6 +132,7 @@ public:
 
   class FontMenu *fontmenu; //! Font selection menu.
   class BookmarkMenu *bookmarkmenu;
+  class ChapterMenu *chaptermenu;
 
   // app.cpp
   void CycleBrightness();
@@ -168,6 +171,7 @@ private:
   void ShowFontView(int app_mode);
   void ShowLibraryView();
   void ShowBookmarksView();
+  void ShowChaptersView();
 
   // app_Browser.cpp
   void browser_draw();

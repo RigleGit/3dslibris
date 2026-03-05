@@ -29,14 +29,15 @@ static const int PREFS_LIBRARY_BTN_W = 76;
 static const int PREFS_LIBRARY_BTN_H = 26;
 
 u8 App::PrefsVisibleButtonCount() const {
-  // General settings hide per-book actions like bookmarks.
-  return prefs_book_context ? PREFS_BUTTON_COUNT : PREFS_BUTTON_BOOKMARKS;
+  // General settings hide per-book actions like index/bookmarks.
+  return prefs_book_context ? PREFS_BUTTON_COUNT : PREFS_BUTTON_INDEX;
 }
 
 void App::PrefsInit() {
   const std::vector<std::string> labels{
       "font configuration", "font size",    "paragraph spacing",
       "screen orientation", "clock format", "color mode",
+      "index",
       "bookmarks"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
@@ -288,6 +289,11 @@ void App::PrefsRefreshButton(int index) {
       prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Sepia"));
     break;
   }
+  case PREFS_BUTTON_INDEX:
+    prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(
+        (prefs_book_context && bookcurrent) ? std::string(">")
+                                            : std::string("(open book first)"));
+    break;
   case PREFS_BUTTON_BOOKMARKS:
     prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
         (prefs_book_context && bookcurrent) ? std::string(">")
@@ -321,6 +327,13 @@ void App::PrefsHandlePress() {
     prefs->Write();
     prefs_view_dirty = true;
     prefs_view_dirty = true;
+    return;
+  }
+
+  if (prefsSelected == PREFS_BUTTON_INDEX) {
+    if (prefs_book_context && bookcurrent) {
+      ShowChaptersView();
+    }
     return;
   }
 
