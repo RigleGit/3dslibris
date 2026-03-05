@@ -173,17 +173,30 @@ u8 App::OpenBook(void) {
     return err;
   }
   bookcurrent = bookselected;
-  if (mode == APP_MODE_BROWSER) {
-    if (orientation)
-      // lcdSwap();
-      mode = APP_MODE_BOOK;
-  }
 
   char msg[64];
-  sprintf(msg, "Generated %d pages", bookcurrent->GetPageCount());
+  int pageCount = bookcurrent->GetPageCount();
+  sprintf(msg, "Generated %d pages", pageCount);
   PrintStatus(msg);
 
-  if (bookcurrent->GetPosition() >= bookcurrent->GetPageCount())
+  if (pageCount <= 0) {
+    PrintStatus("error: book has no parsed pages");
+    bookcurrent->Close();
+    bookcurrent = nullptr;
+    mode = APP_MODE_BROWSER;
+    browser_view_dirty = true;
+    return 253;
+  }
+
+  if (mode == APP_MODE_BROWSER) {
+    if (orientation) {
+      // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
+    }
+    mode = APP_MODE_BOOK;
+    PrintStatus("OpenBook: switched mode to APP_MODE_BOOK");
+  }
+
+  if (bookcurrent->GetPosition() >= pageCount)
     bookcurrent->SetPosition(0);
   bookcurrent->GetPage()->Draw(ts);
   prefs->Write();

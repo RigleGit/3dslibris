@@ -92,6 +92,46 @@ static bool book_title_lessthan(Book *a, Book *b) {
 
 int App::Run(void) {
   const int ok = 0;
+  auto drawBootStatus = [&](const char *lineTop, const char *lineBottom) {
+    int savedStyle = ts->GetStyle();
+    int savedColorMode = ts->GetColorMode();
+    u16 *savedScreen = ts->GetScreen();
+
+    ts->SetStyle(TEXT_STYLE_BROWSER);
+    ts->SetColorMode(0);
+
+    ts->SetScreen(ts->screenleft);
+    ts->ClearScreen();
+    ts->SetPen(12, 28);
+    ts->PrintString("dslibris-3ds");
+    if (lineTop && *lineTop) {
+      ts->SetPen(12, 52);
+      ts->PrintString(lineTop);
+    }
+    if (lineBottom && *lineBottom) {
+      ts->SetPen(12, 72);
+      ts->PrintString(lineBottom);
+    }
+
+    ts->SetScreen(ts->screenright);
+    ts->ClearScreen();
+    if (lineTop && *lineTop) {
+      ts->SetPen(12, 28);
+      ts->PrintString(lineTop);
+    }
+    if (lineBottom && *lineBottom) {
+      ts->SetPen(12, 48);
+      ts->PrintString(lineBottom);
+    }
+
+    ts->SetStyle(savedStyle);
+    ts->SetColorMode(savedColorMode);
+    ts->SetScreen(savedScreen);
+
+    ts->BlitToFramebuffer();
+    gfxFlushBuffers();
+    gfxSwapBuffers();
+  };
 
   // Start up typesetter.
   printf("Loading fonts...\n");
@@ -111,6 +151,7 @@ int App::Run(void) {
   // Initialize screens for 3DS.
   InitScreens();
   ts->SetStyle(TEXT_STYLE_BROWSER);
+  drawBootStatus("Searching for books...", "");
 
   // Construct library.
   printf("Searching for books...\n");
@@ -130,13 +171,20 @@ int App::Run(void) {
   std::sort(books.begin(), books.end(), &book_title_lessthan);
 
   prefs->Read();
+  drawBootStatus("Indexing books...", "");
+  // Apply key mapping/orientation loaded from prefs.
+  SetOrientation(orientation);
   printf("Indexing books...\n");
   for (auto &book : books) {
+    char progress[96];
     if (book->GetTitle()) {
       printf("  %s\n", book->GetTitle());
+      snprintf(progress, sizeof(progress), "%s", book->GetTitle());
     } else {
       printf("  %s\n", book->GetFileName());
+      snprintf(progress, sizeof(progress), "%s", book->GetFileName());
     }
+    drawBootStatus("Indexing:", progress);
     book->Index();
     book->GetBookmarks()->sort();
   }
@@ -304,12 +352,14 @@ void App::UpdateStatus() {
     return;
   u16 *screen = ts->GetScreen();
   time_t unixTime = time(NULL);
-  struct tm *timeStruct = gmtime((const time_t *)&unixTime);
+  struct tm *timeStruct = localtime(&unixTime);
 
   char tmsg[24];
-  if (prefs->time24h)
+  if (!timeStruct) {
+    sprintf(tmsg, "--:--");
+  } else if (prefs->time24h) {
     sprintf(tmsg, "%02d:%02d", timeStruct->tm_hour, timeStruct->tm_min);
-  else {
+  } else {
     int h = timeStruct->tm_hour % 12;
     if (h == 0)
       h = 12;
@@ -320,6 +370,9 @@ void App::UpdateStatus() {
   // Draw on top screen (which is 240x400 in buffer)
   ts->SetScreen(ts->screenleft);
   int style = ts->GetStyle();
+  int savedBottomMargin = ts->margin.bottom;
+  // Status HUD is outside the text area and should ignore page margins.
+  ts->margin.bottom = 0;
   ts->SetStyle(TEXT_STYLE_BROWSER); // smaller, readable font
 
   // Clear the status bar area at the bottom: y=380 to 400
@@ -370,6 +423,7 @@ void App::UpdateStatus() {
   }
 
   ts->SetStyle(style);
+  ts->margin.bottom = savedBottomMargin;
   ts->SetScreen(screen);
 }
 
@@ -399,6 +453,8 @@ void App::SetOrientation(bool turned_right) {
 void App::InitScreens() {
   // consoleInit() set the bottom screen to single-buffered and may have
   // changed the pixel format.  Take full control back before the main loop.
+  gfxSetDoubleBuffering(GFX_TOP, true);
+  gfxSetScreenFormat(GFX_TOP, GSP_BGR8_OES);
   gfxSetDoubleBuffering(GFX_BOTTOM, true);
   gfxSetScreenFormat(GFX_BOTTOM, GSP_BGR8_OES);
 

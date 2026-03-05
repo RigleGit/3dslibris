@@ -34,9 +34,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #include <vector>
 
+void epub_data_delete(epub_data_t *d);
+
 void epub_data_init(epub_data_t *d) {
+  // Reset any leftover heap objects from previous parses.
+  epub_data_delete(d);
+
   d->type = PARSE_CONTAINER;
-  d->ctx.clear();
   d->ctx.push_back(new std::string("TOP"));
   d->rootfile = "";
   d->title = "";
@@ -47,11 +51,17 @@ void epub_data_init(epub_data_t *d) {
 }
 
 void epub_data_delete(epub_data_t *d) {
-  std::vector<std::string *>::iterator it;
+  for (auto *item : d->manifest)
+    delete item;
   d->manifest.clear();
+
+  for (auto *itemref : d->spine)
+    delete itemref;
   d->spine.clear();
-  while (d->ctx.back())
-    d->ctx.pop_back();
+
+  for (auto *ctx : d->ctx)
+    delete ctx;
+  d->ctx.clear();
 }
 
 void epub_container_start(void *data, const char *el, const char **attr) {
@@ -65,6 +75,8 @@ void epub_container_start(void *data, const char *el, const char **attr) {
 void epub_rootfile_start(void *data, const char *el, const char **attr) {
   epub_data_t *d = (epub_data_t *)data;
   std::string elem = el;
+  if (d->ctx.empty())
+    return;
   std::string *ctx = d->ctx.back();
   if (!ctx)
     return;
@@ -136,11 +148,16 @@ void epub_rootfile_start(void *data, const char *el, const char **attr) {
 
 void epub_rootfile_end(void *data, const char *el) {
   epub_data_t *d = (epub_data_t *)data;
+  if (d->ctx.empty())
+    return;
+  delete d->ctx.back();
   d->ctx.pop_back();
 }
 
 void epub_rootfile_char(void *data, const XML_Char *txt, int len) {
   epub_data_t *d = (epub_data_t *)data;
+  if (d->ctx.empty())
+    return;
   std::string *ctx = d->ctx.back();
   if (!ctx)
     return;
@@ -178,16 +195,21 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd) {
   } else
     return 0;
 
-  size_t len, len_total = 0;
+  int len = 0;
+  size_t len_total = 0;
   enum XML_Status status;
   do {
     len = unzReadCurrentFile(uf, filebuf, BUFSIZE);
+    if (len < 0) {
+      rc = len;
+      break;
+    }
     status = XML_Parse(p, filebuf, len, len == 0);
     if (status == XML_STATUS_ERROR) {
       rc = status;
       break;
     }
-    len_total += len;
+    len_total += (size_t)len;
   } while (len);
 
   XML_ParserFree(p);

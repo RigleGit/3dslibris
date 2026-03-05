@@ -311,6 +311,7 @@ void Text::ClearCache(FT_Face face) {
   for (std::map<u16, FT_GlyphSlot>::iterator iter =
            textCache[face]->cacheMap.begin();
        iter != textCache[face]->cacheMap.end(); iter++) {
+    delete[] iter->second->bitmap.buffer;
     delete iter->second;
   }
   textCache[face]->cacheMap.clear();
@@ -396,14 +397,28 @@ u8 Text::GetStringWidth(const char *txt, u8 style) {
 
 u8 Text::GetStringWidth(const char *txt, FT_Face face) {
   //! Return total advance in pixels.
-  u8 width = 0;
-  const char *c;
-  for (c = txt; c != NULL; c++) {
+  if (!txt)
+    return 0;
+
+  int width = 0;
+  const char *c = txt;
+  while (*c) {
     u32 ucs = 0;
-    GetCharCode(c, &ucs);
+    u8 bytes = GetCharCode(c, &ucs);
+    if (bytes == 0) {
+      // Fallback: advance one byte to avoid getting stuck on malformed UTF-8.
+      c++;
+      continue;
+    }
     width += GetAdvance(ucs, face);
+    c += bytes;
   }
-  return width;
+
+  if (width < 0)
+    return 0;
+  if (width > 255)
+    return 255;
+  return (u8)width;
 }
 
 u8 Text::GetCharCountInsideWidth(const char *txt, u8 style, u8 pixels) {
@@ -473,9 +488,9 @@ void Text::SetColorMode(int state) { colorMode = state; }
 
 int Text::GetColorMode() { return colorMode; }
 
-u8 Text::GetPenX() { return pen.x; }
+u16 Text::GetPenX() { return pen.x; }
 
-u8 Text::GetPenY() { return pen.y; }
+u16 Text::GetPenY() { return pen.y; }
 
 u8 Text::GetPixelSize() { return pixelsize; }
 
@@ -621,9 +636,15 @@ void Text::PrintChar(u32 ucs, FT_Face face) {
 
   // Render to framebuffer.
 
-  // Hard clip: don't render glyphs below the safe area (status bar region)
+  // Hard clip: don't render body text below the safe area.
+  // UI text (browser/status) is allowed to use the full screen height.
   int maxY = (screen == screenleft) ? 400 : 320;
-  if (pen.y > maxY - margin.bottom) {
+  int bottomClip = margin.bottom;
+  if (faces.count(TEXT_STYLE_BROWSER) &&
+      face == faces[TEXT_STYLE_BROWSER]) {
+    bottomClip = 0;
+  }
+  if (pen.y > maxY - bottomClip) {
     pen.x += advance;
     codeprev = ucs;
     if (ftc && anode)
@@ -754,59 +775,72 @@ std::string Text::GetFontFile(u8 style) { return filenames[style]; }
 
 void Text::BlitToFramebuffer() {
   u16 fbW, fbH;
+  static int blitDiagCount = 0;
 
-  // --- Bottom screen (Right page in book orientation) ---
+  auto blitPage = [&](u8 *fb, u16 *src, u16 logicalHeight) {
+    if (!fb || !src)
+      return;
+
+    // libctru can report dimensions in either orientation depending on screen.
+    // Use stride=min and width=max to keep mapping stable.
+    const u32 stride = (fbW < fbH) ? fbW : fbH;         // usually 240
+    const u32 physWidth = (fbW > fbH) ? fbW : fbH;      // 320 or 400
+    const size_t fbSize = (size_t)fbW * (size_t)fbH * 3;
+    if (!stride || !physWidth || !fbSize)
+      return;
+
+    memset(fb, 0xFF, fbSize);
+
+    u32 maxSy = logicalHeight;
+    if (maxSy > physWidth)
+      maxSy = physWidth;
+    u32 maxSx = (u32)display.width;
+    if (maxSx > stride)
+      maxSx = stride;
+
+    if (app && blitDiagCount < 8) {
+      char diag[196];
+      snprintf(diag, sizeof(diag),
+               "BLIT diag #%d fbW=%u fbH=%u stride=%lu physW=%lu logicalH=%u "
+               "maxSy=%lu maxSx=%lu src=%p fb=%p",
+               blitDiagCount, fbW, fbH, (unsigned long)stride,
+               (unsigned long)physWidth, logicalHeight, (unsigned long)maxSy,
+               (unsigned long)maxSx, (void *)src, (void *)fb);
+      app->PrintStatus(diag);
+    }
+
+    for (u32 sy = 0; sy < maxSy; sy++) {
+      for (u32 sx = 0; sx < maxSx; sx++) {
+        u16 pixel = src[sy * display.height + sx];
+        if (pixel == 0xFFFF)
+          continue;
+
+        u8 r = ((pixel >> 11) & 0x1F) << 3;
+        u8 g = ((pixel >> 5) & 0x3F) << 2;
+        u8 b = (pixel & 0x1F) << 3;
+
+        // Rotate logical page into linear framebuffer layout.
+        const u32 dx = physWidth - 1 - sy;
+        const u32 dy = stride - 1 - sx;
+        const size_t off = ((size_t)dx * (size_t)stride + (size_t)dy) * 3;
+        if (off + 2 >= fbSize)
+          continue;
+
+        fb[off + 0] = b;
+        fb[off + 1] = g;
+        fb[off + 2] = r;
+      }
+    }
+  };
+
+  // Bottom screen: right page (320x240 physical)
   u8 *fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fbW, &fbH);
-  if (fbBottom && screenright) {
-    memset(fbBottom, 0xFF, fbW * fbH * 3);
-    for (u16 sy = 0; sy < (u16)display.height && sy < fbH; sy++) {
-      for (u16 sx = 0; sx < (u16)display.width && sx < fbW; sx++) {
-        u16 pixel = screenright[sy * display.height + sx];
-        // Don't draw background pixels if we already cleared to white
-        if (pixel == 0xFFFF)
-          continue;
+  blitPage(fbBottom, screenright, 320);
 
-        u8 r = ((pixel >> 11) & 0x1F) << 3;
-        u8 g = ((pixel >> 5) & 0x3F) << 2;
-        u8 b = (pixel & 0x1F) << 3;
-
-        // 90 deg clockwise rotation:
-        u32 lx = fbH - 1 - sy;
-        u32 ly = sx;
-
-        u32 off = (lx * fbW + (fbW - 1 - ly)) * 3;
-        fbBottom[off + 0] = b;
-        fbBottom[off + 1] = g;
-        fbBottom[off + 2] = r;
-      }
-    }
-  }
-
-  // --- Top screen (Left page in book orientation) ---
+  // Top screen: left page (400x240 physical)
   u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
-  if (fbTop && screenleft) {
-    memset(fbTop, 0xFF, fbW * fbH * 3);
-    u16 xOff =
-        (fbH > (u16)display.height) ? (fbH - (u16)display.height) / 2 : 0;
-    for (u16 sy = 0; sy < (u16)display.height && sy < fbH; sy++) {
-      for (u16 sx = 0; sx < (u16)display.width && sx < fbW; sx++) {
-        u16 pixel = screenleft[sy * display.height + sx];
-        if (pixel == 0xFFFF)
-          continue;
+  blitPage(fbTop, screenleft, 400);
 
-        u8 r = ((pixel >> 11) & 0x1F) << 3;
-        u8 g = ((pixel >> 5) & 0x3F) << 2;
-        u8 b = (pixel & 0x1F) << 3;
-
-        // Center vertically on the wider top screen layout
-        u32 lx = xOff + ((u16)display.height - 1 - sy);
-        u32 ly = sx;
-
-        u32 off = (lx * fbW + (fbW - 1 - ly)) * 3;
-        fbTop[off + 0] = b;
-        fbTop[off + 1] = g;
-        fbTop[off + 2] = r;
-      }
-    }
-  }
+  if (blitDiagCount < 8)
+    blitDiagCount++;
 }

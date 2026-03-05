@@ -33,7 +33,7 @@ Page::Page(Book *b) {
 
 Page::~Page() {
   if (buf)
-    delete buf;
+    delete[] buf;
 }
 
 u8 Page::SetBuffer(u8 *src, u16 len) {
@@ -77,10 +77,14 @@ void Page::Draw(Text *ts) {
 #else
   ts->SetScreen(ts->screenleft);
 #endif
-  ts->SetScreen(ts->screenright);
-  ts->ClearScreen();
+  // Force-clear both page buffers explicitly to avoid stale artifacts.
+  const u16 bg = ts->GetBgColor();
+  const int bufsize = PAGE_HEIGHT * PAGE_HEIGHT;
+  for (int k = 0; k < bufsize; k++) {
+    ts->screenright[k] = bg;
+    ts->screenleft[k] = bg;
+  }
   ts->SetScreen(ts->screenleft);
-  ts->ClearScreen();
 
   u16 i = 0;
   while (i < length) {
@@ -150,7 +154,7 @@ void Page::Draw(Text *ts) {
 
 void Page::DrawNumber(Text *ts) {
   //! Draw page number on current screen.
-  char msg[128];
+  char msg[64];
 
   // Find out if the page is bookmarked or not
   bool isBookmark = false;
@@ -190,86 +194,12 @@ void Page::DrawNumber(Text *ts) {
   // Put it at the bottom-right corner of the right screen.
   int location = ts->display.width - ts->margin.right - stringwidth - 4;
 
-  ts->SetScreen(
-      ts->screenright); // Screen 1 is the physically 320px tall screen
+  // UI elements should not be clipped by page margins.
+  int savedBottomMargin = ts->margin.bottom;
+  ts->margin.bottom = 0;
+
+  ts->SetScreen(ts->screenright); // Screen 1 is the physically 320px tall screen
   ts->SetPen((u8)location, 310);
   ts->PrintString(msg);
-
-  // Add clock, progress bar, and percentage on the left screen
-  if (pagecount > 0) {
-    char tmsg[32];
-    char pctmsg[16];
-    time_t t = time(NULL);
-    struct tm *tm = localtime(&t);
-    int pct = (pagecount > 1) ? (pagecurrent * 100) / (pagecount - 1) : 100;
-
-    // Format time
-    if (tm) {
-      bool is_24h = book->GetApp()->prefs->time24h;
-      if (is_24h) {
-        sprintf(tmsg, "%02d:%02d", tm->tm_hour, tm->tm_min);
-      } else {
-        int h = tm->tm_hour % 12;
-        if (h == 0)
-          h = 12;
-        const char *ampm = (tm->tm_hour >= 12) ? "PM" : "AM";
-        sprintf(tmsg, "%d:%02d%s", h, tm->tm_min, ampm);
-      }
-    } else {
-      sprintf(tmsg, "--:--");
-    }
-    sprintf(pctmsg, "%d%%", pct);
-
-    ts->SetScreen(ts->screenleft);
-
-    // Draw progress bar at y=370, spanning the usable width
-    int barLeft = ts->margin.left;
-    int barRight = ts->display.width - ts->margin.right;
-    int barY = 368;
-    int barH = 4;
-    int w = ts->display.height; // buffer stride
-    float progress =
-        (pagecount > 1) ? (float)pagecurrent / (float)(pagecount - 1) : 1.0f;
-    int fillWidth = (int)((barRight - barLeft) * progress);
-
-    // Bar background (light gray)
-    u16 bgColor = 0xBDD7;
-    for (int y = barY; y < barY + barH && y < 400; y++) {
-      for (int x = barLeft; x < barRight && x < 240; x++) {
-        ts->screenleft[y * w + x] = bgColor;
-      }
-    }
-
-    // Bar fill (dark gray/black)
-    u16 fillColor = 0x4A49; // dark gray
-    for (int y = barY; y < barY + barH && y < 400; y++) {
-      for (int x = barLeft; x < barLeft + fillWidth && x < 240; x++) {
-        ts->screenleft[y * w + x] = fillColor;
-      }
-    }
-
-    // Draw bookmark indicators on the progress bar
-    for (std::list<u16>::iterator bi = bookmarks->begin();
-         bi != bookmarks->end(); bi++) {
-      int bx = barLeft + (int)((float)(*bi) / (float)(pagecount - 1) *
-                               (barRight - barLeft));
-      if (bx >= barLeft && bx < barRight) {
-        // Draw small mark (2px wide, full bar height + 1 above)
-        u16 markColor = 0x0000; // black
-        for (int y = barY - 1; y < barY + barH + 1 && y < 400; y++) {
-          for (int dx = 0; dx < 2 && (bx + dx) < barRight; dx++) {
-            if (y >= 0)
-              ts->screenleft[y * w + (bx + dx)] = markColor;
-          }
-        }
-      }
-    }
-
-    // Draw time on the left, percentage on the right below the bar
-    ts->SetPen(barLeft, 385);
-    ts->PrintString(tmsg);
-    int pwidth = ts->GetStringAdvance(pctmsg);
-    ts->SetPen(barRight - pwidth, 385);
-    ts->PrintString(pctmsg);
-  }
+  ts->margin.bottom = savedBottomMargin;
 }

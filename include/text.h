@@ -115,8 +115,8 @@ public:
   bool GetInvert();
   void GetPen(u16 *x, u16 *y);
   void GetPen(u16 &x, u16 &y);
-  u8 GetPenX();
-  u8 GetPenY();
+  u16 GetPenX();
+  u16 GetPenY();
   u8 GetPixelSize();
   u16 *GetScreen();
   int GetStringAdvance(const char *txt);

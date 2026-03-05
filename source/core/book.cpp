@@ -372,8 +372,6 @@ void end(void *data, const char *el) {
     p->pen.y = ts->margin.top + ts->GetHeight();
     p->linebegan = false;
   }
-
-  parse_pop(p);
 }
 
 int unknown(void *encodingHandlerData, const XML_Char *name,
@@ -426,7 +424,7 @@ void fallback(void *data, const XML_Char *s, int len) {
       p->pen.x += advancespace;
       return;
     }
-    if (!strcmp(s, "&lt;")) {
+    if (!strcmp(s, "&gt;")) {
       p->buf[p->buflen++] = '>';
       p->pen.x += advancespace;
       return;
@@ -452,7 +450,13 @@ Book::Book(App *a) {
   coverTried = false;
 }
 
-Book::~Book() { Close(); }
+Book::~Book() {
+  Close();
+  if (coverPixels) {
+    delete[] coverPixels;
+    coverPixels = nullptr;
+  }
+}
 
 void Book::SetFolderName(const char *name) {
   foldername.clear();
