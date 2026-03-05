@@ -426,9 +426,12 @@ u8 Text::GetCharCountInsideWidth(const char *txt, u8 style, u8 pixels) {
   u32 ucs = 0;
   u8 width = 0;
   for (const char *c = txt; *c != 0 && n <= strlen(txt);) {
-    c += GetCharCode(c, &ucs);
-    if (ucs == 0)
-      continue;
+    u8 bytes = GetCharCode(c, &ucs);
+    if (!bytes) {
+      bytes = 1;
+      ucs = '?';
+    }
+    c += bytes;
     width += GetAdvance(ucs, faces[style]);
     if (width > pixels)
       return n;
@@ -444,6 +447,20 @@ u8 Text::GetCharCode(const char *utf8, u32 *ucs) {
   if (!utf8 || !ucs || !utf8[0])
     return 0;
 
+  auto cp1252ToUcs = [](unsigned char b) -> u32 {
+    static const u16 cp1252_map[32] = {
+        0x20AC, 0x0000, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x0000, 0x017D, 0x0000,
+        0x0000, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x0000, 0x017E, 0x0178,
+    };
+    if (b >= 0x80 && b <= 0x9F) {
+      u16 mapped = cp1252_map[b - 0x80];
+      return mapped ? mapped : (u32)'?';
+    }
+    return (u32)b; // Latin-1 range (0xA0..0xFF) or ASCII.
+  };
+
   const unsigned char c0 = (unsigned char)utf8[0];
   if (c0 < 0x80) { // ASCII
     *ucs = c0;
@@ -452,8 +469,10 @@ u8 Text::GetCharCode(const char *utf8, u32 *ucs) {
 
   if (c0 >= 0xC2 && c0 <= 0xDF) { // 2-byte UTF-8
     const unsigned char c1 = (unsigned char)utf8[1];
-    if (!utf8[1] || (c1 & 0xC0) != 0x80)
-      return 0;
+    if (!utf8[1] || (c1 & 0xC0) != 0x80) {
+      *ucs = cp1252ToUcs(c0);
+      return 1;
+    }
     *ucs = ((u32)(c0 & 0x1F) << 6) | (u32)(c1 & 0x3F);
     return 2;
   }
@@ -461,8 +480,10 @@ u8 Text::GetCharCode(const char *utf8, u32 *ucs) {
   if (c0 >= 0xE0 && c0 <= 0xEF) { // 3-byte UTF-8
     const unsigned char c1 = (unsigned char)utf8[1];
     const unsigned char c2 = (unsigned char)utf8[2];
-    if (!utf8[1] || !utf8[2] || (c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80)
-      return 0;
+    if (!utf8[1] || !utf8[2] || (c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) {
+      *ucs = cp1252ToUcs(c0);
+      return 1;
+    }
     *ucs = ((u32)(c0 & 0x0F) << 12) | ((u32)(c1 & 0x3F) << 6) |
            (u32)(c2 & 0x3F);
     return 3;
@@ -473,14 +494,17 @@ u8 Text::GetCharCode(const char *utf8, u32 *ucs) {
     const unsigned char c2 = (unsigned char)utf8[2];
     const unsigned char c3 = (unsigned char)utf8[3];
     if (!utf8[1] || !utf8[2] || !utf8[3] || (c1 & 0xC0) != 0x80 ||
-        (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
-      return 0;
+        (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) {
+      *ucs = cp1252ToUcs(c0);
+      return 1;
+    }
     *ucs = ((u32)(c0 & 0x07) << 18) | ((u32)(c1 & 0x3F) << 12) |
            ((u32)(c2 & 0x3F) << 6) | (u32)(c3 & 0x3F);
     return 4;
   }
 
-  return 0;
+  *ucs = cp1252ToUcs(c0);
+  return 1;
 }
 
 std::string Text::GetFontName(u8 style) {
@@ -759,14 +783,23 @@ void Text::PrintString(const char *s, u8 style) {
 
 void Text::PrintString(const char *s, FT_Face face) {
   //! Render a character string starting at the pen position.
-  u8 i = 0;
-  while (i < strlen((char *)s)) {
-    u32 c = s[i];
-    if (c == '\n') {
+  if (!s)
+    return;
+  size_t i = 0;
+  size_t len = strlen((char *)s);
+  while (i < len) {
+    const unsigned char b = (unsigned char)s[i];
+    if (b == '\n') {
       PrintNewLine();
       i++;
     } else {
-      i += GetCharCode(&(s[i]), &c);
+      u32 c = 0;
+      u8 bytes = GetCharCode(&(s[i]), &c);
+      if (!bytes) {
+        bytes = 1;
+        c = '?';
+      }
+      i += bytes;
       PrintChar(c, face);
     }
   }
