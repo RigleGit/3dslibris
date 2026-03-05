@@ -137,6 +137,20 @@ void FontMenu::handleInput() {
 void FontMenu::handleTouchInput() {
   LayoutFooterButtons(app);
   touchPosition coord = app->TouchRead();
+  // Robust fallback zones for footer buttons (prev/back/next).
+  if (coord.py >= 284) {
+    if (coord.px < 80) {
+      if (page > 0)
+        previousPage();
+    } else if (coord.px < 160) {
+      app->ShowSettingsView();
+    } else {
+      if (page < GetPageCount() - 1)
+        nextPage();
+    }
+    return;
+  }
+
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
     for (int dy = -4; dy <= 4; dy += 4) {
       for (int dx = -4; dx <= 4; dx += 4) {

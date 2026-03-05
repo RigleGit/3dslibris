@@ -128,6 +128,13 @@ void App::PrefsHandleEvent() {
 
 void App::PrefsHandleTouch() {
   touchPosition coord = TouchRead();
+  // Robust fallback zone for the footer action area.
+  // If touch mapping drifts, taps in the bottom strip should still go to library.
+  if (coord.py >= 268) {
+    ShowLibraryView();
+    return;
+  }
+
   // Keep touch hitbox synced with drawing geometry.
   buttonprefs.Move(PREFS_LIBRARY_BTN_X, PREFS_LIBRARY_BTN_Y);
   buttonprefs.Resize(PREFS_LIBRARY_BTN_W, PREFS_LIBRARY_BTN_H);
