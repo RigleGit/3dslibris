@@ -39,6 +39,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 static const size_t EPUB_TOC_MAX_BYTES = 192 * 1024;
 static const size_t EPUB_TOC_MAX_ENTRIES = 2048;
+// Safety switch for 3DS stability: TOC/NAV title resolution can be re-enabled
+// once NCX/NAV parsing is fully hardened on real hardware/emulators.
+static const bool EPUB_ENABLE_REAL_TOC_RESOLVE = false;
 
 static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
   std::string base = path;
@@ -794,143 +797,147 @@ int epub(Book *book, std::string name, bool metadataonly) {
   }
 
   // Replace fallback chapter names with real TOC/NAV names when available.
-  std::vector<toc_entry_t> toc_entries;
-  std::string toc_xml;
-  std::string toc_doc_path;
-  bool toc_loaded = false;
-  if (book && book->GetApp()) {
-    book->GetApp()->PrintStatus("EPUB: TOC resolve begin");
-  }
-
-  if (!parsedata.navid.empty() &&
-      FindManifestItemPath(parsedata, parsedata.navid, folder, toc_doc_path)) {
+  if (EPUB_ENABLE_REAL_TOC_RESOLVE) {
+    std::vector<toc_entry_t> toc_entries;
+    std::string toc_xml;
+    std::string toc_doc_path;
+    bool toc_loaded = false;
     if (book && book->GetApp()) {
-      char msg[192];
-      snprintf(msg, sizeof(msg), "EPUB: try NAV %s", toc_doc_path.c_str());
-      book->GetApp()->PrintStatus(msg);
+      book->GetApp()->PrintStatus("EPUB: TOC resolve begin");
     }
-    if (ReadZipEntryText(uf, toc_doc_path, toc_xml, book ? book->GetApp() : NULL,
-                         "NAV")) {
-      nav_parse_data_t navdata;
-      navdata.entries = &toc_entries;
-      navdata.base_path = toc_doc_path;
-      navdata.depth = 0;
-      navdata.toc_nav_depth = 0;
-      navdata.anchor_depth = 0;
-      if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata)) {
-        toc_loaded = true;
-      }
-    } else if (book && book->GetApp()) {
-      book->GetApp()->PrintStatus("EPUB: NAV skipped (size/format)");
-    }
-  }
 
-  if (!toc_loaded && !parsedata.tocid.empty() &&
-      FindManifestItemPath(parsedata, parsedata.tocid, folder, toc_doc_path)) {
+    if (!parsedata.navid.empty() &&
+        FindManifestItemPath(parsedata, parsedata.navid, folder, toc_doc_path)) {
+      if (book && book->GetApp()) {
+        char msg[192];
+        snprintf(msg, sizeof(msg), "EPUB: try NAV %s", toc_doc_path.c_str());
+        book->GetApp()->PrintStatus(msg);
+      }
+      if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
+                           book ? book->GetApp() : NULL, "NAV")) {
+        nav_parse_data_t navdata;
+        navdata.entries = &toc_entries;
+        navdata.base_path = toc_doc_path;
+        navdata.depth = 0;
+        navdata.toc_nav_depth = 0;
+        navdata.anchor_depth = 0;
+        if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata)) {
+          toc_loaded = true;
+        }
+      } else if (book && book->GetApp()) {
+        book->GetApp()->PrintStatus("EPUB: NAV skipped (size/format)");
+      }
+    }
+
+    if (!toc_loaded && !parsedata.tocid.empty() &&
+        FindManifestItemPath(parsedata, parsedata.tocid, folder, toc_doc_path)) {
+      if (book && book->GetApp()) {
+        char msg[192];
+        snprintf(msg, sizeof(msg), "EPUB: try NCX %s", toc_doc_path.c_str());
+        book->GetApp()->PrintStatus(msg);
+      }
+      if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
+                           book ? book->GetApp() : NULL, "NCX")) {
+        if (ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
+                                book ? book->GetApp() : NULL))
+          toc_loaded = true;
+      } else if (book && book->GetApp()) {
+        book->GetApp()->PrintStatus("EPUB: NCX skipped (size/format)");
+      }
+    }
+
+    if (!toc_loaded) {
+      // Fallback discovery for malformed OPF metadata.
+      for (auto item : parsedata.manifest) {
+        if (item->media_type == "application/xhtml+xml" &&
+            ContainsToken(item->properties, "nav")) {
+          toc_doc_path = BuildDocPath(folder, item->href);
+          if (book && book->GetApp()) {
+            char msg[192];
+            snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s", toc_doc_path.c_str());
+            book->GetApp()->PrintStatus(msg);
+          }
+          if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
+                               book ? book->GetApp() : NULL, "NAV-FALLBACK")) {
+            nav_parse_data_t navdata;
+            navdata.entries = &toc_entries;
+            navdata.base_path = toc_doc_path;
+            navdata.depth = 0;
+            navdata.toc_nav_depth = 0;
+            navdata.anchor_depth = 0;
+            if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata))
+              toc_loaded = true;
+          } else if (book && book->GetApp()) {
+            book->GetApp()->PrintStatus("EPUB: fallback NAV skipped");
+          }
+          if (toc_loaded)
+            break;
+        }
+      }
+    }
+
+    if (!toc_loaded) {
+      for (auto item : parsedata.manifest) {
+        if (item->media_type == "application/x-dtbncx+xml") {
+          toc_doc_path = BuildDocPath(folder, item->href);
+          if (book && book->GetApp()) {
+            char msg[192];
+            snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s", toc_doc_path.c_str());
+            book->GetApp()->PrintStatus(msg);
+          }
+          if (ReadZipEntryText(uf, toc_doc_path, toc_xml, book ? book->GetApp() : NULL,
+                               "NCX-FALLBACK")) {
+            if (ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
+                                    book ? book->GetApp() : NULL))
+              toc_loaded = true;
+          } else if (book && book->GetApp()) {
+            book->GetApp()->PrintStatus("EPUB: fallback NCX skipped");
+          }
+          if (toc_loaded)
+            break;
+        }
+      }
+    }
+
+    if (!toc_entries.empty()) {
+      std::vector<ChapterEntry> resolved;
+      std::map<u16, bool> used_pages;
+      for (size_t i = 0; i < toc_entries.size(); i++) {
+        std::string key = NormalizePath(toc_entries[i].href);
+        if (key.empty())
+          continue;
+        auto hit = page_start_by_href.find(key);
+        if (hit == page_start_by_href.end())
+          continue;
+        if (used_pages[hit->second])
+          continue;
+        used_pages[hit->second] = true;
+
+        ChapterEntry entry;
+        entry.page = hit->second;
+        entry.title = Trim(toc_entries[i].title);
+        if (entry.title.empty())
+          continue;
+        resolved.push_back(entry);
+      }
+
+      if (!resolved.empty()) {
+        book->ClearChapters();
+        for (size_t i = 0; i < resolved.size(); i++) {
+          book->AddChapter(resolved[i].page, resolved[i].title);
+        }
+      }
+    }
+
     if (book && book->GetApp()) {
-      char msg[192];
-      snprintf(msg, sizeof(msg), "EPUB: try NCX %s", toc_doc_path.c_str());
+      char msg[96];
+      snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
+               (unsigned)toc_entries.size(), (unsigned)book->GetChapters().size());
       book->GetApp()->PrintStatus(msg);
+      book->GetApp()->PrintStatus("EPUB: TOC resolve end");
     }
-    if (ReadZipEntryText(uf, toc_doc_path, toc_xml, book ? book->GetApp() : NULL,
-                         "NCX")) {
-      if (ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
-                              book ? book->GetApp() : NULL))
-        toc_loaded = true;
-    } else if (book && book->GetApp()) {
-      book->GetApp()->PrintStatus("EPUB: NCX skipped (size/format)");
-    }
-  }
-
-  if (!toc_loaded) {
-    // Fallback discovery for malformed OPF metadata.
-    for (auto item : parsedata.manifest) {
-      if (item->media_type == "application/xhtml+xml" &&
-          ContainsToken(item->properties, "nav")) {
-        toc_doc_path = BuildDocPath(folder, item->href);
-        if (book && book->GetApp()) {
-          char msg[192];
-          snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s", toc_doc_path.c_str());
-          book->GetApp()->PrintStatus(msg);
-        }
-        if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
-                             book ? book->GetApp() : NULL, "NAV-FALLBACK")) {
-          nav_parse_data_t navdata;
-          navdata.entries = &toc_entries;
-          navdata.base_path = toc_doc_path;
-          navdata.depth = 0;
-          navdata.toc_nav_depth = 0;
-          navdata.anchor_depth = 0;
-          if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata))
-            toc_loaded = true;
-        } else if (book && book->GetApp()) {
-          book->GetApp()->PrintStatus("EPUB: fallback NAV skipped");
-        }
-        if (toc_loaded)
-          break;
-      }
-    }
-  }
-
-  if (!toc_loaded) {
-    for (auto item : parsedata.manifest) {
-      if (item->media_type == "application/x-dtbncx+xml") {
-        toc_doc_path = BuildDocPath(folder, item->href);
-        if (book && book->GetApp()) {
-          char msg[192];
-          snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s", toc_doc_path.c_str());
-          book->GetApp()->PrintStatus(msg);
-        }
-        if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
-                             book ? book->GetApp() : NULL, "NCX-FALLBACK")) {
-          if (ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
-                                  book ? book->GetApp() : NULL))
-            toc_loaded = true;
-        } else if (book && book->GetApp()) {
-          book->GetApp()->PrintStatus("EPUB: fallback NCX skipped");
-        }
-        if (toc_loaded)
-          break;
-      }
-    }
-  }
-
-  if (!toc_entries.empty()) {
-    std::vector<ChapterEntry> resolved;
-    std::map<u16, bool> used_pages;
-    for (size_t i = 0; i < toc_entries.size(); i++) {
-      std::string key = NormalizePath(toc_entries[i].href);
-      if (key.empty())
-        continue;
-      auto hit = page_start_by_href.find(key);
-      if (hit == page_start_by_href.end())
-        continue;
-      if (used_pages[hit->second])
-        continue;
-      used_pages[hit->second] = true;
-
-      ChapterEntry entry;
-      entry.page = hit->second;
-      entry.title = Trim(toc_entries[i].title);
-      if (entry.title.empty())
-        continue;
-      resolved.push_back(entry);
-    }
-
-    if (!resolved.empty()) {
-      book->ClearChapters();
-      for (size_t i = 0; i < resolved.size(); i++) {
-        book->AddChapter(resolved[i].page, resolved[i].title);
-      }
-    }
-  }
-
-  if (book && book->GetApp()) {
-    char msg[96];
-    snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
-             (unsigned)toc_entries.size(), (unsigned)book->GetChapters().size());
-    book->GetApp()->PrintStatus(msg);
-    book->GetApp()->PrintStatus("EPUB: TOC resolve end");
+  } else if (book && book->GetApp()) {
+    book->GetApp()->PrintStatus("EPUB: TOC resolve skipped (safe mode)");
   }
 
   unzClose(uf);
