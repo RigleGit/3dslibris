@@ -66,17 +66,47 @@ static bool LooksLikeValidUtf8(const std::string &s) {
   return true;
 }
 
-static std::string Latin1ToUtf8(const std::string &in) {
+static std::string LegacyBytesToUtf8(const std::string &in) {
+  // Decode legacy single-byte strings as Windows-1252 (superset commonly used
+  // by desktop zippers/file systems for EPUB filenames).
+  static const u16 cp1252_map[32] = {
+      0x20AC, 0x0000, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+      0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x0000, 0x017D, 0x0000,
+      0x0000, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+      0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x0000, 0x017E, 0x0178,
+  };
+
   std::string out;
-  out.reserve(in.size() * 2);
+  out.reserve(in.size() * 3);
+
+  auto appendUcs = [&](u32 cp) {
+    if (cp <= 0x7F) {
+      out.push_back((char)cp);
+    } else if (cp <= 0x7FF) {
+      out.push_back((char)(0xC0 | (cp >> 6)));
+      out.push_back((char)(0x80 | (cp & 0x3F)));
+    } else {
+      out.push_back((char)(0xE0 | (cp >> 12)));
+      out.push_back((char)(0x80 | ((cp >> 6) & 0x3F)));
+      out.push_back((char)(0x80 | (cp & 0x3F)));
+    }
+  };
+
   for (size_t i = 0; i < in.size(); i++) {
     unsigned char c = (unsigned char)in[i];
     if (c < 0x80) {
-      out.push_back((char)c);
-    } else {
-      out.push_back((char)(0xC0 | (c >> 6)));
-      out.push_back((char)(0x80 | (c & 0x3F)));
+      appendUcs(c);
+      continue;
     }
+    if (c >= 0x80 && c <= 0x9F) {
+      u16 mapped = cp1252_map[c - 0x80];
+      if (mapped != 0x0000)
+        appendUcs(mapped);
+      else
+        appendUcs('?');
+      continue;
+    }
+    appendUcs(c); // 0xA0..0xFF same as Latin-1
   }
   return out;
 }
@@ -127,11 +157,11 @@ static std::string BuildFallbackTitle(Book *book) {
   const char *raw = book->GetFileName();
   std::string name = raw ? raw : "";
   if (!LooksLikeValidUtf8(name)) {
-    name = Latin1ToUtf8(name);
+    name = LegacyBytesToUtf8(name);
   } else {
-    std::string repaired;
-    if (TryRepairMojibakeUtf8(name, &repaired))
-      name = repaired;
+    std::string repaired_legacy;
+    if (TryRepairMojibakeUtf8(name, &repaired_legacy))
+      name = LegacyBytesToUtf8(repaired_legacy);
   }
 
   // Prefer filename for missing covers, strip extension.
