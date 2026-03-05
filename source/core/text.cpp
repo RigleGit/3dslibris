@@ -441,24 +441,45 @@ u8 Text::GetCharCode(const char *utf8, u32 *ucs) {
   //! Given a UTF-8 encoding, fill in the Unicode/UCS code point.
   //! Return the bytelength of the encoding, for advancing
   //! to the next character; 0 if encoding could not be translated.
+  if (!utf8 || !ucs || !utf8[0])
+    return 0;
 
-  if (utf8[0] < 0x80) { // ASCII
-    *ucs = utf8[0];
+  const unsigned char c0 = (unsigned char)utf8[0];
+  if (c0 < 0x80) { // ASCII
+    *ucs = c0;
     return 1;
+  }
 
-  } else if (utf8[0] > 0xc1 && utf8[0] < 0xe0) { // latin
-    *ucs = ((utf8[0] - 192) * 64) + (utf8[1] - 128);
+  if (c0 >= 0xC2 && c0 <= 0xDF) { // 2-byte UTF-8
+    const unsigned char c1 = (unsigned char)utf8[1];
+    if (!utf8[1] || (c1 & 0xC0) != 0x80)
+      return 0;
+    *ucs = ((u32)(c0 & 0x1F) << 6) | (u32)(c1 & 0x3F);
     return 2;
+  }
 
-  } else if (utf8[0] > 0xdf && utf8[0] < 0xf0) { // asian
-    *ucs = (utf8[0] - 224) * 4096 + (utf8[1] - 128) * 64 + (utf8[2] - 128);
+  if (c0 >= 0xE0 && c0 <= 0xEF) { // 3-byte UTF-8
+    const unsigned char c1 = (unsigned char)utf8[1];
+    const unsigned char c2 = (unsigned char)utf8[2];
+    if (!utf8[1] || !utf8[2] || (c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80)
+      return 0;
+    *ucs = ((u32)(c0 & 0x0F) << 12) | ((u32)(c1 & 0x3F) << 6) |
+           (u32)(c2 & 0x3F);
     return 3;
+  }
 
-  } else if (utf8[0] > 0xef) {
-    *ucs = ((utf8[0] & 0x07) << 18) | ((utf8[1] & 0x3F) << 12) |
-           ((utf8[2] & 0x3F) << 6) | (utf8[3] & 0x3F);
+  if (c0 >= 0xF0 && c0 <= 0xF4) { // 4-byte UTF-8
+    const unsigned char c1 = (unsigned char)utf8[1];
+    const unsigned char c2 = (unsigned char)utf8[2];
+    const unsigned char c3 = (unsigned char)utf8[3];
+    if (!utf8[1] || !utf8[2] || !utf8[3] || (c1 & 0xC0) != 0x80 ||
+        (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80)
+      return 0;
+    *ucs = ((u32)(c0 & 0x07) << 18) | ((u32)(c1 & 0x3F) << 12) |
+           ((u32)(c2 & 0x3F) << 6) | (u32)(c3 & 0x3F);
     return 4;
   }
+
   return 0;
 }
 

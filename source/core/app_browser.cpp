@@ -359,10 +359,12 @@ void App::browser_handleevent() {
       return false;
     };
 
-    // Browser touch must use a single mapping. Trying alternate mappings here
-    // causes false positives (touches interpreted as other UI zones).
-    touchPosition mapped = TouchRead();
-    handleTouchAt((int)mapped.px, (int)mapped.py);
+    // Browser UI on bottom screen: keep X from raw Y, but keep Y in the same
+    // frame as TouchRead (inverted raw X). Using TouchRead() directly mirrors
+    // left/right in some Citra/3DS setups.
+    touchPosition raw;
+    hidTouchRead(&raw);
+    handleTouchAt((int)raw.py, 319 - (int)raw.px);
   }
 }
 
