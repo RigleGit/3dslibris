@@ -61,6 +61,7 @@ App::App() {
   key.y = KEY_Y;
 
   browser_view_dirty = false;
+  browser_wait_input_release = false;
 
   prefs = new Prefs(this);
   prefsSelected = -1;
@@ -332,6 +333,7 @@ void App::ShowLibraryView() {
   mode = APP_MODE_BROWSER;
   buttonprefs.Label("settings");
   ts->SetScreen(ts->screenright);
+  browser_wait_input_release = true;
   browser_view_dirty = true;
 }
 

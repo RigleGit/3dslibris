@@ -161,6 +161,7 @@ public:
 
 private:
   bool browser_view_dirty;
+  bool browser_wait_input_release;
   bool prefs_view_dirty;
   bool prefs_book_context;
 

@@ -36,11 +36,103 @@ static std::string TrimSpaces(const std::string &s) {
   return s.substr(start, end - start);
 }
 
+static bool LooksLikeValidUtf8(const std::string &s) {
+  size_t i = 0;
+  while (i < s.size()) {
+    unsigned char c = (unsigned char)s[i];
+    if ((c & 0x80) == 0x00) {
+      i++;
+      continue;
+    }
+    size_t need = 0;
+    if ((c & 0xE0) == 0xC0)
+      need = 1;
+    else if ((c & 0xF0) == 0xE0)
+      need = 2;
+    else if ((c & 0xF8) == 0xF0)
+      need = 3;
+    else
+      return false;
+
+    if (i + need >= s.size())
+      return false;
+    for (size_t j = 1; j <= need; j++) {
+      unsigned char cc = (unsigned char)s[i + j];
+      if ((cc & 0xC0) != 0x80)
+        return false;
+    }
+    i += need + 1;
+  }
+  return true;
+}
+
+static std::string Latin1ToUtf8(const std::string &in) {
+  std::string out;
+  out.reserve(in.size() * 2);
+  for (size_t i = 0; i < in.size(); i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (c < 0x80) {
+      out.push_back((char)c);
+    } else {
+      out.push_back((char)(0xC0 | (c >> 6)));
+      out.push_back((char)(0x80 | (c & 0x3F)));
+    }
+  }
+  return out;
+}
+
+static bool TryRepairMojibakeUtf8(const std::string &in, std::string *out) {
+  if (!out)
+    return false;
+
+  // Repair common "UTF-8 bytes decoded as Latin-1 then re-encoded as UTF-8"
+  // mojibake patterns.
+  std::string collapsed;
+  collapsed.reserve(in.size());
+
+  for (size_t i = 0; i < in.size();) {
+    unsigned char c = (unsigned char)in[i];
+    if (c < 0x80) {
+      collapsed.push_back((char)c);
+      i++;
+      continue;
+    }
+
+    if (i + 1 >= in.size())
+      return false;
+
+    unsigned char c2 = (unsigned char)in[i + 1];
+    if (c == 0xC2 && c2 >= 0x80 && c2 <= 0xBF) {
+      collapsed.push_back((char)c2);
+      i += 2;
+      continue;
+    }
+    if (c == 0xC3 && c2 >= 0x80 && c2 <= 0xBF) {
+      collapsed.push_back((char)(c2 + 0x40));
+      i += 2;
+      continue;
+    }
+    return false;
+  }
+
+  if (!LooksLikeValidUtf8(collapsed))
+    return false;
+  *out = collapsed;
+  return true;
+}
+
 static std::string BuildFallbackTitle(Book *book) {
   if (!book)
     return "";
   const char *raw = book->GetFileName();
   std::string name = raw ? raw : "";
+  if (!LooksLikeValidUtf8(name)) {
+    name = Latin1ToUtf8(name);
+  } else {
+    std::string repaired;
+    if (TryRepairMojibakeUtf8(name, &repaired))
+      name = repaired;
+  }
 
   // Prefer filename for missing covers, strip extension.
   size_t dot = name.find_last_of('.');
@@ -142,6 +234,17 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
 
 void App::browser_handleevent() {
   u32 keys = hidKeysDown();
+  const u32 release_mask = KEY_TOUCH | KEY_A | KEY_B | KEY_X | KEY_Y |
+                           KEY_START | KEY_SELECT | KEY_UP | KEY_DOWN |
+                           KEY_LEFT | KEY_RIGHT | KEY_L | KEY_R |
+                           KEY_CPAD_UP | KEY_CPAD_DOWN | KEY_CPAD_LEFT |
+                           KEY_CPAD_RIGHT;
+  if (browser_wait_input_release) {
+    if (hidKeysHeld() & release_mask)
+      return;
+    browser_wait_input_release = false;
+    return;
+  }
 
   if (keys & (KEY_A | key.down)) {
     // Open selected book.
@@ -184,14 +287,13 @@ void App::browser_handleevent() {
     const int kGridX0 = 5;
     const int kGridY0 = 3;
 
-    touchPosition coord = TouchRead();
-    auto hitsButtonMapped = [&](Button &button, int slack) {
+    auto hitsButtonAt = [&](Button &button, int px, int py, int slack) {
       if (slack <= 0)
-        return button.EnclosesPoint(coord.px, coord.py);
+        return button.EnclosesPoint((u16)px, (u16)py);
       for (int dy = -slack; dy <= slack; dy += slack) {
         for (int dx = -slack; dx <= slack; dx += slack) {
-          int x = (int)coord.px + dx;
-          int y = (int)coord.py + dy;
+          int x = px + dx;
+          int y = py + dy;
           if (x < 0 || y < 0 || x > 239 || y > 319)
             continue;
           if (button.EnclosesPoint((u16)x, (u16)y))
@@ -201,56 +303,66 @@ void App::browser_handleevent() {
       return false;
     };
 
-    if (hitsButtonMapped(buttonnext, 4)) {
-      browser_nextpage();
-      return;
-    }
-    if (hitsButtonMapped(buttonprev, 4)) {
-      browser_prevpage();
-      return;
-    }
-    if (hitsButtonMapped(buttonprefs, 4)) {
-      ShowSettingsView(false);
-      return;
-    }
+    auto handleTouchAt = [&](int x, int y) -> bool {
+      if (x < 0 || y < 0 || x > 239 || y > 319)
+        return false;
 
-    // Prefer coarse cell hit-test (cover + title/progress area):
-    // single tap selects, tapping selected book opens.
-    int x = coord.px;
-    int y = coord.py;
-    if (x >= kGridX0 && y >= kGridY0) {
-      int col = (x - kGridX0) / kCellW;
-      int row = (y - kGridY0) / kCellH;
-      if (col >= 0 && col < kGridCols && row >= 0 && row < kGridRows) {
-        int page_idx = row * kGridCols + col;
-        if (page_idx >= 0 && page_idx < APP_BROWSER_BUTTON_COUNT) {
-          int book_idx = browserstart + page_idx;
-          if (book_idx >= 0 && book_idx < bookcount) {
-            if (bookselected == books[book_idx]) {
-              OpenBook();
-            } else {
-              bookselected = books[book_idx];
-              browser_view_dirty = true;
+      if (hitsButtonAt(buttonnext, x, y, 4)) {
+        browser_nextpage();
+        return true;
+      }
+      if (hitsButtonAt(buttonprev, x, y, 4)) {
+        browser_prevpage();
+        return true;
+      }
+      if (hitsButtonAt(buttonprefs, x, y, 4)) {
+        ShowSettingsView(false);
+        return true;
+      }
+
+      // Prefer coarse cell hit-test (cover + title/progress area):
+      // single tap selects, tapping selected book opens.
+      if (x >= kGridX0 && y >= kGridY0) {
+        int col = (x - kGridX0) / kCellW;
+        int row = (y - kGridY0) / kCellH;
+        if (col >= 0 && col < kGridCols && row >= 0 && row < kGridRows) {
+          int page_idx = row * kGridCols + col;
+          if (page_idx >= 0 && page_idx < APP_BROWSER_BUTTON_COUNT) {
+            int book_idx = browserstart + page_idx;
+            if (book_idx >= 0 && book_idx < bookcount) {
+              if (bookselected == books[book_idx]) {
+                OpenBook();
+              } else {
+                bookselected = books[book_idx];
+                browser_view_dirty = true;
+              }
+              return true;
             }
-            return;
           }
         }
       }
-    }
 
-    // Fallback to original cover hitboxes.
-    for (int i = browserstart;
-         (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT); i++) {
-      if (hitsButtonMapped(*buttons[i], 4)) {
-        if (bookselected == books[i]) {
-          OpenBook();
-        } else {
-          bookselected = books[i];
-          browser_view_dirty = true;
+      // Fallback to original cover hitboxes.
+      for (int i = browserstart;
+           (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT);
+           i++) {
+        if (hitsButtonAt(*buttons[i], x, y, 4)) {
+          if (bookselected == books[i]) {
+            OpenBook();
+          } else {
+            bookselected = books[i];
+            browser_view_dirty = true;
+          }
+          return true;
         }
-        return;
       }
-    }
+      return false;
+    };
+
+    // Browser touch must use a single mapping. Trying alternate mappings here
+    // causes false positives (touches interpreted as other UI zones).
+    touchPosition mapped = TouchRead();
+    handleTouchAt((int)mapped.px, (int)mapped.py);
   }
 }
 
