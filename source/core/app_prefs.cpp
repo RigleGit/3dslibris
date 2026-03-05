@@ -25,21 +25,20 @@
 
 void App::PrefsInit() {
   const std::vector<std::string> labels{
-      "regular font",       "bold font",    "italic font",
-      "bold italic font",   "font size",    "paragraph spacing",
+      "font configuration", "font size",    "paragraph spacing",
       "screen orientation", "clock format", "color mode",
       "bookmarks"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     prefsButtons[i].Init(ts);
     prefsButtons[i].SetStyle(BUTTON_STYLE_SETTING);
-    prefsButtons[i].Resize(230, 28);
+    prefsButtons[i].Resize(230, 36);
     prefsButtons[i].SetLabel1(labels[i]);
     PrefsRefreshButton(i);
-    prefsButtons[i].Move(5, i * 30);
+    prefsButtons[i].Move(5, i * 38);
   }
 
-  prefsSelected = PREFS_BUTTON_FONTSIZE;
+  prefsSelected = PREFS_BUTTON_FONT_CONFIG;
 }
 
 void App::PrefsDraw() {
@@ -214,19 +213,9 @@ void App::PrefsFlipOrientation() {
 void App::PrefsRefreshButton(int index) {
   char msg[64];
   switch (index) {
-  case PREFS_BUTTON_FONT:
-    prefsButtons[PREFS_BUTTON_FONT].SetLabel2(
-        ts->GetFontName(TEXT_STYLE_REGULAR));
-  case PREFS_BUTTON_FONT_BOLD:
-    prefsButtons[PREFS_BUTTON_FONT_BOLD].SetLabel2(
-        ts->GetFontName(TEXT_STYLE_BOLD));
-  case PREFS_BUTTON_FONT_BOLDITALIC:
-    prefsButtons[PREFS_BUTTON_FONT_BOLDITALIC].SetLabel2(
-        ts->GetFontName(TEXT_STYLE_BOLDITALIC));
-    break;
-  case PREFS_BUTTON_FONT_ITALIC:
-    prefsButtons[PREFS_BUTTON_FONT_ITALIC].SetLabel2(
-        ts->GetFontName(TEXT_STYLE_ITALIC));
+  case PREFS_BUTTON_FONT_CONFIG:
+    prefsButtons[PREFS_BUTTON_FONT_CONFIG].SetLabel2(
+        std::string("open menu >"));
     break;
   case PREFS_BUTTON_FONTSIZE:
     sprintf(msg, "                        < %d >  ", ts->GetPixelSize());
@@ -296,14 +285,9 @@ void App::PrefsHandlePress() {
     return;
   }
 
-  if (prefsSelected == PREFS_BUTTON_FONT) {
+  if (prefsSelected == PREFS_BUTTON_FONT_CONFIG) {
     mode = APP_MODE_PREFS_FONT;
-  } else if (prefsSelected == PREFS_BUTTON_FONT_BOLD) {
-    mode = APP_MODE_PREFS_FONT_BOLD;
-  } else if (prefsSelected == PREFS_BUTTON_FONT_ITALIC) {
-    mode = APP_MODE_PREFS_FONT_ITALIC;
-  } else if (prefsSelected == PREFS_BUTTON_FONT_BOLDITALIC) {
-    mode = APP_MODE_PREFS_FONT_BOLDITALIC;
+    ShowFontView(mode);
+    return;
   }
-  ShowFontView(mode);
 }

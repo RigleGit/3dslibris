@@ -11,13 +11,42 @@
 #define MIN(x, y) (x < y ? x : y)
 #define MAX(x, y) (x > y ? x : y)
 
+static const char *GetFontTargetLabel(u8 mode) {
+  switch (mode) {
+  case APP_MODE_PREFS_FONT_BOLD:
+    return "bold";
+  case APP_MODE_PREFS_FONT_ITALIC:
+    return "italic";
+  case APP_MODE_PREFS_FONT_BOLDITALIC:
+    return "bold italic";
+  case APP_MODE_PREFS_FONT:
+  default:
+    return "regular";
+  }
+}
+
+static u8 NextFontTargetMode(u8 mode, int delta) {
+  const u8 order[] = {APP_MODE_PREFS_FONT, APP_MODE_PREFS_FONT_BOLD,
+                      APP_MODE_PREFS_FONT_ITALIC,
+                      APP_MODE_PREFS_FONT_BOLDITALIC};
+  int idx = 0;
+  for (int i = 0; i < 4; i++) {
+    if (order[i] == mode) {
+      idx = i;
+      break;
+    }
+  }
+  idx = (idx + delta + 4) % 4;
+  return order[idx];
+}
+
 FontMenu::FontMenu(App *_app) : Menu(_app) {
   dir = app->fontdir;
   findFiles();
   for (auto &filename : files) {
     Button *b = new Button(app->ts);
     b->Init();
-    b->Move(0, (buttons.size() % pagesize) * b->GetHeight());
+    b->Move(0, 20 + (buttons.size() % pagesize) * b->GetHeight());
     b->SetLabel1(std::string(filename));
     buttons.push_back(b);
   }
@@ -62,6 +91,12 @@ void FontMenu::handleInput() {
   if (keys & KEY_B) {
     // cancel and return to settings menu
     app->ShowSettingsView();
+  } else if (keys & key.up) {
+    app->mode = NextFontTargetMode(app->mode, -1);
+    dirty = true;
+  } else if (keys & key.down) {
+    app->mode = NextFontTargetMode(app->mode, +1);
+    dirty = true;
   } else if (keys & (key.r | key.right)) {
     // previous font or page
     if (selected > 0) {
@@ -108,13 +143,19 @@ void FontMenu::handleTouchInput() {
 
 void FontMenu::draw() {
   app->ts->ClearScreen();
+  app->ts->SetPen(6, 14);
+  char header[72];
+  snprintf(header, sizeof(header), "font configuration (%s)",
+           GetFontTargetLabel(app->mode));
+  app->ts->PrintString(header);
+
   for (u8 i = page * pagesize;
        (i < buttons.size()) && (i < (page + 1) * pagesize); i++) {
     buttons[i]->Draw(i == selected);
   }
   if (page > 0)
     app->buttonprev.Draw();
-  app->buttonprefs.Label("cancel");
+  app->buttonprefs.Label("back");
   app->buttonprefs.Draw();
   if (page < GetPageCount() - 1)
     app->buttonnext.Draw();
@@ -161,22 +202,22 @@ void FontMenu::handleButtonPress() {
   switch (app->mode) {
   case APP_MODE_PREFS_FONT:
     app->ts->SetFontFile(filename, TEXT_STYLE_REGULAR);
-    app->PrefsRefreshButton(PREFS_BUTTON_FONT);
+    app->PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
     break;
 
   case APP_MODE_PREFS_FONT_BOLD:
     app->ts->SetFontFile(filename, TEXT_STYLE_BOLD);
-    app->PrefsRefreshButton(PREFS_BUTTON_FONT_BOLD);
+    app->PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
     break;
 
   case APP_MODE_PREFS_FONT_ITALIC:
     app->ts->SetFontFile(filename, TEXT_STYLE_ITALIC);
-    app->PrefsRefreshButton(PREFS_BUTTON_FONT_ITALIC);
+    app->PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
     break;
 
   case APP_MODE_PREFS_FONT_BOLDITALIC:
     app->ts->SetFontFile(filename, TEXT_STYLE_BOLDITALIC);
-    app->PrefsRefreshButton(PREFS_BUTTON_FONT_BOLDITALIC);
+    app->PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
     break;
   }
 

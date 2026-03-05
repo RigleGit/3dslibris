@@ -60,6 +60,12 @@ void Page::Draw()
 #endif
 
 void Page::Draw(Text *ts) {
+  int savedBottomMargin = ts->margin.bottom;
+  int leftBottomMargin = savedBottomMargin;
+  // On the 320px screen we only need a small footer for page number.
+  int rightBottomMargin =
+      (savedBottomMargin > 24) ? 24 : savedBottomMargin;
+
   //! Write to offscreen buffer, then blit to video memory, for both screens.
   ts->InitPen();
   ts->linebegan = false;
@@ -73,6 +79,7 @@ void Page::Draw(Text *ts) {
 #else
   ts->SetScreen(ts->screenleft);
 #endif
+  ts->margin.bottom = leftBottomMargin;
   // Force-clear both page buffers explicitly to avoid stale artifacts.
   const u16 bg = ts->GetBgColor();
   const int bufsize = PAGE_HEIGHT * PAGE_HEIGHT;
@@ -90,8 +97,12 @@ void Page::Draw(Text *ts) {
       i++;
 
       int maxHeight = (ts->GetScreen() == ts->screenleft) ? 400 : 320;
+      int currentBottomMargin =
+          (ts->GetScreen() == ts->screenleft) ? leftBottomMargin
+                                              : rightBottomMargin;
+      ts->margin.bottom = currentBottomMargin;
       if (ts->GetPenY() + ts->GetHeight() + ts->linespacing >
-          maxHeight - ts->margin.bottom) {
+          maxHeight - currentBottomMargin) {
         // Move to right page
         if (ts->GetScreen() == ts->screenleft) {
 #ifdef OFFSCREEN
@@ -101,6 +112,7 @@ void Page::Draw(Text *ts) {
 #else
           ts->SetScreen(ts->screenright);
 #endif
+          ts->margin.bottom = rightBottomMargin;
           ts->ClearScreen();
           ts->InitPen();
           ts->linebegan = false;
@@ -127,6 +139,10 @@ void Page::Draw(Text *ts) {
       else
         i++;
 
+      ts->margin.bottom = (ts->GetScreen() == ts->screenleft)
+                              ? leftBottomMargin
+                              : rightBottomMargin;
+
       if (ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_BOLDITALIC);
       else if (ts->italic)
@@ -146,6 +162,7 @@ void Page::Draw(Text *ts) {
   ts->CopyScreen(ts->offscreen, ts->screen);
   ts->SetScreen(pushscreen);
 #endif
+  ts->margin.bottom = savedBottomMargin;
 }
 
 void Page::DrawNumber(Text *ts) {
