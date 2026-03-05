@@ -65,6 +65,36 @@ static std::string BuildFallbackTitle(Book *book) {
   return TrimSpaces(compact);
 }
 
+static size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
+  if (!s)
+    return 0;
+  size_t bytes = 0;
+  size_t chars = 0;
+  while (s[bytes] && chars < char_count) {
+    unsigned char c = (unsigned char)s[bytes];
+    size_t step = 1;
+    if ((c & 0x80) == 0x00)
+      step = 1;
+    else if ((c & 0xE0) == 0xC0)
+      step = 2;
+    else if ((c & 0xF0) == 0xE0)
+      step = 3;
+    else if ((c & 0xF8) == 0xF0)
+      step = 4;
+
+    // Clamp malformed/truncated sequences to avoid overrun.
+    for (size_t i = 1; i < step; i++) {
+      if (!s[bytes + i]) {
+        step = i;
+        break;
+      }
+    }
+    bytes += step;
+    chars++;
+  }
+  return bytes;
+}
+
 static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
                                         int x, int y, int w, int h, u8 style) {
   if (!ts || title.empty() || w <= 8 || h <= 8)
@@ -87,7 +117,7 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
     if (!fit)
       break;
 
-    size_t take = fit;
+    size_t take = Utf8BytesForCharCount(title.c_str() + pos, fit);
     if (pos + take < title.size()) {
       size_t back = take;
       while (back > 0 && title[pos + back - 1] != ' ')
