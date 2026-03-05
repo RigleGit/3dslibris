@@ -646,6 +646,7 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   const int pad = 2;
   const int avail_w = screen_w - (pad * 2);
   const int avail_h = screen_h - (pad * 2);
+  u16 bg565 = ts->GetBgColor();
 
   auto blit_cached = [&](const InlineImageCacheEntry &entry) {
     u16 *dst = ts->GetScreen();
@@ -676,7 +677,8 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
 
   for (std::list<InlineImageCacheEntry>::iterator it = inline_image_cache.begin();
        it != inline_image_cache.end(); ++it) {
-    if (it->image_id == image_id && it->screen_h == (u16)screen_h) {
+    if (it->image_id == image_id && it->screen_h == (u16)screen_h &&
+        it->bg565 == bg565) {
       inline_image_cache.splice(inline_image_cache.begin(), inline_image_cache, it);
       blit_cached(inline_image_cache.front());
       return true;
@@ -751,13 +753,13 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   InlineImageCacheEntry entry;
   entry.image_id = image_id;
   entry.screen_h = (u16)screen_h;
+  entry.bg565 = bg565;
   entry.start_x = (u16)start_x;
   entry.start_y = (u16)start_y;
   entry.width = (u16)draw_w;
   entry.height = (u16)draw_h;
   entry.pixels.resize(draw_w * draw_h);
 
-  u16 bg565 = ts->GetBgColor();
   u8 bg_r5 = (bg565 >> 11) & 0x1F;
   u8 bg_g6 = (bg565 >> 5) & 0x3F;
   u8 bg_b5 = bg565 & 0x1F;

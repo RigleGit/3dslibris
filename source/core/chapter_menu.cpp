@@ -172,7 +172,10 @@ void ChapterMenu::handleButtonPress() {
 
   u16 targetPage = chapter_pages[selected];
   app->bookcurrent->SetPosition(targetPage);
-  returnToBook();
+  app->mode = APP_MODE_BOOK;
+  app->bookcurrent->GetPage()->Draw(app->ts);
+  app->ts->SetScreen(app->ts->screenleft);
+  app->ts->PrintSplash(app->ts->screenright);
 }
 
 void ChapterMenu::handleTouchInput() {

@@ -40,6 +40,7 @@ class Book {
   struct InlineImageCacheEntry {
     u16 image_id;
     u16 screen_h;
+    u16 bg565;
     u16 start_x;
     u16 start_y;
     u16 width;
