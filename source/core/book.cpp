@@ -4,6 +4,9 @@
 #include "epub.h"
 #include "main.h"
 #include "parse.h"
+#include "stb_image.h"
+#include "unzip.h"
+#include <algorithm>
 #include <errno.h>
 #include <stdio.h>
 #include <sys/param.h>
@@ -49,6 +52,75 @@ void end(void *userdata, const char *el) {
 namespace xml::book {
 
 void chardata(void *data, const XML_Char *txt, int txtlen);
+
+static std::string NormalizeDocPath(const std::string &path) {
+  std::string in = path;
+  std::replace(in.begin(), in.end(), '\\', '/');
+  while (!in.empty() && in[0] == '/')
+    in.erase(in.begin());
+
+  std::vector<std::string> parts;
+  std::string cur;
+  for (size_t i = 0; i <= in.size(); i++) {
+    if (i == in.size() || in[i] == '/') {
+      if (cur == "..") {
+        if (!parts.empty())
+          parts.pop_back();
+      } else if (!cur.empty() && cur != ".") {
+        parts.push_back(cur);
+      }
+      cur.clear();
+    } else {
+      cur.push_back(in[i]);
+    }
+  }
+
+  std::string out;
+  for (size_t i = 0; i < parts.size(); i++) {
+    if (i)
+      out.push_back('/');
+    out += parts[i];
+  }
+  return out;
+}
+
+static bool XmlNameEquals(const char *name, const char *needle) {
+  if (!name || !needle)
+    return false;
+  if (!strcmp(name, needle))
+    return true;
+  const char *colon = strrchr(name, ':');
+  return (colon && !strcmp(colon + 1, needle));
+}
+
+static std::string ResolveDocPath(const std::string &base_doc_path,
+                                  const std::string &href) {
+  if (href.empty())
+    return "";
+  if (href.find("://") != std::string::npos)
+    return "";
+  if (href.compare(0, 5, "data:") == 0)
+    return "";
+
+  std::string clean_href = href;
+  size_t hash = clean_href.find('#');
+  if (hash != std::string::npos)
+    clean_href = clean_href.substr(0, hash);
+  if (clean_href.empty())
+    return "";
+
+  if (!clean_href.empty() && clean_href[0] == '/')
+    return NormalizeDocPath(clean_href);
+
+  std::string base = base_doc_path;
+  size_t slash = base.find_last_of('/');
+  if (slash != std::string::npos)
+    base = base.substr(0, slash + 1);
+  else
+    base.clear();
+
+  return NormalizeDocPath(base + clean_href);
+}
 
 void linefeed(parsedata_t *p) {
   p->buf[p->buflen++] = '\n';
@@ -161,40 +233,44 @@ void start(void *data, const char *el, const char **attr) {
     } else {
       app->ts->SetStyle(TEXT_STYLE_ITALIC);
     }
-  } else if (!strcmp(el, "img") || !strcmp(el, "image")) {
+  } else if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
     parse_push(p, TAG_UNKNOWN);
 
-    // dslibris has no inline bitmap renderer in page flow. Emit a readable
-    // placeholder so image-only sections are not blank.
     const char *src = NULL;
-    const char *alt = NULL;
     for (int i = 0; attr && attr[i]; i += 2) {
-      if (!strcmp(attr[i], "src") || !strcmp(attr[i], "href") ||
-          !strcmp(attr[i], "xlink:href")) {
+      if (XmlNameEquals(attr[i], "src") || XmlNameEquals(attr[i], "href")) {
         src = attr[i + 1];
-      } else if (!strcmp(attr[i], "alt")) {
-        alt = attr[i + 1];
       }
     }
 
-    std::string label = "[illustration";
-    if (alt && *alt) {
-      label += ": ";
-      label += alt;
-    } else if (src && *src) {
-      std::string s(src);
-      size_t slash = s.find_last_of('/');
-      if (slash != std::string::npos)
-        s = s.substr(slash + 1);
-      label += ": ";
-      label += s;
-    }
-    label += "]";
+    std::string resolved =
+        (src && *src) ? ResolveDocPath(p->docpath, std::string(src)) : "";
+    if (!resolved.empty() && p->book) {
+      u16 image_id = p->book->RegisterInlineImage(resolved);
 
-    if (!blankline(p))
+      // Inline image as one-screen block: token + id.
+      if (p->buflen + 4 < PAGEBUFSIZE) {
+        if (!blankline(p))
+          linefeed(p);
+        p->buf[p->buflen++] = TEXT_IMAGE;
+        p->buf[p->buflen++] = (u8)((image_id >> 8) & 0xFF);
+        p->buf[p->buflen++] = (u8)(image_id & 0xFF);
+        p->buf[p->buflen++] = '\n';
+      }
+
+      // Reserve a full screen slot for this image.
+      int maxHeight = (p->screen == 1) ? 320 : 400;
+      p->pen.x = app->ts->margin.left;
+      p->pen.y = maxHeight - 1;
+      p->linebegan = false;
+    } else {
+      // Keep a lightweight fallback marker when src cannot be resolved.
+      const char *fallback = "[illustration]";
+      if (!blankline(p))
+        linefeed(p);
+      chardata(p, fallback, (int)strlen(fallback));
       linefeed(p);
-    chardata(p, label.c_str(), (int)label.size());
-    linefeed(p);
+    }
   } else
     parse_push(p, TAG_UNKNOWN);
 }
@@ -525,6 +601,129 @@ void Book::SetFolderName(std::string &name) { foldername = name; }
 std::list<u16> *Book::GetBookmarks() { return &bookmarks; }
 const std::vector<ChapterEntry> &Book::GetChapters() const { return chapters; }
 
+u16 Book::RegisterInlineImage(const std::string &path) {
+  if (path.empty())
+    return 0;
+  for (u16 i = 0; i < inline_images.size(); i++) {
+    if (inline_images[i] == path)
+      return i;
+  }
+  if (inline_images.size() >= 65535)
+    return 0;
+  inline_images.push_back(path);
+  return (u16)(inline_images.size() - 1);
+}
+
+const std::string *Book::GetInlineImagePath(u16 id) const {
+  if (id >= inline_images.size())
+    return NULL;
+  return &inline_images[id];
+}
+
+void Book::ClearInlineImages() { inline_images.clear(); }
+
+bool Book::DrawInlineImage(Text *ts, u16 image_id) {
+  if (!ts)
+    return false;
+  const std::string *image_path = GetInlineImagePath(image_id);
+  if (!image_path || image_path->empty())
+    return false;
+
+  std::string epubpath = foldername + "/" + filename;
+  unzFile uf = unzOpen(epubpath.c_str());
+  if (!uf)
+    return false;
+
+  int rc = unzLocateFile(uf, image_path->c_str(), 2);
+  if (rc != UNZ_OK) {
+    unzClose(uf);
+    return false;
+  }
+  if (unzOpenCurrentFile(uf) != UNZ_OK) {
+    unzClose(uf);
+    return false;
+  }
+
+  unz_file_info fi;
+  if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) != UNZ_OK ||
+      fi.uncompressed_size == 0 || fi.uncompressed_size > (4 * 1024 * 1024)) {
+    unzCloseCurrentFile(uf);
+    unzClose(uf);
+    return false;
+  }
+
+  std::vector<u8> compressed(fi.uncompressed_size);
+  int bytes_read = unzReadCurrentFile(uf, compressed.data(), fi.uncompressed_size);
+  unzCloseCurrentFile(uf);
+  unzClose(uf);
+  if (bytes_read <= 0)
+    return false;
+
+  int info_w = 0, info_h = 0, info_c = 0;
+  if (!stbi_info_from_memory(compressed.data(), bytes_read, &info_w, &info_h,
+                             &info_c))
+    return false;
+  if (info_w <= 0 || info_h <= 0)
+    return false;
+  if ((long long)info_w * (long long)info_h > 2000000LL)
+    return false;
+
+  int imgW = 0, imgH = 0, channels = 0;
+  unsigned char *pixels =
+      stbi_load_from_memory(compressed.data(), bytes_read, &imgW, &imgH, &channels, 3);
+  if (!pixels)
+    return false;
+
+  const bool left_screen = (ts->GetScreen() == ts->screenleft);
+  const int screen_w = 240;
+  const int screen_h = left_screen ? 400 : 320;
+  // Image mode: one-screen fit (top 240x400, bottom 240x320), centered.
+  const int pad = 2;
+  int avail_w = screen_w - (pad * 2);
+  int avail_h = screen_h - (pad * 2);
+
+  float sx = (float)avail_w / (float)imgW;
+  float sy = (float)avail_h / (float)imgH;
+  float scale = (sx < sy) ? sx : sy;
+  if (scale > 1.0f)
+    scale = 1.0f;
+
+  int draw_w = (int)(imgW * scale);
+  int draw_h = (int)(imgH * scale);
+  if (draw_w < 1)
+    draw_w = 1;
+  if (draw_h < 1)
+    draw_h = 1;
+
+  int start_x = pad + (avail_w - draw_w) / 2;
+  int start_y = pad + (avail_h - draw_h) / 2;
+  if (start_x < 0)
+    start_x = 0;
+  if (start_y < 0)
+    start_y = 0;
+
+  u16 *dst = ts->GetScreen();
+  const int stride = ts->display.height;
+  for (int y = 0; y < draw_h && (start_y + y) < screen_h; y++) {
+    int src_y = (int)(y / scale);
+    if (src_y >= imgH)
+      src_y = imgH - 1;
+    for (int x = 0; x < draw_w && (start_x + x) < screen_w; x++) {
+      int src_x = (int)(x / scale);
+      if (src_x >= imgW)
+        src_x = imgW - 1;
+      unsigned char *px = &pixels[(src_y * imgW + src_x) * 3];
+      u16 r = (px[0] >> 3) & 0x1F;
+      u16 g = (px[1] >> 2) & 0x3F;
+      u16 b = (px[2] >> 3) & 0x1F;
+      dst[(start_y + y) * stride + (start_x + x)] = (r << 11) | (g << 5) | b;
+    }
+  }
+
+  stbi_image_free(pixels);
+  return true;
+}
+
 void Book::AddChapter(u16 page, const std::string &title) {
   ChapterEntry entry;
   entry.page = page;
@@ -737,5 +936,6 @@ void Book::Close() {
   }
   pages.clear();
   chapters.clear();
+  inline_images.clear();
   // pages.erase(pages.begin(), pages.end());
 }

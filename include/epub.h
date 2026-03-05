@@ -21,6 +21,7 @@ typedef struct {
 typedef struct {
   epub_parse_t type;
   std::vector<std::string *> ctx;
+  std::string docpath;
   std::string rootfile;
   std::vector<epub_item *> manifest;
   std::vector<epub_itemref *> spine;

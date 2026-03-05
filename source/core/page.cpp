@@ -133,6 +133,15 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_ITALIC_OFF) {
       i++;
       ts->italic = false;
+    } else if (c == TEXT_IMAGE) {
+      if (i + 2 < length) {
+        u16 image_id = ((u16)buf[i + 1] << 8) | (u16)buf[i + 2];
+        i += 3;
+        book->DrawInlineImage(ts, image_id);
+        ts->linebegan = false;
+      } else {
+        i++;
+      }
     } else {
       if (c > 127)
         i += ts->GetCharCode((char *)&(buf[i]), &c);

@@ -2,6 +2,7 @@
 
 #include <expat.h>
 #include <3ds.h>
+#include <string>
 #include "text.h"
 
 #define PAGEBUFSIZE 2048
@@ -44,6 +45,7 @@ typedef struct {
 	bool linebegan;
 	bool bold;
 	bool italic;
+	std::string docpath; //! Current XHTML document path inside EPUB.
 	int status;
 	int totalbytes;
 	int pagecount;

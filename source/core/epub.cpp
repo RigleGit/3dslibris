@@ -479,6 +479,7 @@ void epub_data_init(epub_data_t *d) {
 
   d->type = PARSE_CONTAINER;
   d->ctx.push_back(new std::string("TOP"));
+  d->docpath = "";
   d->rootfile = "";
   d->title = "";
   d->creator = "";
@@ -628,6 +629,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd) {
     pd.app = pd.book->GetApp();
     pd.ts = pd.app->ts;
     pd.prefs = pd.app->prefs;
+    pd.docpath = epd->docpath;
     XML_SetUserData(p, &pd);
     XML_SetElementHandler(p, xml::book::start, xml::book::end);
     XML_SetCharacterDataHandler(p, xml::book::chardata);
@@ -737,6 +739,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
   parsedata.book = book;
   parsedata.type = PARSE_CONTENT;
   book->ClearChapters();
+  book->ClearInlineImages();
   std::vector<std::string *> href;
   if (parsedata.spine.size()) {
     // Use spine for reading order.
@@ -773,6 +776,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
         u16 chapter_start_page = book->GetPageCount();
         std::string chapter_label = BuildChapterLabel(path, chapter_num++);
         rc = unzOpenCurrentFile(uf);
+        parsedata.docpath = path;
         epub_parse_currentfile(uf, &parsedata);
         rc = unzCloseCurrentFile(uf);
         if (book->GetPageCount() > 0) {

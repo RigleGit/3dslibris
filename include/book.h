@@ -43,6 +43,7 @@ class Book {
   int position;             //! as page index.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
+  std::vector<std::string> inline_images;
   std::vector<class Page *> pages;
   App *app; //! pointer to the App instance.
 public:
@@ -62,6 +63,10 @@ public:
   inline std::string GetAuthor() { return author; }
   std::list<u16> *GetBookmarks(void);
   const std::vector<ChapterEntry> &GetChapters() const;
+  u16 RegisterInlineImage(const std::string &path);
+  const std::string *GetInlineImagePath(u16 id) const;
+  void ClearInlineImages();
+  bool DrawInlineImage(Text *ts, u16 image_id);
   void AddChapter(u16 page, const std::string &title);
   void ClearChapters();
   int GetNextBookmark(void);
