@@ -719,12 +719,12 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
     return false;
   if (info_w <= 0 || info_h <= 0)
     return false;
-  if ((long long)info_w * (long long)info_h > 2000000LL)
+  if ((long long)info_w * (long long)info_h > 1500000LL)
     return false;
 
   int imgW = 0, imgH = 0, channels = 0;
-  unsigned char *pixels =
-      stbi_load_from_memory(compressed.data(), bytes_read, &imgW, &imgH, &channels, 3);
+  unsigned char *pixels = stbi_load_from_memory(
+      compressed.data(), bytes_read, &imgW, &imgH, &channels, 4);
   if (!pixels)
     return false;
 
@@ -757,6 +757,14 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   entry.height = (u16)draw_h;
   entry.pixels.resize(draw_w * draw_h);
 
+  u16 bg565 = ts->GetBgColor();
+  u8 bg_r5 = (bg565 >> 11) & 0x1F;
+  u8 bg_g6 = (bg565 >> 5) & 0x3F;
+  u8 bg_b5 = bg565 & 0x1F;
+  u8 bg_r8 = (bg_r5 << 3) | (bg_r5 >> 2);
+  u8 bg_g8 = (bg_g6 << 2) | (bg_g6 >> 4);
+  u8 bg_b8 = (bg_b5 << 3) | (bg_b5 >> 2);
+
   for (int y = 0; y < draw_h; y++) {
     int src_y = (int)(y / scale);
     if (src_y >= imgH)
@@ -765,10 +773,21 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
       int src_x = (int)(x / scale);
       if (src_x >= imgW)
         src_x = imgW - 1;
-      unsigned char *px = &pixels[(src_y * imgW + src_x) * 3];
-      u16 r = (px[0] >> 3) & 0x1F;
-      u16 g = (px[1] >> 2) & 0x3F;
-      u16 b = (px[2] >> 3) & 0x1F;
+      unsigned char *px = &pixels[(src_y * imgW + src_x) * 4];
+
+      u8 r8 = px[0];
+      u8 g8 = px[1];
+      u8 b8 = px[2];
+      u8 a8 = px[3];
+      if (a8 < 255) {
+        r8 = (u8)((r8 * a8 + bg_r8 * (255 - a8) + 127) / 255);
+        g8 = (u8)((g8 * a8 + bg_g8 * (255 - a8) + 127) / 255);
+        b8 = (u8)((b8 * a8 + bg_b8 * (255 - a8) + 127) / 255);
+      }
+
+      u16 r = (r8 >> 3) & 0x1F;
+      u16 g = (g8 >> 2) & 0x3F;
+      u16 b = (b8 >> 3) & 0x1F;
       entry.pixels[(y * draw_w) + x] = (r << 11) | (g << 5) | b;
     }
   }

@@ -79,6 +79,24 @@ void Page::Draw(Text *ts) {
 #else
   ts->SetScreen(ts->screenleft);
 #endif
+
+  auto advance_to_next_screen = [&]() -> bool {
+    if (ts->GetScreen() == ts->screenleft) {
+#ifdef OFFSCREEN
+      ts->SetScreen(ts->screenleft);
+      ts->CopyScreen(ts->offscreen, ts->screen);
+      ts->SetScreen(ts->offscreen);
+#else
+      ts->SetScreen(ts->screenright);
+#endif
+      ts->margin.bottom = rightBottomMargin;
+      ts->ClearScreen();
+      ts->InitPen();
+      ts->linebegan = false;
+      return true;
+    }
+    return false;
+  };
   ts->margin.bottom = leftBottomMargin;
   // Force-clear both page buffers explicitly to avoid stale artifacts.
   const u16 bg = ts->GetBgColor();
@@ -137,8 +155,28 @@ void Page::Draw(Text *ts) {
       if (i + 2 < length) {
         u16 image_id = ((u16)buf[i + 1] << 8) | (u16)buf[i + 2];
         i += 3;
-        book->DrawInlineImage(ts, image_id);
+
+        // Inline image is a full-screen block. Ensure it starts on a fresh
+        // screen to avoid overlapping text and then consume that whole screen.
+        bool at_screen_start =
+            (!ts->linebegan && ts->GetPenX() == ts->margin.left &&
+             ts->GetPenY() == (u16)(ts->margin.top + ts->GetHeight()));
+        if (!at_screen_start) {
+          if (!advance_to_next_screen())
+            break;
+        }
+        ts->ClearScreen();
+        ts->InitPen();
         ts->linebegan = false;
+        book->DrawInlineImage(ts, image_id);
+
+        // Consume delimiter newline inserted by parser for image token.
+        if (i < length && buf[i] == '\n')
+          i++;
+
+        // After the image, continue on the next screen/page.
+        if (!advance_to_next_screen())
+          break;
       } else {
         i++;
       }
