@@ -24,6 +24,7 @@ static const int LIST_FOOTER_Y = 292;
 PagedListMenu::PagedListMenu(App *_app, const char *title) : Menu(_app) {
   pagesize = 7;
   header_title = title ? title : "";
+  wait_input_release = false;
 }
 
 PagedListMenu::~PagedListMenu() {
@@ -77,6 +78,8 @@ void PagedListMenu::Init() {
 
   selected = 0;
   page = 0;
+  // Avoid immediate accidental activation from the touch/key used to open menu.
+  wait_input_release = true;
   dirty = true;
 }
 
@@ -110,6 +113,17 @@ void PagedListMenu::Draw() {
 }
 
 void PagedListMenu::HandleInput(u32 keys) {
+  const u32 release_mask = KEY_TOUCH | KEY_A | KEY_B | KEY_START | KEY_SELECT |
+                           KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT | KEY_L |
+                           KEY_R | KEY_CPAD_UP | KEY_CPAD_DOWN | KEY_CPAD_LEFT |
+                           KEY_CPAD_RIGHT;
+  if (wait_input_release) {
+    if (hidKeysHeld() & release_mask)
+      return;
+    wait_input_release = false;
+    return;
+  }
+
   auto key = app->key;
 
   if (keys & KEY_TOUCH) {

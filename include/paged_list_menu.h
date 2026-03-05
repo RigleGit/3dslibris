@@ -33,5 +33,5 @@ private:
 
   std::string header_title;
   std::vector<u16> target_pages;
+  bool wait_input_release;
 };
-
