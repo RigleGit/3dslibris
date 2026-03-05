@@ -31,7 +31,7 @@ include $(DEVKITARM)/3ds_rules
 #     - icon.png
 #     - <libctru folder>/default_icon.png
 #---------------------------------------------------------------------------------
-TARGET		:=	dslibris-3ds
+TARGET		:=	3dslibris
 BUILD		:=	build
 SOURCES		:=	source source/core source/expat
 DATA		:=	data

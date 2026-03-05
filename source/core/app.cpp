@@ -1,5 +1,5 @@
 /*
-    dslibris-3ds - app.cpp
+    3dslibris - app.cpp
     Adapted from dslibris for Nintendo 3DS.
 
     NDS-specific hardware calls replaced with libctru equivalents or stubs.
@@ -103,7 +103,7 @@ int App::Run(void) {
     ts->SetScreen(ts->screenleft);
     ts->ClearScreen();
     ts->SetPen(12, 28);
-    ts->PrintString("dslibris-3ds");
+    ts->PrintString("3dslibris");
     if (lineTop && *lineTop) {
       ts->SetPen(12, 52);
       ts->PrintString(lineTop);

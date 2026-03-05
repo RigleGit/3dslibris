@@ -1,5 +1,5 @@
 /*
-    dslibris-3ds - app_prefs.cpp
+    3dslibris - app_prefs.cpp
     Adapted from dslibris for Nintendo 3DS.
 */
 
@@ -71,7 +71,7 @@ void App::PrefsDraw() {
   int tmpSize = ts->pixelsize;
   ts->SetPixelSize(12);
   ts->PrintString(
-      "dslibris-3ds\n------------\n\n"
+      "3dslibris\n---------\n\n"
       "Controls:\n"
       "A / B / L / R : Turn Pages\n"
       "D-Pad Left/Right : Jump to Bookmarks\n"

@@ -1,5 +1,5 @@
 /*
-    dslibris-3ds - main.cpp
+    3dslibris - main.cpp
 
     An ebook reader for the Nintendo 3DS.
     Ported from dslibris (Nintendo DS).
@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
   consoleInit(GFX_BOTTOM, NULL);
 
   printf("================================\n");
-  printf("  dslibris-3ds %s\n", VERSION);
+  printf("  3dslibris %s\n", VERSION);
   printf("================================\n\n");
   printf("Initializing...\n");
 

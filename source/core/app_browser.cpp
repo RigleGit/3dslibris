@@ -1,5 +1,5 @@
 /*
-    dslibris-3ds - app_browser.cpp
+    3dslibris - app_browser.cpp
     Adapted from dslibris for Nintendo 3DS.
 */
 
