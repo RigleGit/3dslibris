@@ -711,6 +711,9 @@ bool Text::PrintNewLine(void) {
   int maxHeight = (screen == screenleft) ? 400 : 320;
   int y = pen.y + height + linespacing;
   if (y > (maxHeight - margin.bottom)) {
+    // UI strings should not spill over to the other screen.
+    if (style == TEXT_STYLE_BROWSER)
+      return false;
     if (screen == screenleft) {
       screen = screenright;
       pen.y = margin.top + height;

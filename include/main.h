@@ -28,7 +28,7 @@
 #define MARGINLEFT 12
 #define MARGINRIGHT 12
 #define MARGINTOP 10
-#define MARGINBOTTOM 55
+#define MARGINBOTTOM 36
 #define LINESPACING 0
 // 3DS screen dimensions in landscape mode:
 //   Bottom screen: 320 x 240 physical pixels

@@ -162,7 +162,8 @@ u8 App::OpenBook(void) {
     return 254;
 
   PrintStatus("opening book ...");
-  printf("Opening book: %s\n", bookselected->GetTitle());
+  if (bookselected->GetTitle())
+    PrintStatus(bookselected->GetTitle());
   gfxFlushBuffers();
   gfxSwapBuffers();
 

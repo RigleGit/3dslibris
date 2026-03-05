@@ -154,17 +154,15 @@ int App::Run(void) {
   drawBootStatus("Searching for books...", "");
 
   // Construct library.
-  printf("Searching for books...\n");
+  PrintStatus("Searching for books...");
   if (FindBooks() != ok) {
-    printf("\n[FAIL] No book directory!\n");
-    printf("Place EPUBs in:\n");
-    printf("  sdmc:/3ds/dslibris/book/\n");
+    PrintStatus("error: no book directory");
+    drawBootStatus("No se encontro carpeta de libros", "Usa sdmc:/3ds/dslibris/book");
     return 1;
   }
   if (bookcount == 0) {
-    printf("\n[FAIL] No EPUB files found!\n");
-    printf("Place .epub files in:\n");
-    printf("  %s/\n", bookdir.c_str());
+    PrintStatus("error: no epub files found");
+    drawBootStatus("No se encontraron EPUB", bookdir.c_str());
     return 1;
   }
 
@@ -174,21 +172,20 @@ int App::Run(void) {
   drawBootStatus("Indexing books...", "");
   // Apply key mapping/orientation loaded from prefs.
   SetOrientation(orientation);
-  printf("Indexing books...\n");
+  PrintStatus("Indexing books...");
   for (auto &book : books) {
     char progress[96];
     if (book->GetTitle()) {
-      printf("  %s\n", book->GetTitle());
       snprintf(progress, sizeof(progress), "%s", book->GetTitle());
     } else {
-      printf("  %s\n", book->GetFileName());
       snprintf(progress, sizeof(progress), "%s", book->GetFileName());
     }
+    PrintStatus(progress);
     drawBootStatus("Indexing:", progress);
     book->Index();
     book->GetBookmarks()->sort();
   }
-  printf("Indexing complete.\n");
+  PrintStatus("Indexing complete.");
 
   // Set up menus.
   PrefsInit();

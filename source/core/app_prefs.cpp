@@ -47,6 +47,10 @@ void App::PrefsDraw() {
   int colorMode = ts->GetColorMode();
   u16 *screen = ts->GetScreen();
   int style = ts->GetStyle();
+  int savedBottomMargin = ts->margin.bottom;
+
+  // Settings UI uses full-screen layout; page margins should not clip text.
+  ts->margin.bottom = 0;
 
   ts->SetScreen(ts->screenright);
   ts->SetColorMode(0); // Normal for prefs menu
@@ -55,8 +59,8 @@ void App::PrefsDraw() {
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++)
     prefsButtons[i].Draw(ts->screenright, i == prefsSelected);
 
-  // Draw library button at the very bottom, after all settings buttons
-  buttonprefs.Move(162, 248);
+  // Draw library button below settings list (without overlapping list rows).
+  buttonprefs.Move(162, 300);
   buttonprefs.Resize(70, 18);
   buttonprefs.Draw(ts->screenright);
 
@@ -64,20 +68,25 @@ void App::PrefsDraw() {
   ts->SetScreen(ts->screenleft);
   ts->SetColorMode(0); // Normal for controls guide
   ts->ClearScreen();
-  ts->SetPen(ts->margin.left, 50);
+  ts->SetPen(ts->margin.left, 24);
   int tmpSize = ts->pixelsize;
   ts->SetPixelSize(12);
   ts->PrintString(
-      "dslibris-3ds\n------------\n\nControls:\n\nA / B / L / R :\n  "
-      "Turn Pages\n\nD-Pad Left/Right :\n  Jump to Bookmarks\n\nSTART :\n  "
-      "Return to Library\n\nSELECT :\n  "
-      "Settings\n\nY : Toggle Bookmark\n\nX : "
-      "Invert Colors\n\n\nSettings are saved\nautomatically.");
+      "dslibris-3ds\n------------\n\n"
+      "Controls:\n"
+      "A / B / L / R : Turn Pages\n"
+      "D-Pad Left/Right : Jump to Bookmarks\n"
+      "START : Return to Library\n"
+      "SELECT : Settings\n"
+      "Y : Toggle Bookmark\n"
+      "X : Invert Colors\n\n"
+      "Settings are saved automatically.");
   ts->SetPixelSize(tmpSize);
 
   // restore state
   ts->SetStyle(style);
   ts->SetColorMode(colorMode);
+  ts->margin.bottom = savedBottomMargin;
   ts->SetScreen(screen);
 
   prefs_view_dirty = false;

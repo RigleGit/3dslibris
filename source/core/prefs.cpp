@@ -135,8 +135,12 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         app->ts->margin.right = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "top"))
         app->ts->margin.top = atoi(attr[i + 1]);
-      if (!strcmp(attr[i], "bottom"))
-        app->ts->margin.bottom = MAX(atoi(attr[i + 1]), 65);
+      if (!strcmp(attr[i], "bottom")) {
+        int parsedBottom = atoi(attr[i + 1]);
+        // 3DS screens are 400/320px tall; legacy DS values like 65 leave too
+        // much blank area, especially on the 320px screen.
+        app->ts->margin.bottom = MIN(MAX(parsedBottom, 16), 36);
+      }
     }
   } else if (!strcmp(name, "option")) {
     for (i = 0; attr[i]; i += 2) {
