@@ -10,6 +10,7 @@ typedef struct {
   std::string id;
   std::string href;
   std::string media_type;
+  std::string properties;
 } epub_item;
 
 // <spine> elements
@@ -28,6 +29,8 @@ typedef struct {
   std::string title;
   std::string creator;
   std::string coverid; //! id of the cover image item
+  std::string tocid;   //! id of the NCX item (EPUB2)
+  std::string navid;   //! id of the nav document (EPUB3)
 } epub_data_t;
 
 int epub(Book *book, std::string filepath, bool metadataonly);
