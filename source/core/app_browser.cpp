@@ -24,6 +24,92 @@
 #define MIN(x, y) (x < y ? x : y)
 #define MAX(x, y) (x > y ? x : y)
 
+namespace {
+
+static std::string TrimSpaces(const std::string &s) {
+  size_t start = 0;
+  while (start < s.size() && s[start] == ' ')
+    start++;
+  size_t end = s.size();
+  while (end > start && s[end - 1] == ' ')
+    end--;
+  return s.substr(start, end - start);
+}
+
+static std::string BuildFallbackTitle(Book *book) {
+  if (!book)
+    return "";
+  const char *raw = book->GetFileName();
+  std::string name = raw ? raw : "";
+
+  // Prefer filename for missing covers, strip extension.
+  size_t dot = name.find_last_of('.');
+  if (dot != std::string::npos)
+    name = name.substr(0, dot);
+
+  for (size_t i = 0; i < name.size(); i++) {
+    if (name[i] == '_' || name[i] == '-')
+      name[i] = ' ';
+  }
+
+  std::string compact;
+  compact.reserve(name.size());
+  bool prev_space = true;
+  for (size_t i = 0; i < name.size(); i++) {
+    bool is_space = (name[i] == ' ');
+    if (is_space && prev_space)
+      continue;
+    compact.push_back(name[i]);
+    prev_space = is_space;
+  }
+  return TrimSpaces(compact);
+}
+
+static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
+                                        int x, int y, int w, int h, u8 style) {
+  if (!ts || title.empty() || w <= 8 || h <= 8)
+    return;
+
+  int line_h = ts->GetHeight();
+  int max_lines = (h - 8) / MAX(1, line_h);
+  if (max_lines < 1)
+    return;
+
+  size_t pos = 0;
+  int drawn = 0;
+  while (pos < title.size() && drawn < max_lines) {
+    while (pos < title.size() && title[pos] == ' ')
+      pos++;
+    if (pos >= title.size())
+      break;
+
+    u8 fit = ts->GetCharCountInsideWidth(title.c_str() + pos, style, w - 8);
+    if (!fit)
+      break;
+
+    size_t take = fit;
+    if (pos + take < title.size()) {
+      size_t back = take;
+      while (back > 0 && title[pos + back - 1] != ' ')
+        back--;
+      if (back > 0)
+        take = back;
+    }
+    std::string line = TrimSpaces(title.substr(pos, take));
+    if (line.empty()) {
+      pos += take;
+      continue;
+    }
+
+    ts->SetPen(x + 4, y + 4 + drawn * line_h);
+    ts->PrintString(line.c_str(), style);
+    drawn++;
+    pos += take;
+  }
+}
+
+} // namespace
+
 void App::browser_handleevent() {
   u32 keys = hidKeysDown();
 
@@ -150,7 +236,6 @@ void App::browser_handleevent() {
 
 void App::browser_init(void) {
   for (int i = 0; i < bookcount; i++) {
-    Book *book = books[i];
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
     int col = page_idx % GRID_COLS;
     int row = page_idx / GRID_COLS;
@@ -163,14 +248,8 @@ void App::browser_init(void) {
 
     // Cover extraction moved to browser_draw to avoid freezing at startup
 
-    // Set text label only for books without covers
-    if (!book->coverPixels) {
-      const char *title = books[i]->GetTitle();
-      if (title && strlen(title))
-        buttons[i]->SetLabel1(std::string(title));
-      else
-        buttons[i]->SetLabel1(std::string(books[i]->GetFileName()));
-    }
+    // In browser_draw we render fallback title manually for no-cover books.
+    buttons[i]->SetLabel1(std::string(""));
   }
 
   buttonprev.Init(ts);
@@ -272,15 +351,23 @@ void App::browser_draw(void) {
       ts->SetStyle(TEXT_STYLE_REGULAR);
     }
 
-    // Draw title below the cover in small font
+    // Draw title:
+    //  - with cover: below thumbnail (single line)
+    //  - without cover: wrapped inside thumbnail rectangle
     ts->SetPixelSize(10);
-    const char *title = books[i]->GetTitle();
-    if (title && strlen(title)) {
-      char truncTitle[20];
-      strncpy(truncTitle, title, 19);
-      truncTitle[19] = '\0';
-      ts->SetPen(btnX, btnY + COVER_H + 12);
-      ts->PrintString(truncTitle);
+    if (books[i]->coverPixels) {
+      const char *title = books[i]->GetTitle();
+      if (title && strlen(title)) {
+        char truncTitle[20];
+        strncpy(truncTitle, title, 19);
+        truncTitle[19] = '\0';
+        ts->SetPen(btnX, btnY + COVER_H + 12);
+        ts->PrintString(truncTitle);
+      }
+    } else {
+      std::string fallback_title = BuildFallbackTitle(books[i]);
+      DrawWrappedTitleInsideCover(ts, fallback_title, btnX + 2, btnY + 2,
+                                  COVER_W, COVER_H, TEXT_STYLE_BROWSER);
     }
 
     // Draw progress indicator
