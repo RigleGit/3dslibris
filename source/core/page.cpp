@@ -64,7 +64,7 @@ void Page::Draw(Text *ts) {
   int leftBottomMargin = savedBottomMargin;
   // On the 320px screen we only need a small footer for page number.
   int rightBottomMargin =
-      (savedBottomMargin > 24) ? 24 : savedBottomMargin;
+      (savedBottomMargin > 16) ? 16 : savedBottomMargin;
 
   //! Write to offscreen buffer, then blit to video memory, for both screens.
   ts->InitPen();

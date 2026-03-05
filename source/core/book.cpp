@@ -241,7 +241,9 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     }
 
     int maxHeight = (p->screen == 1) ? 320 : 400;
-    if ((p->pen.y + lineheight) > (maxHeight - ts->margin.bottom)) {
+    int bottomMargin = (p->screen == 1) ? MIN(ts->margin.bottom, 16)
+                                        : ts->margin.bottom;
+    if ((p->pen.y + lineheight) > (maxHeight - bottomMargin)) {
       // reached bottom of screen.
       if (p->screen == 1) {
         // page full.
@@ -352,8 +354,10 @@ void end(void *data, const char *el) {
   parse_pop(p);
 
   int maxHeight = (p->screen == 1) ? 320 : 400;
+  int bottomMargin =
+      (p->screen == 1) ? MIN(ts->margin.bottom, 16) : ts->margin.bottom;
   int lineheight = p->app->ts->GetHeight();
-  if ((p->pen.y + lineheight) > (maxHeight - ts->margin.bottom)) {
+  if ((p->pen.y + lineheight) > (maxHeight - bottomMargin)) {
     if (p->screen == 1) {
       // End of right screen; end of page.
       // Copy in buffered char data into a new page.
