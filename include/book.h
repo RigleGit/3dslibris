@@ -4,6 +4,7 @@
 #include "page.h"
 #include <3ds.h>
 #include <list>
+#include <stddef.h>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,16 @@ struct ChapterEntry {
 //! App maintains a vector of Book to represent the available library.
 
 class Book {
+  struct InlineImageCacheEntry {
+    u16 image_id;
+    u16 screen_h;
+    u16 start_x;
+    u16 start_y;
+    u16 width;
+    u16 height;
+    std::vector<u16> pixels;
+  };
+
   std::string filename;
   std::string foldername;
   std::string title;
@@ -44,8 +55,12 @@ class Book {
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
   std::vector<std::string> inline_images;
+  std::list<InlineImageCacheEntry> inline_image_cache;
+  size_t inline_image_cache_bytes;
   std::vector<class Page *> pages;
   App *app; //! pointer to the App instance.
+
+  void ClearInlineImageCache();
 public:
   //! Cover thumbnail for library grid (RGB565, scaled to fit)
   u16 *coverPixels;

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/param.h>
 
 // extern App *app;
@@ -52,6 +53,7 @@ void end(void *userdata, const char *el) {
 namespace xml::book {
 
 void chardata(void *data, const XML_Char *txt, int txtlen);
+static const size_t kInlineImageCacheMaxBytes = 1024 * 1024;
 
 static std::string NormalizeDocPath(const std::string &path) {
   std::string in = path;
@@ -566,6 +568,7 @@ Book::Book(App *a) {
   coverTried = false;
   metadataIndexTried = false;
   metadataIndexed = false;
+  inline_image_cache_bytes = 0;
 }
 
 Book::~Book() {
@@ -620,7 +623,15 @@ const std::string *Book::GetInlineImagePath(u16 id) const {
   return &inline_images[id];
 }
 
-void Book::ClearInlineImages() { inline_images.clear(); }
+void Book::ClearInlineImageCache() {
+  inline_image_cache.clear();
+  inline_image_cache_bytes = 0;
+}
+
+void Book::ClearInlineImages() {
+  inline_images.clear();
+  ClearInlineImageCache();
+}
 
 bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   if (!ts)
@@ -628,6 +639,49 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   const std::string *image_path = GetInlineImagePath(image_id);
   if (!image_path || image_path->empty())
     return false;
+
+  const bool left_screen = (ts->GetScreen() == ts->screenleft);
+  const int screen_w = 240;
+  const int screen_h = left_screen ? 400 : 320;
+  const int pad = 2;
+  const int avail_w = screen_w - (pad * 2);
+  const int avail_h = screen_h - (pad * 2);
+
+  auto blit_cached = [&](const InlineImageCacheEntry &entry) {
+    u16 *dst = ts->GetScreen();
+    const int stride = ts->display.height;
+    for (int y = 0; y < entry.height; y++) {
+      int dy = entry.start_y + y;
+      if (dy < 0 || dy >= screen_h)
+        continue;
+
+      int draw_x = entry.start_x;
+      int draw_w = entry.width;
+      int src_x = 0;
+      if (draw_x < 0) {
+        src_x = -draw_x;
+        draw_w -= src_x;
+        draw_x = 0;
+      }
+      if (draw_x + draw_w > screen_w)
+        draw_w = screen_w - draw_x;
+      if (draw_w <= 0)
+        continue;
+
+      const u16 *src_row = entry.pixels.data() + (y * entry.width) + src_x;
+      u16 *dst_row = dst + (dy * stride) + draw_x;
+      memcpy(dst_row, src_row, draw_w * sizeof(u16));
+    }
+  };
+
+  for (std::list<InlineImageCacheEntry>::iterator it = inline_image_cache.begin();
+       it != inline_image_cache.end(); ++it) {
+    if (it->image_id == image_id && it->screen_h == (u16)screen_h) {
+      inline_image_cache.splice(inline_image_cache.begin(), inline_image_cache, it);
+      blit_cached(inline_image_cache.front());
+      return true;
+    }
+  }
 
   std::string epubpath = foldername + "/" + filename;
   unzFile uf = unzOpen(epubpath.c_str());
@@ -674,14 +728,6 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   if (!pixels)
     return false;
 
-  const bool left_screen = (ts->GetScreen() == ts->screenleft);
-  const int screen_w = 240;
-  const int screen_h = left_screen ? 400 : 320;
-  // Image mode: one-screen fit (top 240x400, bottom 240x320), centered.
-  const int pad = 2;
-  int avail_w = screen_w - (pad * 2);
-  int avail_h = screen_h - (pad * 2);
-
   float sx = (float)avail_w / (float)imgW;
   float sy = (float)avail_h / (float)imgH;
   float scale = (sx < sy) ? sx : sy;
@@ -702,13 +748,20 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   if (start_y < 0)
     start_y = 0;
 
-  u16 *dst = ts->GetScreen();
-  const int stride = ts->display.height;
-  for (int y = 0; y < draw_h && (start_y + y) < screen_h; y++) {
+  InlineImageCacheEntry entry;
+  entry.image_id = image_id;
+  entry.screen_h = (u16)screen_h;
+  entry.start_x = (u16)start_x;
+  entry.start_y = (u16)start_y;
+  entry.width = (u16)draw_w;
+  entry.height = (u16)draw_h;
+  entry.pixels.resize(draw_w * draw_h);
+
+  for (int y = 0; y < draw_h; y++) {
     int src_y = (int)(y / scale);
     if (src_y >= imgH)
       src_y = imgH - 1;
-    for (int x = 0; x < draw_w && (start_x + x) < screen_w; x++) {
+    for (int x = 0; x < draw_w; x++) {
       int src_x = (int)(x / scale);
       if (src_x >= imgW)
         src_x = imgW - 1;
@@ -716,11 +769,29 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
       u16 r = (px[0] >> 3) & 0x1F;
       u16 g = (px[1] >> 2) & 0x3F;
       u16 b = (px[2] >> 3) & 0x1F;
-      dst[(start_y + y) * stride + (start_x + x)] = (r << 11) | (g << 5) | b;
+      entry.pixels[(y * draw_w) + x] = (r << 11) | (g << 5) | b;
     }
   }
 
   stbi_image_free(pixels);
+
+  const size_t entry_bytes = entry.pixels.size() * sizeof(u16);
+  if (entry_bytes <= xml::book::kInlineImageCacheMaxBytes) {
+    while (!inline_image_cache.empty() &&
+           inline_image_cache_bytes + entry_bytes >
+               xml::book::kInlineImageCacheMaxBytes) {
+      inline_image_cache_bytes -=
+          inline_image_cache.back().pixels.size() * sizeof(u16);
+      inline_image_cache.pop_back();
+    }
+    inline_image_cache.push_front(std::move(entry));
+    inline_image_cache_bytes += entry_bytes;
+    blit_cached(inline_image_cache.front());
+  } else {
+    // Should never happen with 240x400 cap, but keep a direct fallback path.
+    blit_cached(entry);
+  }
+
   return true;
 }
 
@@ -937,5 +1008,6 @@ void Book::Close() {
   pages.clear();
   chapters.clear();
   inline_images.clear();
+  ClearInlineImageCache();
   // pages.erase(pages.begin(), pages.end());
 }
