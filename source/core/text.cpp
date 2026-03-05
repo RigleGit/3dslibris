@@ -778,7 +778,6 @@ std::string Text::GetFontFile(u8 style) { return filenames[style]; }
 
 void Text::BlitToFramebuffer() {
   u16 fbW, fbH;
-  static int blitDiagCount = 0;
 
   auto blitPage = [&](u8 *fb, u16 *src, u16 logicalHeight) {
     if (!fb || !src)
@@ -800,17 +799,6 @@ void Text::BlitToFramebuffer() {
     u32 maxSx = (u32)display.width;
     if (maxSx > stride)
       maxSx = stride;
-
-    if (app && blitDiagCount < 8) {
-      char diag[196];
-      snprintf(diag, sizeof(diag),
-               "BLIT diag #%d fbW=%u fbH=%u stride=%lu physW=%lu logicalH=%u "
-               "maxSy=%lu maxSx=%lu src=%p fb=%p",
-               blitDiagCount, fbW, fbH, (unsigned long)stride,
-               (unsigned long)physWidth, logicalHeight, (unsigned long)maxSy,
-               (unsigned long)maxSx, (void *)src, (void *)fb);
-      app->PrintStatus(diag);
-    }
 
     for (u32 sy = 0; sy < maxSy; sy++) {
       for (u32 sx = 0; sx < maxSx; sx++) {
@@ -843,7 +831,4 @@ void Text::BlitToFramebuffer() {
   // Top screen: left page (400x240 physical)
   u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
   blitPage(fbTop, screenleft, 400);
-
-  if (blitDiagCount < 8)
-    blitDiagCount++;
 }

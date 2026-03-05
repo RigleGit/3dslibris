@@ -60,10 +60,6 @@ void Page::Draw()
 #endif
 
 void Page::Draw(Text *ts) {
-  char msg[128];
-  sprintf(msg, "Drawing page: %d bytes", length);
-  book->GetApp()->PrintStatus(msg);
-
   //! Write to offscreen buffer, then blit to video memory, for both screens.
   ts->InitPen();
   ts->linebegan = false;
