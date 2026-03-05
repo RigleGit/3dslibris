@@ -14,7 +14,7 @@ public:
 
   void Init();
   void Draw() override;
-  void HandleInput(u16 keys) override;
+  void HandleInput(u32 keys) override;
 
   inline bool IsDirty() const { return dirty; }
   inline void SetDirty(bool d = true) { dirty = d; }

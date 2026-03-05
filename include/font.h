@@ -13,7 +13,8 @@ public:
     ~FontMenu();
     void draw();
     void Draw() override { draw(); } // Override to use the draw method
-    void HandleInput(u16 keys) override {
+    void HandleInput(u32 keys) override {
+        (void)keys;
         handleInput();
     }
     inline const std::vector<std::string>& getFiles() const { return files; }

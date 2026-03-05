@@ -112,12 +112,13 @@ void BookmarkMenu::Draw() {
   dirty = false;
 }
 
-void BookmarkMenu::HandleInput(u16 keys) {
+void BookmarkMenu::HandleInput(u32 keys) {
   auto key = app->key;
   if (keys) {
     char msg[96];
     snprintf(msg, sizeof(msg),
-             "BookmarkMenu input keys=%04x sel=%u page=%u count=%u", keys,
+             "BookmarkMenu input keys=%08lx sel=%u page=%u count=%u",
+             (unsigned long)keys,
              selected, page, (unsigned)buttons.size());
     app->PrintStatus(msg);
   }
