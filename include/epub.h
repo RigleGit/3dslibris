@@ -32,6 +32,7 @@ typedef struct {
   std::string coverid; //! id of the cover image item
   std::string tocid;   //! id of the NCX item (EPUB2)
   std::string navid;   //! id of the nav document (EPUB3)
+  std::string parsed_doc_title; //! per-XHTML parsed title/heading candidate
 } epub_data_t;
 
 int epub(Book *book, std::string filepath, bool metadataonly);

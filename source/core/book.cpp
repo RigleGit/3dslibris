@@ -278,12 +278,18 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
   parsedata_t *p = (parsedata_t *)data;
   Text *ts = p->ts;
 
-  if (parse_in(p, TAG_TITLE))
+  if (parse_in(p, TAG_TITLE)) {
+    p->doc_title.append((const char *)txt, txtlen);
     return;
+  }
   if (parse_in(p, TAG_SCRIPT))
     return;
   if (parse_in(p, TAG_STYLE))
     return;
+  if ((parse_in(p, TAG_H1) || parse_in(p, TAG_H2) || parse_in(p, TAG_H3)) &&
+      p->doc_heading.size() < 160) {
+    p->doc_heading.append((const char *)txt, txtlen);
+  }
 
   int lineheight = ts->GetHeight();
   int linespacing = ts->linespacing;

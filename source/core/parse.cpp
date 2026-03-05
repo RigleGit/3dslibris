@@ -53,6 +53,8 @@ void parse_init(parsedata_t *data)
 	data->bold = false;
 	data->italic = false;
 	data->docpath.clear();
+	data->doc_title.clear();
+	data->doc_heading.clear();
 	strcpy((char*)data->buf,"");
 	data->cachefile = NULL;
 	data->buflen = 0;

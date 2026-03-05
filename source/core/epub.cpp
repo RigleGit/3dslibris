@@ -42,6 +42,7 @@ static const size_t EPUB_TOC_MAX_ENTRIES = 2048;
 // Safety switch for 3DS stability: TOC/NAV title resolution can be re-enabled
 // once NCX/NAV parsing is fully hardened on real hardware/emulators.
 static const bool EPUB_ENABLE_REAL_TOC_RESOLVE = false;
+static std::string Trim(const std::string &s);
 
 static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
   std::string base = path;
@@ -79,6 +80,40 @@ static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
   }
 
   char label[160];
+  snprintf(label, sizeof(label), "%02d - %s", chapter_num, normalized.c_str());
+  return std::string(label);
+}
+
+static std::string BuildChapterLabelFromText(const std::string &raw_title,
+                                             int chapter_num) {
+  std::string title = Trim(raw_title);
+  if (title.empty())
+    return "";
+
+  std::string normalized;
+  normalized.reserve(title.size());
+  bool prev_space = true;
+  for (size_t i = 0; i < title.size(); i++) {
+    unsigned char uc = (unsigned char)title[i];
+    bool is_space = isspace(uc) || title[i] == '\n' || title[i] == '\r' ||
+                    title[i] == '\t';
+    if (is_space) {
+      if (!prev_space)
+        normalized.push_back(' ');
+      prev_space = true;
+      continue;
+    }
+    normalized.push_back((char)uc);
+    prev_space = false;
+    if (normalized.size() >= 96)
+      break;
+  }
+
+  normalized = Trim(normalized);
+  if (normalized.empty())
+    return "";
+
+  char label[192];
   snprintf(label, sizeof(label), "%02d - %s", chapter_num, normalized.c_str());
   return std::string(label);
 }
@@ -486,6 +521,7 @@ void epub_data_init(epub_data_t *d) {
   d->coverid = "";
   d->tocid = "";
   d->navid = "";
+  d->parsed_doc_title = "";
   d->metadataonly = false;
   d->book = nullptr;
 }
@@ -624,6 +660,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd) {
     XML_SetElementHandler(p, epub_rootfile_start, epub_rootfile_end);
     XML_SetCharacterDataHandler(p, epub_rootfile_char);
   } else if (epd->type == PARSE_CONTENT) {
+    epd->parsed_doc_title.clear();
     parse_init(&pd);
     pd.book = epd->book;
     pd.app = pd.book->GetApp();
@@ -657,6 +694,11 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd) {
 
   XML_ParserFree(p);
   delete[] filebuf;
+  if (epd->type == PARSE_CONTENT) {
+    epd->parsed_doc_title = Trim(pd.doc_title);
+    if (epd->parsed_doc_title.empty())
+      epd->parsed_doc_title = Trim(pd.doc_heading);
+  }
   return (rc);
 }
 
@@ -774,11 +816,16 @@ int epub(Book *book, std::string name, bool metadataonly) {
       rc = unzLocateFile(uf, path.c_str(), 2); // 2 = case insensitive
       if (rc == UNZ_OK) {
         u16 chapter_start_page = book->GetPageCount();
-        std::string chapter_label = BuildChapterLabel(path, chapter_num++);
+        std::string chapter_label = BuildChapterLabel(path, chapter_num);
         rc = unzOpenCurrentFile(uf);
         parsedata.docpath = path;
         epub_parse_currentfile(uf, &parsedata);
         rc = unzCloseCurrentFile(uf);
+        std::string parsed_title =
+            BuildChapterLabelFromText(parsedata.parsed_doc_title, chapter_num);
+        if (!parsed_title.empty())
+          chapter_label = parsed_title;
+        chapter_num++;
         if (book->GetPageCount() > 0) {
           book->AddChapter(chapter_start_page, chapter_label);
           if (page_start_by_href.find(path_key) == page_start_by_href.end()) {

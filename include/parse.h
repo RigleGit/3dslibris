@@ -46,6 +46,8 @@ typedef struct {
 	bool bold;
 	bool italic;
 	std::string docpath; //! Current XHTML document path inside EPUB.
+	std::string doc_title;   //! Current XHTML <title> text (best chapter label).
+	std::string doc_heading; //! Fallback heading text from h1/h2/h3.
 	int status;
 	int totalbytes;
 	int pagecount;
