@@ -161,7 +161,7 @@ static std::string BuildFallbackTitle(Book *book) {
   } else {
     std::string repaired_legacy;
     if (TryRepairMojibakeUtf8(name, &repaired_legacy))
-      name = LegacyBytesToUtf8(repaired_legacy);
+      name = repaired_legacy;
   }
 
   // Prefer filename for missing covers, strip extension.
