@@ -254,70 +254,92 @@ static void nav_end(void *userdata, const char *el) {
   d->depth--;
 }
 
-typedef struct {
-  std::string src;
-  std::string label;
-} ncx_node_t;
+static bool ParseNcxLightweight(const std::string &xml,
+                                const std::string &base_path,
+                                std::vector<toc_entry_t> *entries) {
+  if (xml.empty() || !entries)
+    return false;
+  if (xml.size() > EPUB_TOC_MAX_BYTES)
+    return false;
 
-typedef struct {
-  std::vector<toc_entry_t> *entries;
-  std::string base_path;
-  int depth;
-  int text_depth;
-  std::string textbuf;
-  std::vector<ncx_node_t> stack;
-} ncx_parse_data_t;
-
-static void ncx_start(void *userdata, const char *el, const char **attr) {
-  ncx_parse_data_t *d = (ncx_parse_data_t *)userdata;
-  d->depth++;
-  const char *lname = LocalName(el);
-
-  if (!strcmp(lname, "navPoint")) {
-    d->stack.push_back(ncx_node_t());
-  } else if (!strcmp(lname, "content") && !d->stack.empty()) {
-    const char *src = AttrValue(attr, "src");
-    if (src && *src)
-      d->stack.back().src = ResolveRelativePath(d->base_path, src);
-  } else if (!strcmp(lname, "text") && !d->stack.empty()) {
-    d->text_depth = d->depth;
-    d->textbuf.clear();
+  std::string lower = xml;
+  for (size_t i = 0; i < lower.size(); i++) {
+    lower[i] = (char)tolower((unsigned char)lower[i]);
   }
-}
 
-static void ncx_char(void *userdata, const XML_Char *txt, int len) {
-  ncx_parse_data_t *d = (ncx_parse_data_t *)userdata;
-  if (d->text_depth > 0) {
-    d->textbuf.append((const char *)txt, len);
-  }
-}
+  std::string pending_src;
+  std::string pending_title;
+  bool any = false;
+  size_t pos = 0;
 
-static void ncx_end(void *userdata, const char *el) {
-  ncx_parse_data_t *d = (ncx_parse_data_t *)userdata;
-  const char *lname = LocalName(el);
-
-  if (d->text_depth == d->depth && !strcmp(lname, "text")) {
-    if (!d->stack.empty()) {
-      std::string label = Trim(d->textbuf);
-      if (!label.empty() && d->stack.back().label.empty())
-        d->stack.back().label = label;
+  auto try_flush = [&]() {
+    if (pending_src.empty() || pending_title.empty())
+      return;
+    if (entries->size() >= EPUB_TOC_MAX_ENTRIES)
+      return;
+    toc_entry_t entry;
+    entry.href = ResolveRelativePath(base_path, pending_src);
+    entry.title = Trim(pending_title);
+    if (!entry.href.empty() && !entry.title.empty()) {
+      entries->push_back(entry);
+      any = true;
     }
-    d->text_depth = 0;
-    d->textbuf.clear();
-  } else if (!strcmp(lname, "navPoint") && !d->stack.empty()) {
-    ncx_node_t node = d->stack.back();
-    d->stack.pop_back();
-    if (!node.src.empty() && !node.label.empty()) {
-      if (d->entries->size() < EPUB_TOC_MAX_ENTRIES) {
-        toc_entry_t entry;
-        entry.href = node.src;
-        entry.title = node.label;
-        d->entries->push_back(entry);
+    pending_src.clear();
+    pending_title.clear();
+  };
+
+  while (pos < lower.size() && entries->size() < EPUB_TOC_MAX_ENTRIES) {
+    size_t content_pos = lower.find("<content", pos);
+    size_t text_pos = lower.find("<text", pos);
+    if (content_pos == std::string::npos && text_pos == std::string::npos)
+      break;
+
+    if (content_pos != std::string::npos &&
+        (text_pos == std::string::npos || content_pos < text_pos)) {
+      size_t tag_end = lower.find('>', content_pos);
+      if (tag_end == std::string::npos)
+        break;
+      size_t src_pos = lower.find("src", content_pos);
+      if (src_pos != std::string::npos && src_pos < tag_end) {
+        size_t eq = lower.find('=', src_pos);
+        if (eq != std::string::npos && eq < tag_end) {
+          size_t v = eq + 1;
+          while (v < tag_end && isspace((unsigned char)lower[v]))
+            v++;
+          if (v < tag_end) {
+            char quote = xml[v];
+            if (quote == '"' || quote == '\'') {
+              size_t v_end = xml.find(quote, v + 1);
+              if (v_end != std::string::npos && v_end < tag_end) {
+                pending_src = xml.substr(v + 1, v_end - (v + 1));
+              }
+            } else {
+              size_t v_end = v;
+              while (v_end < tag_end && !isspace((unsigned char)lower[v_end]) &&
+                     lower[v_end] != '>')
+                v_end++;
+              pending_src = xml.substr(v, v_end - v);
+            }
+          }
+        }
       }
+      pos = tag_end + 1;
+      try_flush();
+      continue;
     }
+
+    size_t tag_end = lower.find('>', text_pos);
+    if (tag_end == std::string::npos)
+      break;
+    size_t close_pos = lower.find("</text>", tag_end + 1);
+    if (close_pos == std::string::npos)
+      break;
+    pending_title = xml.substr(tag_end + 1, close_pos - (tag_end + 1));
+    pos = close_pos + 7;
+    try_flush();
   }
 
-  d->depth--;
+  return any;
 }
 
 static bool ParseXmlBuffer(const std::string &xml, XML_StartElementHandler start,
@@ -762,14 +784,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
       book->GetApp()->PrintStatus(msg);
     }
     if (ReadZipEntryText(uf, toc_doc_path, toc_xml)) {
-      ncx_parse_data_t ncxdata;
-      ncxdata.entries = &toc_entries;
-      ncxdata.base_path = toc_doc_path;
-      ncxdata.depth = 0;
-      ncxdata.text_depth = 0;
-      if (ParseXmlBuffer(toc_xml, ncx_start, ncx_end, ncx_char, &ncxdata)) {
+      if (ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries))
         toc_loaded = true;
-      }
     } else if (book && book->GetApp()) {
       book->GetApp()->PrintStatus("EPUB: NCX skipped (size/format)");
     }
@@ -814,12 +830,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
           book->GetApp()->PrintStatus(msg);
         }
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml)) {
-          ncx_parse_data_t ncxdata;
-          ncxdata.entries = &toc_entries;
-          ncxdata.base_path = toc_doc_path;
-          ncxdata.depth = 0;
-          ncxdata.text_depth = 0;
-          if (ParseXmlBuffer(toc_xml, ncx_start, ncx_end, ncx_char, &ncxdata))
+          if (ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries))
             toc_loaded = true;
         } else if (book && book->GetApp()) {
           book->GetApp()->PrintStatus("EPUB: fallback NCX skipped");
