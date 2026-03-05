@@ -83,9 +83,9 @@ int main(int argc, char **argv) {
 
   // Create book directory if it doesn't exist
   mkdir("sdmc:/3ds", 0777);
-  mkdir("sdmc:/3ds/dslibris", 0777);
-  mkdir("sdmc:/3ds/dslibris/book", 0777);
-  mkdir("sdmc:/3ds/dslibris/font", 0777);
+  mkdir("sdmc:/3ds/3dslibris", 0777);
+  mkdir("sdmc:/3ds/3dslibris/book", 0777);
+  mkdir("sdmc:/3ds/3dslibris/font", 0777);
 
   app = new App();
   int result = app->Run();

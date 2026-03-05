@@ -44,8 +44,8 @@
 #define SPLASH_LEFT 28
 #define SPLASH_TOP 44
 
-#define LOGFILEPATH "sdmc:/3ds/dslibris/dslibris.log"
-#define PREFSPATH "sdmc:/3ds/dslibris/dslibris.xml"
+#define LOGFILEPATH "sdmc:/3ds/3dslibris/3dslibris.log"
+#define PREFSPATH "sdmc:/3ds/3dslibris/3dslibris.xml"
 
 #define FONTREGULARFILE "LiberationSerif-Regular.ttf"
 #define FONTBOLDFILE "LiberationSerif-Bold.ttf"

@@ -31,8 +31,8 @@
 App::App() {
   melonds = false;
 
-  fontdir = std::string("sdmc:/3ds/dslibris/font");
-  bookdir = std::string("sdmc:/3ds/dslibris/book");
+  fontdir = std::string("sdmc:/3ds/3dslibris/font");
+  bookdir = std::string("sdmc:/3ds/3dslibris/book");
   bookcount = 0;
   bookselected = NULL;
   bookcurrent = NULL;
@@ -157,7 +157,8 @@ int App::Run(void) {
   PrintStatus("Searching for books...");
   if (FindBooks() != ok) {
     PrintStatus("error: no book directory");
-    drawBootStatus("No se encontro carpeta de libros", "Usa sdmc:/3ds/dslibris/book");
+    drawBootStatus("No se encontro carpeta de libros",
+                   "Usa sdmc:/3ds/3dslibris/book");
     return 1;
   }
   if (bookcount == 0) {
