@@ -33,7 +33,6 @@ void App::HandleEventInBook() {
       bookcurrent->SetPosition(pagecurrent);
       bookcurrent->GetPage()->Draw(ts);
     }
-    prefs->Write();
   } else if (keys & (KEY_B | key.l | key.up)) {
     // page back.
     if (pagecurrent > 0) {
@@ -41,7 +40,6 @@ void App::HandleEventInBook() {
       bookcurrent->SetPosition(pagecurrent);
       bookcurrent->GetPage()->Draw(ts);
     }
-    prefs->Write();
   } else if (keys & KEY_X) {
     // cycle color modes: 0=normal, 1=dark, 2=sepia
     int mode = ts->GetColorMode();
@@ -65,7 +63,6 @@ void App::HandleEventInBook() {
         bookcurrent->GetPage()->Draw(ts);
       }
     }
-    prefs->Write();
   } else if (keys & KEY_START) {
     bookcurrent->Close();
     bookcurrent = nullptr;

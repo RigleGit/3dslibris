@@ -114,15 +114,6 @@ void BookmarkMenu::Draw() {
 
 void BookmarkMenu::HandleInput(u32 keys) {
   auto key = app->key;
-  if (keys) {
-    char msg[96];
-    snprintf(msg, sizeof(msg),
-             "BookmarkMenu input keys=%08lx sel=%u page=%u count=%u",
-             (unsigned long)keys,
-             selected, page, (unsigned)buttons.size());
-    app->PrintStatus(msg);
-  }
-
   if (keys & KEY_TOUCH) {
     handleTouchInput();
   } else if (keys & KEY_A) {
@@ -189,10 +180,6 @@ void BookmarkMenu::handleButtonPress() {
     return;
 
   u16 targetPage = book_pages[selected];
-  char msg[96];
-  snprintf(msg, sizeof(msg), "BookmarkMenu open selected=%u target=%u",
-           selected, targetPage + 1);
-  app->PrintStatus(msg);
   app->bookcurrent->SetPosition(targetPage);
   returnToBook();
 }
@@ -202,12 +189,6 @@ void BookmarkMenu::handleTouchInput() {
   touchPosition touch = app->TouchRead();
   touchPosition raw;
   hidTouchRead(&raw);
-  {
-    char msg[96];
-    snprintf(msg, sizeof(msg), "BookmarkMenu touch raw=(%u,%u) map=(%u,%u)",
-             raw.px, raw.py, touch.px, touch.py);
-    app->PrintStatus(msg);
-  }
 
   const int candidates[4][2] = {
       {(int)touch.px, (int)touch.py},
@@ -232,13 +213,10 @@ void BookmarkMenu::handleTouchInput() {
   }
   if (footerX >= 0) {
     if (footerX < 80) {
-      app->PrintStatus("BookmarkMenu touch action=prev_page");
       previousPage();
     } else if (footerX < 160) {
-      app->PrintStatus("BookmarkMenu touch action=back");
       returnToBook();
     } else {
-      app->PrintStatus("BookmarkMenu touch action=next_page");
       nextPage();
     }
     return;
@@ -273,17 +251,14 @@ void BookmarkMenu::handleTouchInput() {
   };
 
   if (hitsButton(app->buttonprefs)) {
-    app->PrintStatus("BookmarkMenu touch action=button_back");
     returnToBook();
     return;
   }
   if (hitsButton(app->buttonnext)) {
-    app->PrintStatus("BookmarkMenu touch action=button_next");
     nextPage();
     return;
   }
   if (hitsButton(app->buttonprev)) {
-    app->PrintStatus("BookmarkMenu touch action=button_prev");
     previousPage();
     return;
   }
@@ -294,14 +269,10 @@ void BookmarkMenu::handleTouchInput() {
   for (int i = start; i < end; i++) {
     if (hitsButton(*buttons[i])) {
       selected = i;
-      char msg[96];
-      snprintf(msg, sizeof(msg), "BookmarkMenu touch action=open idx=%d", i);
-      app->PrintStatus(msg);
       handleButtonPress();
       return;
     }
   }
-  app->PrintStatus("BookmarkMenu touch action=none");
 }
 
 void BookmarkMenu::returnToBook() {

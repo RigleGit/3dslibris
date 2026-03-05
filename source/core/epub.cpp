@@ -335,16 +335,13 @@ int epub(Book *book, std::string name, bool metadataonly) {
       }
       path = decoded_path;
 
-      char msg[256];
-      sprintf(msg, "Chapter: %s", path.c_str());
-      book->GetApp()->PrintStatus(msg);
-
       rc = unzLocateFile(uf, path.c_str(), 2); // 2 = case insensitive
       if (rc == UNZ_OK) {
         rc = unzOpenCurrentFile(uf);
         epub_parse_currentfile(uf, &parsedata);
         rc = unzCloseCurrentFile(uf);
       } else {
+        char msg[256];
         sprintf(msg, "NOT FOUND IN ZIP: %s", path.c_str());
         book->GetApp()->PrintStatus(msg);
       }

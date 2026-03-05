@@ -452,6 +452,8 @@ Book::Book(App *a) {
   coverHeight = 0;
   coverImagePath.clear();
   coverTried = false;
+  metadataIndexTried = false;
+  metadataIndexed = false;
 }
 
 Book::~Book() {
@@ -582,11 +584,18 @@ u8 Book::Open() {
 }
 
 u8 Book::Index() {
+  if (metadataIndexTried)
+    return metadataIndexed ? 0 : 1;
+  metadataIndexTried = true;
+
   std::string path;
   path.append(GetFolderName());
   path.append("/");
   path.append(GetFileName());
   int err = epub(this, path, true);
+  if (!err) {
+    metadataIndexed = true;
+  }
   return err;
 }
 

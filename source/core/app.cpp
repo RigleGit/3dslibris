@@ -171,23 +171,14 @@ int App::Run(void) {
   std::sort(books.begin(), books.end(), &book_title_lessthan);
 
   prefs->Read();
-  drawBootStatus("Indexing books...", "");
+  drawBootStatus("Preparing library...", "");
   // Apply key mapping/orientation loaded from prefs.
   SetOrientation(orientation);
-  PrintStatus("Indexing books...");
+  PrintStatus("Preparing library...");
   for (auto &book : books) {
-    char progress[96];
-    if (book->GetTitle()) {
-      snprintf(progress, sizeof(progress), "%s", book->GetTitle());
-    } else {
-      snprintf(progress, sizeof(progress), "%s", book->GetFileName());
-    }
-    PrintStatus(progress);
-    drawBootStatus("Indexing:", progress);
-    book->Index();
     book->GetBookmarks()->sort();
   }
-  PrintStatus("Indexing complete.");
+  PrintStatus("Library ready.");
 
   // Set up menus.
   PrefsInit();
