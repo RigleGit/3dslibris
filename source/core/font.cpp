@@ -53,7 +53,8 @@ void FontMenu::findFiles() {
 }
 
 void FontMenu::handleInput() {
-  auto keys = keysDown();
+  // Keep input handling consistent with the rest of the 3DS app.
+  u32 keys = hidKeysDown();
 
   // WARNING d-pad keys are in pre-rotation space!
   // TODO stop that!

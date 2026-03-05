@@ -22,7 +22,9 @@ void App::HandleEventInBook() {
   u16 pagecurrent = bookcurrent->GetPosition();
   u16 pagecount = bookcurrent->GetPageCount();
 
-  auto keys = keysDown();
+  // Use 3DS edge-triggered key state to avoid carry-over/repeat from the key
+  // press used to open the book.
+  u32 keys = hidKeysDown();
 
   if (keys & (KEY_A | key.r | key.down)) {
     // page forward.
