@@ -104,7 +104,7 @@ void FontMenu::handleInput() {
   auto key = app->key;
   if (keys & KEY_B) {
     // cancel and return to settings menu
-    app->ShowSettingsView();
+    app->ShowSettingsView(app->IsBookSettingsContext());
   } else if (keys & key.up) {
     app->mode = NextFontTargetMode(app->mode, -1);
     dirty = true;
@@ -143,7 +143,7 @@ void FontMenu::handleTouchInput() {
       if (page > 0)
         previousPage();
     } else if (coord.px < 160) {
-      app->ShowSettingsView();
+      app->ShowSettingsView(app->IsBookSettingsContext());
     } else {
       if (page < GetPageCount() - 1)
         nextPage();
@@ -166,7 +166,7 @@ void FontMenu::handleTouchInput() {
   };
 
   if (enclosesWithSlack(app->buttonprefs, coord.px, coord.py)) {
-    app->ShowSettingsView();
+    app->ShowSettingsView(app->IsBookSettingsContext());
   } else if (enclosesWithSlack(app->buttonnext, coord.px, coord.py)) {
     nextPage();
   } else if (enclosesWithSlack(app->buttonprev, coord.px, coord.py)) {
@@ -264,5 +264,5 @@ void FontMenu::handleButtonPress() {
   }
 
   app->prefs->Write();
-  app->ShowSettingsView();
+  app->ShowSettingsView(app->IsBookSettingsContext());
 }

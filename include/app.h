@@ -153,11 +153,13 @@ public:
   void PrefsRefreshButtonFontBold();
   void PrefsRefreshButtonFontItalic();
   void PrefsRefreshButtonFontBoldItalic();
-  void ShowSettingsView();
+  void ShowSettingsView(bool from_book = false);
+  inline bool IsBookSettingsContext() const { return prefs_book_context; }
 
 private:
   bool browser_view_dirty;
   bool prefs_view_dirty;
+  bool prefs_book_context;
 
   int FindBooks();
   void InitScreens();
@@ -185,4 +187,5 @@ private:
   void PrefsIncreaseParaspacing();
   void PrefsDecreaseParaspacing();
   void PrefsFlipOrientation();
+  u8 PrefsVisibleButtonCount() const;
 };

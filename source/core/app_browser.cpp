@@ -57,7 +57,7 @@ void App::browser_handleevent() {
   }
 
   else if (keys & (KEY_SELECT | KEY_Y)) {
-    ShowSettingsView();
+    ShowSettingsView(false);
   }
 
   else if (keys & KEY_TOUCH) {
@@ -72,7 +72,7 @@ void App::browser_handleevent() {
     } else if (buttonprev.EnclosesPoint(tx, ty)) {
       browser_prevpage();
     } else if (buttonprefs.EnclosesPoint(tx, ty)) {
-      ShowSettingsView();
+      ShowSettingsView(false);
     } else {
       // Check if a book cover was tapped
       for (int i = browserstart;

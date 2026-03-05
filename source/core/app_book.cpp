@@ -77,7 +77,7 @@ void App::HandleEventInBook() {
     prefs->Write();
   } else if (keys & KEY_SELECT) {
     // Go directly to settings from book.
-    ShowSettingsView();
+    ShowSettingsView(true);
     prefs->Write();
   } else if (keys & (key.right | key.left)) {
     // Navigate bookmarks.

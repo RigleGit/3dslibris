@@ -64,6 +64,7 @@ App::App() {
   prefs = new Prefs(this);
   prefsSelected = -1;
   prefs_view_dirty = false;
+  prefs_book_context = false;
 
   ts = new Text();
   ts->app = this;
@@ -332,7 +333,13 @@ void App::ShowLibraryView() {
   browser_view_dirty = true;
 }
 
-void App::ShowSettingsView() {
+void App::ShowSettingsView(bool from_book) {
+  prefs_book_context = from_book;
+  u8 visible_count = PrefsVisibleButtonCount();
+  if (visible_count == 0)
+    visible_count = 1;
+  if (prefsSelected >= visible_count)
+    prefsSelected = visible_count - 1;
   mode = APP_MODE_PREFS;
   buttonprefs.Label(" library");
   ts->SetScreen(ts->screenright);

@@ -28,6 +28,11 @@ static const int PREFS_LIBRARY_BTN_Y = 286;
 static const int PREFS_LIBRARY_BTN_W = 76;
 static const int PREFS_LIBRARY_BTN_H = 26;
 
+u8 App::PrefsVisibleButtonCount() const {
+  // General settings hide per-book actions like bookmarks.
+  return prefs_book_context ? PREFS_BUTTON_COUNT : PREFS_BUTTON_BOOKMARKS;
+}
+
 void App::PrefsInit() {
   const std::vector<std::string> labels{
       "font configuration", "font size",    "paragraph spacing",
@@ -60,7 +65,13 @@ void App::PrefsDraw() {
   ts->SetColorMode(0); // Normal for prefs menu
   ts->ClearScreen();
 
-  for (int i = 0; i < PREFS_BUTTON_COUNT; i++)
+  u8 visibleCount = PrefsVisibleButtonCount();
+  if (visibleCount == 0)
+    visibleCount = 1;
+  if (prefsSelected >= visibleCount)
+    prefsSelected = visibleCount - 1;
+
+  for (int i = 0; i < visibleCount; i++)
     prefsButtons[i].Draw(ts->screenright, i == prefsSelected);
 
   // Draw library button below settings list (without overlapping list rows).
@@ -98,13 +109,18 @@ void App::PrefsDraw() {
 
 void App::PrefsHandleEvent() {
   u32 keys = hidKeysDown();
+  u8 visibleCount = PrefsVisibleButtonCount();
+  if (visibleCount == 0)
+    visibleCount = 1;
+  if (prefsSelected >= visibleCount)
+    prefsSelected = visibleCount - 1;
 
   if (keys & KEY_A) {
     PrefsHandlePress();
   } else if (keys & (KEY_SELECT | KEY_START | KEY_B | KEY_Y)) {
     ShowLibraryView();
   } else if (keys & (key.left | key.l)) {
-    if (prefsSelected < PREFS_BUTTON_COUNT - 1) {
+    if (prefsSelected < visibleCount - 1) {
       prefsSelected++;
       prefs_view_dirty = true;
     }
@@ -157,7 +173,8 @@ void App::PrefsHandleTouch() {
     return;
   }
 
-  for (u8 i = 0; i < PREFS_BUTTON_COUNT; i++) {
+  u8 visibleCount = PrefsVisibleButtonCount();
+  for (u8 i = 0; i < visibleCount; i++) {
     if (prefsButtons[i].EnclosesPoint(coord.px, coord.py)) {
       if (i != prefsSelected) {
         prefsSelected = i;
@@ -273,7 +290,8 @@ void App::PrefsRefreshButton(int index) {
   }
   case PREFS_BUTTON_BOOKMARKS:
     prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
-        bookcurrent ? std::string(">") : std::string("(open book first)"));
+        (prefs_book_context && bookcurrent) ? std::string(">")
+                                            : std::string("(open book first)"));
     break;
   }
   prefs_view_dirty = true;
@@ -307,7 +325,7 @@ void App::PrefsHandlePress() {
   }
 
   if (prefsSelected == PREFS_BUTTON_BOOKMARKS) {
-    if (bookcurrent) {
+    if (prefs_book_context && bookcurrent) {
       ShowBookmarksView();
     }
     return;
