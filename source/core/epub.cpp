@@ -37,6 +37,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <string.h>
 #include <vector>
 
+static const size_t EPUB_TOC_MAX_BYTES = 512 * 1024;
+
 static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
   std::string base = path;
   size_t slash = base.find_last_of('/');
@@ -316,6 +318,8 @@ static void ncx_end(void *userdata, const char *el) {
 static bool ParseXmlBuffer(const std::string &xml, XML_StartElementHandler start,
                            XML_EndElementHandler end,
                            XML_CharacterDataHandler chardata, void *userdata) {
+  if (xml.size() > EPUB_TOC_MAX_BYTES)
+    return false;
   XML_Parser p = XML_ParserCreate(NULL);
   if (!p)
     return false;
@@ -333,6 +337,11 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &o
     return false;
   if (unzLocateFile(uf, path.c_str(), 2) != UNZ_OK)
     return false;
+  unz_file_info fi;
+  if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) == UNZ_OK) {
+    if (fi.uncompressed_size > EPUB_TOC_MAX_BYTES)
+      return false;
+  }
   if (unzOpenCurrentFile(uf) != UNZ_OK)
     return false;
 
@@ -571,6 +580,9 @@ int epub(Book *book, std::string name, bool metadataonly) {
   //! Set metadataonly to true if you only want the title and author.
   int rc = 0;
   static epub_data_t parsedata;
+  if (book && book->GetApp()) {
+    book->GetApp()->PrintStatus("EPUB: parse begin");
+  }
 
   // Parse top-level container XML for the rootfile.
 
@@ -631,6 +643,9 @@ int epub(Book *book, std::string name, bool metadataonly) {
     }
     unzClose(uf);
     epub_data_delete(&parsedata);
+    if (book && book->GetApp()) {
+      book->GetApp()->PrintStatus("EPUB: metadata done");
+    }
     return rc;
   }
 
@@ -690,6 +705,12 @@ int epub(Book *book, std::string name, bool metadataonly) {
       }
     }
     delete *it;
+  }
+  if (book && book->GetApp()) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "EPUB: content done pages=%u",
+             (unsigned)book->GetPageCount());
+    book->GetApp()->PrintStatus(msg);
   }
 
   // Replace fallback chapter names with real TOC/NAV names when available.
@@ -798,8 +819,18 @@ int epub(Book *book, std::string name, bool metadataonly) {
     }
   }
 
+  if (book && book->GetApp()) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
+             (unsigned)toc_entries.size(), (unsigned)book->GetChapters().size());
+    book->GetApp()->PrintStatus(msg);
+  }
+
   unzClose(uf);
   epub_data_delete(&parsedata);
+  if (book && book->GetApp()) {
+    book->GetApp()->PrintStatus("EPUB: parse end");
+  }
   return rc;
 }
 

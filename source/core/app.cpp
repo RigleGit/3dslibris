@@ -193,6 +193,8 @@ int App::Run(void) {
   // Resume reading from the last session.
   if (reopen && bookcurrent) {
     bookselected = bookcurrent;
+    const char *title = bookcurrent->GetTitle();
+    drawBootStatus("Opening last book...", (title && *title) ? title : "");
     OpenBook();
   }
 
