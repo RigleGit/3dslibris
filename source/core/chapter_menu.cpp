@@ -200,17 +200,6 @@ void ChapterMenu::handleTouchInput() {
       break;
     }
   }
-  if (footerX >= 0) {
-    if (footerX < 80) {
-      previousPage();
-    } else if (footerX < 160) {
-      returnToBook();
-    } else {
-      nextPage();
-    }
-    return;
-  }
-
   // Coarse row hit-test fallback: robust even if button hitboxes drift.
   for (int i = 0; i < 4; i++) {
     int x = candidates[i][0];
@@ -273,6 +262,16 @@ void ChapterMenu::handleTouchInput() {
     previousPage();
     return;
   }
+  if (footerX >= 0) {
+    if (footerX < 80) {
+      previousPage();
+    } else if (footerX < 160) {
+      returnToBook();
+    } else {
+      nextPage();
+    }
+    return;
+  }
 
   u8 start = page * pagesize;
   u8 end = MIN(start + pagesize, buttons.size());
@@ -286,6 +285,11 @@ void ChapterMenu::handleTouchInput() {
 }
 
 void ChapterMenu::returnToBook() {
+  if (app->IsBookSettingsContext()) {
+    app->ShowSettingsView(true);
+    return;
+  }
+
   app->mode = APP_MODE_BOOK;
   if (app->bookcurrent) {
     app->bookcurrent->GetPage()->Draw(app->ts);
