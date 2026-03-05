@@ -7,6 +7,7 @@
 #include "app.h"
 #include "book.h"
 #include "button.h"
+#include "touch_utils.h"
 
 #define MIN(x, y) (x < y ? x : y)
 
@@ -176,34 +177,15 @@ void ChapterMenu::handleButtonPress() {
 
 void ChapterMenu::handleTouchInput() {
   LayoutFooterButtons(app);
-  touchPosition touch = app->TouchRead();
-  touchPosition raw;
-  hidTouchRead(&raw);
-
-  const int candidates[4][2] = {
-      {(int)touch.px, (int)touch.py},
-      {(int)raw.py, (int)raw.px},
-      {239 - (int)raw.py, (int)raw.px},
-      {(int)raw.py, 319 - (int)raw.px},
-  };
+  TouchCandidates candidates;
+  touch::BuildCandidates(app, &candidates);
 
   int footerX = -1;
-  for (int i = 0; i < 4; i++) {
-    int x = candidates[i][0];
-    int y = candidates[i][1];
-    if (x < 0 || y < 0)
-      continue;
-    if (x > 239 || y > 319)
-      continue;
-    if (y >= 284) {
-      footerX = x;
-      break;
-    }
-  }
+  touch::FirstXInBottomBand(candidates, 284, &footerX);
   // Coarse row hit-test fallback: robust even if button hitboxes drift.
-  for (int i = 0; i < 4; i++) {
-    int x = candidates[i][0];
-    int y = candidates[i][1];
+  for (int i = 0; i < TouchCandidates::kCount; i++) {
+    int x = candidates.points[i].x;
+    int y = candidates.points[i].y;
     if (x < CHAPTER_ROW_X || x >= CHAPTER_ROW_X + CHAPTER_ROW_W)
       continue;
     if (y < CHAPTER_ROW_Y0)
@@ -222,43 +204,15 @@ void ChapterMenu::handleTouchInput() {
     return;
   }
 
-  auto enclosesWithSlack = [&](Button &button, int x, int y) {
-    for (int dy = -4; dy <= 4; dy += 4) {
-      for (int dx = -4; dx <= 4; dx += 4) {
-        int tx = x + dx;
-        int ty = y + dy;
-        if (tx < 0 || ty < 0)
-          continue;
-        if (button.EnclosesPoint((u16)tx, (u16)ty))
-          return true;
-      }
-    }
-    return false;
-  };
-
-  auto hitsButton = [&](Button &button) {
-    for (int i = 0; i < 4; i++) {
-      int x = candidates[i][0];
-      int y = candidates[i][1];
-      if (x < 0 || y < 0)
-        continue;
-      if (x > 239 || y > 319)
-        continue;
-      if (enclosesWithSlack(button, x, y))
-        return true;
-    }
-    return false;
-  };
-
-  if (hitsButton(app->buttonprefs)) {
+  if (touch::HitsButton(candidates, &app->buttonprefs, 4)) {
     returnToBook();
     return;
   }
-  if (hitsButton(app->buttonnext)) {
+  if (touch::HitsButton(candidates, &app->buttonnext, 4)) {
     nextPage();
     return;
   }
-  if (hitsButton(app->buttonprev)) {
+  if (touch::HitsButton(candidates, &app->buttonprev, 4)) {
     previousPage();
     return;
   }
@@ -276,7 +230,7 @@ void ChapterMenu::handleTouchInput() {
   u8 start = page * pagesize;
   u8 end = MIN(start + pagesize, buttons.size());
   for (int i = start; i < end; i++) {
-    if (hitsButton(*buttons[i])) {
+    if (touch::HitsButton(candidates, buttons[i], 4)) {
       selected = i;
       handleButtonPress();
       return;

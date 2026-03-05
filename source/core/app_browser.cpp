@@ -20,6 +20,7 @@
 #include "main.h"
 #include "parse.h"
 #include "text.h"
+#include "touch_utils.h"
 
 #define MIN(x, y) (x < y ? x : y)
 #define MAX(x, y) (x > y ? x : y)
@@ -68,61 +69,27 @@ void App::browser_handleevent() {
     const int kGridX0 = 5;
     const int kGridY0 = 3;
 
-    touchPosition coord = TouchRead();
-    // TouchRead() now maps to buffer coords: coord.px=sx (origin.x),
-    // coord.py=sy (origin.y)
-    int tx = coord.px;
-    int ty = coord.py;
-    touchPosition raw;
-    hidTouchRead(&raw);
+    TouchCandidates candidates;
+    touch::BuildCandidates(this, &candidates);
 
-    const int candidates[4][2] = {
-        {tx, ty},
-        {(int)raw.py, (int)raw.px},
-        {239 - (int)raw.py, (int)raw.px},
-        {(int)raw.py, 319 - (int)raw.px},
-    };
-
-    auto enclosesWithSlack = [&](Button &button, int x, int y) {
-      for (int dy = -4; dy <= 4; dy += 4) {
-        for (int dx = -4; dx <= 4; dx += 4) {
-          int sx = x + dx;
-          int sy = y + dy;
-          if (sx < 0 || sy < 0 || sx > 239 || sy > 319)
-            continue;
-          if (button.EnclosesPoint((u16)sx, (u16)sy))
-            return true;
-        }
-      }
-      return false;
-    };
-
-    auto hitsButton = [&](Button &button) {
-      for (int i = 0; i < 4; i++) {
-        if (enclosesWithSlack(button, candidates[i][0], candidates[i][1]))
-          return true;
-      }
-      return false;
-    };
-
-    if (hitsButton(buttonnext)) {
+    if (touch::HitsButton(candidates, &buttonnext, 4)) {
       browser_nextpage();
       return;
     }
-    if (hitsButton(buttonprev)) {
+    if (touch::HitsButton(candidates, &buttonprev, 4)) {
       browser_prevpage();
       return;
     }
-    if (hitsButton(buttonprefs)) {
+    if (touch::HitsButton(candidates, &buttonprefs, 4)) {
       ShowSettingsView(false);
       return;
     }
 
     // Prefer coarse cell hit-test (cover + title/progress area):
     // single tap selects, tapping selected book opens.
-    for (int i = 0; i < 4; i++) {
-      int x = candidates[i][0];
-      int y = candidates[i][1];
+    for (int i = 0; i < TouchCandidates::kCount; i++) {
+      int x = candidates.points[i].x;
+      int y = candidates.points[i].y;
       if (x < kGridX0 || y < kGridY0)
         continue;
       int col = (x - kGridX0) / kCellW;
@@ -148,7 +115,7 @@ void App::browser_handleevent() {
     // Fallback to original cover hitboxes.
     for (int i = browserstart;
          (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT); i++) {
-      if (hitsButton(*buttons[i])) {
+      if (touch::HitsButton(candidates, buttons[i], 4)) {
         if (bookselected == books[i]) {
           OpenBook();
         } else {
