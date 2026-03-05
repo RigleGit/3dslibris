@@ -23,6 +23,11 @@
 #define MIN(x, y) (x < y ? x : y)
 #define MAX(x, y) (x > y ? x : y)
 
+static const int PREFS_LIBRARY_BTN_X = 158;
+static const int PREFS_LIBRARY_BTN_Y = 286;
+static const int PREFS_LIBRARY_BTN_W = 76;
+static const int PREFS_LIBRARY_BTN_H = 26;
+
 void App::PrefsInit() {
   const std::vector<std::string> labels{
       "font configuration", "font size",    "paragraph spacing",
@@ -59,8 +64,8 @@ void App::PrefsDraw() {
     prefsButtons[i].Draw(ts->screenright, i == prefsSelected);
 
   // Draw library button below settings list (without overlapping list rows).
-  buttonprefs.Move(162, 300);
-  buttonprefs.Resize(70, 18);
+  buttonprefs.Move(PREFS_LIBRARY_BTN_X, PREFS_LIBRARY_BTN_Y);
+  buttonprefs.Resize(PREFS_LIBRARY_BTN_W, PREFS_LIBRARY_BTN_H);
   buttonprefs.Draw(ts->screenright);
 
   // Draw controls guide on the other screen
@@ -123,8 +128,24 @@ void App::PrefsHandleEvent() {
 
 void App::PrefsHandleTouch() {
   touchPosition coord = TouchRead();
+  // Keep touch hitbox synced with drawing geometry.
+  buttonprefs.Move(PREFS_LIBRARY_BTN_X, PREFS_LIBRARY_BTN_Y);
+  buttonprefs.Resize(PREFS_LIBRARY_BTN_W, PREFS_LIBRARY_BTN_H);
+  auto enclosesWithSlack = [&](Button &button, int x, int y) {
+    for (int dy = -4; dy <= 4; dy += 4) {
+      for (int dx = -4; dx <= 4; dx += 4) {
+        int tx = x + dx;
+        int ty = y + dy;
+        if (tx < 0 || ty < 0)
+          continue;
+        if (button.EnclosesPoint((u16)tx, (u16)ty))
+          return true;
+      }
+    }
+    return false;
+  };
 
-  if (buttonprefs.EnclosesPoint(coord.px, coord.py)) {
+  if (enclosesWithSlack(buttonprefs, coord.px, coord.py)) {
     ShowLibraryView();
     return;
   }

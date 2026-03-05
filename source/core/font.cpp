@@ -40,6 +40,20 @@ static u8 NextFontTargetMode(u8 mode, int delta) {
   return order[idx];
 }
 
+static void LayoutFooterButtons(App *app) {
+  app->buttonprev.Move(6, 292);
+  app->buttonprev.Resize(68, 22);
+  app->buttonprev.Label("prev");
+
+  app->buttonprefs.Move(86, 292);
+  app->buttonprefs.Resize(68, 22);
+  app->buttonprefs.Label("back");
+
+  app->buttonnext.Move(166, 292);
+  app->buttonnext.Resize(68, 22);
+  app->buttonnext.Label("next");
+}
+
 FontMenu::FontMenu(App *_app) : Menu(_app) {
   dir = app->fontdir;
   findFiles();
@@ -121,13 +135,27 @@ void FontMenu::handleInput() {
 }
 
 void FontMenu::handleTouchInput() {
+  LayoutFooterButtons(app);
   touchPosition coord = app->TouchRead();
+  auto enclosesWithSlack = [&](Button &button, int x, int y) {
+    for (int dy = -4; dy <= 4; dy += 4) {
+      for (int dx = -4; dx <= 4; dx += 4) {
+        int tx = x + dx;
+        int ty = y + dy;
+        if (tx < 0 || ty < 0)
+          continue;
+        if (button.EnclosesPoint((u16)tx, (u16)ty))
+          return true;
+      }
+    }
+    return false;
+  };
 
-  if (app->buttonprefs.EnclosesPoint(coord.px, coord.py)) {
+  if (enclosesWithSlack(app->buttonprefs, coord.px, coord.py)) {
     app->ShowSettingsView();
-  } else if (app->buttonnext.EnclosesPoint(coord.px, coord.py)) {
+  } else if (enclosesWithSlack(app->buttonnext, coord.px, coord.py)) {
     nextPage();
-  } else if (app->buttonprev.EnclosesPoint(coord.px, coord.py)) {
+  } else if (enclosesWithSlack(app->buttonprev, coord.px, coord.py)) {
     previousPage();
   } else {
     for (u8 i = page * pagesize;
@@ -143,6 +171,7 @@ void FontMenu::handleTouchInput() {
 
 void FontMenu::draw() {
   app->ts->ClearScreen();
+  LayoutFooterButtons(app);
   app->ts->SetPen(6, 14);
   char header[72];
   snprintf(header, sizeof(header), "font configuration (%s)",
@@ -155,7 +184,6 @@ void FontMenu::draw() {
   }
   if (page > 0)
     app->buttonprev.Draw();
-  app->buttonprefs.Label("back");
   app->buttonprefs.Draw();
   if (page < GetPageCount() - 1)
     app->buttonnext.Draw();
