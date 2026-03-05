@@ -1,6 +1,7 @@
 #include "bookmark_menu.h"
 
 #include <3ds.h>
+#include <stdio.h>
 #include <string>
 #include <vector>
 
@@ -113,6 +114,13 @@ void BookmarkMenu::Draw() {
 
 void BookmarkMenu::HandleInput(u16 keys) {
   auto key = app->key;
+  if (keys) {
+    char msg[96];
+    snprintf(msg, sizeof(msg),
+             "BookmarkMenu input keys=%04x sel=%u page=%u count=%u", keys,
+             selected, page, (unsigned)buttons.size());
+    app->PrintStatus(msg);
+  }
 
   if (keys & KEY_TOUCH) {
     handleTouchInput();
@@ -120,15 +128,15 @@ void BookmarkMenu::HandleInput(u16 keys) {
     handleButtonPress();
   } else if (keys & (KEY_B | KEY_START | KEY_SELECT)) {
     returnToBook();
-  } else if (keys & key.right) {
+  } else if (keys & (key.down | KEY_DOWN | key.right | KEY_RIGHT)) {
     // next item
     selectNext();
-  } else if (keys & key.left) {
+  } else if (keys & (key.up | KEY_UP | key.left | KEY_LEFT)) {
     // prev item
     selectPrevious();
-  } else if (keys & key.r) {
+  } else if (keys & (key.r | KEY_R)) {
     nextPage();
-  } else if (keys & key.l) {
+  } else if (keys & (key.l | KEY_L)) {
     previousPage();
   }
 }
@@ -180,6 +188,10 @@ void BookmarkMenu::handleButtonPress() {
     return;
 
   u16 targetPage = book_pages[selected];
+  char msg[96];
+  snprintf(msg, sizeof(msg), "BookmarkMenu open selected=%u target=%u",
+           selected, targetPage + 1);
+  app->PrintStatus(msg);
   app->bookcurrent->SetPosition(targetPage);
   returnToBook();
 }
@@ -187,14 +199,45 @@ void BookmarkMenu::handleButtonPress() {
 void BookmarkMenu::handleTouchInput() {
   LayoutFooterButtons(app);
   touchPosition touch = app->TouchRead();
+  touchPosition raw;
+  hidTouchRead(&raw);
+  {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "BookmarkMenu touch raw=(%u,%u) map=(%u,%u)",
+             raw.px, raw.py, touch.px, touch.py);
+    app->PrintStatus(msg);
+  }
+
+  const int candidates[4][2] = {
+      {(int)touch.px, (int)touch.py},
+      {(int)raw.py, (int)raw.px},
+      {239 - (int)raw.py, (int)raw.px},
+      {(int)raw.py, 319 - (int)raw.px},
+  };
 
   // Robust fallback zones for footer buttons.
-  if (touch.py >= 284) {
-    if (touch.px < 80) {
+  int footerX = -1;
+  for (int i = 0; i < 4; i++) {
+    int x = candidates[i][0];
+    int y = candidates[i][1];
+    if (x < 0 || y < 0)
+      continue;
+    if (x > 239 || y > 319)
+      continue;
+    if (y >= 284) {
+      footerX = x;
+      break;
+    }
+  }
+  if (footerX >= 0) {
+    if (footerX < 80) {
+      app->PrintStatus("BookmarkMenu touch action=prev_page");
       previousPage();
-    } else if (touch.px < 160) {
+    } else if (footerX < 160) {
+      app->PrintStatus("BookmarkMenu touch action=back");
       returnToBook();
     } else {
+      app->PrintStatus("BookmarkMenu touch action=next_page");
       nextPage();
     }
     return;
@@ -214,15 +257,32 @@ void BookmarkMenu::handleTouchInput() {
     return false;
   };
 
-  if (enclosesWithSlack(app->buttonprefs, touch.px, touch.py)) {
+  auto hitsButton = [&](Button &button) {
+    for (int i = 0; i < 4; i++) {
+      int x = candidates[i][0];
+      int y = candidates[i][1];
+      if (x < 0 || y < 0)
+        continue;
+      if (x > 239 || y > 319)
+        continue;
+      if (enclosesWithSlack(button, x, y))
+        return true;
+    }
+    return false;
+  };
+
+  if (hitsButton(app->buttonprefs)) {
+    app->PrintStatus("BookmarkMenu touch action=button_back");
     returnToBook();
     return;
   }
-  if (enclosesWithSlack(app->buttonnext, touch.px, touch.py)) {
+  if (hitsButton(app->buttonnext)) {
+    app->PrintStatus("BookmarkMenu touch action=button_next");
     nextPage();
     return;
   }
-  if (enclosesWithSlack(app->buttonprev, touch.px, touch.py)) {
+  if (hitsButton(app->buttonprev)) {
+    app->PrintStatus("BookmarkMenu touch action=button_prev");
     previousPage();
     return;
   }
@@ -231,12 +291,16 @@ void BookmarkMenu::handleTouchInput() {
   u8 end = MIN(start + pagesize, buttons.size());
 
   for (int i = start; i < end; i++) {
-    if (enclosesWithSlack(*buttons[i], touch.px, touch.py)) {
+    if (hitsButton(*buttons[i])) {
       selected = i;
+      char msg[96];
+      snprintf(msg, sizeof(msg), "BookmarkMenu touch action=open idx=%d", i);
+      app->PrintStatus(msg);
       handleButtonPress();
       return;
     }
   }
+  app->PrintStatus("BookmarkMenu touch action=none");
 }
 
 void BookmarkMenu::returnToBook() {
