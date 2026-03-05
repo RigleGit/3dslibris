@@ -9,6 +9,8 @@ namespace {
 bool EnclosesWithSlack(Button *button, int x, int y, int slack) {
   if (!button)
     return false;
+  if (slack <= 0)
+    return button->EnclosesPoint((u16)x, (u16)y);
   for (int dy = -slack; dy <= slack; dy += slack) {
     for (int dx = -slack; dx <= slack; dx += slack) {
       int sx = x + dx;
@@ -27,7 +29,13 @@ bool EnclosesWithSlack(Button *button, int x, int y, int slack) {
 namespace touch {
 
 void BuildCandidates(App *app, TouchCandidates *out) {
-  if (!app || !out)
+  if (!out)
+    return;
+  for (int i = 0; i < TouchCandidates::kCount; i++) {
+    out->points[i].x = -1;
+    out->points[i].y = -1;
+  }
+  if (!app)
     return;
 
   touchPosition mapped = app->TouchRead();
@@ -74,4 +82,3 @@ bool FirstXInBottomBand(const TouchCandidates &candidates, int y_min,
 }
 
 } // namespace touch
-
