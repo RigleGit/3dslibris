@@ -59,6 +59,7 @@ class Book {
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
   std::vector<std::string> inline_images;
+  std::unordered_map<std::string, u16> chapter_anchor_pages;
   std::unordered_map<std::string, std::vector<u8>> fb2_inline_images;
   size_t fb2_inline_images_bytes;
   std::list<InlineImageCacheEntry> inline_image_cache;
@@ -101,6 +102,9 @@ public:
   std::list<u16> *GetBookmarks(void);
   const std::vector<ChapterEntry> &GetChapters() const;
   u16 RegisterInlineImage(const std::string &path);
+  void AddChapterAnchor(const std::string &docpath, const std::string &anchor_id);
+  bool FindChapterAnchorPage(const std::string &href, u16 *page_out) const;
+  void ClearChapterAnchors();
   const std::string *GetInlineImagePath(u16 id) const;
   void ClearInlineImages();
   bool StoreFb2InlineImage(const std::string &id,

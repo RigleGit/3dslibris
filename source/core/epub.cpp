@@ -1625,6 +1625,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   std::set<std::string> basename_lc_ambiguous;
   size_t stat_exact = 0;
   size_t stat_nofrag = 0;
+  size_t stat_anchor = 0;
   size_t stat_lc = 0;
   size_t stat_base = 0;
   size_t stat_skip_unmatched = 0;
@@ -1660,13 +1661,24 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     bool have_page = false;
 
     const bool has_fragment = toc_entries[i].href.find('#') != std::string::npos;
+    if (has_fragment) {
+      u16 anchor_page = 0;
+      if (book->FindChapterAnchorPage(toc_entries[i].href, &anchor_page)) {
+        page = anchor_page;
+        have_page = true;
+        stat_anchor++;
+      }
+    }
+
     std::string key = NormalizePath(toc_entries[i].href);
     if (!key.empty()) {
-      auto hit = page_start_by_href.find(key);
-      if (hit != page_start_by_href.end()) {
-        page = hit->second;
-        have_page = true;
-        stat_exact++;
+      if (!have_page) {
+        auto hit = page_start_by_href.find(key);
+        if (hit != page_start_by_href.end()) {
+          page = hit->second;
+          have_page = true;
+          stat_exact++;
+        }
       }
       if (!have_page) {
         std::string key_no_fragment =
@@ -1751,10 +1763,10 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     app->PrintStatus(msg);
     char map_msg[192];
     snprintf(map_msg, sizeof(map_msg),
-             "EPUB: TOC map stats exact=%u nofrag=%u lower=%u base=%u skip=%u dup=%u",
-             (unsigned)stat_exact, (unsigned)stat_nofrag, (unsigned)stat_lc,
-             (unsigned)stat_base, (unsigned)stat_skip_unmatched,
-             (unsigned)stat_skip_dup);
+             "EPUB: TOC map stats anchor=%u exact=%u nofrag=%u lower=%u base=%u skip=%u dup=%u",
+             (unsigned)stat_anchor, (unsigned)stat_exact, (unsigned)stat_nofrag,
+             (unsigned)stat_lc, (unsigned)stat_base,
+             (unsigned)stat_skip_unmatched, (unsigned)stat_skip_dup);
     app->PrintStatus(map_msg);
     app->PrintStatus("EPUB: TOC resolve end");
   }
