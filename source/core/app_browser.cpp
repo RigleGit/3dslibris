@@ -19,6 +19,7 @@
 #include "book.h"
 #include "button.h"
 #include "epub.h"
+#include "fb2.h"
 #include "main.h"
 #include "parse.h"
 #include "text.h"
@@ -40,6 +41,16 @@ static std::string TrimSpaces(const std::string &s) {
   while (end > start && s[end - 1] == ' ')
     end--;
   return s.substr(start, end - start);
+}
+
+static bool HasExtCI(const char *name, const char *ext) {
+  if (!name || !ext)
+    return false;
+  size_t nlen = strlen(name);
+  size_t elen = strlen(ext);
+  if (elen == 0 || nlen < elen)
+    return false;
+  return strcasecmp(name + nlen - elen, ext) == 0;
 }
 
 static bool LooksLikeValidUtf8(const std::string &s) {
@@ -798,12 +809,19 @@ void App::browser_draw(void) {
     int btnY = GRID_Y0 + row * CELL_H;
 
     if (books[i] == bookselected && !books[i]->coverPixels &&
-        !books[i]->coverTried && books[i]->format == FORMAT_EPUB) {
-      if (books[i]->metadataIndexTried) {
-        if (!books[i]->coverImagePath.empty()) {
-          std::string path = bookdir + "/" + books[i]->GetFileName();
-          epub_extract_cover(books[i], path);
+        !books[i]->coverTried) {
+      if (books[i]->format == FORMAT_EPUB) {
+        if (books[i]->metadataIndexTried) {
+          if (!books[i]->coverImagePath.empty()) {
+            std::string path = bookdir + "/" + books[i]->GetFileName();
+            epub_extract_cover(books[i], path);
+          }
+          books[i]->coverTried = true;
         }
+      } else if (books[i]->format == FORMAT_XHTML &&
+                 HasExtCI(books[i]->GetFileName(), ".fb2")) {
+        std::string path = bookdir + "/" + books[i]->GetFileName();
+        fb2_extract_cover(books[i], path);
         books[i]->coverTried = true;
       }
     }
