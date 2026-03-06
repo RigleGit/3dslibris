@@ -60,6 +60,7 @@ class Book {
   std::vector<ChapterEntry> chapters;
   std::vector<std::string> inline_images;
   std::unordered_map<std::string, u16> chapter_anchor_pages;
+  std::unordered_map<std::string, u16> chapter_doc_start_pages;
   std::unordered_map<std::string, std::vector<u8>> fb2_inline_images;
   size_t fb2_inline_images_bytes;
   std::list<InlineImageCacheEntry> inline_image_cache;
@@ -105,6 +106,10 @@ public:
   void AddChapterAnchor(const std::string &docpath, const std::string &anchor_id);
   bool FindChapterAnchorPage(const std::string &href, u16 *page_out) const;
   void ClearChapterAnchors();
+  void SetChapterDocStartPage(const std::string &docpath, u16 page);
+  bool FindChapterDocStartPage(const std::string &href, u16 *page_out) const;
+  const std::unordered_map<std::string, u16> &GetChapterDocStartPages() const;
+  void ClearChapterDocStartPages();
   const std::string *GetInlineImagePath(u16 id) const;
   void ClearInlineImages();
   bool StoreFb2InlineImage(const std::string &id,

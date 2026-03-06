@@ -44,6 +44,9 @@ static const size_t EPUB_TOC_MAX_ENTRIES = 2048;
 // once NCX/NAV parsing is fully hardened on real hardware/emulators.
 static const bool EPUB_ENABLE_REAL_TOC_RESOLVE = false;
 static std::string Trim(const std::string &s);
+static bool ParseXmlBuffer(const std::string &xml, XML_StartElementHandler start,
+                           XML_EndElementHandler end,
+                           XML_CharacterDataHandler chardata, void *userdata);
 
 static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
   std::string base = path;
@@ -259,6 +262,21 @@ typedef struct {
   std::string current_title;
 } nav_parse_data_t;
 
+typedef struct {
+  int depth;
+  std::string src;
+  std::string title;
+  bool in_text;
+  int text_depth;
+} ncx_navpoint_state_t;
+
+typedef struct {
+  std::vector<toc_entry_t> *entries;
+  std::string base_path;
+  int depth;
+  std::vector<ncx_navpoint_state_t> stack;
+} ncx_parse_data_t;
+
 static void EpubDiag(App *app, const char *fmt, const char *arg = NULL);
 
 static void nav_start(void *userdata, const char *el, const char **attr) {
@@ -313,6 +331,104 @@ static void nav_end(void *userdata, const char *el) {
   }
 
   d->depth--;
+}
+
+static void ncx_start(void *userdata, const char *el, const char **attr) {
+  ncx_parse_data_t *d = (ncx_parse_data_t *)userdata;
+  d->depth++;
+  const char *lname = LocalName(el);
+
+  if (!strcmp(lname, "navPoint")) {
+    ncx_navpoint_state_t node;
+    node.depth = d->depth;
+    node.src.clear();
+    node.title.clear();
+    node.in_text = false;
+    node.text_depth = 0;
+    d->stack.push_back(node);
+    return;
+  }
+
+  if (d->stack.empty())
+    return;
+
+  ncx_navpoint_state_t &node = d->stack.back();
+  if (!strcmp(lname, "content")) {
+    const char *src = AttrValue(attr, "src");
+    if (src && *src && node.src.empty())
+      node.src = src;
+  } else if (!strcmp(lname, "text")) {
+    node.in_text = true;
+    node.text_depth = d->depth;
+  }
+}
+
+static void ncx_char(void *userdata, const XML_Char *txt, int len) {
+  ncx_parse_data_t *d = (ncx_parse_data_t *)userdata;
+  if (d->stack.empty())
+    return;
+  ncx_navpoint_state_t &node = d->stack.back();
+  if (node.in_text)
+    node.title.append((const char *)txt, len);
+}
+
+static void ncx_end(void *userdata, const char *el) {
+  ncx_parse_data_t *d = (ncx_parse_data_t *)userdata;
+  const char *lname = LocalName(el);
+
+  if (!d->stack.empty()) {
+    ncx_navpoint_state_t &node = d->stack.back();
+    if (!strcmp(lname, "text") && node.in_text && node.text_depth == d->depth) {
+      node.in_text = false;
+      node.text_depth = 0;
+    }
+  }
+
+  if (!d->stack.empty() && !strcmp(lname, "navPoint") &&
+      d->stack.back().depth == d->depth) {
+    ncx_navpoint_state_t node = d->stack.back();
+    d->stack.pop_back();
+
+    std::string title = Trim(node.title);
+    if (!node.src.empty() && !title.empty() &&
+        d->entries->size() < EPUB_TOC_MAX_ENTRIES) {
+      toc_entry_t entry;
+      entry.href = ResolveRelativePath(d->base_path, node.src);
+      entry.title = title;
+      if (!entry.href.empty() && !entry.title.empty())
+        d->entries->push_back(entry);
+    }
+  }
+
+  d->depth--;
+}
+
+static bool ParseNcxWithExpat(const std::string &xml,
+                              const std::string &base_path,
+                              std::vector<toc_entry_t> *entries, App *app) {
+  if (xml.empty() || !entries)
+    return false;
+  if (xml.size() > EPUB_TOC_MAX_BYTES)
+    return false;
+
+  if (app)
+    app->PrintStatus("EPUB: NCX expat parse begin");
+
+  ncx_parse_data_t d;
+  d.entries = entries;
+  d.base_path = base_path;
+  d.depth = 0;
+  d.stack.clear();
+  bool ok = ParseXmlBuffer(xml, ncx_start, ncx_end, ncx_char, &d);
+
+  if (app) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "EPUB: NCX expat parse end ok=%u entries=%u",
+             ok ? 1u : 0u, (unsigned)entries->size());
+    app->PrintStatus(msg);
+  }
+
+  return ok && !entries->empty();
 }
 
 static bool ParseNcxLightweight(const std::string &xml,
@@ -943,6 +1059,14 @@ static void BuildPageStartMapFromPackage(const epub_data_t &parsedata,
     return;
   out->clear();
 
+  const auto &cached = book->GetChapterDocStartPages();
+  if (!cached.empty()) {
+    for (const auto &kv : cached) {
+      (*out)[kv.first] = kv.second;
+    }
+    return;
+  }
+
   const std::vector<ChapterEntry> &chapters = book->GetChapters();
   if (chapters.empty())
     return;
@@ -1011,21 +1135,28 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
 
     size_t too_long = 0;
     size_t empty_href = 0;
+    size_t with_fragment = 0;
     std::set<std::string> unique_hrefs;
     for (const auto &e : entries) {
       if (e.title.size() > 140)
         too_long++;
       if (e.href.empty())
         empty_href++;
-      else
+      else {
         unique_hrefs.insert(StripFragmentAndQuery(e.href));
+        if (e.href.find('#') != std::string::npos)
+          with_fragment++;
+      }
     }
 
     if (too_long * 4 > entries.size())  // >25% suspiciously long labels
       return false;
     if (empty_href * 2 > entries.size()) // >50% without href
       return false;
-    if (entries.size() >= 6 && unique_hrefs.size() < 2)
+    // Allow single-document TOCs (common in old EPUBs) when entries are mostly
+    // in-document anchors (chapter.xhtml#id).
+    if (entries.size() >= 6 && unique_hrefs.size() < 2 &&
+        with_fragment * 3 < entries.size() * 2)
       return false;
     return true;
   };
@@ -1073,8 +1204,10 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
     }
     if (ncx_read_ok) {
       std::vector<toc_entry_t> ncx_entries;
-      if (ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app) &&
-          looks_reasonable_toc(ncx_entries)) {
+      bool parsed = ParseNcxWithExpat(toc_xml, toc_doc_path, &ncx_entries, app);
+      if (!parsed)
+        parsed = ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app);
+      if (parsed && looks_reasonable_toc(ncx_entries)) {
         *toc_entries = ncx_entries;
         toc_loaded = true;
       } else if (app) {
@@ -1132,8 +1265,12 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
         }
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX-FALLBACK")) {
           std::vector<toc_entry_t> ncx_entries;
-          if (ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app) &&
-              looks_reasonable_toc(ncx_entries)) {
+          bool parsed =
+              ParseNcxWithExpat(toc_xml, toc_doc_path, &ncx_entries, app);
+          if (!parsed)
+            parsed =
+                ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app);
+          if (parsed && looks_reasonable_toc(ncx_entries)) {
             *toc_entries = ncx_entries;
             toc_loaded = true;
           }
@@ -1246,6 +1383,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
   parsedata.book = book;
   parsedata.type = PARSE_CONTENT;
   book->ClearChapters();
+  book->ClearChapterDocStartPages();
   book->ClearInlineImages();
   std::vector<std::string *> href;
   if (parsedata.spine.size()) {
@@ -1293,6 +1431,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
         chapter_num++;
         if (book->GetPageCount() > 0) {
           book->AddChapter(chapter_start_page, chapter_label);
+          book->SetChapterDocStartPage(path_key, chapter_start_page);
           if (page_start_by_href.find(path_key) == page_start_by_href.end()) {
             page_start_by_href[path_key] = chapter_start_page;
           }
@@ -1354,8 +1493,12 @@ int epub(Book *book, std::string name, bool metadataonly) {
       }
       if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
                            book ? book->GetApp() : NULL, "NCX")) {
-        if (ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
-                                book ? book->GetApp() : NULL))
+        bool parsed = ParseNcxWithExpat(toc_xml, toc_doc_path, &toc_entries,
+                                        book ? book->GetApp() : NULL);
+        if (!parsed)
+          parsed = ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
+                                       book ? book->GetApp() : NULL);
+        if (parsed)
           toc_loaded = true;
       } else if (book && book->GetApp()) {
         book->GetApp()->PrintStatus("EPUB: NCX skipped (size/format)");
@@ -1403,8 +1546,13 @@ int epub(Book *book, std::string name, bool metadataonly) {
           }
           if (ReadZipEntryText(uf, toc_doc_path, toc_xml, book ? book->GetApp() : NULL,
                                "NCX-FALLBACK")) {
-            if (ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
-                                    book ? book->GetApp() : NULL))
+            bool parsed =
+                ParseNcxWithExpat(toc_xml, toc_doc_path, &toc_entries,
+                                  book ? book->GetApp() : NULL);
+            if (!parsed)
+              parsed = ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
+                                           book ? book->GetApp() : NULL);
+            if (parsed)
               toc_loaded = true;
           } else if (book && book->GetApp()) {
             book->GetApp()->PrintStatus("EPUB: fallback NCX skipped");

@@ -842,6 +842,57 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
 
 void Book::ClearChapterAnchors() { chapter_anchor_pages.clear(); }
 
+void Book::SetChapterDocStartPage(const std::string &docpath, u16 page) {
+  if (docpath.empty())
+    return;
+  std::string key = NormalizePathForAnchor(docpath);
+  if (key.empty())
+    return;
+  if (chapter_doc_start_pages.find(key) == chapter_doc_start_pages.end())
+    chapter_doc_start_pages[key] = page;
+}
+
+bool Book::FindChapterDocStartPage(const std::string &href, u16 *page_out) const {
+  if (!page_out)
+    return false;
+  if (href.empty())
+    return false;
+
+  std::string decoded = UrlDecodeComponent(href);
+  size_t hash = decoded.find('#');
+  if (hash != std::string::npos)
+    decoded = decoded.substr(0, hash);
+  size_t q = decoded.find('?');
+  if (q != std::string::npos)
+    decoded = decoded.substr(0, q);
+
+  std::string key = NormalizePathForAnchor(decoded);
+  if (key.empty())
+    return false;
+
+  auto hit = chapter_doc_start_pages.find(key);
+  if (hit != chapter_doc_start_pages.end()) {
+    *page_out = hit->second;
+    return true;
+  }
+
+  std::string key_lc = ToLowerAsciiLocal(key);
+  for (const auto &kv : chapter_doc_start_pages) {
+    if (ToLowerAsciiLocal(kv.first) == key_lc) {
+      *page_out = kv.second;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+const std::unordered_map<std::string, u16> &Book::GetChapterDocStartPages() const {
+  return chapter_doc_start_pages;
+}
+
+void Book::ClearChapterDocStartPages() { chapter_doc_start_pages.clear(); }
+
 void Book::AddChapter(u16 page, const std::string &title) {
   ChapterEntry entry;
   entry.page = page;
@@ -921,6 +972,7 @@ void Book::Close() {
   pages.clear();
   chapters.clear();
   ClearChapterAnchors();
+  ClearChapterDocStartPages();
   ClearInlineImages();
   // pages.erase(pages.begin(), pages.end());
 }
