@@ -2180,7 +2180,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     if (has_fragment && anchor_lookup_failed && have_page && page_from_doc_start) {
       u16 title_page = 0;
       bool got_title = false;
-      if (!PathLooksLikeTocDocForFallback(mapped_doc_key)) {
+      bool mapped_is_toc_doc = PathLooksLikeTocDocForFallback(mapped_doc_key);
+      if (!mapped_is_toc_doc) {
         got_title =
             FindTocTitlePageInDocRange(book, page, doc_starts, title, &title_page);
       } else {
@@ -2196,6 +2197,12 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         stat_title_fallback++;
       } else if (unresolved_fragment_samples.size() < 3) {
         unresolved_fragment_samples.push_back(toc_entries[i].href);
+      }
+
+      // If this came from a TOC/index document and we still couldn't resolve
+      // by title, avoid emitting a broken chapter entry (often page 0).
+      if (!got_title && mapped_is_toc_doc) {
+        have_page = false;
       }
     }
 
