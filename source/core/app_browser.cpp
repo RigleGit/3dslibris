@@ -579,6 +579,8 @@ static std::string NormalizeDisplayUtf8(const std::string &raw,
 static std::string BuildBrowserDisplayName(Book *book) {
   if (!book)
     return "";
+  if (book->HasBrowserDisplayNameCache())
+    return book->GetBrowserDisplayNameCache();
 
   std::string raw = book->GetFileName() ? book->GetFileName() : "";
   LogUtf8StageOnce(book, "filename_raw", raw);
@@ -603,7 +605,8 @@ static std::string BuildBrowserDisplayName(Book *book) {
 
   normalized = TrimSpaces(normalized);
   LogUtf8StageOnce(book, "filename_final", normalized);
-  return normalized;
+  book->SetBrowserDisplayNameCache(normalized);
+  return book->GetBrowserDisplayNameCache();
 }
 
 static size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
@@ -913,25 +916,34 @@ void App::browser_draw(void) {
   ts->SetColorMode(0); // Normal for browser text
   ts->ClearScreen();
 
-  // Metadata/cover work: index one visible EPUB per frame to keep UI responsive
-  // while still getting proper titles/covers (avoids filesystem-encoding issues
-  // from raw filenames).
-  bool metadata_work_done = false;
-  for (int i = browserstart;
-       !metadata_work_done && (i < bookcount) &&
-       (i < browserstart + APP_BROWSER_BUTTON_COUNT);
-       i++) {
-    if (books[i] && books[i]->format == FORMAT_EPUB && !books[i]->coverPixels &&
-        !books[i]->metadataIndexTried) {
-      books[i]->Index();
-      metadata_work_done = true;
-      browser_view_dirty = true;
+  // Lazy metadata/cover work only for selected book to keep navigation smooth.
+  if (bookselected && !bookselected->coverPixels && !bookselected->coverTried) {
+    std::string selected_path = bookdir + "/" + bookselected->GetFileName();
+    if (bookselected->format == FORMAT_EPUB) {
+      if (!bookselected->metadataIndexTried) {
+        bookselected->Index();
+        browser_view_dirty = true;
+      } else {
+        int rc = 1;
+        if (!bookselected->coverImagePath.empty()) {
+          rc = epub_extract_cover(bookselected, selected_path);
+        }
+        if (rc == 0 && bookselected->coverPixels) {
+          SaveCoverCache(bookselected, selected_path);
+          browser_view_dirty = true;
+        }
+        bookselected->coverTried = true;
+      }
+    } else if (bookselected->format == FORMAT_XHTML &&
+               HasExtCI(bookselected->GetFileName(), ".fb2")) {
+      int rc = fb2_extract_cover(bookselected, selected_path);
+      if (rc == 0 && bookselected->coverPixels) {
+        SaveCoverCache(bookselected, selected_path);
+        browser_view_dirty = true;
+      }
+      bookselected->coverTried = true;
     }
   }
-
-  // Background cover generation (one visible book per frame) so opening
-  // the browser feels snappy while new books get cached progressively.
-  bool cover_work_done = false;
 
   for (int i = browserstart;
        (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT); i++) {
@@ -942,34 +954,6 @@ void App::browser_draw(void) {
     int row = page_idx / GRID_COLS;
     int btnX = GRID_X0 + col * CELL_W;
     int btnY = GRID_Y0 + row * CELL_H;
-
-    if (!cover_work_done && !books[i]->coverPixels && !books[i]->coverTried) {
-      int rc = 1;
-      bool attempted = false;
-      std::string path = bookdir + "/" + books[i]->GetFileName();
-
-      if (books[i]->format == FORMAT_EPUB) {
-        if (books[i]->metadataIndexTried) {
-          attempted = true;
-          if (!books[i]->coverImagePath.empty()) {
-            rc = epub_extract_cover(books[i], path);
-          }
-        }
-      } else if (books[i]->format == FORMAT_XHTML &&
-                 HasExtCI(books[i]->GetFileName(), ".fb2")) {
-        attempted = true;
-        rc = fb2_extract_cover(books[i], path);
-      }
-
-      if (attempted) {
-        if (rc == 0 && books[i]->coverPixels) {
-          SaveCoverCache(books[i], path);
-          browser_view_dirty = true;
-        }
-        books[i]->coverTried = true;
-        cover_work_done = true;
-      }
-    }
 
     if (books[i]->coverPixels) {
       int cx = btnX + 2 + (COVER_W - books[i]->coverWidth) / 2;
@@ -1053,9 +1037,13 @@ void App::browser_draw(void) {
   }
 
   bool pendingLazyWork = false;
-  if (bookselected && bookselected->format == FORMAT_EPUB &&
-      (!bookselected->metadataIndexTried || !bookselected->coverTried)) {
-    pendingLazyWork = true;
+  if (bookselected && !bookselected->coverPixels && !bookselected->coverTried) {
+    if (bookselected->format == FORMAT_EPUB) {
+      pendingLazyWork = true;
+    } else if (bookselected->format == FORMAT_XHTML &&
+               HasExtCI(bookselected->GetFileName(), ".fb2")) {
+      pendingLazyWork = true;
+    }
   }
 
   // restore state

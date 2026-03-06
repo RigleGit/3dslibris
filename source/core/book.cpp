@@ -618,6 +618,8 @@ Book::Book(App *a) {
   filename.clear();
   title.clear();
   author.clear();
+  browser_display_name_cache.clear();
+  browser_display_name_cached = false;
   pages.clear();
   position = 0;
   format = FORMAT_UNDEF;
@@ -649,6 +651,7 @@ void Book::SetFolderName(const char *name) {
 void Book::SetFileName(const char *name) {
   filename.clear();
   filename = name;
+  ClearBrowserDisplayNameCache();
 }
 
 void Book::SetTitle(const char *name) {

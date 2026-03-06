@@ -53,6 +53,8 @@ class Book {
   std::string foldername;
   std::string title;
   std::string author;
+  std::string browser_display_name_cache;
+  bool browser_display_name_cached;
   int position;             //! as page index.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
@@ -80,6 +82,20 @@ public:
   format_t format;
   inline App *GetApp() { return app; }
   inline std::string GetAuthor() { return author; }
+  inline bool HasBrowserDisplayNameCache() const {
+    return browser_display_name_cached;
+  }
+  inline const std::string &GetBrowserDisplayNameCache() const {
+    return browser_display_name_cache;
+  }
+  inline void SetBrowserDisplayNameCache(const std::string &name) {
+    browser_display_name_cache = name;
+    browser_display_name_cached = true;
+  }
+  inline void ClearBrowserDisplayNameCache() {
+    browser_display_name_cache.clear();
+    browser_display_name_cached = false;
+  }
   std::list<u16> *GetBookmarks(void);
   const std::vector<ChapterEntry> &GetChapters() const;
   u16 RegisterInlineImage(const std::string &path);
