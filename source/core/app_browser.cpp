@@ -364,23 +364,37 @@ static std::string ToAsciiCoverLabel(const std::string &utf8) {
 static std::string BuildFallbackTitle(Book *book) {
   if (!book)
     return "";
-  const char *raw = book->GetFileName();
-  std::string name = raw ? raw : "";
-  if (!LooksLikeValidUtf8(name)) {
-    name = LegacyBytesToUtf8(name);
-  } else {
-    std::string repaired_legacy;
-    if (TryRepairMojibakeUtf8(name, &repaired_legacy))
-      name = repaired_legacy;
-  }
+  auto normalizeUtf8 = [](const char *raw) -> std::string {
+    std::string s = raw ? raw : "";
+    if (!LooksLikeValidUtf8(s)) {
+      s = LegacyBytesToUtf8(s);
+    } else {
+      std::string repaired_legacy;
+      if (TryRepairMojibakeUtf8(s, &repaired_legacy))
+        s = repaired_legacy;
+    }
+    return s;
+  };
 
-  // Prefer filename for missing covers, strip extension.
-  size_t dot = name.find_last_of('.');
+  std::string file_full = normalizeUtf8(book->GetFileName());
+  std::string file_no_ext = file_full;
+  size_t dot = file_no_ext.find_last_of('.');
   if (dot != std::string::npos)
-    name = name.substr(0, dot);
+    file_no_ext = file_no_ext.substr(0, dot);
+
+  std::string title = normalizeUtf8(book->GetTitle());
+  bool has_real_title =
+      !title.empty() && title != file_full && title != file_no_ext;
+
+  // Prefer EPUB metadata title when available (it is usually proper UTF-8 and
+  // avoids filesystem encoding quirks). Fall back to filename otherwise.
+  std::string name = has_real_title ? title : file_no_ext;
+  bool from_filename = !has_real_title;
 
   for (size_t i = 0; i < name.size(); i++) {
-    if (name[i] == '_' || name[i] == '-')
+    if (name[i] == '_')
+      name[i] = ' ';
+    if (from_filename && name[i] == '-')
       name[i] = ' ';
   }
 
@@ -395,7 +409,9 @@ static std::string BuildFallbackTitle(Book *book) {
     prev_space = is_space;
   }
   compact = TrimSpaces(compact);
-  return ToAsciiCoverLabel(compact);
+  if (from_filename)
+    return ToAsciiCoverLabel(compact);
+  return compact;
 }
 
 static size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
