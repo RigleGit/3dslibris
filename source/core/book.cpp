@@ -91,6 +91,20 @@ static bool XmlNameEquals(const char *name, const char *needle) {
   return (colon && !strcmp(colon + 1, needle));
 }
 
+static bool PathLooksLikeTocDoc(const std::string &path) {
+  if (path.empty())
+    return false;
+  std::string lower = path;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
+  return lower.find("toc") != std::string::npos ||
+         lower.find("indice") != std::string::npos ||
+         lower.find("index") != std::string::npos ||
+         lower.find("contents") != std::string::npos ||
+         lower.find("contenido") != std::string::npos ||
+         lower.find("nav") != std::string::npos;
+}
+
 static std::string ResolveDocPath(const std::string &base_doc_path,
                                   const std::string &href) {
   if (href.empty())
@@ -485,6 +499,13 @@ void end(void *data, const char *el) {
 
   if (!strcmp(el, "br")) {
     linefeed(p);
+  } else if (!strcmp(el, "a")) {
+    // Many EPUB TOC/Nav documents are built as dense anchor lists with little
+    // structural markup; force line breaks there to keep the reading view sane.
+    if (PathLooksLikeTocDoc(p->docpath) && p->linebegan && p->buflen > 0 &&
+        p->buf[p->buflen - 1] != '\n') {
+      linefeed(p);
+    }
   } else if (!strcmp(el, "p")) {
     linefeed(p);
     linefeed(p);
