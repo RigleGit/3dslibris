@@ -873,7 +873,12 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
     std::string key_path_lc = ToLowerAsciiLocal(key.substr(0, hash));
     std::string key_base_lc = ToLowerAsciiLocal(BasenamePathLocal(key_path_lc));
     std::string key_anchor_lc = ToLowerAsciiLocal(key.substr(hash + 1));
+    u16 target_doc_page = 0;
+    bool has_target_doc = FindChapterDocStartPage(key_path_lc, &target_doc_page);
 
+    bool path_anchor_found = false;
+    u16 path_anchor_page = 0;
+    bool path_anchor_ambiguous = false;
     bool base_anchor_found = false;
     u16 base_anchor_page = 0;
     bool base_anchor_ambiguous = false;
@@ -899,6 +904,19 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
         anchor_ambiguous = true;
       }
 
+      if (has_target_doc) {
+        u16 candidate_doc_page = 0;
+        if (FindChapterDocStartPage(kv.first, &candidate_doc_page) &&
+            candidate_doc_page == target_doc_page) {
+          if (!path_anchor_found) {
+            path_anchor_found = true;
+            path_anchor_page = kv.second;
+          } else if (path_anchor_page != kv.second) {
+            path_anchor_ambiguous = true;
+          }
+        }
+      }
+
       if (!key_base_lc.empty() && kv_base_lc == key_base_lc) {
         if (!base_anchor_found) {
           base_anchor_found = true;
@@ -909,6 +927,10 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
       }
     }
 
+    if (path_anchor_found && !path_anchor_ambiguous) {
+      *page_out = path_anchor_page;
+      return true;
+    }
     if (base_anchor_found && !base_anchor_ambiguous) {
       *page_out = base_anchor_page;
       return true;
