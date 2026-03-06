@@ -277,7 +277,80 @@ typedef struct {
   std::vector<ncx_navpoint_state_t> stack;
 } ncx_parse_data_t;
 
+typedef struct {
+  std::map<std::string, std::string> *fragment_to_href;
+  std::string base_path;
+  std::vector<std::string> id_stack;
+  std::vector<bool> pushed_stack;
+} toc_proxy_parse_data_t;
+
 static void EpubDiag(App *app, const char *fmt, const char *arg = NULL);
+
+static std::string NormalizeFragmentId(const std::string &raw) {
+  std::string frag = Trim(UrlDecode(raw));
+  while (!frag.empty() && frag[0] == '#')
+    frag.erase(frag.begin());
+  size_t q = frag.find('?');
+  if (q != std::string::npos)
+    frag = frag.substr(0, q);
+  return frag;
+}
+
+static std::string ExtractHrefFragment(const std::string &href) {
+  size_t hash = href.find('#');
+  if (hash == std::string::npos || hash + 1 >= href.size())
+    return "";
+  return NormalizeFragmentId(href.substr(hash + 1));
+}
+
+static void toc_proxy_start(void *userdata, const char *el, const char **attr) {
+  toc_proxy_parse_data_t *d = (toc_proxy_parse_data_t *)userdata;
+  bool pushed = false;
+
+  std::string current_id;
+  const char *id = AttrValue(attr, "id");
+  if (!id || !*id)
+    id = AttrValue(attr, "name");
+  if (id && *id) {
+    current_id = NormalizeFragmentId(id);
+    if (!current_id.empty()) {
+      d->id_stack.push_back(current_id);
+      pushed = true;
+    }
+  }
+
+  const char *href = AttrValue(attr, "href");
+  if (!href || !*href)
+    href = AttrValue(attr, "src");
+  if (href && *href) {
+    std::string resolved = ResolveRelativePath(d->base_path, href);
+    if (!resolved.empty()) {
+      if (!current_id.empty()) {
+        if (d->fragment_to_href->find(current_id) == d->fragment_to_href->end())
+          (*d->fragment_to_href)[current_id] = resolved;
+      } else if (!d->id_stack.empty()) {
+        const std::string &id_from_parent = d->id_stack.back();
+        if (d->fragment_to_href->find(id_from_parent) ==
+            d->fragment_to_href->end()) {
+          (*d->fragment_to_href)[id_from_parent] = resolved;
+        }
+      }
+    }
+  }
+
+  d->pushed_stack.push_back(pushed);
+}
+
+static void toc_proxy_end(void *userdata, const char *el) {
+  (void)el;
+  toc_proxy_parse_data_t *d = (toc_proxy_parse_data_t *)userdata;
+  if (d->pushed_stack.empty())
+    return;
+  bool pushed = d->pushed_stack.back();
+  d->pushed_stack.pop_back();
+  if (pushed && !d->id_stack.empty())
+    d->id_stack.pop_back();
+}
 
 static void nav_start(void *userdata, const char *el, const char **attr) {
   nav_parse_data_t *d = (nav_parse_data_t *)userdata;
@@ -692,6 +765,60 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &o
     EpubDiag(app, msg);
   }
   return n >= 0;
+}
+
+static bool
+BuildTocFragmentProxyMap(unzFile uf, const std::string &doc_path,
+                         std::map<std::string, std::string> *proxy_map,
+                         App *app) {
+  if (!proxy_map || doc_path.empty())
+    return false;
+  proxy_map->clear();
+
+  std::string xml;
+  if (!ReadZipEntryText(uf, doc_path, xml, app, "TOC-PROXY"))
+    return false;
+
+  toc_proxy_parse_data_t data;
+  data.fragment_to_href = proxy_map;
+  data.base_path = doc_path;
+  data.id_stack.clear();
+  data.pushed_stack.clear();
+
+  if (!ParseXmlBuffer(xml, toc_proxy_start, toc_proxy_end, NULL, &data))
+    return false;
+
+  return !proxy_map->empty();
+}
+
+static bool LookupTocProxyHref(
+    unzFile uf, const std::string &doc_path, const std::string &fragment_raw,
+    std::map<std::string, std::map<std::string, std::string>> *cache,
+    std::set<std::string> *attempted, std::string *href_out, App *app) {
+  if (!cache || !attempted || !href_out || doc_path.empty())
+    return false;
+  href_out->clear();
+
+  std::string fragment = NormalizeFragmentId(fragment_raw);
+  if (fragment.empty())
+    return false;
+
+  if (attempted->find(doc_path) == attempted->end()) {
+    std::map<std::string, std::string> local_map;
+    BuildTocFragmentProxyMap(uf, doc_path, &local_map, app);
+    (*cache)[doc_path] = local_map;
+    attempted->insert(doc_path);
+  }
+
+  auto hit_doc = cache->find(doc_path);
+  if (hit_doc == cache->end())
+    return false;
+  auto hit = hit_doc->second.find(fragment);
+  if (hit == hit_doc->second.end())
+    return false;
+
+  *href_out = hit->second;
+  return !href_out->empty();
 }
 
 static std::string BuildDocPath(const std::string &opf_folder,
@@ -1536,7 +1663,8 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
 }
 
 static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
-                                   u16 from_page, u16 *page_out) {
+                                   u16 from_page, u16 *page_out,
+                                   bool allow_wrap = true) {
   if (!book || !page_out)
     return false;
   u16 page_count = book->GetPageCount();
@@ -1556,7 +1684,7 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
   int best_hits = 0;
   u16 best_page = from_page;
 
-  for (u16 pass = 0; pass < 2; pass++) {
+  for (u16 pass = 0; pass < (allow_wrap ? 2 : 1); pass++) {
     u16 p0 = (pass == 0) ? from_page : 0;
     u16 p1 = (pass == 0) ? page_count : from_page;
     for (u16 p = p0; p < p1; p++) {
@@ -2061,12 +2189,15 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   size_t stat_anchor_miss = 0;
   size_t stat_title_fallback = 0;
   size_t stat_title_global = 0;
+  size_t stat_proxy = 0;
   size_t stat_with_fragment = 0;
   size_t stat_lc = 0;
   size_t stat_base = 0;
   size_t stat_skip_unmatched = 0;
   size_t stat_skip_dup = 0;
   std::vector<std::string> unresolved_fragment_samples;
+  std::map<std::string, std::map<std::string, std::string>> toc_proxy_cache;
+  std::set<std::string> toc_proxy_attempted;
 
   for (const auto &kv : page_start_by_href) {
     std::string lower_key = ToLowerAscii(kv.first);
@@ -2092,6 +2223,9 @@ int epub_resolve_toc(Book *book, std::string filepath) {
                    doc_starts.end());
 
   const size_t kResolvedMaxEntries = 512;
+  const u16 total_pages = book->GetPageCount();
+  bool have_last_resolved_page = false;
+  u16 last_resolved_page = 0;
 
   for (size_t i = 0; i < toc_entries.size(); i++) {
     std::string title = NormalizeTocTitle(toc_entries[i].title);
@@ -2177,10 +2311,51 @@ int epub_resolve_toc(Book *book, std::string filepath) {
       }
     }
 
+    bool mapped_is_toc_doc = PathLooksLikeTocDocForFallback(mapped_doc_key);
+    if (has_fragment && anchor_lookup_failed && have_page && page_from_doc_start &&
+        mapped_is_toc_doc) {
+      std::string fragment = ExtractHrefFragment(toc_entries[i].href);
+      std::string proxy_href;
+      if (LookupTocProxyHref(uf, mapped_doc_key, fragment, &toc_proxy_cache,
+                             &toc_proxy_attempted, &proxy_href, app)) {
+        u16 proxy_page = 0;
+        bool proxy_ok = false;
+        if (book->FindChapterAnchorPage(proxy_href, &proxy_page)) {
+          proxy_ok = true;
+        } else {
+          std::string proxy_key = NormalizePath(proxy_href);
+          if (!proxy_key.empty()) {
+            auto hit_exact = page_start_by_href.find(proxy_key);
+            if (hit_exact != page_start_by_href.end()) {
+              proxy_page = hit_exact->second;
+              proxy_ok = true;
+            }
+          }
+          if (!proxy_ok) {
+            std::string proxy_nofrag = NormalizePath(StripFragmentAndQuery(proxy_href));
+            if (!proxy_nofrag.empty()) {
+              auto hit_nofrag = page_start_by_href.find(proxy_nofrag);
+              if (hit_nofrag != page_start_by_href.end()) {
+                proxy_page = hit_nofrag->second;
+                proxy_ok = true;
+              }
+            }
+          }
+        }
+
+        if (proxy_ok) {
+          page = proxy_page;
+          have_page = true;
+          page_from_doc_start = false;
+          anchor_lookup_failed = false;
+          stat_proxy++;
+        }
+      }
+    }
+
     if (has_fragment && anchor_lookup_failed && have_page && page_from_doc_start) {
       u16 title_page = 0;
       bool got_title = false;
-      bool mapped_is_toc_doc = PathLooksLikeTocDocForFallback(mapped_doc_key);
       if (!mapped_is_toc_doc) {
         got_title =
             FindTocTitlePageInDocRange(book, page, doc_starts, title, &title_page);
@@ -2188,7 +2363,16 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         // Some EPUBs point TOC entries to an index/toc doc with numeric
         // fragments (#3, #7...) that are not real content anchors.
         // In that case, resolve by searching chapter title in the book body.
-        got_title = FindTocTitlePageGlobal(book, title, (u16)(page + 1), &title_page);
+        u16 from_page = (u16)(page + 1);
+        if (have_last_resolved_page && total_pages > 0) {
+          u16 next_page = (last_resolved_page + 1 < total_pages)
+                              ? (u16)(last_resolved_page + 1)
+                              : last_resolved_page;
+          if (next_page > from_page)
+            from_page = next_page;
+        }
+        got_title =
+            FindTocTitlePageGlobal(book, title, from_page, &title_page, false);
         if (got_title)
           stat_title_global++;
       }
@@ -2221,6 +2405,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     entry.page = page;
     entry.title = title;
     resolved.push_back(entry);
+    have_last_resolved_page = true;
+    last_resolved_page = page;
     if (resolved.size() >= kResolvedMaxEntries)
       break;
   }
@@ -2245,9 +2431,9 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     app->PrintStatus(msg);
     char map_msg[192];
     snprintf(map_msg, sizeof(map_msg),
-             "EPUB: TOC map stats anchor=%u exact=%u nofrag=%u lower=%u base=%u titlefb=%u titleg=%u skip=%u dup=%u",
+             "EPUB: TOC map stats anchor=%u exact=%u nofrag=%u lower=%u base=%u proxy=%u titlefb=%u titleg=%u skip=%u dup=%u",
              (unsigned)stat_anchor, (unsigned)stat_exact, (unsigned)stat_nofrag,
-             (unsigned)stat_lc, (unsigned)stat_base,
+             (unsigned)stat_lc, (unsigned)stat_base, (unsigned)stat_proxy,
              (unsigned)stat_title_fallback, (unsigned)stat_title_global,
              (unsigned)stat_skip_unmatched, (unsigned)stat_skip_dup);
     app->PrintStatus(map_msg);
