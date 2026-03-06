@@ -18,6 +18,7 @@
 #include <unistd.h>
 
 #include <3ds.h>
+#include <3ds/util/utf.h>
 
 #include "book.h"
 #include "bookmark_menu.h"
@@ -168,6 +169,75 @@ static void log_filename_stage(App *app, const char *stage, const char *value) {
            bytes.c_str(), value);
   app->PrintStatus(msg);
 #endif
+}
+
+static bool has_epub_extension(const char *filename) {
+  if (!filename)
+    return false;
+  size_t len = strlen(filename);
+  if (len < 5)
+    return false;
+  return strcasecmp(filename + len - 5, ".epub") == 0;
+}
+
+static std::string sdmc_to_archive_relpath(const std::string &path) {
+  const char kPrefix[] = "sdmc:";
+  if (path.compare(0, strlen(kPrefix), kPrefix) == 0) {
+    std::string rel = path.substr(strlen(kPrefix));
+    if (rel.empty())
+      return "/";
+    if (rel[0] != '/')
+      rel.insert(rel.begin(), '/');
+    return rel;
+  }
+  if (!path.empty() && path[0] != '/')
+    return std::string("/") + path;
+  return path;
+}
+
+static bool utf16_name_to_utf8(const u16 *name, std::string *out) {
+  if (!name || !out)
+    return false;
+
+  size_t in_len = 0;
+  while (in_len < 0x106 && name[in_len] != 0)
+    in_len++;
+
+  if (in_len == 0) {
+    out->clear();
+    return true;
+  }
+
+  std::vector<uint8_t> utf8buf(in_len * 4 + 4, 0);
+  ssize_t produced = utf16_to_utf8(utf8buf.data(), name, utf8buf.size() - 1);
+  if (produced < 0)
+    return false;
+
+  size_t out_len = (size_t)produced;
+  if (out_len > utf8buf.size() - 1)
+    out_len = utf8buf.size() - 1;
+  out->assign((const char *)utf8buf.data(), out_len);
+  return true;
+}
+
+static void append_book_from_filename(App *app, const char *filename) {
+  if (!app || !filename || !*filename)
+    return;
+  if (filename[0] == '.')
+    return;
+  if (!has_epub_extension(filename))
+    return;
+
+  log_filename_stage(app, "d_name", filename);
+  Book *book = new Book(app);
+  book->SetFolderName(app->bookdir.c_str());
+  book->SetFileName(filename);
+  book->SetTitle(filename);
+  log_filename_stage(app, "book.filename", book->GetFileName());
+  log_filename_stage(app, "book.title", book->GetTitle());
+  book->format = FORMAT_EPUB;
+  app->books.push_back(book);
+  app->bookcount++;
 }
 
 int App::Run(void) {
@@ -344,45 +414,83 @@ void App::CycleBrightness() {
 }
 
 int App::FindBooks() {
-  DIR *dp = opendir(bookdir.c_str());
-  if (!dp) {
-    // Try fallback paths
-    const char *fallbacks[] = {"sdmc:/book", "sdmc:/books", NULL};
-    for (int i = 0; fallbacks[i]; i++) {
-      dp = opendir(fallbacks[i]);
-      if (dp) {
-        bookdir = std::string(fallbacks[i]);
+  auto scan_with_native_fs = [&](const std::string &dir) -> int {
+    FS_Archive sdmc_archive;
+    Result rc = FSUSER_OpenArchive(&sdmc_archive, ARCHIVE_SDMC,
+                                   fsMakePath(PATH_EMPTY, ""));
+    if (R_FAILED(rc))
+      return 1;
+
+    std::string rel_path = sdmc_to_archive_relpath(dir);
+    Handle dir_handle = 0;
+    rc = FSUSER_OpenDirectory(&dir_handle, sdmc_archive,
+                              fsMakePath(PATH_ASCII, rel_path.c_str()));
+    if (R_FAILED(rc)) {
+      FSUSER_CloseArchive(sdmc_archive);
+      return 1;
+    }
+
+    while (true) {
+      FS_DirectoryEntry entries[16];
+      u32 read_count = 0;
+      rc = FSDIR_Read(dir_handle, &read_count, 16, entries);
+      if (R_FAILED(rc) || read_count == 0)
         break;
+
+      for (u32 i = 0; i < read_count; i++) {
+        if (entries[i].attributes & FS_ATTRIBUTE_DIRECTORY)
+          continue;
+
+        std::string filename;
+        if (!utf16_name_to_utf8(entries[i].name, &filename))
+          continue;
+        if (filename.empty())
+          continue;
+        append_book_from_filename(this, filename.c_str());
       }
     }
+
+    FSDIR_Close(dir_handle);
+    FSUSER_CloseArchive(sdmc_archive);
+    return 0;
+  };
+
+  auto scan_with_posix_fallback = [&](const std::string &dir) -> int {
+    DIR *dp = opendir(dir.c_str());
     if (!dp)
       return 1;
-  }
 
-  struct dirent *ent;
-  while ((ent = readdir(dp))) {
-    char *filename = ent->d_name;
-    if (*filename == '.')
-      continue;
-    // Starting from the end, find the file extension.
-    char *c;
-    for (c = filename + strlen(filename) - 1; c != filename && *c != '.'; c--)
-      ;
-    if (!strcmp(".epub", c)) {
-      log_filename_stage(this, "d_name", filename);
-      Book *book = new Book(this);
-      book->SetFolderName(bookdir.c_str());
-      book->SetFileName(filename);
-      book->SetTitle(filename);
-      log_filename_stage(this, "book.filename", book->GetFileName());
-      log_filename_stage(this, "book.title", book->GetTitle());
-      book->format = FORMAT_EPUB;
-      books.push_back(book);
-      bookcount++;
+    struct dirent *ent;
+    while ((ent = readdir(dp))) {
+      append_book_from_filename(this, ent->d_name);
+    }
+    closedir(dp);
+    return 0;
+  };
+
+  // Prefer native FS API (UTF-16 filenames), keep POSIX as safety fallback.
+  if (scan_with_native_fs(bookdir) == 0)
+    return 0;
+
+  const char *fallbacks[] = {"sdmc:/book", "sdmc:/books", NULL};
+  for (int i = 0; fallbacks[i]; i++) {
+    if (scan_with_native_fs(fallbacks[i]) == 0) {
+      bookdir = std::string(fallbacks[i]);
+      return 0;
     }
   }
-  closedir(dp);
-  return 0;
+
+  if (scan_with_posix_fallback(bookdir) == 0)
+    return 0;
+
+  for (int i = 0; fallbacks[i]; i++) {
+    if (scan_with_posix_fallback(fallbacks[i]) == 0) {
+      bookdir = std::string(fallbacks[i]);
+      return 0;
+    }
+  }
+
+  return 1;
 }
 
 // 3DS touch input — map physical touch to our buffer coordinate system.
