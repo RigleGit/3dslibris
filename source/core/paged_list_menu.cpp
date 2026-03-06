@@ -191,6 +191,14 @@ void PagedListMenu::ActivateSelected() {
   if (!app || !app->bookcurrent || buttons.empty() || selected >= target_pages.size())
     return;
 
+  if (app) {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "LIST activate title=%s sel=%u page=%u cur=%u",
+             header_title.c_str(), (unsigned)selected,
+             (unsigned)target_pages[selected],
+             (unsigned)app->bookcurrent->GetPosition());
+    app->PrintStatus(msg);
+  }
   app->bookcurrent->SetPosition(target_pages[selected]);
   app->mode = APP_MODE_BOOK;
   app->bookcurrent->GetPage()->Draw(app->ts);
