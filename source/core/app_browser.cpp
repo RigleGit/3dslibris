@@ -207,6 +207,65 @@ static bool TryRepairMojibakeUtf8(const std::string &in, std::string *out) {
   return true;
 }
 
+static bool TryRepairFullwidthByteMojibake(const std::string &in,
+                                           std::string *out) {
+  if (!out || in.empty())
+    return false;
+
+  // Some FS/libc paths return each non-ASCII byte b as U+FF00+b, encoded in
+  // UTF-8 (e.g. "í" C3 AD becomes "ￃﾭ": EF BF 83 EF BE AD).
+  // Collapse that representation back to raw bytes and accept only if the
+  // resulting stream is valid UTF-8 and contains UTF-8-like lead/continuation.
+  std::string collapsed;
+  collapsed.reserve(in.size());
+  std::vector<unsigned char> mapped;
+  mapped.reserve(in.size() / 3);
+
+  bool changed = false;
+  for (size_t i = 0; i < in.size();) {
+    unsigned char b0 = (unsigned char)in[i];
+    if (i + 2 < in.size() && b0 == 0xEF) {
+      unsigned char b1 = (unsigned char)in[i + 1];
+      unsigned char b2 = (unsigned char)in[i + 2];
+      if (b1 == 0xBE || b1 == 0xBF) {
+        unsigned char recovered = 0;
+        if (b1 == 0xBE) {
+          recovered = (unsigned char)(0x80 + b2); // U+FF80..U+FFBF
+        } else {
+          recovered = (unsigned char)(0xC0 + b2); // U+FFC0..U+FFFF
+        }
+        collapsed.push_back((char)recovered);
+        mapped.push_back(recovered);
+        i += 3;
+        changed = true;
+        continue;
+      }
+    }
+    collapsed.push_back((char)b0);
+    i++;
+  }
+
+  if (!changed || mapped.size() < 2)
+    return false;
+
+  bool has_utf8_pair = false;
+  for (size_t i = 0; i + 1 < mapped.size(); i++) {
+    unsigned char lead = mapped[i];
+    unsigned char cont = mapped[i + 1];
+    if (lead >= 0xC2 && lead <= 0xF4 && cont >= 0x80 && cont <= 0xBF) {
+      has_utf8_pair = true;
+      break;
+    }
+  }
+  if (!has_utf8_pair)
+    return false;
+  if (!LooksLikeValidUtf8(collapsed))
+    return false;
+
+  *out = collapsed;
+  return true;
+}
+
 static std::string HexBytesForLog(const std::string &s, size_t max_bytes = 32) {
   static const char hex[] = "0123456789ABCDEF";
   std::string out;
@@ -251,16 +310,37 @@ static void LogUtf8StageOnce(Book *book, const char *stage,
   book->GetApp()->PrintStatus(msg);
 }
 
-static std::string NormalizeDisplayUtf8(const std::string &raw) {
+static std::string NormalizeDisplayUtf8(const std::string &raw,
+                                        bool *repaired_fullwidth = nullptr,
+                                        bool *repaired_legacy = nullptr) {
+  if (repaired_fullwidth)
+    *repaired_fullwidth = false;
+  if (repaired_legacy)
+    *repaired_legacy = false;
+
   if (raw.empty())
     return raw;
-  if (!LooksLikeValidUtf8(raw))
-    return LegacyBytesToUtf8(raw);
 
+  std::string s = raw;
   std::string repaired;
-  if (TryRepairMojibakeUtf8(raw, &repaired))
+  if (TryRepairFullwidthByteMojibake(s, &repaired)) {
+    s = repaired;
+    if (repaired_fullwidth)
+      *repaired_fullwidth = true;
+  }
+
+  if (!LooksLikeValidUtf8(s)) {
+    if (repaired_legacy)
+      *repaired_legacy = true;
+    return LegacyBytesToUtf8(s);
+  }
+
+  if (TryRepairMojibakeUtf8(s, &repaired)) {
+    if (repaired_legacy)
+      *repaired_legacy = true;
     return repaired;
-  return raw;
+  }
+  return s;
 }
 
 static std::string BuildBrowserDisplayName(Book *book) {
@@ -270,7 +350,14 @@ static std::string BuildBrowserDisplayName(Book *book) {
   std::string raw = book->GetFileName() ? book->GetFileName() : "";
   LogUtf8StageOnce(book, "filename_raw", raw);
 
-  std::string normalized = NormalizeDisplayUtf8(raw);
+  bool repaired_fullwidth = false;
+  bool repaired_legacy = false;
+  std::string normalized =
+      NormalizeDisplayUtf8(raw, &repaired_fullwidth, &repaired_legacy);
+  if (repaired_fullwidth)
+    LogUtf8StageOnce(book, "filename_ff_repair", normalized);
+  if (repaired_legacy)
+    LogUtf8StageOnce(book, "filename_legacy_fix", normalized);
   LogUtf8StageOnce(book, "filename_norm", normalized);
 
   size_t dot = normalized.find_last_of('.');
