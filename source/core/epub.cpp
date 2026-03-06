@@ -482,6 +482,19 @@ static std::string BuildDocPath(const std::string &opf_folder,
   return NormalizePath(opf_folder + "/" + UrlDecode(href));
 }
 
+static bool ContainsNoCase(const std::string &haystack,
+                           const std::string &needle) {
+  if (needle.empty())
+    return true;
+  if (haystack.empty())
+    return false;
+  std::string h = haystack;
+  std::string n = needle;
+  std::transform(h.begin(), h.end(), h.begin(), tolower);
+  std::transform(n.begin(), n.end(), n.begin(), tolower);
+  return h.find(n) != std::string::npos;
+}
+
 static bool ContainsToken(const std::string &list, const std::string &token) {
   size_t start = 0;
   while (start < list.size()) {
@@ -506,6 +519,45 @@ static bool FindManifestItemPath(epub_data_t &data, const std::string &id,
       return true;
     }
   }
+  return false;
+}
+
+static bool FindLikelyCoverImagePath(epub_data_t &data,
+                                     const std::string &opf_folder,
+                                     std::string &path_out) {
+  // 1) Standard explicit cover-id.
+  if (!data.coverid.empty() &&
+      FindManifestItemPath(data, data.coverid, opf_folder, path_out)) {
+    for (auto item : data.manifest) {
+      if (item && item->id == data.coverid &&
+          item->media_type.find("image/") == 0) {
+        return true;
+      }
+    }
+  }
+
+  // 2) Heuristic: image item whose id/href/properties looks like "cover".
+  for (auto item : data.manifest) {
+    if (!item || item->media_type.find("image/") != 0)
+      continue;
+    if (ContainsNoCase(item->id, "cover") ||
+        ContainsNoCase(item->href, "cover") ||
+        ContainsNoCase(item->href, "portada") ||
+        ContainsNoCase(item->properties, "cover")) {
+      path_out = BuildDocPath(opf_folder, item->href);
+      return true;
+    }
+  }
+
+  // 3) Fallback: first image in manifest.
+  for (auto item : data.manifest) {
+    if (!item || item->media_type.find("image/") != 0)
+      continue;
+    path_out = BuildDocPath(opf_folder, item->href);
+    return true;
+  }
+
+  path_out.clear();
   return false;
 }
 
@@ -1037,18 +1089,12 @@ int epub(Book *book, std::string name, bool metadataonly) {
       if (parsedata.creator.length())
         book->SetAuthor(parsedata.creator);
     }
-    // Find cover image path from manifest
-    if (parsedata.coverid.length()) {
-      for (auto item : parsedata.manifest) {
-        if (item->id == parsedata.coverid) {
-          std::string coverpath = folder;
-          if (coverpath.length())
-            coverpath += "/";
-          coverpath += item->href;
-          book->coverImagePath = coverpath;
-          break;
-        }
-      }
+    // Find cover image path (explicit metadata first, then robust fallbacks).
+    std::string coverpath;
+    if (FindLikelyCoverImagePath(parsedata, folder, coverpath)) {
+      book->coverImagePath = coverpath;
+    } else {
+      book->coverImagePath.clear();
     }
     unzClose(uf);
     epub_data_delete(&parsedata);
