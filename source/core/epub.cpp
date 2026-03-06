@@ -1056,6 +1056,10 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
   if (finalH > thumbH)
     finalH = thumbH;
 
+  if (book->coverPixels) {
+    delete[] book->coverPixels;
+    book->coverPixels = nullptr;
+  }
   book->coverPixels = new u16[finalW * finalH];
   book->coverWidth = finalW;
   book->coverHeight = finalH;

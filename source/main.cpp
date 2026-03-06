@@ -86,6 +86,8 @@ int main(int argc, char **argv) {
   mkdir("sdmc:/3ds/3dslibris", 0777);
   mkdir("sdmc:/3ds/3dslibris/book", 0777);
   mkdir("sdmc:/3ds/3dslibris/font", 0777);
+  mkdir("sdmc:/3ds/3dslibris/cache", 0777);
+  mkdir("sdmc:/3ds/3dslibris/cache/covers", 0777);
 
   app = new App();
   int result = app->Run();

@@ -33,6 +33,11 @@
 
 namespace {
 
+static const char *kCoverCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
+static const char *kCoverCacheDir = "sdmc:/3ds/3dslibris/cache/covers";
+static const int kCoverThumbMaxW = 85;
+static const int kCoverThumbMaxH = 115;
+
 static std::string TrimSpaces(const std::string &s) {
   size_t start = 0;
   while (start < s.size() && s[start] == ' ')
@@ -51,6 +56,120 @@ static bool HasExtCI(const char *name, const char *ext) {
   if (elen == 0 || nlen < elen)
     return false;
   return strcasecmp(name + nlen - elen, ext) == 0;
+}
+
+static uint64_t Fnv1a64(const std::string &s) {
+  uint64_t hash = 1469598103934665603ULL;
+  for (size_t i = 0; i < s.size(); i++) {
+    hash ^= (uint8_t)s[i];
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+static void EnsureCoverCacheDirs() {
+  static bool initialized = false;
+  if (initialized)
+    return;
+  mkdir(kCoverCacheBaseDir, 0777);
+  mkdir(kCoverCacheDir, 0777);
+  initialized = true;
+}
+
+static std::string BuildCoverCachePath(const std::string &book_path) {
+  struct stat st;
+  long long fsize = 0;
+  long long fmtime = 0;
+  if (stat(book_path.c_str(), &st) == 0) {
+    fsize = (long long)st.st_size;
+    fmtime = (long long)st.st_mtime;
+  }
+
+  std::string key = book_path;
+  key.push_back('|');
+  key += std::to_string(fsize);
+  key.push_back('|');
+  key += std::to_string(fmtime);
+  uint64_t h = Fnv1a64(key);
+
+  char out[160];
+  snprintf(out, sizeof(out), "%s/%016llx.cvr", kCoverCacheDir,
+           (unsigned long long)h);
+  return std::string(out);
+}
+
+static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
+  if (!book)
+    return false;
+  EnsureCoverCacheDirs();
+
+  std::string cache_path = BuildCoverCachePath(book_path);
+  FILE *fp = fopen(cache_path.c_str(), "rb");
+  if (!fp)
+    return false;
+
+  u8 header[8];
+  bool ok = fread(header, 1, sizeof(header), fp) == sizeof(header);
+  if (!ok || memcmp(header, "CVR1", 4) != 0) {
+    fclose(fp);
+    return false;
+  }
+
+  u16 w = (u16)header[4] | ((u16)header[5] << 8);
+  u16 h = (u16)header[6] | ((u16)header[7] << 8);
+  if (w == 0 || h == 0 || w > kCoverThumbMaxW || h > kCoverThumbMaxH) {
+    fclose(fp);
+    return false;
+  }
+
+  size_t count = (size_t)w * (size_t)h;
+  std::vector<u16> pixels(count);
+  if (fread(pixels.data(), sizeof(u16), count, fp) != count) {
+    fclose(fp);
+    return false;
+  }
+  fclose(fp);
+
+  if (book->coverPixels) {
+    delete[] book->coverPixels;
+    book->coverPixels = nullptr;
+  }
+  book->coverPixels = new u16[count];
+  if (!book->coverPixels)
+    return false;
+  memcpy(book->coverPixels, pixels.data(), count * sizeof(u16));
+  book->coverWidth = w;
+  book->coverHeight = h;
+  return true;
+}
+
+static bool SaveCoverCache(Book *book, const std::string &book_path) {
+  if (!book || !book->coverPixels || book->coverWidth <= 0 ||
+      book->coverHeight <= 0) {
+    return false;
+  }
+  if (book->coverWidth > kCoverThumbMaxW || book->coverHeight > kCoverThumbMaxH)
+    return false;
+
+  EnsureCoverCacheDirs();
+  std::string cache_path = BuildCoverCachePath(book_path);
+  FILE *fp = fopen(cache_path.c_str(), "wb");
+  if (!fp)
+    return false;
+
+  u8 header[8];
+  memcpy(header, "CVR1", 4);
+  header[4] = (u8)(book->coverWidth & 0xFF);
+  header[5] = (u8)((book->coverWidth >> 8) & 0xFF);
+  header[6] = (u8)(book->coverHeight & 0xFF);
+  header[7] = (u8)((book->coverHeight >> 8) & 0xFF);
+  bool ok = fwrite(header, 1, sizeof(header), fp) == sizeof(header);
+  size_t count = (size_t)book->coverWidth * (size_t)book->coverHeight;
+  if (ok) {
+    ok = fwrite(book->coverPixels, sizeof(u16), count, fp) == count;
+  }
+  fclose(fp);
+  return ok;
 }
 
 static bool LooksLikeValidUtf8(const std::string &s) {
@@ -732,6 +851,17 @@ void App::browser_init(void) {
 
     // In browser_draw we render fallback title manually for no-cover books.
     buttons[i]->SetLabel1(std::string(""));
+
+    // Fast path: preload thumbnail from on-disk cache (if available).
+    std::string path = bookdir + "/" + books[i]->GetFileName();
+    if (TryLoadCoverCache(books[i], path)) {
+      books[i]->coverTried = true;
+      if (books[i]->format == FORMAT_EPUB) {
+        // With a valid cached cover, skip metadata indexing in browser.
+        books[i]->metadataIndexTried = true;
+        books[i]->metadataIndexed = true;
+      }
+    }
   }
 
   buttonprev.Init(ts);
@@ -791,12 +921,17 @@ void App::browser_draw(void) {
        !metadata_work_done && (i < bookcount) &&
        (i < browserstart + APP_BROWSER_BUTTON_COUNT);
        i++) {
-    if (books[i] && books[i]->format == FORMAT_EPUB && !books[i]->metadataIndexTried) {
+    if (books[i] && books[i]->format == FORMAT_EPUB && !books[i]->coverPixels &&
+        !books[i]->metadataIndexTried) {
       books[i]->Index();
       metadata_work_done = true;
       browser_view_dirty = true;
     }
   }
+
+  // Background cover generation (one visible book per frame) so opening
+  // the browser feels snappy while new books get cached progressively.
+  bool cover_work_done = false;
 
   for (int i = browserstart;
        (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT); i++) {
@@ -808,21 +943,31 @@ void App::browser_draw(void) {
     int btnX = GRID_X0 + col * CELL_W;
     int btnY = GRID_Y0 + row * CELL_H;
 
-    if (books[i] == bookselected && !books[i]->coverPixels &&
-        !books[i]->coverTried) {
+    if (!cover_work_done && !books[i]->coverPixels && !books[i]->coverTried) {
+      int rc = 1;
+      bool attempted = false;
+      std::string path = bookdir + "/" + books[i]->GetFileName();
+
       if (books[i]->format == FORMAT_EPUB) {
         if (books[i]->metadataIndexTried) {
+          attempted = true;
           if (!books[i]->coverImagePath.empty()) {
-            std::string path = bookdir + "/" + books[i]->GetFileName();
-            epub_extract_cover(books[i], path);
+            rc = epub_extract_cover(books[i], path);
           }
-          books[i]->coverTried = true;
         }
       } else if (books[i]->format == FORMAT_XHTML &&
                  HasExtCI(books[i]->GetFileName(), ".fb2")) {
-        std::string path = bookdir + "/" + books[i]->GetFileName();
-        fb2_extract_cover(books[i], path);
+        attempted = true;
+        rc = fb2_extract_cover(books[i], path);
+      }
+
+      if (attempted) {
+        if (rc == 0 && books[i]->coverPixels) {
+          SaveCoverCache(books[i], path);
+          browser_view_dirty = true;
+        }
         books[i]->coverTried = true;
+        cover_work_done = true;
       }
     }
 
