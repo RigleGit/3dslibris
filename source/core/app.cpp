@@ -655,6 +655,12 @@ void App::ShowBookmarksView() {
 }
 
 void App::ShowChaptersView() {
+  if (!bookcurrent || bookcurrent->format != FORMAT_EPUB ||
+      bookcurrent->GetChapters().empty()) {
+    PrintStatus("Index unavailable: no EPUB chapters");
+    ShowSettingsView(true);
+    return;
+  }
   if (bookcurrent && bookcurrent->format == FORMAT_EPUB &&
       !bookcurrent->tocResolveTried) {
     QueueTocResolve(bookcurrent);

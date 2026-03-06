@@ -28,6 +28,14 @@ static const int PREFS_LIBRARY_BTN_Y = 286;
 static const int PREFS_LIBRARY_BTN_W = 76;
 static const int PREFS_LIBRARY_BTN_H = 26;
 
+static bool CanOpenBookIndexInCurrentContext(App *app) {
+  if (!app || !app->IsBookSettingsContext() || !app->bookcurrent)
+    return false;
+  if (app->bookcurrent->format != FORMAT_EPUB)
+    return false;
+  return !app->bookcurrent->GetChapters().empty();
+}
+
 u8 App::PrefsVisibleButtonCount() const {
   // General settings hide per-book actions like index/bookmarks.
   return prefs_book_context ? PREFS_BUTTON_COUNT : PREFS_BUTTON_INDEX;
@@ -290,9 +298,14 @@ void App::PrefsRefreshButton(int index) {
     break;
   }
   case PREFS_BUTTON_INDEX:
-    prefsButtons[PREFS_BUTTON_INDEX].SetLabel2((prefs_book_context && bookcurrent)
-                                                   ? std::string(">")
-                                                   : std::string("(open selected book)"));
+    if (CanOpenBookIndexInCurrentContext(this)) {
+      prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
+    } else if (prefs_book_context) {
+      prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string("(not available)"));
+    } else {
+      prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(
+          std::string("(open selected book)"));
+    }
     break;
   case PREFS_BUTTON_BOOKMARKS:
     prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
@@ -332,7 +345,13 @@ void App::PrefsHandlePress() {
 
   if (prefsSelected == PREFS_BUTTON_INDEX) {
     if (prefs_book_context && bookcurrent) {
-      ShowChaptersView();
+      if (CanOpenBookIndexInCurrentContext(this)) {
+        ShowChaptersView();
+      } else {
+        PrintStatus("Index unavailable for this book");
+        PrefsRefreshButton(PREFS_BUTTON_INDEX);
+        prefs_view_dirty = true;
+      }
     } else if (!prefs_book_context && bookselected) {
       OpenBook();
     }
