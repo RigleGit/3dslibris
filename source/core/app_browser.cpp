@@ -190,6 +190,171 @@ static bool TryRepairMojibakeUtf8(const std::string &in, std::string *out) {
   return true;
 }
 
+static bool DecodeUtf8Codepoint(const std::string &s, size_t pos, u32 *cp,
+                                size_t *step) {
+  if (!cp || !step || pos >= s.size())
+    return false;
+
+  const unsigned char c0 = (unsigned char)s[pos];
+  if (c0 < 0x80) {
+    *cp = c0;
+    *step = 1;
+    return true;
+  }
+
+  if ((c0 & 0xE0) == 0xC0 && pos + 1 < s.size()) {
+    const unsigned char c1 = (unsigned char)s[pos + 1];
+    if ((c1 & 0xC0) == 0x80) {
+      *cp = ((u32)(c0 & 0x1F) << 6) | (u32)(c1 & 0x3F);
+      *step = 2;
+      return true;
+    }
+  } else if ((c0 & 0xF0) == 0xE0 && pos + 2 < s.size()) {
+    const unsigned char c1 = (unsigned char)s[pos + 1];
+    const unsigned char c2 = (unsigned char)s[pos + 2];
+    if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80) {
+      *cp = ((u32)(c0 & 0x0F) << 12) | ((u32)(c1 & 0x3F) << 6) |
+            (u32)(c2 & 0x3F);
+      *step = 3;
+      return true;
+    }
+  } else if ((c0 & 0xF8) == 0xF0 && pos + 3 < s.size()) {
+    const unsigned char c1 = (unsigned char)s[pos + 1];
+    const unsigned char c2 = (unsigned char)s[pos + 2];
+    const unsigned char c3 = (unsigned char)s[pos + 3];
+    if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
+      *cp = ((u32)(c0 & 0x07) << 18) | ((u32)(c1 & 0x3F) << 12) |
+            ((u32)(c2 & 0x3F) << 6) | (u32)(c3 & 0x3F);
+      *step = 4;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static void AppendAsciiFolded(u32 cp, std::string *out) {
+  if (!out)
+    return;
+
+  if (cp < 0x80) {
+    out->push_back((char)cp);
+    return;
+  }
+
+  // Skip combining diacritics.
+  if (cp >= 0x300 && cp <= 0x36F)
+    return;
+
+  // Common punctuation.
+  if (cp == 0x2018 || cp == 0x2019 || cp == 0x2032) {
+    out->push_back('\'');
+    return;
+  }
+  if (cp == 0x201C || cp == 0x201D || cp == 0x2033) {
+    out->push_back('"');
+    return;
+  }
+  if (cp == 0x2013 || cp == 0x2014) {
+    out->push_back('-');
+    return;
+  }
+  if (cp == 0x00A0) {
+    out->push_back(' ');
+    return;
+  }
+
+  // Latin letters with diacritics -> base ASCII.
+  switch (cp) {
+  case 0x00C0:
+  case 0x00C1:
+  case 0x00C2:
+  case 0x00C3:
+  case 0x00C4:
+  case 0x00C5:
+  case 0x00E0:
+  case 0x00E1:
+  case 0x00E2:
+  case 0x00E3:
+  case 0x00E4:
+  case 0x00E5:
+    out->push_back('a');
+    return;
+  case 0x00C8:
+  case 0x00C9:
+  case 0x00CA:
+  case 0x00CB:
+  case 0x00E8:
+  case 0x00E9:
+  case 0x00EA:
+  case 0x00EB:
+    out->push_back('e');
+    return;
+  case 0x00CC:
+  case 0x00CD:
+  case 0x00CE:
+  case 0x00CF:
+  case 0x00EC:
+  case 0x00ED:
+  case 0x00EE:
+  case 0x00EF:
+    out->push_back('i');
+    return;
+  case 0x00D2:
+  case 0x00D3:
+  case 0x00D4:
+  case 0x00D5:
+  case 0x00D6:
+  case 0x00F2:
+  case 0x00F3:
+  case 0x00F4:
+  case 0x00F5:
+  case 0x00F6:
+    out->push_back('o');
+    return;
+  case 0x00D9:
+  case 0x00DA:
+  case 0x00DB:
+  case 0x00DC:
+  case 0x00F9:
+  case 0x00FA:
+  case 0x00FB:
+  case 0x00FC:
+    out->push_back('u');
+    return;
+  case 0x00D1:
+  case 0x00F1:
+    out->push_back('n');
+    return;
+  case 0x00C7:
+  case 0x00E7:
+    out->push_back('c');
+    return;
+  default:
+    // Drop unsupported code points in this tiny-cover fallback view.
+    return;
+  }
+}
+
+static std::string ToAsciiCoverLabel(const std::string &utf8) {
+  std::string out;
+  out.reserve(utf8.size());
+
+  for (size_t i = 0; i < utf8.size();) {
+    u32 cp = 0;
+    size_t step = 0;
+    if (!DecodeUtf8Codepoint(utf8, i, &cp, &step)) {
+      // Legacy stray byte fallback.
+      AppendAsciiFolded((u8)utf8[i], &out);
+      i++;
+      continue;
+    }
+    AppendAsciiFolded(cp, &out);
+    i += step;
+  }
+  return TrimSpaces(out);
+}
+
 static std::string BuildFallbackTitle(Book *book) {
   if (!book)
     return "";
@@ -224,64 +389,7 @@ static std::string BuildFallbackTitle(Book *book) {
     prev_space = is_space;
   }
   compact = TrimSpaces(compact);
-
-  // Normalize punctuation/combining marks but preserve letters to avoid
-  // destructive replacements ('?') in titles with accents.
-  std::string safe;
-  safe.reserve(compact.size());
-  for (size_t i = 0; i < compact.size();) {
-    unsigned char c0 = (unsigned char)compact[i];
-    if (c0 < 0x80) {
-      safe.push_back((char)c0);
-      i++;
-      continue;
-    }
-
-    if (i + 1 < compact.size()) {
-      unsigned char c1 = (unsigned char)compact[i + 1];
-      // Remove combining marks U+0300..U+030F (common in decomposed filenames).
-      if (c0 == 0xCC && c1 >= 0x80 && c1 <= 0x8F) {
-        i += 2;
-        continue;
-      }
-    }
-
-    if (i + 2 < compact.size()) {
-      unsigned char c1 = (unsigned char)compact[i + 1];
-      unsigned char c2 = (unsigned char)compact[i + 2];
-      if (c0 == 0xE2 && c1 == 0x80) {
-        if (c2 == 0x98 || c2 == 0x99) {
-          safe.push_back('\'');
-          i += 3;
-          continue; // ‘ ’
-        }
-        if (c2 == 0x9C || c2 == 0x9D) {
-          safe.push_back('"');
-          i += 3;
-          continue; // “ ”
-        }
-        if (c2 == 0x93 || c2 == 0x94) {
-          safe.push_back('-');
-          i += 3;
-          continue; // – —
-        }
-      }
-    }
-
-    // Preserve UTF-8 bytes for letters/symbols to avoid destructive fallback.
-    size_t step = 1;
-    if ((c0 & 0xE0) == 0xC0)
-      step = 2;
-    else if ((c0 & 0xF0) == 0xE0)
-      step = 3;
-    else if ((c0 & 0xF8) == 0xF0)
-      step = 4;
-    if (i + step > compact.size())
-      step = 1;
-    safe.append(compact, i, step);
-    i += step;
-  }
-  return TrimSpaces(safe);
+  return ToAsciiCoverLabel(compact);
 }
 
 static size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
