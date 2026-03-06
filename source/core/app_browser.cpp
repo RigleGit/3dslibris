@@ -38,6 +38,16 @@ static const char *kCoverCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
 static const char *kCoverCacheDir = "sdmc:/3ds/3dslibris/cache/covers";
 static const int kCoverThumbMaxW = 85;
 static const int kCoverThumbMaxH = 115;
+static const int kBrowserGridCols = 2;
+static const int kBrowserGridRows = 2;
+static const int kBrowserCoverW = 85;
+static const int kBrowserCoverH = 115;
+static const int kBrowserCellW = 115;
+// Reserve a dedicated footer strip for browser buttons.
+static const int kBrowserCellH = 132;
+static const int kBrowserGridX0 = 5;
+static const int kBrowserGridY0 = 3;
+static const int kBrowserFooterY = 302;
 
 static std::string TrimSpaces(const std::string &s) {
   size_t start = 0;
@@ -868,13 +878,6 @@ void App::browser_handleevent() {
   }
 
   else if (keys & KEY_TOUCH) {
-    const int kGridCols = 2;
-    const int kGridRows = 2;
-    const int kCellW = 115;
-    const int kCellH = 140;
-    const int kGridX0 = 5;
-    const int kGridY0 = 3;
-
     auto hitsButtonAt = [&](Button &button, int px, int py, int slack) {
       if (slack <= 0)
         return button.EnclosesPoint((u16)px, (u16)py);
@@ -910,11 +913,12 @@ void App::browser_handleevent() {
 
       // Prefer coarse cell hit-test (cover + title/progress area):
       // single tap selects, tapping selected book opens.
-      if (x >= kGridX0 && y >= kGridY0) {
-        int col = (x - kGridX0) / kCellW;
-        int row = (y - kGridY0) / kCellH;
-        if (col >= 0 && col < kGridCols && row >= 0 && row < kGridRows) {
-          int page_idx = row * kGridCols + col;
+      if (x >= kBrowserGridX0 && y >= kBrowserGridY0) {
+        int col = (x - kBrowserGridX0) / kBrowserCellW;
+        int row = (y - kBrowserGridY0) / kBrowserCellH;
+        if (col >= 0 && col < kBrowserGridCols && row >= 0 &&
+            row < kBrowserGridRows) {
+          int page_idx = row * kBrowserGridCols + col;
           if (page_idx >= 0 && page_idx < APP_BROWSER_BUTTON_COUNT) {
             int book_idx = browserstart + page_idx;
             if (book_idx >= 0 && book_idx < bookcount) {
@@ -956,27 +960,18 @@ void App::browser_handleevent() {
   }
 }
 
-// Grid layout constants for portrait covers
-#define GRID_COLS 2
-#define GRID_ROWS 2
-#define COVER_W 85
-#define COVER_H 115
-#define CELL_W 115
-#define CELL_H 140
-#define GRID_X0 5
-#define GRID_Y0 3
-
 void App::browser_init(void) {
   for (int i = 0; i < bookcount; i++) {
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
-    int col = page_idx % GRID_COLS;
-    int row = page_idx / GRID_COLS;
+    int col = page_idx % kBrowserGridCols;
+    int row = page_idx / kBrowserGridCols;
 
     buttons.push_back(new Button());
     buttons[i]->Init(ts);
     // Button is the cover area - portrait orientation
-    buttons[i]->Resize(COVER_W + 4, COVER_H + 4);
-    buttons[i]->Move(GRID_X0 + col * CELL_W, GRID_Y0 + row * CELL_H);
+    buttons[i]->Resize(kBrowserCoverW + 4, kBrowserCoverH + 4);
+    buttons[i]->Move(kBrowserGridX0 + col * kBrowserCellW,
+                     kBrowserGridY0 + row * kBrowserCellH);
 
     // Cover extraction moved to browser_draw to avoid freezing at startup
 
@@ -996,15 +991,15 @@ void App::browser_init(void) {
   }
 
   buttonprev.Init(ts);
-  buttonprev.Move(2, 300);
+  buttonprev.Move(2, kBrowserFooterY);
   buttonprev.Resize(50, 16);
   buttonprev.Label("prev");
   buttonnext.Init(ts);
-  buttonnext.Move(188, 300);
+  buttonnext.Move(188, kBrowserFooterY);
   buttonnext.Resize(50, 16);
   buttonnext.Label("next");
   buttonprefs.Init(ts);
-  buttonprefs.Move(80, 300);
+  buttonprefs.Move(80, kBrowserFooterY);
   buttonprefs.Resize(78, 16);
   buttonprefs.Label("settings");
 
@@ -1052,14 +1047,14 @@ void App::browser_draw(void) {
     buttons[i]->Draw(ts->screenright, books[i] == bookselected);
 
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
-    int col = page_idx % GRID_COLS;
-    int row = page_idx / GRID_COLS;
-    int btnX = GRID_X0 + col * CELL_W;
-    int btnY = GRID_Y0 + row * CELL_H;
+    int col = page_idx % kBrowserGridCols;
+    int row = page_idx / kBrowserGridCols;
+    int btnX = kBrowserGridX0 + col * kBrowserCellW;
+    int btnY = kBrowserGridY0 + row * kBrowserCellH;
 
     if (books[i]->coverPixels) {
-      int cx = btnX + 2 + (COVER_W - books[i]->coverWidth) / 2;
-      int cy = btnY + 2 + (COVER_H - books[i]->coverHeight) / 2;
+      int cx = btnX + 2 + (kBrowserCoverW - books[i]->coverWidth) / 2;
+      int cy = btnY + 2 + (kBrowserCoverH - books[i]->coverHeight) / 2;
       int w = ts->display.height; // buffer stride
       for (int py = 0; py < books[i]->coverHeight && (cy + py) < 320; py++) {
         for (int px = 0; px < books[i]->coverWidth && (cx + px) < 240; px++) {
@@ -1070,9 +1065,11 @@ void App::browser_draw(void) {
     }
 
     if (books[i] == bookselected) {
-      ts->DrawRect(btnX - 2, btnY - 2, btnX + CELL_W + 2, btnY + CELL_H + 2,
+      ts->DrawRect(btnX - 2, btnY - 2, btnX + kBrowserCellW + 2,
+                   btnY + kBrowserCellH + 2,
                    0xF800); // Red thick outer bounding box
-      ts->DrawRect(btnX - 3, btnY - 3, btnX + CELL_W + 3, btnY + CELL_H + 3,
+      ts->DrawRect(btnX - 3, btnY - 3, btnX + kBrowserCellW + 3,
+                   btnY + kBrowserCellH + 3,
                    0xF800);
       ts->SetStyle(TEXT_STYLE_BOLD);
     } else {
@@ -1095,13 +1092,14 @@ void App::browser_draw(void) {
         truncTitle[bytes] = '\0';
         truncTitle[19] = '\0';
         LogUtf8StageOnce(books[i], "draw_label_cut", std::string(truncTitle));
-        ts->SetPen(btnX, btnY + COVER_H + 12);
+        ts->SetPen(btnX, btnY + kBrowserCoverH + 12);
         ts->PrintString(truncTitle);
       }
     } else {
       LogUtf8StageOnce(books[i], "draw_label_wrap", display_name);
       DrawWrappedTitleInsideCover(ts, display_name, btnX + 2, btnY + 2,
-                                  COVER_W, COVER_H, TEXT_STYLE_BROWSER);
+                                  kBrowserCoverW, kBrowserCoverH,
+                                  TEXT_STYLE_BROWSER);
     }
 
     // Draw progress indicator
@@ -1111,7 +1109,7 @@ void App::browser_draw(void) {
       sprintf(msg, "Pg %d", pos + 1);
     else
       sprintf(msg, "NEW");
-    ts->SetPen(btnX, btnY + COVER_H + 24);
+    ts->SetPen(btnX, btnY + kBrowserCoverH + 24);
     ts->PrintString(msg);
   }
 
@@ -1133,7 +1131,7 @@ void App::browser_draw(void) {
     char pageMsg[16];
     sprintf(pageMsg, "%d/%d", currentPage, totalPages);
     ts->SetPixelSize(8);
-    ts->SetPen(112, 303);
+    ts->SetPen(112, kBrowserFooterY + 3);
     ts->PrintString(pageMsg);
     ts->SetPixelSize(savedPixelSize);
   }
