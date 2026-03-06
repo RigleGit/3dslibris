@@ -847,8 +847,10 @@ void Text::MarkScreenDirty(u16 *target) {
 }
 
 bool Text::BlitToFramebuffer() {
+  if (!screenleft_dirty && !screenright_dirty)
+    return false;
+
   u16 fbW, fbH;
-  bool did_blit = false;
 
   auto blitPage = [&](u8 *fb, u16 *src, u16 logicalHeight) {
     if (!fb || !src)
@@ -895,21 +897,17 @@ bool Text::BlitToFramebuffer() {
     }
   };
 
-  if (screenright_dirty) {
-    // Bottom screen: right page (320x240 physical)
-    u8 *fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fbW, &fbH);
-    blitPage(fbBottom, screenright, 320);
-    screenright_dirty = false;
-    did_blit = true;
-  }
+  // With double-buffering on 3DS, a swap flips both screens. If we only write
+  // one side, the other side can show stale content from an older backbuffer.
+  // So when anything is dirty, refresh both software pages into current
+  // backbuffers before swapping.
+  u8 *fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fbW, &fbH);
+  blitPage(fbBottom, screenright, 320);
 
-  if (screenleft_dirty) {
-    // Top screen: left page (400x240 physical)
-    u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
-    blitPage(fbTop, screenleft, 400);
-    screenleft_dirty = false;
-    did_blit = true;
-  }
+  u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
+  blitPage(fbTop, screenleft, 400);
 
-  return did_blit;
+  screenright_dirty = false;
+  screenleft_dirty = false;
+  return true;
 }
