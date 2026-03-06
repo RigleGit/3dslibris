@@ -179,6 +179,10 @@ static format_t detect_book_format(const char *filename) {
     return FORMAT_EPUB;
   if (len >= 4 && strcasecmp(filename + len - 4, ".fb2") == 0)
     return FORMAT_XHTML;
+  if (len >= 4 && strcasecmp(filename + len - 4, ".txt") == 0)
+    return FORMAT_XHTML;
+  if (len >= 4 && strcasecmp(filename + len - 4, ".rtf") == 0)
+    return FORMAT_XHTML;
   return FORMAT_UNDEF;
 }
 
