@@ -29,6 +29,10 @@
 #include "text.h"
 #include "version.h"
 
+#ifndef UTF8_FILENAME_DIAG
+#define UTF8_FILENAME_DIAG 0
+#endif
+
 App::App() {
   melonds = false;
 
@@ -95,6 +99,7 @@ static bool book_title_lessthan(Book *a, Book *b) {
   return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
 }
 
+#if UTF8_FILENAME_DIAG
 static bool looks_like_valid_utf8(const char *s) {
   if (!s)
     return false;
@@ -144,8 +149,15 @@ static std::string hex_bytes_for_log(const char *s, size_t max_bytes = 32) {
     out += " ...";
   return out;
 }
+#endif
 
 static void log_filename_stage(App *app, const char *stage, const char *value) {
+#if !UTF8_FILENAME_DIAG
+  (void)app;
+  (void)stage;
+  (void)value;
+  return;
+#else
   if (!app || !stage || !value)
     return;
   char msg[512];
@@ -155,6 +167,7 @@ static void log_filename_stage(App *app, const char *stage, const char *value) {
            (unsigned)strlen(value), looks_like_valid_utf8(value) ? 1 : 0,
            bytes.c_str(), value);
   app->PrintStatus(msg);
+#endif
 }
 
 int App::Run(void) {

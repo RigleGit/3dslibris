@@ -23,6 +23,10 @@
 #include "parse.h"
 #include "text.h"
 
+#ifndef UTF8_FILENAME_DIAG
+#define UTF8_FILENAME_DIAG 0
+#endif
+
 #define MIN(x, y) (x < y ? x : y)
 #define MAX(x, y) (x > y ? x : y)
 
@@ -346,6 +350,7 @@ static std::string ComposeLatinCombiningMarks(const std::string &in) {
   return out;
 }
 
+#if UTF8_FILENAME_DIAG
 static std::string HexBytesForLog(const std::string &s, size_t max_bytes = 32) {
   static const char hex[] = "0123456789ABCDEF";
   std::string out;
@@ -368,9 +373,16 @@ static std::string ClipForLog(const std::string &s, size_t max_chars = 72) {
     return s;
   return s.substr(0, max_chars) + "...";
 }
+#endif
 
 static void LogUtf8StageOnce(Book *book, const char *stage,
                              const std::string &value) {
+#if !UTF8_FILENAME_DIAG
+  (void)book;
+  (void)stage;
+  (void)value;
+  return;
+#else
   if (!book || !book->GetApp() || !stage)
     return;
 
@@ -388,6 +400,7 @@ static void LogUtf8StageOnce(Book *book, const char *stage,
            (unsigned)value.size(), LooksLikeValidUtf8(value) ? 1 : 0,
            bytes.c_str(), clipped.c_str());
   book->GetApp()->PrintStatus(msg);
+#endif
 }
 
 static std::string NormalizeDisplayUtf8(const std::string &raw,
