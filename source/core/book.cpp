@@ -12,6 +12,33 @@
 
 namespace {
 
+static bool EqualsAsciiNoCase(const char *a, const char *b) {
+  if (!a || !b)
+    return false;
+  while (*a && *b) {
+    unsigned char ca = (unsigned char)*a;
+    unsigned char cb = (unsigned char)*b;
+    if (ca >= 'A' && ca <= 'Z')
+      ca = (unsigned char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z')
+      cb = (unsigned char)(cb - 'A' + 'a');
+    if (ca != cb)
+      return false;
+    a++;
+    b++;
+  }
+  return *a == '\0' && *b == '\0';
+}
+
+static std::string BasenamePathLocal(const std::string &path) {
+  size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos)
+    return path;
+  if (slash + 1 >= path.size())
+    return "";
+  return path.substr(slash + 1);
+}
+
 static std::string NormalizePathForAnchor(const std::string &path) {
   std::string in = path;
   std::replace(in.begin(), in.end(), '\\', '/');
@@ -181,10 +208,11 @@ static std::string NormalizeDocPath(const std::string &path) {
 static bool XmlNameEquals(const char *name, const char *needle) {
   if (!name || !needle)
     return false;
-  if (!strcmp(name, needle))
+  if (!strcmp(name, needle) || EqualsAsciiNoCase(name, needle))
     return true;
   const char *colon = strrchr(name, ':');
-  return (colon && !strcmp(colon + 1, needle));
+  return (colon && (strcmp(colon + 1, needle) == 0 ||
+                    EqualsAsciiNoCase(colon + 1, needle)));
 }
 
 static bool PathLooksLikeTocDoc(const std::string &path) {
@@ -838,8 +866,63 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
     }
   }
 
+  // Robust fallback for malformed EPUBs where TOC path and parsed doc path differ
+  // but anchor IDs are still consistent.
+  size_t hash = key.find('#');
+  if (hash != std::string::npos && hash + 1 < key.size()) {
+    std::string key_path_lc = ToLowerAsciiLocal(key.substr(0, hash));
+    std::string key_base_lc = ToLowerAsciiLocal(BasenamePathLocal(key_path_lc));
+    std::string key_anchor_lc = ToLowerAsciiLocal(key.substr(hash + 1));
+
+    bool base_anchor_found = false;
+    u16 base_anchor_page = 0;
+    bool base_anchor_ambiguous = false;
+    bool anchor_found = false;
+    u16 anchor_page = 0;
+    bool anchor_ambiguous = false;
+
+    for (const auto &kv : chapter_anchor_pages) {
+      size_t kv_hash = kv.first.find('#');
+      if (kv_hash == std::string::npos || kv_hash + 1 >= kv.first.size())
+        continue;
+      std::string kv_path_lc = ToLowerAsciiLocal(kv.first.substr(0, kv_hash));
+      std::string kv_base_lc = ToLowerAsciiLocal(BasenamePathLocal(kv_path_lc));
+      std::string kv_anchor_lc = ToLowerAsciiLocal(kv.first.substr(kv_hash + 1));
+
+      if (kv_anchor_lc != key_anchor_lc)
+        continue;
+
+      if (!anchor_found) {
+        anchor_found = true;
+        anchor_page = kv.second;
+      } else if (anchor_page != kv.second) {
+        anchor_ambiguous = true;
+      }
+
+      if (!key_base_lc.empty() && kv_base_lc == key_base_lc) {
+        if (!base_anchor_found) {
+          base_anchor_found = true;
+          base_anchor_page = kv.second;
+        } else if (base_anchor_page != kv.second) {
+          base_anchor_ambiguous = true;
+        }
+      }
+    }
+
+    if (base_anchor_found && !base_anchor_ambiguous) {
+      *page_out = base_anchor_page;
+      return true;
+    }
+    if (anchor_found && !anchor_ambiguous) {
+      *page_out = anchor_page;
+      return true;
+    }
+  }
+
   return false;
 }
+
+size_t Book::GetChapterAnchorCount() const { return chapter_anchor_pages.size(); }
 
 void Book::ClearChapterAnchors() { chapter_anchor_pages.clear(); }
 

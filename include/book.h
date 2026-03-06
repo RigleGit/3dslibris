@@ -105,6 +105,7 @@ public:
   u16 RegisterInlineImage(const std::string &path);
   void AddChapterAnchor(const std::string &docpath, const std::string &anchor_id);
   bool FindChapterAnchorPage(const std::string &href, u16 *page_out) const;
+  size_t GetChapterAnchorCount() const;
   void ClearChapterAnchors();
   void SetChapterDocStartPage(const std::string &docpath, u16 page);
   bool FindChapterDocStartPage(const std::string &href, u16 *page_out) const;

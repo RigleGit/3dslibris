@@ -1774,6 +1774,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   size_t stat_exact = 0;
   size_t stat_nofrag = 0;
   size_t stat_anchor = 0;
+  size_t stat_with_fragment = 0;
   size_t stat_lc = 0;
   size_t stat_base = 0;
   size_t stat_skip_unmatched = 0;
@@ -1809,6 +1810,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     bool have_page = false;
 
     const bool has_fragment = toc_entries[i].href.find('#') != std::string::npos;
+    if (has_fragment)
+      stat_with_fragment++;
     if (has_fragment) {
       u16 anchor_page = 0;
       if (book->FindChapterAnchorPage(toc_entries[i].href, &anchor_page)) {
@@ -1916,6 +1919,14 @@ int epub_resolve_toc(Book *book, std::string filepath) {
              (unsigned)stat_lc, (unsigned)stat_base,
              (unsigned)stat_skip_unmatched, (unsigned)stat_skip_dup);
     app->PrintStatus(map_msg);
+    if (stat_with_fragment > 0 && stat_anchor == 0) {
+      char warn_msg[160];
+      snprintf(warn_msg, sizeof(warn_msg),
+               "EPUB: TOC fragments unresolved=%u anchor_map=%u",
+               (unsigned)stat_with_fragment,
+               (unsigned)book->GetChapterAnchorCount());
+      app->PrintStatus(warn_msg);
+    }
     app->PrintStatus("EPUB: TOC resolve end");
   }
 
