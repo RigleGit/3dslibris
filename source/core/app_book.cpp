@@ -175,8 +175,6 @@ u8 App::OpenBook(void) {
   PrintStatus("opening book ...");
   if (bookselected->GetTitle())
     PrintStatus(bookselected->GetTitle());
-  gfxFlushBuffers();
-  gfxSwapBuffers();
 
   // Fast path: selected book is already parsed and resident.
   if (bookselected->GetPageCount() > 0) {
@@ -195,6 +193,47 @@ u8 App::OpenBook(void) {
     prefs->Write();
     return 0;
   }
+
+  auto drawOpeningSplash = [&]() {
+    int savedStyle = ts->GetStyle();
+    int savedColorMode = ts->GetColorMode();
+    u16 *savedScreen = ts->GetScreen();
+
+    ts->SetStyle(TEXT_STYLE_BROWSER);
+    ts->SetColorMode(0);
+
+    ts->SetScreen(ts->screenleft);
+    ts->ClearScreen();
+    ts->SetPen(12, 28);
+    ts->PrintString("3dslibris");
+    ts->SetPen(12, 52);
+    ts->PrintString("opening book ...");
+
+    ts->SetScreen(ts->screenright);
+    ts->ClearScreen();
+    ts->SetPen(12, 28);
+    ts->PrintString("opening book ...");
+
+    const char *name = bookselected->GetFileName();
+    if (!name || !*name)
+      name = bookselected->GetTitle();
+    if (name && *name) {
+      ts->SetPen(12, 50);
+      ts->PrintString(name);
+    }
+
+    ts->SetStyle(savedStyle);
+    ts->SetColorMode(savedColorMode);
+    ts->SetScreen(savedScreen);
+
+    if (ts->BlitToFramebuffer()) {
+      gfxFlushBuffers();
+      gfxSwapBuffers();
+    }
+  };
+
+  // While parsing a new book, avoid displaying stale browser highlight state.
+  drawOpeningSplash();
 
   if (bookcurrent && bookcurrent != bookselected)
     bookcurrent->Close();
