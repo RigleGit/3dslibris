@@ -95,6 +95,68 @@ static bool book_title_lessthan(Book *a, Book *b) {
   return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
 }
 
+static bool looks_like_valid_utf8(const char *s) {
+  if (!s)
+    return false;
+  const unsigned char *p = (const unsigned char *)s;
+  while (*p) {
+    unsigned char c = *p;
+    if ((c & 0x80) == 0x00) {
+      p++;
+      continue;
+    }
+    int need = 0;
+    if ((c & 0xE0) == 0xC0)
+      need = 1;
+    else if ((c & 0xF0) == 0xE0)
+      need = 2;
+    else if ((c & 0xF8) == 0xF0)
+      need = 3;
+    else
+      return false;
+
+    p++;
+    for (int i = 0; i < need; i++, p++) {
+      if (!*p || ((*p & 0xC0) != 0x80))
+        return false;
+    }
+  }
+  return true;
+}
+
+static std::string hex_bytes_for_log(const char *s, size_t max_bytes = 32) {
+  static const char hex[] = "0123456789ABCDEF";
+  if (!s)
+    return "";
+  std::string out;
+  size_t n = strlen(s);
+  if (n > max_bytes)
+    n = max_bytes;
+  out.reserve(n * 3 + 8);
+  for (size_t i = 0; i < n; i++) {
+    unsigned char b = (unsigned char)s[i];
+    if (i)
+      out.push_back(' ');
+    out.push_back(hex[(b >> 4) & 0x0F]);
+    out.push_back(hex[b & 0x0F]);
+  }
+  if (strlen(s) > max_bytes)
+    out += " ...";
+  return out;
+}
+
+static void log_filename_stage(App *app, const char *stage, const char *value) {
+  if (!app || !stage || !value)
+    return;
+  char msg[512];
+  std::string bytes = hex_bytes_for_log(value);
+  snprintf(msg, sizeof(msg),
+           "FindBooks %-20s len=%u valid=%d bytes=[%s] text=\"%s\"", stage,
+           (unsigned)strlen(value), looks_like_valid_utf8(value) ? 1 : 0,
+           bytes.c_str(), value);
+  app->PrintStatus(msg);
+}
+
 int App::Run(void) {
   const int ok = 0;
   auto drawBootStatus = [&](const char *lineTop, const char *lineBottom) {
@@ -294,10 +356,13 @@ int App::FindBooks() {
     for (c = filename + strlen(filename) - 1; c != filename && *c != '.'; c--)
       ;
     if (!strcmp(".epub", c)) {
+      log_filename_stage(this, "d_name", filename);
       Book *book = new Book(this);
       book->SetFolderName(bookdir.c_str());
       book->SetFileName(filename);
       book->SetTitle(filename);
+      log_filename_stage(this, "book.filename", book->GetFileName());
+      log_filename_stage(this, "book.title", book->GetTitle());
       book->format = FORMAT_EPUB;
       books.push_back(book);
       bookcount++;

@@ -10,7 +10,9 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
+#include <set>
 
 #include <3ds.h>
 
@@ -205,228 +207,79 @@ static bool TryRepairMojibakeUtf8(const std::string &in, std::string *out) {
   return true;
 }
 
-static bool DecodeUtf8Codepoint(const std::string &s, size_t pos, u32 *cp,
-                                size_t *step) {
-  if (!cp || !step || pos >= s.size())
-    return false;
-
-  const unsigned char c0 = (unsigned char)s[pos];
-  if (c0 < 0x80) {
-    *cp = c0;
-    *step = 1;
-    return true;
-  }
-
-  if ((c0 & 0xE0) == 0xC0 && pos + 1 < s.size()) {
-    const unsigned char c1 = (unsigned char)s[pos + 1];
-    if ((c1 & 0xC0) == 0x80) {
-      *cp = ((u32)(c0 & 0x1F) << 6) | (u32)(c1 & 0x3F);
-      *step = 2;
-      return true;
-    }
-  } else if ((c0 & 0xF0) == 0xE0 && pos + 2 < s.size()) {
-    const unsigned char c1 = (unsigned char)s[pos + 1];
-    const unsigned char c2 = (unsigned char)s[pos + 2];
-    if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80) {
-      *cp = ((u32)(c0 & 0x0F) << 12) | ((u32)(c1 & 0x3F) << 6) |
-            (u32)(c2 & 0x3F);
-      *step = 3;
-      return true;
-    }
-  } else if ((c0 & 0xF8) == 0xF0 && pos + 3 < s.size()) {
-    const unsigned char c1 = (unsigned char)s[pos + 1];
-    const unsigned char c2 = (unsigned char)s[pos + 2];
-    const unsigned char c3 = (unsigned char)s[pos + 3];
-    if ((c1 & 0xC0) == 0x80 && (c2 & 0xC0) == 0x80 && (c3 & 0xC0) == 0x80) {
-      *cp = ((u32)(c0 & 0x07) << 18) | ((u32)(c1 & 0x3F) << 12) |
-            ((u32)(c2 & 0x3F) << 6) | (u32)(c3 & 0x3F);
-      *step = 4;
-      return true;
-    }
-  }
-
-  return false;
-}
-
-static void AppendAsciiFolded(u32 cp, std::string *out) {
-  if (!out)
-    return;
-
-  if (cp < 0x80) {
-    out->push_back((char)cp);
-    return;
-  }
-
-  // Skip combining diacritics.
-  if (cp >= 0x300 && cp <= 0x36F)
-    return;
-
-  // Common punctuation.
-  if (cp == 0x2018 || cp == 0x2019 || cp == 0x2032) {
-    out->push_back('\'');
-    return;
-  }
-  if (cp == 0x201C || cp == 0x201D || cp == 0x2033) {
-    out->push_back('"');
-    return;
-  }
-  if (cp == 0x2013 || cp == 0x2014) {
-    out->push_back('-');
-    return;
-  }
-  if (cp == 0x00A0) {
-    out->push_back(' ');
-    return;
-  }
-  // Some mojibake paths collapse accented í into soft hyphen (U+00AD).
-  // In fallback cover labels this is visually/semantically closer to 'i'.
-  if (cp == 0x00AD || cp == 0x0131) {
-    out->push_back('i');
-    return;
-  }
-
-  // Latin letters with diacritics -> base ASCII.
-  switch (cp) {
-  case 0x00C0:
-  case 0x00C1:
-  case 0x00C2:
-  case 0x00C3:
-  case 0x00C4:
-  case 0x00C5:
-  case 0x00E0:
-  case 0x00E1:
-  case 0x00E2:
-  case 0x00E3:
-  case 0x00E4:
-  case 0x00E5:
-    out->push_back('a');
-    return;
-  case 0x00C8:
-  case 0x00C9:
-  case 0x00CA:
-  case 0x00CB:
-  case 0x00E8:
-  case 0x00E9:
-  case 0x00EA:
-  case 0x00EB:
-    out->push_back('e');
-    return;
-  case 0x00CC:
-  case 0x00CD:
-  case 0x00CE:
-  case 0x00CF:
-  case 0x00EC:
-  case 0x00ED:
-  case 0x00EE:
-  case 0x00EF:
-    out->push_back('i');
-    return;
-  case 0x00D2:
-  case 0x00D3:
-  case 0x00D4:
-  case 0x00D5:
-  case 0x00D6:
-  case 0x00F2:
-  case 0x00F3:
-  case 0x00F4:
-  case 0x00F5:
-  case 0x00F6:
-    out->push_back('o');
-    return;
-  case 0x00D9:
-  case 0x00DA:
-  case 0x00DB:
-  case 0x00DC:
-  case 0x00F9:
-  case 0x00FA:
-  case 0x00FB:
-  case 0x00FC:
-    out->push_back('u');
-    return;
-  case 0x00D1:
-  case 0x00F1:
-    out->push_back('n');
-    return;
-  case 0x00C7:
-  case 0x00E7:
-    out->push_back('c');
-    return;
-  default:
-    // Drop unsupported code points in this tiny-cover fallback view.
-    return;
-  }
-}
-
-static std::string ToAsciiCoverLabel(const std::string &utf8) {
+static std::string HexBytesForLog(const std::string &s, size_t max_bytes = 32) {
+  static const char hex[] = "0123456789ABCDEF";
   std::string out;
-  out.reserve(utf8.size());
-
-  for (size_t i = 0; i < utf8.size();) {
-    u32 cp = 0;
-    size_t step = 0;
-    if (!DecodeUtf8Codepoint(utf8, i, &cp, &step)) {
-      // Legacy stray byte fallback.
-      AppendAsciiFolded((u8)utf8[i], &out);
-      i++;
-      continue;
-    }
-    AppendAsciiFolded(cp, &out);
-    i += step;
+  size_t n = s.size() < max_bytes ? s.size() : max_bytes;
+  out.reserve(n * 3 + 8);
+  for (size_t i = 0; i < n; i++) {
+    unsigned char b = (unsigned char)s[i];
+    if (i)
+      out.push_back(' ');
+    out.push_back(hex[(b >> 4) & 0x0F]);
+    out.push_back(hex[b & 0x0F]);
   }
-  return TrimSpaces(out);
+  if (s.size() > max_bytes)
+    out += " ...";
+  return out;
 }
 
-static std::string BuildFallbackTitle(Book *book) {
+static std::string ClipForLog(const std::string &s, size_t max_chars = 72) {
+  if (s.size() <= max_chars)
+    return s;
+  return s.substr(0, max_chars) + "...";
+}
+
+static void LogUtf8StageOnce(Book *book, const char *stage,
+                             const std::string &value) {
+  if (!book || !book->GetApp() || !stage)
+    return;
+
+  static std::set<std::string> logged;
+  char key[96];
+  snprintf(key, sizeof(key), "%p|%s", (void *)book, stage);
+  if (!logged.insert(std::string(key)).second)
+    return;
+
+  char msg[512];
+  std::string bytes = HexBytesForLog(value);
+  std::string clipped = ClipForLog(value);
+  snprintf(msg, sizeof(msg),
+           "UTF8 flow %-18s len=%u valid=%d bytes=[%s] text=\"%s\"", stage,
+           (unsigned)value.size(), LooksLikeValidUtf8(value) ? 1 : 0,
+           bytes.c_str(), clipped.c_str());
+  book->GetApp()->PrintStatus(msg);
+}
+
+static std::string NormalizeDisplayUtf8(const std::string &raw) {
+  if (raw.empty())
+    return raw;
+  if (!LooksLikeValidUtf8(raw))
+    return LegacyBytesToUtf8(raw);
+
+  std::string repaired;
+  if (TryRepairMojibakeUtf8(raw, &repaired))
+    return repaired;
+  return raw;
+}
+
+static std::string BuildBrowserDisplayName(Book *book) {
   if (!book)
     return "";
-  auto normalizeUtf8 = [](const char *raw) -> std::string {
-    std::string s = raw ? raw : "";
-    if (!LooksLikeValidUtf8(s)) {
-      s = LegacyBytesToUtf8(s);
-    } else {
-      std::string repaired_legacy;
-      if (TryRepairMojibakeUtf8(s, &repaired_legacy))
-        s = repaired_legacy;
-    }
-    return s;
-  };
 
-  std::string file_full = normalizeUtf8(book->GetFileName());
-  std::string file_no_ext = file_full;
-  size_t dot = file_no_ext.find_last_of('.');
+  std::string raw = book->GetFileName() ? book->GetFileName() : "";
+  LogUtf8StageOnce(book, "filename_raw", raw);
+
+  std::string normalized = NormalizeDisplayUtf8(raw);
+  LogUtf8StageOnce(book, "filename_norm", normalized);
+
+  size_t dot = normalized.find_last_of('.');
   if (dot != std::string::npos)
-    file_no_ext = file_no_ext.substr(0, dot);
+    normalized = normalized.substr(0, dot);
 
-  std::string title = normalizeUtf8(book->GetTitle());
-  bool has_real_title = book->metadataIndexed && !title.empty() &&
-                        title != file_full && title != file_no_ext;
-
-  // Prefer EPUB metadata title when available (it is usually proper UTF-8 and
-  // avoids filesystem encoding quirks). Fall back to filename otherwise.
-  std::string name = has_real_title ? title : file_no_ext;
-  bool from_filename = !has_real_title;
-
-  for (size_t i = 0; i < name.size(); i++) {
-    if (name[i] == '_')
-      name[i] = ' ';
-    if (from_filename && name[i] == '-')
-      name[i] = ' ';
-  }
-
-  std::string compact;
-  compact.reserve(name.size());
-  bool prev_space = true;
-  for (size_t i = 0; i < name.size(); i++) {
-    bool is_space = (name[i] == ' ');
-    if (is_space && prev_space)
-      continue;
-    compact.push_back(name[i]);
-    prev_space = is_space;
-  }
-  compact = TrimSpaces(compact);
-  if (from_filename)
-    return ToAsciiCoverLabel(compact);
-  return compact;
+  normalized = TrimSpaces(normalized);
+  LogUtf8StageOnce(book, "filename_final", normalized);
+  return normalized;
 }
 
 static size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
@@ -783,22 +636,28 @@ void App::browser_draw(void) {
       ts->SetStyle(TEXT_STYLE_REGULAR);
     }
 
-    // Draw title:
+    // Draw filename (not EPUB metadata title):
     //  - with cover: below thumbnail (single line)
     //  - without cover: wrapped inside thumbnail rectangle
     ts->SetPixelSize(10);
+    std::string display_name = BuildBrowserDisplayName(books[i]);
+    LogUtf8StageOnce(books[i], "draw_label", display_name);
     if (books[i]->coverPixels) {
-      const char *title = books[i]->GetTitle();
-      if (title && strlen(title)) {
+      if (!display_name.empty()) {
         char truncTitle[20];
-        strncpy(truncTitle, title, 19);
+        size_t bytes = Utf8BytesForCharCount(display_name.c_str(), 19);
+        if (bytes > 19)
+          bytes = 19;
+        memcpy(truncTitle, display_name.c_str(), bytes);
+        truncTitle[bytes] = '\0';
         truncTitle[19] = '\0';
+        LogUtf8StageOnce(books[i], "draw_label_cut", std::string(truncTitle));
         ts->SetPen(btnX, btnY + COVER_H + 12);
         ts->PrintString(truncTitle);
       }
     } else {
-      std::string fallback_title = BuildFallbackTitle(books[i]);
-      DrawWrappedTitleInsideCover(ts, fallback_title, btnX + 2, btnY + 2,
+      LogUtf8StageOnce(books[i], "draw_label_wrap", display_name);
+      DrawWrappedTitleInsideCover(ts, display_name, btnX + 2, btnY + 2,
                                   COVER_W, COVER_H, TEXT_STYLE_BROWSER);
     }
 
