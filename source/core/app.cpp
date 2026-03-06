@@ -456,7 +456,10 @@ int App::Run(void) {
   while (aptMainLoop()) {
     gspWaitForVBlank();
     hidScanInput();
-    ProcessJobs(3); // Cooperative budget per frame (ms).
+    // Keep reading mode responsive: avoid running heavy background jobs while
+    // the user is paging through a book.
+    if (mode != APP_MODE_BOOK)
+      ProcessJobs(3); // Cooperative budget per frame (ms).
 
     switch (mode) {
     case APP_MODE_BOOK:

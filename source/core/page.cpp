@@ -98,13 +98,11 @@ void Page::Draw(Text *ts) {
     return false;
   };
   ts->margin.bottom = leftBottomMargin;
-  // Force-clear both page buffers explicitly to avoid stale artifacts.
-  const u16 bg = ts->GetBgColor();
-  const int bufsize = PAGE_HEIGHT * PAGE_HEIGHT;
-  for (int k = 0; k < bufsize; k++) {
-    ts->screenright[k] = bg;
-    ts->screenleft[k] = bg;
-  }
+  // Clear both page buffers through Text API so dirty flags stay coherent.
+  ts->SetScreen(ts->screenleft);
+  ts->ClearScreen();
+  ts->SetScreen(ts->screenright);
+  ts->ClearScreen();
   ts->SetScreen(ts->screenleft);
 
   u16 i = 0;
