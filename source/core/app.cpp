@@ -195,6 +195,83 @@ static std::string sdmc_to_archive_relpath(const std::string &path) {
   return path;
 }
 
+static bool looks_like_valid_utf8_bytes(const std::string &s) {
+  size_t i = 0;
+  while (i < s.size()) {
+    unsigned char c = (unsigned char)s[i];
+    if ((c & 0x80) == 0x00) {
+      i++;
+      continue;
+    }
+    size_t need = 0;
+    if ((c & 0xE0) == 0xC0)
+      need = 1;
+    else if ((c & 0xF0) == 0xE0)
+      need = 2;
+    else if ((c & 0xF8) == 0xF0)
+      need = 3;
+    else
+      return false;
+    if (i + need >= s.size())
+      return false;
+    for (size_t j = 1; j <= need; j++) {
+      unsigned char cc = (unsigned char)s[i + j];
+      if ((cc & 0xC0) != 0x80)
+        return false;
+    }
+    i += need + 1;
+  }
+  return true;
+}
+
+static std::string normalize_fs_filename_for_io(const char *raw_name) {
+  if (!raw_name)
+    return "";
+  std::string in(raw_name);
+  std::string out;
+  out.reserve(in.size());
+  bool changed = false;
+  std::vector<unsigned char> mapped;
+  mapped.reserve(in.size() / 3);
+
+  for (size_t i = 0; i < in.size();) {
+    unsigned char b0 = (unsigned char)in[i];
+    if (i + 2 < in.size() && b0 == 0xEF) {
+      unsigned char b1 = (unsigned char)in[i + 1];
+      unsigned char b2 = (unsigned char)in[i + 2];
+      if (b1 >= 0xBC && b1 <= 0xBF && b2 >= 0x80 && b2 <= 0xBF) {
+        unsigned char recovered =
+            (unsigned char)(((b1 - 0xBC) << 6) | (b2 - 0x80));
+        out.push_back((char)recovered);
+        mapped.push_back(recovered);
+        i += 3;
+        changed = true;
+        continue;
+      }
+    }
+    out.push_back((char)b0);
+    i++;
+  }
+
+  if (!changed || mapped.size() < 2)
+    return in;
+
+  bool has_utf8_pair = false;
+  for (size_t i = 0; i + 1 < mapped.size(); i++) {
+    unsigned char lead = mapped[i];
+    unsigned char cont = mapped[i + 1];
+    if (lead >= 0xC2 && lead <= 0xF4 && cont >= 0x80 && cont <= 0xBF) {
+      has_utf8_pair = true;
+      break;
+    }
+  }
+  if (!has_utf8_pair)
+    return in;
+  if (!looks_like_valid_utf8_bytes(out))
+    return in;
+  return out;
+}
+
 static bool utf16_name_to_utf8(const u16 *name, std::string *out) {
   if (!name || !out)
     return false;
@@ -228,11 +305,16 @@ static void append_book_from_filename(App *app, const char *filename) {
   if (!has_epub_extension(filename))
     return;
 
-  log_filename_stage(app, "d_name", filename);
+  std::string raw_name(filename);
+  std::string io_name = normalize_fs_filename_for_io(filename);
+  log_filename_stage(app, "d_name", raw_name.c_str());
+  if (io_name != raw_name) {
+    log_filename_stage(app, "d_name_io_fix", io_name.c_str());
+  }
   Book *book = new Book(app);
   book->SetFolderName(app->bookdir.c_str());
-  book->SetFileName(filename);
-  book->SetTitle(filename);
+  book->SetFileName(io_name.c_str());
+  book->SetTitle(io_name.c_str());
   log_filename_stage(app, "book.filename", book->GetFileName());
   log_filename_stage(app, "book.title", book->GetTitle());
   book->format = FORMAT_EPUB;
