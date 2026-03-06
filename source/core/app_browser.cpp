@@ -115,6 +115,21 @@ static bool TryRepairMojibakeUtf8(const std::string &in, std::string *out) {
   if (!out)
     return false;
 
+  // Only attempt this conversion when the string actually looks mojibake-ish
+  // (e.g. visible "Ã"/"Â"). Applying it unconditionally corrupts valid UTF-8
+  // accents like "í" (C3 AD).
+  bool has_mojibake_markers = false;
+  for (size_t i = 0; i + 1 < in.size(); i++) {
+    unsigned char c0 = (unsigned char)in[i];
+    unsigned char c1 = (unsigned char)in[i + 1];
+    if (c0 == 0xC3 && (c1 == 0x82 || c1 == 0x83)) {
+      has_mojibake_markers = true; // "Â" / "Ã"
+      break;
+    }
+  }
+  if (!has_mojibake_markers)
+    return false;
+
   // Repair common "UTF-8 bytes decoded as Latin-1 then re-encoded as UTF-8"
   // mojibake patterns.
   std::string collapsed;
