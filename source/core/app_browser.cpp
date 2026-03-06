@@ -383,8 +383,8 @@ static std::string BuildFallbackTitle(Book *book) {
     file_no_ext = file_no_ext.substr(0, dot);
 
   std::string title = normalizeUtf8(book->GetTitle());
-  bool has_real_title =
-      !title.empty() && title != file_full && title != file_no_ext;
+  bool has_real_title = book->metadataIndexed && !title.empty() &&
+                        title != file_full && title != file_no_ext;
 
   // Prefer EPUB metadata title when available (it is usually proper UTF-8 and
   // avoids filesystem encoding quirks). Fall back to filename otherwise.
@@ -710,11 +710,19 @@ void App::browser_draw(void) {
   ts->SetColorMode(0); // Normal for browser text
   ts->ClearScreen();
 
-  // Metadata/cover work only for the selected book to avoid startup stalls.
-  if (bookselected && bookselected->format == FORMAT_EPUB &&
-      !bookselected->metadataIndexTried) {
-    bookselected->Index();
-    browser_view_dirty = true;
+  // Metadata/cover work: index one visible EPUB per frame to keep UI responsive
+  // while still getting proper titles/covers (avoids filesystem-encoding issues
+  // from raw filenames).
+  bool metadata_work_done = false;
+  for (int i = browserstart;
+       !metadata_work_done && (i < bookcount) &&
+       (i < browserstart + APP_BROWSER_BUTTON_COUNT);
+       i++) {
+    if (books[i] && books[i]->format == FORMAT_EPUB && !books[i]->metadataIndexTried) {
+      books[i]->Index();
+      metadata_work_done = true;
+      browser_view_dirty = true;
+    }
   }
 
   for (int i = browserstart;
