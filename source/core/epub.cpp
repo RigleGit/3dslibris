@@ -535,7 +535,8 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &o
   }
   EpubDiag(app, "EPUB: %s open ok", t);
 
-  char buf[BUFSIZE];
+  // 3DS stack is tight; avoid large BUFSIZE (128KB) on stack here.
+  char buf[8 * 1024];
   int n = 0;
   EpubDiag(app, "EPUB: %s read loop", t);
   while ((n = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0) {
