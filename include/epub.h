@@ -37,3 +37,4 @@ typedef struct {
 
 int epub(Book *book, std::string filepath, bool metadataonly);
 int epub_extract_cover(Book *book, const std::string &epubpath);
+int epub_resolve_toc(Book *book, std::string filepath);

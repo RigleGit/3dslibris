@@ -406,6 +406,8 @@ u8 Book::Open() {
 
   // Page layout is a function of the current style.
   app->ts->SetStyle(TEXT_STYLE_REGULAR);
+  tocResolveTried = false;
+  tocResolved = false;
   u8 err = 1;
   if (format == FORMAT_EPUB) {
     err = epub(this, path, false);

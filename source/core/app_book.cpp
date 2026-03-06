@@ -21,6 +21,7 @@
 void App::HandleEventInBook() {
   u16 pagecurrent = bookcurrent->GetPosition();
   u16 pagecount = bookcurrent->GetPageCount();
+  bool status_dirty = false;
 
   // Use 3DS edge-triggered key state to avoid carry-over/repeat from the key
   // press used to open the book.
@@ -32,6 +33,7 @@ void App::HandleEventInBook() {
       pagecurrent++;
       bookcurrent->SetPosition(pagecurrent);
       bookcurrent->GetPage()->Draw(ts);
+      status_dirty = true;
     }
   } else if (keys & (KEY_B | key.l | key.up)) {
     // page back.
@@ -39,12 +41,14 @@ void App::HandleEventInBook() {
       pagecurrent--;
       bookcurrent->SetPosition(pagecurrent);
       bookcurrent->GetPage()->Draw(ts);
+      status_dirty = true;
     }
   } else if (keys & KEY_X) {
     // cycle color modes: 0=normal, 1=dark, 2=sepia
     int mode = ts->GetColorMode();
     ts->SetColorMode((mode + 1) % 3);
     bookcurrent->GetPage()->Draw(ts);
+    status_dirty = true;
   } else if (keys & KEY_Y) {
     ToggleBookmark();
   } else if (keys & KEY_TOUCH) {
@@ -60,12 +64,14 @@ void App::HandleEventInBook() {
         pagecurrent--;
         bookcurrent->SetPosition(pagecurrent);
         bookcurrent->GetPage()->Draw(ts);
+        status_dirty = true;
       }
     } else {
       if (pagecurrent < pagecount - 1) {
         pagecurrent++;
         bookcurrent->SetPosition(pagecurrent);
         bookcurrent->GetPage()->Draw(ts);
+        status_dirty = true;
       }
     }
   } else if (keys & KEY_START) {
@@ -109,8 +115,12 @@ void App::HandleEventInBook() {
         bookcurrent->SetPosition(*i);
       }
       bookcurrent->GetPage()->Draw(ts);
+      status_dirty = true;
     }
   }
+
+  if (status_dirty)
+    RequestStatusRedraw();
 }
 
 void App::ToggleBookmark() {
@@ -134,6 +144,7 @@ void App::ToggleBookmark() {
   }
 
   bookcurrent->GetPage()->Draw(ts);
+  RequestStatusRedraw();
 }
 
 void App::CloseBook() {
@@ -180,6 +191,7 @@ u8 App::OpenBook(void) {
     if (bookcurrent->GetPosition() >= bookcurrent->GetPageCount())
       bookcurrent->SetPosition(0);
     bookcurrent->GetPage()->Draw(ts);
+    RequestStatusRedraw();
     prefs->Write();
     return 0;
   }
@@ -219,6 +231,7 @@ u8 App::OpenBook(void) {
   if (bookcurrent->GetPosition() >= pageCount)
     bookcurrent->SetPosition(0);
   bookcurrent->GetPage()->Draw(ts);
+  RequestStatusRedraw();
   prefs->Write();
   return 0;
 }

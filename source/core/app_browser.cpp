@@ -18,6 +18,7 @@
 
 #include "book.h"
 #include "button.h"
+#include "chapter_menu.h"
 #include "epub.h"
 #include "fb2.h"
 #include "main.h"
@@ -692,6 +693,132 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
 
 } // namespace
 
+bool App::HasQueuedJob(app_job_type_t type, Book *book) const {
+  for (const auto &job : job_queue) {
+    if (job.type == type && job.book == book)
+      return true;
+  }
+  return false;
+}
+
+void App::EnqueueJob(app_job_type_t type, Book *book) {
+  if (!book)
+    return;
+  if (HasQueuedJob(type, book))
+    return;
+  app_job_t job;
+  job.type = type;
+  job.book = book;
+  job_queue.push_back(job);
+}
+
+void App::QueueBookWarmup(Book *book) {
+  if (!book || book->coverPixels || book->coverTried)
+    return;
+
+  if (book->format == FORMAT_EPUB) {
+    if (!book->metadataIndexTried)
+      EnqueueJob(APP_JOB_INDEX_METADATA, book);
+    EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+  } else if (book->format == FORMAT_XHTML &&
+             HasExtCI(book->GetFileName(), ".fb2")) {
+    EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+  }
+}
+
+void App::QueueTocResolve(Book *book) {
+  if (!book || book->format != FORMAT_EPUB || book->tocResolveTried)
+    return;
+  EnqueueJob(APP_JOB_RESOLVE_TOC, book);
+}
+
+void App::ProcessJobs(u32 budget_ms) {
+  if (job_queue.empty())
+    return;
+
+  auto job_name = [](app_job_type_t t) -> const char * {
+    switch (t) {
+    case APP_JOB_INDEX_METADATA:
+      return "index";
+    case APP_JOB_EXTRACT_COVER:
+      return "cover";
+    case APP_JOB_RESOLVE_TOC:
+      return "toc";
+    default:
+      return "unknown";
+    }
+  };
+
+  u64 start_ms = osGetTime();
+  while (!job_queue.empty()) {
+    app_job_t job = job_queue.front();
+    job_queue.pop_front();
+    if (!job.book)
+      continue;
+
+    Book *book = job.book;
+    int rc = 0;
+    u64 t0 = osGetTime();
+
+    if (job.type == APP_JOB_INDEX_METADATA) {
+      if (book->format == FORMAT_EPUB && !book->metadataIndexTried) {
+        rc = book->Index();
+        if (rc != 0)
+          book->coverTried = true;
+        browser_view_dirty = true;
+      }
+    } else if (job.type == APP_JOB_EXTRACT_COVER) {
+      if (!book->coverPixels && !book->coverTried) {
+        std::string path = bookdir + "/" + book->GetFileName();
+        if (book->format == FORMAT_EPUB) {
+          if (!book->metadataIndexTried) {
+            EnqueueJob(APP_JOB_INDEX_METADATA, book);
+            EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+          } else {
+            if (!book->coverImagePath.empty()) {
+              rc = epub_extract_cover(book, path);
+              if (rc == 0 && book->coverPixels) {
+                SaveCoverCache(book, path);
+              }
+            }
+            book->coverTried = true;
+            browser_view_dirty = true;
+          }
+        } else if (book->format == FORMAT_XHTML &&
+                   HasExtCI(book->GetFileName(), ".fb2")) {
+          rc = fb2_extract_cover(book, path);
+          if (rc == 0 && book->coverPixels) {
+            SaveCoverCache(book, path);
+          }
+          book->coverTried = true;
+          browser_view_dirty = true;
+        }
+      }
+    } else if (job.type == APP_JOB_RESOLVE_TOC) {
+      if (book->format == FORMAT_EPUB && !book->tocResolveTried) {
+        std::string path = bookdir + "/" + book->GetFileName();
+        rc = epub_resolve_toc(book, path);
+        book->tocResolveTried = true;
+        book->tocResolved = (rc == 0);
+        if (mode == APP_MODE_CHAPTERS && book == bookcurrent && chaptermenu) {
+          chaptermenu->Init();
+          chaptermenu->SetDirty(true);
+        }
+      }
+    }
+
+    u64 elapsed = osGetTime() - t0;
+    char msg[256];
+    snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%d ms=%llums book=%s",
+             job_name(job.type), rc, (unsigned long long)elapsed,
+             book->GetFileName() ? book->GetFileName() : "(null)");
+    PrintStatus(msg);
+
+    if (osGetTime() - start_ms >= budget_ms)
+      break;
+  }
+}
+
 void App::browser_handleevent() {
   u32 keys = hidKeysDown();
   const u32 release_mask = KEY_TOUCH | KEY_A | KEY_B | KEY_X | KEY_Y |
@@ -915,38 +1042,12 @@ void App::browser_draw(void) {
   ts->SetScreen(ts->screenright);
   ts->SetColorMode(0); // Normal for browser text
   ts->ClearScreen();
-
-  // Lazy metadata/cover work only for selected book to keep navigation smooth.
-  if (bookselected && !bookselected->coverPixels && !bookselected->coverTried) {
-    std::string selected_path = bookdir + "/" + bookselected->GetFileName();
-    if (bookselected->format == FORMAT_EPUB) {
-      if (!bookselected->metadataIndexTried) {
-        bookselected->Index();
-        browser_view_dirty = true;
-      } else {
-        int rc = 1;
-        if (!bookselected->coverImagePath.empty()) {
-          rc = epub_extract_cover(bookselected, selected_path);
-        }
-        if (rc == 0 && bookselected->coverPixels) {
-          SaveCoverCache(bookselected, selected_path);
-          browser_view_dirty = true;
-        }
-        bookselected->coverTried = true;
-      }
-    } else if (bookselected->format == FORMAT_XHTML &&
-               HasExtCI(bookselected->GetFileName(), ".fb2")) {
-      int rc = fb2_extract_cover(bookselected, selected_path);
-      if (rc == 0 && bookselected->coverPixels) {
-        SaveCoverCache(bookselected, selected_path);
-        browser_view_dirty = true;
-      }
-      bookselected->coverTried = true;
-    }
-  }
+  if (bookselected)
+    QueueBookWarmup(bookselected);
 
   for (int i = browserstart;
        (i < bookcount) && (i < browserstart + APP_BROWSER_BUTTON_COUNT); i++) {
+    QueueBookWarmup(books[i]);
     buttons[i]->Draw(ts->screenright, books[i] == bookselected);
 
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
@@ -1036,20 +1137,10 @@ void App::browser_draw(void) {
     ts->SetPixelSize(savedPixelSize);
   }
 
-  bool pendingLazyWork = false;
-  if (bookselected && !bookselected->coverPixels && !bookselected->coverTried) {
-    if (bookselected->format == FORMAT_EPUB) {
-      pendingLazyWork = true;
-    } else if (bookselected->format == FORMAT_XHTML &&
-               HasExtCI(bookselected->GetFileName(), ".fb2")) {
-      pendingLazyWork = true;
-    }
-  }
-
   // restore state
   ts->SetColorMode(colorMode);
   ts->SetScreen(screen);
   ts->SetStyle(style);
 
-  browser_view_dirty = pendingLazyWork;
+  browser_view_dirty = false;
 }

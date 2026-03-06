@@ -92,6 +92,7 @@ public:
   } display;
   int linespacing;
   bool linebegan, bold, italic;
+  bool screenleft_dirty, screenright_dirty;
 
   Text();
   Text(class App *parent) { app = parent; }
@@ -132,6 +133,15 @@ public:
   void SetFontFile(const char *path, u8 style);
   void SetScreen(u16 *s);
   inline void SetStyle(int astyle) { style = astyle; }
+  void MarkScreenDirty(u16 *target);
+  inline void MarkCurrentScreenDirty() { MarkScreenDirty(screen); }
+  inline void MarkAllScreensDirty() {
+    screenleft_dirty = true;
+    screenright_dirty = true;
+  }
+  inline bool HasDirtyScreens() const {
+    return screenleft_dirty || screenright_dirty;
+  }
 
   void ClearCache();
   void ClearCache(u8 style);
@@ -145,7 +155,7 @@ public:
   void ClearScreen(u16 *, u8, u8, u8);
   void CopyScreen(u16 *src, u16 *dst);
   void SwapScreens();
-  void BlitToFramebuffer();
+  bool BlitToFramebuffer();
 
   void PrintChar(u32 ucs);
   void PrintChar(u32 ucs, u8 style);

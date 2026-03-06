@@ -72,6 +72,9 @@ App::App() {
   prefsSelected = -1;
   prefs_view_dirty = false;
   prefs_book_context = false;
+  status_last_minute = -1;
+  status_last_percent_tenths = -1;
+  status_force_redraw = true;
 
   ts = new Text();
   ts->app = this;
@@ -367,9 +370,10 @@ int App::Run(void) {
     ts->SetColorMode(savedColorMode);
     ts->SetScreen(savedScreen);
 
-    ts->BlitToFramebuffer();
-    gfxFlushBuffers();
-    gfxSwapBuffers();
+    if (ts->BlitToFramebuffer()) {
+      gfxFlushBuffers();
+      gfxSwapBuffers();
+    }
   };
 
   // Start up typesetter.
@@ -394,6 +398,7 @@ int App::Run(void) {
 
   // Construct library.
   PrintStatus("Searching for books...");
+  u64 t_scan_ms = osGetTime();
   if (FindBooks() != ok) {
     PrintStatus("error: no book directory");
     drawBootStatus("No se encontro carpeta de libros",
@@ -405,6 +410,13 @@ int App::Run(void) {
     drawBootStatus("No se encontraron EPUB", bookdir.c_str());
     return 1;
   }
+  {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "TIMING: scan_books=%llums count=%u",
+             (unsigned long long)(osGetTime() - t_scan_ms),
+             (unsigned)bookcount);
+    PrintStatus(msg);
+  }
 
   std::sort(books.begin(), books.end(), &book_title_lessthan);
 
@@ -413,8 +425,15 @@ int App::Run(void) {
   // Apply key mapping/orientation loaded from prefs.
   SetOrientation(orientation);
   PrintStatus("Preparing library...");
+  u64 t_prepare_ms = osGetTime();
   for (auto &book : books) {
     book->GetBookmarks()->sort();
+  }
+  {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "TIMING: prepare_library=%llums",
+             (unsigned long long)(osGetTime() - t_prepare_ms));
+    PrintStatus(msg);
   }
   PrintStatus("Library ready.");
 
@@ -437,6 +456,7 @@ int App::Run(void) {
   while (aptMainLoop()) {
     gspWaitForVBlank();
     hidScanInput();
+    ProcessJobs(3); // Cooperative budget per frame (ms).
 
     switch (mode) {
     case APP_MODE_BOOK:
@@ -483,11 +503,11 @@ int App::Run(void) {
       break;
     }
 
-    // Copy software buffers to 3DS framebuffer
-    ts->BlitToFramebuffer();
-
-    gfxFlushBuffers();
-    gfxSwapBuffers();
+    // Copy software buffers to 3DS framebuffer only when something changed.
+    if (ts->BlitToFramebuffer()) {
+      gfxFlushBuffers();
+      gfxSwapBuffers();
+    }
   }
   return 0;
 }
@@ -632,10 +652,16 @@ void App::ShowBookmarksView() {
 }
 
 void App::ShowChaptersView() {
+  if (bookcurrent && bookcurrent->format == FORMAT_EPUB &&
+      !bookcurrent->tocResolveTried) {
+    QueueTocResolve(bookcurrent);
+  }
   mode = APP_MODE_CHAPTERS;
   ts->SetScreen(ts->screenright);
   chaptermenu->Init();
 }
+
+void App::RequestStatusRedraw() { status_force_redraw = true; }
 
 void App::UpdateStatus() {
   if (mode != APP_MODE_BOOK)
@@ -643,6 +669,25 @@ void App::UpdateStatus() {
   u16 *screen = ts->GetScreen();
   time_t unixTime = time(NULL);
   struct tm *timeStruct = localtime(&unixTime);
+  int minute_of_day = -1;
+  if (timeStruct) {
+    minute_of_day = timeStruct->tm_hour * 60 + timeStruct->tm_min;
+  }
+
+  int percent_tenths = -1;
+  if (bookcurrent && bookcurrent->GetPageCount() > 0) {
+    int pageNum = bookcurrent->GetPosition();
+    int pageCount = bookcurrent->GetPageCount();
+    float percent = pageCount > 1
+                        ? ((float)pageNum / (float)(pageCount - 1)) * 100.0f
+                        : 100.0f;
+    percent_tenths = (int)(percent * 10.0f + 0.5f);
+  }
+
+  if (!status_force_redraw && minute_of_day == status_last_minute &&
+      percent_tenths == status_last_percent_tenths) {
+    return;
+  }
 
   char tmsg[24];
   if (!timeStruct) {
@@ -715,6 +760,9 @@ void App::UpdateStatus() {
   ts->SetStyle(style);
   ts->margin.bottom = savedBottomMargin;
   ts->SetScreen(screen);
+  status_last_minute = minute_of_day;
+  status_last_percent_tenths = percent_tenths;
+  status_force_redraw = false;
 }
 
 void App::SetOrientation(bool turned_right) {

@@ -76,6 +76,8 @@ public:
   bool coverTried;
   bool metadataIndexTried;
   bool metadataIndexed;
+  bool tocResolveTried;
+  bool tocResolved;
 
   Book(App *app);
   ~Book();

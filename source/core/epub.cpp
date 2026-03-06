@@ -702,6 +702,239 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd) {
   return (rc);
 }
 
+static int LoadEpubPackageData(unzFile uf, Book *book, epub_data_t *parsedata,
+                               std::string *opf_folder) {
+  if (!uf || !parsedata || !opf_folder)
+    return 1;
+
+  int rc = unzLocateFile(uf, "META-INF/container.xml", 2); // case-insensitive
+  if (rc != UNZ_OK)
+    return rc;
+
+  rc = unzOpenCurrentFile(uf);
+  if (rc != UNZ_OK)
+    return rc;
+
+  epub_data_init(parsedata);
+  parsedata->book = book;
+  parsedata->type = PARSE_CONTAINER;
+  rc = epub_parse_currentfile(uf, parsedata);
+  int close_rc = unzCloseCurrentFile(uf);
+  if (rc == 0 && close_rc != UNZ_OK)
+    rc = close_rc;
+  if (rc != 0)
+    return rc;
+  if (parsedata->rootfile.empty())
+    return 1;
+
+  *opf_folder = "";
+  size_t pos =
+      parsedata->rootfile.find_last_of("/", parsedata->rootfile.length());
+  if (pos < parsedata->rootfile.length())
+    *opf_folder = parsedata->rootfile.substr(0, pos);
+
+  rc = unzLocateFile(uf, parsedata->rootfile.c_str(), 0);
+  if (rc != UNZ_OK)
+    return rc;
+  rc = unzOpenCurrentFile(uf);
+  if (rc != UNZ_OK)
+    return rc;
+
+  epub_data_init(parsedata);
+  parsedata->book = book;
+  parsedata->type = PARSE_ROOTFILE;
+  rc = epub_parse_currentfile(uf, parsedata);
+  close_rc = unzCloseCurrentFile(uf);
+  if (rc == 0 && close_rc != UNZ_OK)
+    rc = close_rc;
+  return rc;
+}
+
+static const epub_item *FindManifestItemById(const epub_data_t &data,
+                                             const std::string &id) {
+  for (auto item : data.manifest) {
+    if (item && item->id == id)
+      return item;
+  }
+  return nullptr;
+}
+
+static bool IsLikelyContentItem(const epub_item *item) {
+  if (!item)
+    return false;
+  if (item->media_type == "application/xhtml+xml" ||
+      item->media_type == "text/html" || item->media_type == "application/xml" ||
+      item->media_type == "text/xml")
+    return true;
+
+  std::string href = item->href;
+  std::transform(href.begin(), href.end(), href.begin(), tolower);
+  return (href.size() >= 6 && href.substr(href.size() - 6) == ".xhtml") ||
+         (href.size() >= 5 && href.substr(href.size() - 5) == ".html") ||
+         (href.size() >= 4 && href.substr(href.size() - 4) == ".htm");
+}
+
+static void BuildPageStartMapFromPackage(const epub_data_t &parsedata,
+                                         const std::string &opf_folder,
+                                         Book *book,
+                                         std::map<std::string, u16> *out) {
+  if (!book || !out)
+    return;
+  out->clear();
+
+  const std::vector<ChapterEntry> &chapters = book->GetChapters();
+  if (chapters.empty())
+    return;
+
+  size_t chapter_index = 0;
+  auto map_item = [&](const epub_item *item) {
+    if (!item || item->href.empty())
+      return;
+    if (chapter_index >= chapters.size())
+      return;
+    std::string key = NormalizePath(BuildDocPath(opf_folder, item->href));
+    if (key.empty())
+      return;
+    if (out->find(key) == out->end()) {
+      (*out)[key] = chapters[chapter_index].page;
+      chapter_index++;
+    }
+  };
+
+  if (!parsedata.spine.empty()) {
+    for (auto itemref : parsedata.spine) {
+      if (chapter_index >= chapters.size())
+        break;
+      if (!itemref)
+        continue;
+      map_item(FindManifestItemById(parsedata, itemref->idref));
+    }
+  }
+
+  if (out->empty()) {
+    for (auto item : parsedata.manifest) {
+      if (chapter_index >= chapters.size())
+        break;
+      if (!IsLikelyContentItem(item))
+        continue;
+      map_item(item);
+    }
+  }
+
+  if (out->empty()) {
+    for (auto item : parsedata.manifest) {
+      if (chapter_index >= chapters.size())
+        break;
+      map_item(item);
+    }
+  }
+}
+
+static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
+                                      const std::string &opf_folder,
+                                      std::vector<toc_entry_t> *toc_entries,
+                                      App *app) {
+  if (!uf || !toc_entries)
+    return false;
+
+  toc_entries->clear();
+  std::string toc_xml;
+  std::string toc_doc_path;
+  bool toc_loaded = false;
+
+  if (!parsedata.navid.empty() &&
+      FindManifestItemPath(parsedata, parsedata.navid, opf_folder, toc_doc_path)) {
+    if (app) {
+      char msg[192];
+      snprintf(msg, sizeof(msg), "EPUB: try NAV %s", toc_doc_path.c_str());
+      app->PrintStatus(msg);
+    }
+    if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NAV")) {
+      nav_parse_data_t navdata;
+      navdata.entries = toc_entries;
+      navdata.base_path = toc_doc_path;
+      navdata.depth = 0;
+      navdata.toc_nav_depth = 0;
+      navdata.anchor_depth = 0;
+      if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata)) {
+        toc_loaded = true;
+      }
+    } else if (app) {
+      app->PrintStatus("EPUB: NAV skipped (size/format)");
+    }
+  }
+
+  if (!toc_loaded && !parsedata.tocid.empty() &&
+      FindManifestItemPath(parsedata, parsedata.tocid, opf_folder, toc_doc_path)) {
+    if (app) {
+      char msg[192];
+      snprintf(msg, sizeof(msg), "EPUB: try NCX %s", toc_doc_path.c_str());
+      app->PrintStatus(msg);
+    }
+    if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX")) {
+      if (ParseNcxLightweight(toc_xml, toc_doc_path, toc_entries, app))
+        toc_loaded = true;
+    } else if (app) {
+      app->PrintStatus("EPUB: NCX skipped (size/format)");
+    }
+  }
+
+  if (!toc_loaded) {
+    for (auto item : parsedata.manifest) {
+      if (!item)
+        continue;
+      if (item->media_type == "application/xhtml+xml" &&
+          ContainsToken(item->properties, "nav")) {
+        toc_doc_path = BuildDocPath(opf_folder, item->href);
+        if (app) {
+          char msg[192];
+          snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s", toc_doc_path.c_str());
+          app->PrintStatus(msg);
+        }
+        if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NAV-FALLBACK")) {
+          nav_parse_data_t navdata;
+          navdata.entries = toc_entries;
+          navdata.base_path = toc_doc_path;
+          navdata.depth = 0;
+          navdata.toc_nav_depth = 0;
+          navdata.anchor_depth = 0;
+          if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata))
+            toc_loaded = true;
+        } else if (app) {
+          app->PrintStatus("EPUB: fallback NAV skipped");
+        }
+        if (toc_loaded)
+          break;
+      }
+    }
+  }
+
+  if (!toc_loaded) {
+    for (auto item : parsedata.manifest) {
+      if (!item)
+        continue;
+      if (item->media_type == "application/x-dtbncx+xml") {
+        toc_doc_path = BuildDocPath(opf_folder, item->href);
+        if (app) {
+          char msg[192];
+          snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s", toc_doc_path.c_str());
+          app->PrintStatus(msg);
+        }
+        if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX-FALLBACK")) {
+          if (ParseNcxLightweight(toc_xml, toc_doc_path, toc_entries, app))
+            toc_loaded = true;
+        } else if (app) {
+          app->PrintStatus("EPUB: fallback NCX skipped");
+        }
+        if (toc_loaded)
+          break;
+      }
+    }
+  }
+
+  return !toc_entries->empty();
+}
+
 int epub(Book *book, std::string name, bool metadataonly) {
   //! Parse EPUB file.
   //! Set metadataonly to true if you only want the title and author.
@@ -1082,5 +1315,114 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
   }
 
   stbi_image_free(pixels);
+  return 0;
+}
+
+int epub_resolve_toc(Book *book, std::string filepath) {
+  if (!book || filepath.empty())
+    return 1;
+  if (book->format != FORMAT_EPUB)
+    return 2;
+  if (book->GetChapters().empty())
+    return 3;
+
+  App *app = book->GetApp();
+  if (app)
+    app->PrintStatus("EPUB: TOC resolve begin");
+
+  unzFile uf = unzOpen(filepath.c_str());
+  if (!uf)
+    return 4;
+
+  epub_data_t parsedata;
+  std::string opf_folder;
+  int rc = LoadEpubPackageData(uf, book, &parsedata, &opf_folder);
+  if (rc != 0) {
+    epub_data_delete(&parsedata);
+    unzClose(uf);
+    return rc;
+  }
+
+  std::map<std::string, u16> page_start_by_href;
+  BuildPageStartMapFromPackage(parsedata, opf_folder, book, &page_start_by_href);
+
+  std::vector<toc_entry_t> toc_entries;
+  bool loaded = LoadTocEntriesFromPackage(uf, parsedata, opf_folder, &toc_entries,
+                                          app);
+  if (!loaded) {
+    if (app)
+      app->PrintStatus("EPUB: TOC resolve end (no entries)");
+    epub_data_delete(&parsedata);
+    unzClose(uf);
+    return 5;
+  }
+
+  std::vector<ChapterEntry> resolved;
+  std::map<u16, bool> used_pages;
+  size_t fallback_idx = 0;
+  const std::vector<ChapterEntry> &current = book->GetChapters();
+
+  for (size_t i = 0; i < toc_entries.size(); i++) {
+    std::string title = Trim(toc_entries[i].title);
+    if (title.empty())
+      continue;
+
+    u16 page = 0;
+    bool have_page = false;
+
+    std::string key = NormalizePath(toc_entries[i].href);
+    if (!key.empty()) {
+      auto hit = page_start_by_href.find(key);
+      if (hit != page_start_by_href.end()) {
+        page = hit->second;
+        have_page = true;
+      }
+    }
+
+    if (!have_page) {
+      while (fallback_idx < current.size() &&
+             used_pages[current[fallback_idx].page]) {
+        fallback_idx++;
+      }
+      if (fallback_idx < current.size()) {
+        page = current[fallback_idx].page;
+        have_page = true;
+        fallback_idx++;
+      }
+    }
+
+    if (!have_page || used_pages[page])
+      continue;
+    used_pages[page] = true;
+
+    ChapterEntry entry;
+    entry.page = page;
+    entry.title = title;
+    resolved.push_back(entry);
+  }
+
+  if (resolved.empty()) {
+    if (app)
+      app->PrintStatus("EPUB: TOC resolve end (unmatched)");
+    epub_data_delete(&parsedata);
+    unzClose(uf);
+    return 6;
+  }
+
+  book->ClearChapters();
+  for (size_t i = 0; i < resolved.size(); i++) {
+    book->AddChapter(resolved[i].page, resolved[i].title);
+  }
+
+  if (app) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
+             (unsigned)toc_entries.size(), (unsigned)book->GetChapters().size());
+    app->PrintStatus(msg);
+    app->PrintStatus("EPUB: TOC resolve end");
+  }
+
+  epub_data_delete(&parsedata);
+  unzClose(uf);
   return 0;
 }

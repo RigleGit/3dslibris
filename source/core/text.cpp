@@ -83,6 +83,8 @@ Text::Text() {
   style = TEXT_STYLE_REGULAR;
   pixelsize = PIXELSIZE;
   screen = screenleft;
+  screenleft_dirty = true;
+  screenright_dirty = true;
 
   imagetype.face_id = (FTC_FaceID)&face_id;
   imagetype.flags = FT_LOAD_DEFAULT;
@@ -318,6 +320,7 @@ void Text::ClearCache(FT_Face face) {
 }
 
 void Text::ClearScreen() {
+  MarkCurrentScreenDirty();
   // Buffer is PAGE_HEIGHT * PAGE_HEIGHT entries
   const int bufsize = PAGE_HEIGHT * PAGE_HEIGHT;
   u16 bg_color;
@@ -334,6 +337,7 @@ void Text::ClearScreen() {
 }
 
 void Text::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
+  MarkCurrentScreenDirty();
   u16 clearcolor;
   if (colorMode == 1)
     clearcolor = 0x0000;
@@ -367,6 +371,7 @@ u16 Text::GetBgColor() {
 }
 
 void Text::FillRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
+  MarkCurrentScreenDirty();
   for (u16 y = yl; y < yh; y++) {
     for (u16 x = xl; x < xh; x++) {
       if (y < (u16)display.height && x < (u16)display.width)
@@ -376,6 +381,7 @@ void Text::FillRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
 }
 
 void Text::DrawRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
+  MarkCurrentScreenDirty();
   int maxHeight = (screen == screenleft ? 400 : 320);
   for (u16 x = xl; x < xh; x++) {
     if (yl < maxHeight && x < (u16)display.width)
@@ -621,6 +627,7 @@ void Text::PrintChar(u32 ucs, u8 astyle) { PrintChar(ucs, GetFace(astyle)); }
 void Text::PrintChar(u32 ucs, FT_Face face) {
   // Draw a character for the given UCS codepoint,
   // into the current screen buffer at the current pen position.
+  MarkCurrentScreenDirty();
 
   u16 bx, by, width, height = 0;
   FT_Byte *buffer = NULL;
@@ -806,6 +813,7 @@ void Text::PrintString(const char *s, FT_Face face) {
 }
 
 void Text::ClearScreen(u16 *screen, u8 r, u8 g, u8 b) {
+  MarkScreenDirty(screen);
   u16 pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
   for (int i = 0; i < display.width * display.height; i++)
     screen[i] = pixel;
@@ -817,6 +825,7 @@ void Text::PrintSplash(u16 *screen) {
 
   SetScreen(screen);
   drawstack(screen);
+  MarkScreenDirty(screen);
   // pop
   SetScreen(s);
 }
@@ -830,8 +839,16 @@ void Text::SetFontFile(const char *path, u8 style) {
 
 std::string Text::GetFontFile(u8 style) { return filenames[style]; }
 
-void Text::BlitToFramebuffer() {
+void Text::MarkScreenDirty(u16 *target) {
+  if (target == screenleft)
+    screenleft_dirty = true;
+  else if (target == screenright)
+    screenright_dirty = true;
+}
+
+bool Text::BlitToFramebuffer() {
   u16 fbW, fbH;
+  bool did_blit = false;
 
   auto blitPage = [&](u8 *fb, u16 *src, u16 logicalHeight) {
     if (!fb || !src)
@@ -878,11 +895,21 @@ void Text::BlitToFramebuffer() {
     }
   };
 
-  // Bottom screen: right page (320x240 physical)
-  u8 *fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fbW, &fbH);
-  blitPage(fbBottom, screenright, 320);
+  if (screenright_dirty) {
+    // Bottom screen: right page (320x240 physical)
+    u8 *fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fbW, &fbH);
+    blitPage(fbBottom, screenright, 320);
+    screenright_dirty = false;
+    did_blit = true;
+  }
 
-  // Top screen: left page (400x240 physical)
-  u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
-  blitPage(fbTop, screenleft, 400);
+  if (screenleft_dirty) {
+    // Top screen: left page (400x240 physical)
+    u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
+    blitPage(fbTop, screenleft, 400);
+    screenleft_dirty = false;
+    did_blit = true;
+  }
+
+  return did_blit;
 }

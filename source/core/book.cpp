@@ -631,6 +631,8 @@ Book::Book(App *a) {
   coverTried = false;
   metadataIndexTried = false;
   metadataIndexed = false;
+  tocResolveTried = false;
+  tocResolved = false;
   fb2_inline_images_bytes = 0;
   inline_image_cache_bytes = 0;
 }

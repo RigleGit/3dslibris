@@ -43,6 +43,7 @@ https://github.com/rhaleblian/dslibris
 */
 
 #include <list>
+#include <deque>
 #include <sstream>
 #include <unistd.h>
 #include <vector>
@@ -80,6 +81,17 @@ enum prefsbuttonindex {
   PREFS_BUTTON_INDEX,
   PREFS_BUTTON_BOOKMARKS,
   PREFS_BUTTON_COUNT
+};
+
+enum app_job_type_t {
+  APP_JOB_INDEX_METADATA,
+  APP_JOB_EXTRACT_COVER,
+  APP_JOB_RESOLVE_TOC
+};
+
+struct app_job_t {
+  app_job_type_t type;
+  Book *book;
 };
 
 //! \brief Main application.
@@ -142,6 +154,7 @@ public:
   void SetProgress(int amount);
   touchPosition TouchRead();
   void UpdateStatus();
+  void RequestStatusRedraw();
   void parse_error(XML_ParserStruct *ps);
 
   // app_book.cpp
@@ -164,6 +177,10 @@ private:
   bool browser_wait_input_release;
   bool prefs_view_dirty;
   bool prefs_book_context;
+  int status_last_minute;
+  int status_last_percent_tenths;
+  bool status_force_redraw;
+  std::deque<app_job_t> job_queue;
 
   int FindBooks();
   void InitScreens();
@@ -180,6 +197,11 @@ private:
   void browser_init();
   void browser_nextpage();
   void browser_prevpage();
+  bool HasQueuedJob(app_job_type_t type, Book *book) const;
+  void EnqueueJob(app_job_type_t type, Book *book);
+  void QueueBookWarmup(Book *book);
+  void QueueTocResolve(Book *book);
+  void ProcessJobs(u32 budget_ms);
 
   // app_prefs.cpp
   void PrefsDraw();
