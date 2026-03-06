@@ -186,6 +186,8 @@ static format_t detect_book_format(const char *filename) {
     return FORMAT_XHTML;
   if (len >= 4 && strcasecmp(filename + len - 4, ".rtf") == 0)
     return FORMAT_XHTML;
+  if (len >= 4 && strcasecmp(filename + len - 4, ".odt") == 0)
+    return FORMAT_XHTML;
   return FORMAT_UNDEF;
 }
 

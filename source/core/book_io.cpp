@@ -3,6 +3,7 @@
 #include "epub.h"
 #include "main.h"
 #include "parse.h"
+#include "unzip.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,6 +13,7 @@
 namespace {
 
 static const size_t kPlainTextMaxBytes = 12 * 1024 * 1024;
+static const size_t kOdtContentMaxBytes = 24 * 1024 * 1024;
 
 static bool HasExtCI(const char *name, const char *ext) {
   if (!name || !ext)
@@ -376,6 +378,229 @@ static u8 ParseRtfFile(Book *book, const char *path) {
   return ParsePlainTextBuffer(book, text);
 }
 
+static const char *XmlLocalName(const char *name) {
+  if (!name)
+    return "";
+  const char *colon = strrchr(name, ':');
+  return colon ? (colon + 1) : name;
+}
+
+static bool XmlAttrLocalNameEquals(const char *name, const char *needle) {
+  if (!name || !needle)
+    return false;
+  if (!strcmp(name, needle))
+    return true;
+  const char *local = XmlLocalName(name);
+  return !strcmp(local, needle);
+}
+
+static bool OdtIsParagraphTag(const char *local_name) {
+  if (!local_name)
+    return false;
+  return !strcmp(local_name, "p") || !strcmp(local_name, "h") ||
+         !strcmp(local_name, "list-item") || !strcmp(local_name, "table-row");
+}
+
+struct OdtParseState {
+  parsedata_t *parsedata;
+  int depth;
+  int office_text_depth;
+  bool pending_space;
+};
+
+static bool ParsedataEndsWhitespace(parsedata_t *p) {
+  if (!p || p->buflen <= 0)
+    return true;
+  unsigned char c = p->buf[p->buflen - 1];
+  return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+}
+
+static void OdtEmit(OdtParseState *s, const char *txt, int len) {
+  if (!s || !s->parsedata || !txt || len <= 0)
+    return;
+  xml::book::chardata(s->parsedata, txt, len);
+}
+
+static void OdtEmitParagraphBreak(OdtParseState *s) {
+  if (!s)
+    return;
+  OdtEmit(s, "\n\n", 2);
+  s->pending_space = false;
+}
+
+static void odt_start(void *userdata, const char *el, const char **attr) {
+  OdtParseState *s = (OdtParseState *)userdata;
+  if (!s)
+    return;
+  s->depth++;
+
+  if (!strcmp(el, "office:text")) {
+    s->office_text_depth = s->depth;
+    s->pending_space = false;
+    return;
+  }
+
+  if (s->office_text_depth <= 0)
+    return;
+
+  const char *local = XmlLocalName(el);
+  if (!strcmp(local, "line-break")) {
+    OdtEmit(s, "\n", 1);
+    s->pending_space = false;
+    return;
+  }
+  if (!strcmp(local, "tab")) {
+    OdtEmit(s, "\t", 1);
+    s->pending_space = false;
+    return;
+  }
+  if (!strcmp(local, "s")) {
+    int count = 1;
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (!XmlAttrLocalNameEquals(attr[i], "c"))
+        continue;
+      int parsed = atoi(attr[i + 1] ? attr[i + 1] : "1");
+      if (parsed > 0 && parsed < 64)
+        count = parsed;
+      break;
+    }
+    std::string spaces((size_t)count, ' ');
+    OdtEmit(s, spaces.c_str(), (int)spaces.size());
+    s->pending_space = false;
+    return;
+  }
+  if (!strcmp(local, "image")) {
+    OdtEmit(s, "\n[illustration]\n", 15);
+    s->pending_space = false;
+    return;
+  }
+}
+
+static void odt_chardata(void *userdata, const char *txt, int txtlen) {
+  OdtParseState *s = (OdtParseState *)userdata;
+  if (!s || s->office_text_depth <= 0 || !txt || txtlen <= 0)
+    return;
+
+  std::string out;
+  out.reserve((size_t)txtlen + 1);
+  for (int i = 0; i < txtlen; i++) {
+    unsigned char c = (unsigned char)txt[i];
+    bool is_space = (c == ' ' || c == '\n' || c == '\r' || c == '\t');
+    if (is_space) {
+      s->pending_space = true;
+      continue;
+    }
+    if (s->pending_space) {
+      if (!ParsedataEndsWhitespace(s->parsedata) || !out.empty())
+        out.push_back(' ');
+      s->pending_space = false;
+    }
+    out.push_back((char)c);
+  }
+  if (!out.empty())
+    OdtEmit(s, out.c_str(), (int)out.size());
+}
+
+static void odt_end(void *userdata, const char *el) {
+  OdtParseState *s = (OdtParseState *)userdata;
+  if (!s)
+    return;
+
+  const char *local = XmlLocalName(el);
+  if (s->office_text_depth > 0 && OdtIsParagraphTag(local)) {
+    OdtEmitParagraphBreak(s);
+  }
+
+  if (s->office_text_depth > 0 && s->depth == s->office_text_depth &&
+      !strcmp(el, "office:text")) {
+    s->office_text_depth = 0;
+    s->pending_space = false;
+  }
+  s->depth--;
+}
+
+static bool ReadZipEntryToStringLimited(unzFile uf, const char *entry_name,
+                                        std::string *out, size_t max_bytes) {
+  if (!uf || !entry_name || !out)
+    return false;
+  out->clear();
+
+  if (unzLocateFile(uf, entry_name, 2) != UNZ_OK)
+    return false;
+  if (unzOpenCurrentFile(uf) != UNZ_OK)
+    return false;
+
+  char buf[8192];
+  int n = 0;
+  bool ok = true;
+  while ((n = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0) {
+    if (out->size() + (size_t)n > max_bytes) {
+      ok = false;
+      break;
+    }
+    out->append(buf, n);
+  }
+  if (n < 0)
+    ok = false;
+  unzCloseCurrentFile(uf);
+  return ok;
+}
+
+static u8 ParseOdtFile(Book *book, const char *path) {
+  if (!book || !path)
+    return 251;
+
+  unzFile uf = unzOpen(path);
+  if (!uf)
+    return 252;
+
+  std::string content_xml;
+  bool loaded = ReadZipEntryToStringLimited(uf, "content.xml", &content_xml,
+                                            kOdtContentMaxBytes);
+  unzClose(uf);
+  if (!loaded || content_xml.empty())
+    return 253;
+
+  parsedata_t parsedata;
+  parse_init(&parsedata);
+  parsedata.app = book->GetApp();
+  parsedata.ts = parsedata.app ? parsedata.app->ts : NULL;
+  parsedata.prefs = parsedata.app ? parsedata.app->prefs : NULL;
+  parsedata.book = book;
+  parse_push(&parsedata, TAG_PRE);
+
+  XML_Parser p = XML_ParserCreate(NULL);
+  if (!p) {
+    parse_pop(&parsedata);
+    return 254;
+  }
+
+  OdtParseState odt_state;
+  odt_state.parsedata = &parsedata;
+  odt_state.depth = 0;
+  odt_state.office_text_depth = 0;
+  odt_state.pending_space = false;
+
+  XML_SetUserData(p, &odt_state);
+  XML_SetElementHandler(p, odt_start, odt_end);
+  XML_SetCharacterDataHandler(p, odt_chardata);
+
+  bool ok = XML_Parse(p, content_xml.c_str(), (int)content_xml.size(), 1) !=
+            XML_STATUS_ERROR;
+  if (!ok && parsedata.app) {
+    parsedata.app->parse_error(p);
+  }
+
+  XML_ParserFree(p);
+  parse_pop(&parsedata);
+
+  if (!ok)
+    return 255;
+
+  FinalizePlainPage(&parsedata);
+  return 0;
+}
+
 } // namespace
 
 void Book::Cache() {
@@ -456,6 +681,8 @@ u8 Book::Parse(bool fulltext) {
     return ParseTxtFile(this, path);
   if (fulltext && HasExtCI(GetFileName(), ".rtf"))
     return ParseRtfFile(this, path);
+  if (fulltext && HasExtCI(GetFileName(), ".odt"))
+    return ParseOdtFile(this, path);
 
   char *filebuf = new char[BUFSIZE];
   if (!filebuf) {
