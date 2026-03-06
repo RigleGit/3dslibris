@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <3ds.h>
 #include <algorithm>
 #include <ctype.h>
+#include <deque>
 #include <map>
 #include <set>
 #include <stdio.h>
@@ -282,6 +283,7 @@ typedef struct {
   std::string base_path;
   std::vector<std::string> id_stack;
   std::vector<bool> pushed_stack;
+  std::deque<std::string> pending_ids;
 } toc_proxy_parse_data_t;
 
 static void EpubDiag(App *app, const char *fmt, const char *arg = NULL);
@@ -303,7 +305,19 @@ static std::string ExtractHrefFragment(const std::string &href) {
   return NormalizeFragmentId(href.substr(hash + 1));
 }
 
+static std::string DigitsOnly(const std::string &s) {
+  std::string out;
+  out.reserve(s.size());
+  for (size_t i = 0; i < s.size(); i++) {
+    unsigned char c = (unsigned char)s[i];
+    if (c >= '0' && c <= '9')
+      out.push_back((char)c);
+  }
+  return out;
+}
+
 static void toc_proxy_start(void *userdata, const char *el, const char **attr) {
+  (void)el;
   toc_proxy_parse_data_t *d = (toc_proxy_parse_data_t *)userdata;
   bool pushed = false;
 
@@ -325,17 +339,33 @@ static void toc_proxy_start(void *userdata, const char *el, const char **attr) {
   if (href && *href) {
     std::string resolved = ResolveRelativePath(d->base_path, href);
     if (!resolved.empty()) {
+      bool mapped = false;
       if (!current_id.empty()) {
-        if (d->fragment_to_href->find(current_id) == d->fragment_to_href->end())
+        if (d->fragment_to_href->find(current_id) == d->fragment_to_href->end()) {
           (*d->fragment_to_href)[current_id] = resolved;
+        }
+        mapped = true;
       } else if (!d->id_stack.empty()) {
         const std::string &id_from_parent = d->id_stack.back();
         if (d->fragment_to_href->find(id_from_parent) ==
             d->fragment_to_href->end()) {
           (*d->fragment_to_href)[id_from_parent] = resolved;
         }
+        mapped = true;
+      }
+
+      if (!mapped && !d->pending_ids.empty()) {
+        std::string id_from_pending = d->pending_ids.front();
+        d->pending_ids.pop_front();
+        if (!id_from_pending.empty() &&
+            d->fragment_to_href->find(id_from_pending) ==
+                d->fragment_to_href->end()) {
+          (*d->fragment_to_href)[id_from_pending] = resolved;
+        }
       }
     }
+  } else if (!current_id.empty()) {
+    d->pending_ids.push_back(current_id);
   }
 
   d->pushed_stack.push_back(pushed);
@@ -788,6 +818,13 @@ BuildTocFragmentProxyMap(unzFile uf, const std::string &doc_path,
   if (!ParseXmlBuffer(xml, toc_proxy_start, toc_proxy_end, NULL, &data))
     return false;
 
+  if (app) {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "EPUB: TOC-PROXY map size=%u",
+             (unsigned)proxy_map->size());
+    app->PrintStatus(msg);
+  }
+
   return !proxy_map->empty();
 }
 
@@ -814,10 +851,34 @@ static bool LookupTocProxyHref(
   if (hit_doc == cache->end())
     return false;
   auto hit = hit_doc->second.find(fragment);
-  if (hit == hit_doc->second.end())
+  if (hit != hit_doc->second.end()) {
+    *href_out = hit->second;
+    return !href_out->empty();
+  }
+
+  // Some generated TOCs use inconsistent fragment identifiers; if both carry
+  // stable numeric suffixes, allow a digit-only match.
+  std::string fragment_digits = DigitsOnly(fragment);
+  if (fragment_digits.size() < 1)
     return false;
 
-  *href_out = hit->second;
+  std::string fallback_href;
+  bool found = false;
+  for (const auto &kv : hit_doc->second) {
+    if (DigitsOnly(kv.first) != fragment_digits)
+      continue;
+    if (!found) {
+      fallback_href = kv.second;
+      found = true;
+    } else if (fallback_href != kv.second) {
+      found = false;
+      break;
+    }
+  }
+  if (!found)
+    return false;
+
+  *href_out = fallback_href;
   return !href_out->empty();
 }
 
