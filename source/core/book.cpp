@@ -72,15 +72,16 @@ static std::string BuildAnchorKey(const std::string &docpath,
   if (docpath.empty() || anchor_raw.empty())
     return "";
 
+  std::string doc = UrlDecodeComponent(docpath);
   std::string anchor = UrlDecodeComponent(anchor_raw);
   while (!anchor.empty() && anchor[0] == '#')
     anchor.erase(anchor.begin());
   if (anchor.empty())
     return "";
-  if (anchor.size() > 160)
-    anchor.resize(160);
+  if (anchor.size() > 512)
+    anchor.resize(512);
 
-  std::string key = NormalizePathForAnchor(docpath);
+  std::string key = NormalizePathForAnchor(doc);
   if (key.empty())
     return "";
   key.push_back('#');
@@ -845,7 +846,7 @@ void Book::ClearChapterAnchors() { chapter_anchor_pages.clear(); }
 void Book::SetChapterDocStartPage(const std::string &docpath, u16 page) {
   if (docpath.empty())
     return;
-  std::string key = NormalizePathForAnchor(docpath);
+  std::string key = NormalizePathForAnchor(UrlDecodeComponent(docpath));
   if (key.empty())
     return;
   if (chapter_doc_start_pages.find(key) == chapter_doc_start_pages.end())
