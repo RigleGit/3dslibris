@@ -92,6 +92,9 @@ u8 Book::Parse(bool fulltext) {
   parsedata_t parsedata;
   parse_init(&parsedata);
   parsedata.cachefile = fopen("/cache.dat", "w");
+  parsedata.app = app;
+  parsedata.ts = app ? app->ts : NULL;
+  parsedata.prefs = app ? app->prefs : NULL;
   parsedata.book = this;
 
   XML_Parser p = XML_ParserCreate(NULL);
