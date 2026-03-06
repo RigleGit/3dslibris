@@ -212,7 +212,7 @@ static bool TryRepairFullwidthByteMojibake(const std::string &in,
   if (!out || in.empty())
     return false;
 
-  // Some FS/libc paths return each non-ASCII byte b as U+FF00+b, encoded in
+  // Some FS/libc paths return each original byte b as U+FF00+b, encoded in
   // UTF-8 (e.g. "í" C3 AD becomes "ￃﾭ": EF BF 83 EF BE AD).
   // Collapse that representation back to raw bytes and accept only if the
   // resulting stream is valid UTF-8 and contains UTF-8-like lead/continuation.
@@ -227,13 +227,11 @@ static bool TryRepairFullwidthByteMojibake(const std::string &in,
     if (i + 2 < in.size() && b0 == 0xEF) {
       unsigned char b1 = (unsigned char)in[i + 1];
       unsigned char b2 = (unsigned char)in[i + 2];
-      if (b1 == 0xBE || b1 == 0xBF) {
-        unsigned char recovered = 0;
-        if (b1 == 0xBE) {
-          recovered = (unsigned char)(0x80 + b2); // U+FF80..U+FFBF
-        } else {
-          recovered = (unsigned char)(0xC0 + b2); // U+FFC0..U+FFFF
-        }
+      if (b1 >= 0xBC && b1 <= 0xBF && b2 >= 0x80 && b2 <= 0xBF) {
+        // Inverse of UTF-8 for U+FF00..U+FFFF range:
+        // byte = ((second - 0xBC) << 6) | (third - 0x80)
+        unsigned char recovered =
+            (unsigned char)(((b1 - 0xBC) << 6) | (b2 - 0x80));
         collapsed.push_back((char)recovered);
         mapped.push_back(recovered);
         i += 3;
@@ -264,6 +262,88 @@ static bool TryRepairFullwidthByteMojibake(const std::string &in,
 
   *out = collapsed;
   return true;
+}
+
+static std::string ComposeLatinCombiningMarks(const std::string &in) {
+  if (in.empty())
+    return in;
+
+  std::string out;
+  out.reserve(in.size());
+
+  for (size_t i = 0; i < in.size(); i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (i + 2 < in.size() && (c == 'a' || c == 'e' || c == 'i' || c == 'o' ||
+                              c == 'u' || c == 'A' || c == 'E' || c == 'I' ||
+                              c == 'O' || c == 'U' || c == 'n' || c == 'N') &&
+        (unsigned char)in[i + 1] == 0xCC) {
+      unsigned char mark = (unsigned char)in[i + 2];
+      const char *rep = nullptr;
+
+      if (mark == 0x81) { // U+0301 combining acute
+        switch (c) {
+        case 'a':
+          rep = "\xC3\xA1";
+          break;
+        case 'e':
+          rep = "\xC3\xA9";
+          break;
+        case 'i':
+          rep = "\xC3\xAD";
+          break;
+        case 'o':
+          rep = "\xC3\xB3";
+          break;
+        case 'u':
+          rep = "\xC3\xBA";
+          break;
+        case 'A':
+          rep = "\xC3\x81";
+          break;
+        case 'E':
+          rep = "\xC3\x89";
+          break;
+        case 'I':
+          rep = "\xC3\x8D";
+          break;
+        case 'O':
+          rep = "\xC3\x93";
+          break;
+        case 'U':
+          rep = "\xC3\x9A";
+          break;
+        }
+      } else if (mark == 0x83) { // U+0303 combining tilde
+        switch (c) {
+        case 'n':
+          rep = "\xC3\xB1";
+          break;
+        case 'N':
+          rep = "\xC3\x91";
+          break;
+        }
+      } else if (mark == 0x88) { // U+0308 combining diaeresis
+        switch (c) {
+        case 'u':
+          rep = "\xC3\xBC";
+          break;
+        case 'U':
+          rep = "\xC3\x9C";
+          break;
+        }
+      }
+
+      if (rep) {
+        out.append(rep);
+        i += 2;
+        continue;
+      }
+    }
+
+    out.push_back((char)c);
+  }
+
+  return out;
 }
 
 static std::string HexBytesForLog(const std::string &s, size_t max_bytes = 32) {
@@ -312,11 +392,14 @@ static void LogUtf8StageOnce(Book *book, const char *stage,
 
 static std::string NormalizeDisplayUtf8(const std::string &raw,
                                         bool *repaired_fullwidth = nullptr,
-                                        bool *repaired_legacy = nullptr) {
+                                        bool *repaired_legacy = nullptr,
+                                        bool *composed_accents = nullptr) {
   if (repaired_fullwidth)
     *repaired_fullwidth = false;
   if (repaired_legacy)
     *repaired_legacy = false;
+  if (composed_accents)
+    *composed_accents = false;
 
   if (raw.empty())
     return raw;
@@ -338,7 +421,14 @@ static std::string NormalizeDisplayUtf8(const std::string &raw,
   if (TryRepairMojibakeUtf8(s, &repaired)) {
     if (repaired_legacy)
       *repaired_legacy = true;
-    return repaired;
+    s = repaired;
+  }
+
+  std::string composed = ComposeLatinCombiningMarks(s);
+  if (composed != s) {
+    s = composed;
+    if (composed_accents)
+      *composed_accents = true;
   }
   return s;
 }
@@ -352,12 +442,16 @@ static std::string BuildBrowserDisplayName(Book *book) {
 
   bool repaired_fullwidth = false;
   bool repaired_legacy = false;
+  bool composed_accents = false;
   std::string normalized =
-      NormalizeDisplayUtf8(raw, &repaired_fullwidth, &repaired_legacy);
+      NormalizeDisplayUtf8(raw, &repaired_fullwidth, &repaired_legacy,
+                           &composed_accents);
   if (repaired_fullwidth)
     LogUtf8StageOnce(book, "filename_ff_repair", normalized);
   if (repaired_legacy)
     LogUtf8StageOnce(book, "filename_legacy_fix", normalized);
+  if (composed_accents)
+    LogUtf8StageOnce(book, "filename_compose", normalized);
   LogUtf8StageOnce(book, "filename_norm", normalized);
 
   size_t dot = normalized.find_last_of('.');
