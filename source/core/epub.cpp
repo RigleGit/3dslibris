@@ -1310,6 +1310,219 @@ static std::string NormalizeTocTitle(const std::string &raw) {
   return Trim(out);
 }
 
+static std::string ClipForDiag(const std::string &s, size_t max_bytes = 120) {
+  if (s.size() <= max_bytes)
+    return s;
+  return s.substr(0, max_bytes) + "...";
+}
+
+static std::string NormalizeAsciiSearchText(const std::string &raw,
+                                            size_t max_out = 0) {
+  if (raw.empty())
+    return "";
+  std::string out;
+  out.reserve(raw.size());
+  bool prev_space = true;
+  for (size_t i = 0; i < raw.size(); i++) {
+    unsigned char c = (unsigned char)raw[i];
+    if (c < 0x80) {
+      if (isalnum(c)) {
+        out.push_back((char)tolower(c));
+        prev_space = false;
+      } else if (!prev_space) {
+        out.push_back(' ');
+        prev_space = true;
+      }
+    } else {
+      // Keep UTF-8 bytes to preserve accented text for exact byte matching.
+      out.push_back((char)c);
+      prev_space = false;
+    }
+    if (max_out > 0 && out.size() >= max_out)
+      break;
+  }
+  return Trim(out);
+}
+
+static std::string BuildPageSearchText(Page *page, size_t max_out = 2048) {
+  if (!page || !page->GetBuffer() || page->GetLength() <= 0)
+    return "";
+  const u8 *buf = page->GetBuffer();
+  const int len = page->GetLength();
+
+  std::string out;
+  out.reserve((size_t)len);
+  bool prev_space = true;
+
+  int i = 0;
+  while (i < len) {
+    unsigned char c = (unsigned char)buf[i];
+    if (c == TEXT_IMAGE) {
+      i += (i + 2 < len) ? 3 : 1;
+      if (!prev_space) {
+        out.push_back(' ');
+        prev_space = true;
+      }
+      continue;
+    }
+    if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
+        c == TEXT_ITALIC_OFF) {
+      i++;
+      continue;
+    }
+    if (c < 0x20) {
+      i++;
+      if (!prev_space) {
+        out.push_back(' ');
+        prev_space = true;
+      }
+      continue;
+    }
+    if (c < 0x80) {
+      i++;
+      if (isalnum(c)) {
+        out.push_back((char)tolower(c));
+        prev_space = false;
+      } else if (!prev_space) {
+        out.push_back(' ');
+        prev_space = true;
+      }
+      if (max_out > 0 && out.size() >= max_out)
+        break;
+      continue;
+    }
+
+    int step = 1;
+    if ((c & 0xE0) == 0xC0)
+      step = 2;
+    else if ((c & 0xF0) == 0xE0)
+      step = 3;
+    else if ((c & 0xF8) == 0xF0)
+      step = 4;
+    if (i + step > len)
+      step = 1;
+    for (int j = 1; j < step; j++) {
+      if (((unsigned char)buf[i + j] & 0xC0) != 0x80) {
+        step = 1;
+        break;
+      }
+    }
+    for (int j = 0; j < step; j++)
+      out.push_back((char)buf[i + j]);
+    prev_space = false;
+    i += step;
+    if (max_out > 0 && out.size() >= max_out)
+      break;
+  }
+
+  return Trim(out);
+}
+
+static std::vector<std::string>
+ExtractTitleSearchTokens(const std::string &normalized_title) {
+  std::vector<std::string> tokens;
+  std::string cur;
+  for (size_t i = 0; i <= normalized_title.size(); i++) {
+    unsigned char c =
+        (i < normalized_title.size()) ? (unsigned char)normalized_title[i] : 0;
+    if (c >= 'a' && c <= 'z') {
+      cur.push_back((char)c);
+    } else if (c >= '0' && c <= '9') {
+      cur.push_back((char)c);
+    } else {
+      if (cur.size() >= 4)
+        tokens.push_back(cur);
+      cur.clear();
+    }
+  }
+  if (tokens.empty())
+    return tokens;
+  std::sort(tokens.begin(), tokens.end(),
+            [](const std::string &a, const std::string &b) {
+              if (a.size() != b.size())
+                return a.size() > b.size();
+              return a < b;
+            });
+  tokens.erase(std::unique(tokens.begin(), tokens.end()), tokens.end());
+  if (tokens.size() > 8)
+    tokens.resize(8);
+  return tokens;
+}
+
+static u16 FindDocEndPage(u16 doc_start, const std::vector<u16> &doc_starts,
+                          u16 page_count) {
+  for (size_t i = 0; i < doc_starts.size(); i++) {
+    if (doc_starts[i] != doc_start)
+      continue;
+    if (i + 1 < doc_starts.size())
+      return doc_starts[i + 1];
+    return page_count;
+  }
+  for (size_t i = 0; i < doc_starts.size(); i++) {
+    if (doc_starts[i] > doc_start)
+      return doc_starts[i];
+  }
+  return page_count;
+}
+
+static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
+                                       const std::vector<u16> &doc_starts,
+                                       const std::string &toc_title,
+                                       u16 *page_out) {
+  if (!book || !page_out)
+    return false;
+
+  const u16 page_count = book->GetPageCount();
+  if (doc_start >= page_count)
+    return false;
+
+  const u16 doc_end = FindDocEndPage(doc_start, doc_starts, page_count);
+  if (doc_end <= doc_start + 1)
+    return false;
+
+  std::string query = NormalizeAsciiSearchText(toc_title, 192);
+  if (query.empty())
+    return false;
+  std::vector<std::string> tokens = ExtractTitleSearchTokens(query);
+  if (tokens.empty() && query.size() < 8)
+    return false;
+
+  int best_score = -1;
+  int best_hits = 0;
+  u16 best_page = doc_start;
+
+  for (u16 p = doc_start; p < doc_end && p < page_count; p++) {
+    Page *page = book->GetPage((int)p);
+    std::string text = BuildPageSearchText(page, 4096);
+    if (text.empty())
+      continue;
+    if (query.size() >= 10 && text.find(query) != std::string::npos) {
+      *page_out = p;
+      return true;
+    }
+
+    int score = 0;
+    int hits = 0;
+    for (size_t i = 0; i < tokens.size() && i < 6; i++) {
+      if (text.find(tokens[i]) != std::string::npos) {
+        score += (int)tokens[i].size();
+        hits++;
+      }
+    }
+    if (score > best_score) {
+      best_score = score;
+      best_hits = hits;
+      best_page = p;
+    }
+  }
+
+  if (best_score >= 12 || (best_score >= 8 && best_hits >= 2)) {
+    *page_out = best_page;
+    return true;
+  }
+  return false;
+}
+
 int epub(Book *book, std::string name, bool metadataonly) {
   //! Parse EPUB file.
   //! Set metadataonly to true if you only want the title and author.
@@ -1771,19 +1984,24 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   std::map<std::string, u16> page_start_by_href_lc;
   std::map<std::string, u16> page_start_by_basename_lc;
   std::set<std::string> basename_lc_ambiguous;
+  std::vector<u16> doc_starts;
   size_t stat_exact = 0;
   size_t stat_nofrag = 0;
   size_t stat_anchor = 0;
+  size_t stat_anchor_miss = 0;
+  size_t stat_title_fallback = 0;
   size_t stat_with_fragment = 0;
   size_t stat_lc = 0;
   size_t stat_base = 0;
   size_t stat_skip_unmatched = 0;
   size_t stat_skip_dup = 0;
+  std::vector<std::string> unresolved_fragment_samples;
 
   for (const auto &kv : page_start_by_href) {
     std::string lower_key = ToLowerAscii(kv.first);
     if (page_start_by_href_lc.find(lower_key) == page_start_by_href_lc.end())
       page_start_by_href_lc[lower_key] = kv.second;
+    doc_starts.push_back(kv.second);
 
     std::string base = BasenamePath(lower_key);
     if (base.empty())
@@ -1798,6 +2016,9 @@ int epub_resolve_toc(Book *book, std::string filepath) {
       basename_lc_ambiguous.insert(base);
     }
   }
+  std::sort(doc_starts.begin(), doc_starts.end());
+  doc_starts.erase(std::unique(doc_starts.begin(), doc_starts.end()),
+                   doc_starts.end());
 
   const size_t kResolvedMaxEntries = 512;
 
@@ -1808,6 +2029,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
 
     u16 page = 0;
     bool have_page = false;
+    bool page_from_doc_start = false;
+    bool anchor_lookup_failed = false;
 
     const bool has_fragment = toc_entries[i].href.find('#') != std::string::npos;
     if (has_fragment)
@@ -1818,6 +2041,9 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         page = anchor_page;
         have_page = true;
         stat_anchor++;
+      } else {
+        stat_anchor_miss++;
+        anchor_lookup_failed = true;
       }
     }
 
@@ -1840,6 +2066,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
             page = hit_nofrag->second;
             have_page = true;
             stat_nofrag++;
+            page_from_doc_start = true;
           }
         }
       }
@@ -1860,6 +2087,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
           page = hit_nofrag_lc->second;
           have_page = true;
           stat_lc++;
+          page_from_doc_start = true;
         }
       }
       if (!have_page) {
@@ -1872,6 +2100,16 @@ int epub_resolve_toc(Book *book, std::string filepath) {
             stat_base++;
           }
         }
+      }
+    }
+
+    if (has_fragment && anchor_lookup_failed && have_page && page_from_doc_start) {
+      u16 title_page = 0;
+      if (FindTocTitlePageInDocRange(book, page, doc_starts, title, &title_page)) {
+        page = title_page;
+        stat_title_fallback++;
+      } else if (unresolved_fragment_samples.size() < 3) {
+        unresolved_fragment_samples.push_back(toc_entries[i].href);
       }
     }
 
@@ -1914,17 +2152,34 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     app->PrintStatus(msg);
     char map_msg[192];
     snprintf(map_msg, sizeof(map_msg),
-             "EPUB: TOC map stats anchor=%u exact=%u nofrag=%u lower=%u base=%u skip=%u dup=%u",
+             "EPUB: TOC map stats anchor=%u exact=%u nofrag=%u lower=%u base=%u titlefb=%u skip=%u dup=%u",
              (unsigned)stat_anchor, (unsigned)stat_exact, (unsigned)stat_nofrag,
              (unsigned)stat_lc, (unsigned)stat_base,
+             (unsigned)stat_title_fallback,
              (unsigned)stat_skip_unmatched, (unsigned)stat_skip_dup);
     app->PrintStatus(map_msg);
-    if (stat_with_fragment > 0 && stat_anchor == 0) {
+    if (stat_anchor_miss > 0) {
       char warn_msg[160];
       snprintf(warn_msg, sizeof(warn_msg),
-               "EPUB: TOC fragments unresolved=%u anchor_map=%u",
+               "EPUB: TOC fragments unresolved=%u anchor_map=%u titlefb=%u",
+               (unsigned)stat_anchor_miss,
+               (unsigned)book->GetChapterAnchorCount(),
+               (unsigned)stat_title_fallback);
+      app->PrintStatus(warn_msg);
+      for (size_t i = 0; i < unresolved_fragment_samples.size(); i++) {
+        char sample_msg[192];
+        std::string clipped = ClipForDiag(unresolved_fragment_samples[i], 100);
+        snprintf(sample_msg, sizeof(sample_msg), "EPUB: TOC unresolved href[%u]=%s",
+                 (unsigned)i, clipped.c_str());
+        app->PrintStatus(sample_msg);
+      }
+    } else if (stat_with_fragment > 0 && stat_anchor == 0) {
+      char warn_msg[160];
+      snprintf(warn_msg, sizeof(warn_msg),
+               "EPUB: TOC fragments unresolved=%u anchor_map=%u titlefb=%u",
                (unsigned)stat_with_fragment,
-               (unsigned)book->GetChapterAnchorCount());
+               (unsigned)book->GetChapterAnchorCount(),
+               (unsigned)stat_title_fallback);
       app->PrintStatus(warn_msg);
     }
     app->PrintStatus("EPUB: TOC resolve end");
