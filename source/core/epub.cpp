@@ -1495,6 +1495,47 @@ static std::string NormalizeTocTitle(const std::string &raw) {
     if (out.size() >= 120)
       break;
   }
+  out = Trim(out);
+
+  // Trim dotted leaders (e.g. "Chapter ....... 23").
+  size_t leader_pos = std::string::npos;
+  size_t run = 0;
+  for (size_t i = 0; i < out.size(); i++) {
+    if (out[i] == '.') {
+      run++;
+      if (run >= 3) {
+        leader_pos = i + 1 - run;
+        break;
+      }
+    } else {
+      run = 0;
+    }
+  }
+  if (leader_pos != std::string::npos)
+    out = Trim(out.substr(0, leader_pos));
+
+  // Drop trailing numeric page suffix.
+  while (!out.empty() && isspace((unsigned char)out.back()))
+    out.pop_back();
+  size_t end = out.size();
+  while (end > 0 && isdigit((unsigned char)out[end - 1]))
+    end--;
+  if (end < out.size()) {
+    size_t ws = end;
+    while (ws > 0 && isspace((unsigned char)out[ws - 1]))
+      ws--;
+    if (ws < out.size())
+      out = out.substr(0, ws);
+  }
+
+  while (!out.empty()) {
+    unsigned char c = (unsigned char)out.back();
+    if (c == '.' || c == ':' || c == ';' || c == '-' || c == ' ')
+      out.pop_back();
+    else
+      break;
+  }
+
   return Trim(out);
 }
 
@@ -2441,7 +2482,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         page = title_page;
         stat_title_fallback++;
       } else if (unresolved_fragment_samples.size() < 3) {
-        unresolved_fragment_samples.push_back(toc_entries[i].href);
+        std::string sample = toc_entries[i].href + " | " + title;
+        unresolved_fragment_samples.push_back(sample);
       }
 
       // If this came from a TOC/index document and we still couldn't resolve
