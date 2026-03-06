@@ -7,6 +7,54 @@
 
 namespace {
 static const size_t kInlineImageCacheMaxBytes = 1024 * 1024;
+static const size_t kFb2InlineImageMaxBytes = 4 * 1024 * 1024;
+static const size_t kFb2InlineImageMaxTotalBytes = 12 * 1024 * 1024;
+
+static int Base64Value(unsigned char c) {
+  if (c >= 'A' && c <= 'Z')
+    return c - 'A';
+  if (c >= 'a' && c <= 'z')
+    return c - 'a' + 26;
+  if (c >= '0' && c <= '9')
+    return c - '0' + 52;
+  if (c == '+' || c == '-')
+    return 62;
+  if (c == '/' || c == '_')
+    return 63;
+  return -1;
+}
+
+static bool DecodeBase64Bytes(const std::string &in, std::vector<u8> *out,
+                              size_t max_bytes) {
+  if (!out)
+    return false;
+  out->clear();
+  if (in.empty())
+    return false;
+
+  out->reserve((in.size() * 3) / 4);
+  int accum = 0;
+  int bits = -8;
+  for (size_t i = 0; i < in.size(); i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (c == '=')
+      break;
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+      continue;
+    int v = Base64Value(c);
+    if (v < 0)
+      return false;
+    accum = (accum << 6) | v;
+    bits += 6;
+    if (bits >= 0) {
+      out->push_back((u8)((accum >> bits) & 0xFF));
+      bits -= 8;
+      if (out->size() > max_bytes)
+        return false;
+    }
+  }
+  return !out->empty();
+}
 }
 
 u16 Book::RegisterInlineImage(const std::string &path) {
@@ -35,7 +83,40 @@ void Book::ClearInlineImageCache() {
 
 void Book::ClearInlineImages() {
   inline_images.clear();
+  fb2_inline_images.clear();
+  fb2_inline_images_bytes = 0;
   ClearInlineImageCache();
+}
+
+bool Book::StoreFb2InlineImage(const std::string &id,
+                               const std::string &base64_data) {
+  if (id.empty() || base64_data.empty())
+    return false;
+
+  std::string key = id;
+  if (!key.empty() && key[0] == '#')
+    key.erase(0, 1);
+  if (key.empty())
+    return false;
+
+  std::vector<u8> decoded;
+  if (!DecodeBase64Bytes(base64_data, &decoded, kFb2InlineImageMaxBytes))
+    return false;
+
+  size_t old_size = 0;
+  std::unordered_map<std::string, std::vector<u8>>::iterator it =
+      fb2_inline_images.find(key);
+  if (it != fb2_inline_images.end())
+    old_size = it->second.size();
+
+  if (fb2_inline_images_bytes - old_size + decoded.size() >
+      kFb2InlineImageMaxTotalBytes) {
+    return false;
+  }
+
+  fb2_inline_images_bytes = fb2_inline_images_bytes - old_size + decoded.size();
+  fb2_inline_images[key] = std::move(decoded);
+  return true;
 }
 
 bool Book::DrawInlineImage(Text *ts, u16 image_id) {
@@ -91,38 +172,58 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
     }
   }
 
-  std::string epubpath = foldername + "/" + filename;
-  unzFile uf = unzOpen(epubpath.c_str());
-  if (!uf)
-    return false;
+  const u8 *compressed_data = NULL;
+  int compressed_size = 0;
+  std::vector<u8> compressed;
+  if (image_path->compare(0, 4, "fb2:") == 0) {
+    std::string key = image_path->substr(4);
+    if (!key.empty() && key[0] == '#')
+      key.erase(0, 1);
+    std::unordered_map<std::string, std::vector<u8>>::const_iterator hit =
+        fb2_inline_images.find(key);
+    if (hit == fb2_inline_images.end() || hit->second.empty())
+      return false;
+    compressed_data = hit->second.data();
+    compressed_size = (int)hit->second.size();
+  } else {
+    std::string epubpath = foldername + "/" + filename;
+    unzFile uf = unzOpen(epubpath.c_str());
+    if (!uf)
+      return false;
 
-  int rc = unzLocateFile(uf, image_path->c_str(), 2);
-  if (rc != UNZ_OK) {
-    unzClose(uf);
-    return false;
-  }
-  if (unzOpenCurrentFile(uf) != UNZ_OK) {
-    unzClose(uf);
-    return false;
-  }
+    int rc = unzLocateFile(uf, image_path->c_str(), 2);
+    if (rc != UNZ_OK) {
+      unzClose(uf);
+      return false;
+    }
+    if (unzOpenCurrentFile(uf) != UNZ_OK) {
+      unzClose(uf);
+      return false;
+    }
 
-  unz_file_info fi;
-  if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) != UNZ_OK ||
-      fi.uncompressed_size == 0 || fi.uncompressed_size > (4 * 1024 * 1024)) {
+    unz_file_info fi;
+    if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) != UNZ_OK ||
+        fi.uncompressed_size == 0 ||
+        fi.uncompressed_size > (4 * 1024 * 1024)) {
+      unzCloseCurrentFile(uf);
+      unzClose(uf);
+      return false;
+    }
+
+    compressed.resize(fi.uncompressed_size);
+    int bytes_read =
+        unzReadCurrentFile(uf, compressed.data(), fi.uncompressed_size);
     unzCloseCurrentFile(uf);
     unzClose(uf);
-    return false;
+    if (bytes_read <= 0)
+      return false;
+
+    compressed_data = compressed.data();
+    compressed_size = bytes_read;
   }
 
-  std::vector<u8> compressed(fi.uncompressed_size);
-  int bytes_read = unzReadCurrentFile(uf, compressed.data(), fi.uncompressed_size);
-  unzCloseCurrentFile(uf);
-  unzClose(uf);
-  if (bytes_read <= 0)
-    return false;
-
   int info_w = 0, info_h = 0, info_c = 0;
-  if (!stbi_info_from_memory(compressed.data(), bytes_read, &info_w, &info_h,
+  if (!stbi_info_from_memory(compressed_data, compressed_size, &info_w, &info_h,
                              &info_c))
     return false;
   if (info_w <= 0 || info_h <= 0)
@@ -132,7 +233,7 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
 
   int imgW = 0, imgH = 0, channels = 0;
   unsigned char *pixels = stbi_load_from_memory(
-      compressed.data(), bytes_read, &imgW, &imgH, &channels, 4);
+      compressed_data, compressed_size, &imgW, &imgH, &channels, 4);
   if (!pixels)
     return false;
 

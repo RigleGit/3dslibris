@@ -49,6 +49,7 @@ void end(void *userdata, const char *el) {
 namespace xml::book {
 
 void chardata(void *data, const XML_Char *txt, int txtlen);
+static const size_t kFb2BinaryMaxChars = 6 * 1024 * 1024;
 
 static std::string NormalizeDocPath(const std::string &path) {
   std::string in = path;
@@ -240,8 +241,17 @@ void start(void *data, const char *el, const char **attr) {
       }
     }
 
-    std::string resolved =
-        (src && *src) ? ResolveDocPath(p->docpath, std::string(src)) : "";
+    std::string resolved;
+    if (src && *src) {
+      std::string raw_src(src);
+      if (!raw_src.empty() && raw_src[0] == '#') {
+        // FB2 inline binary reference (<image href="#id">).
+        resolved = "fb2:" + raw_src.substr(1);
+      } else {
+        resolved = ResolveDocPath(p->docpath, raw_src);
+      }
+    }
+
     if (!resolved.empty() && p->book) {
       u16 image_id = p->book->RegisterInlineImage(resolved);
 
@@ -268,6 +278,27 @@ void start(void *data, const char *el, const char **attr) {
       chardata(p, fallback, (int)strlen(fallback));
       linefeed(p);
     }
+  } else if (XmlNameEquals(el, "binary")) {
+    parse_push(p, TAG_UNKNOWN);
+
+    p->collecting_fb2_binary = false;
+    p->fb2_binary_too_large = false;
+    p->fb2_binary_id.clear();
+    p->fb2_binary_data.clear();
+
+    const char *id = NULL;
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (XmlNameEquals(attr[i], "id")) {
+        id = attr[i + 1];
+      }
+    }
+
+    if (id && *id && p->book) {
+      p->collecting_fb2_binary = true;
+      p->fb2_binary_id = id;
+      if (!p->fb2_binary_id.empty() && p->fb2_binary_id[0] == '#')
+        p->fb2_binary_id.erase(0, 1);
+    }
   } else
     parse_push(p, TAG_UNKNOWN);
 }
@@ -277,6 +308,22 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
 
   parsedata_t *p = (parsedata_t *)data;
   Text *ts = p->ts;
+
+  if (p->collecting_fb2_binary) {
+    if (!p->fb2_binary_too_large) {
+      for (int i = 0; i < txtlen; i++) {
+        unsigned char c = (unsigned char)txt[i];
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+          continue;
+        p->fb2_binary_data.push_back((char)c);
+      }
+      if (p->fb2_binary_data.size() > kFb2BinaryMaxChars) {
+        p->fb2_binary_data.clear();
+        p->fb2_binary_too_large = true;
+      }
+    }
+    return;
+  }
 
   if (parse_in(p, TAG_TITLE)) {
     p->doc_title.append((const char *)txt, txtlen);
@@ -408,6 +455,19 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
 void end(void *data, const char *el) {
   parsedata_t *p = (parsedata_t *)data;
   Text *ts = p->ts;
+
+  if (XmlNameEquals(el, "binary")) {
+    if (p->collecting_fb2_binary && !p->fb2_binary_too_large && p->book &&
+        !p->fb2_binary_id.empty() && !p->fb2_binary_data.empty()) {
+      p->book->StoreFb2InlineImage(p->fb2_binary_id, p->fb2_binary_data);
+    }
+    p->collecting_fb2_binary = false;
+    p->fb2_binary_too_large = false;
+    p->fb2_binary_id.clear();
+    p->fb2_binary_data.clear();
+    parse_pop(p);
+    return;
+  }
 
   if (!strcmp(el, "body")) {
     // Save off our last page.
@@ -569,6 +629,7 @@ Book::Book(App *a) {
   coverTried = false;
   metadataIndexTried = false;
   metadataIndexed = false;
+  fb2_inline_images_bytes = 0;
   inline_image_cache_bytes = 0;
 }
 
@@ -683,7 +744,6 @@ void Book::Close() {
   }
   pages.clear();
   chapters.clear();
-  inline_images.clear();
-  ClearInlineImageCache();
+  ClearInlineImages();
   // pages.erase(pages.begin(), pages.end());
 }

@@ -48,6 +48,10 @@ typedef struct {
 	std::string docpath; //! Current XHTML document path inside EPUB.
 	std::string doc_title;   //! Current XHTML <title> text (best chapter label).
 	std::string doc_heading; //! Fallback heading text from h1/h2/h3.
+	bool collecting_fb2_binary;
+	bool fb2_binary_too_large;
+	std::string fb2_binary_id;
+	std::string fb2_binary_data;
 	int status;
 	int totalbytes;
 	int pagecount;

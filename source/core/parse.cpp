@@ -55,6 +55,10 @@ void parse_init(parsedata_t *data)
 	data->docpath.clear();
 	data->doc_title.clear();
 	data->doc_heading.clear();
+	data->collecting_fb2_binary = false;
+	data->fb2_binary_too_large = false;
+	data->fb2_binary_id.clear();
+	data->fb2_binary_data.clear();
 	strcpy((char*)data->buf,"");
 	data->cachefile = NULL;
 	data->buflen = 0;

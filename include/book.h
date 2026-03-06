@@ -5,6 +5,7 @@
 #include <3ds.h>
 #include <list>
 #include <stddef.h>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,8 @@ class Book {
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
   std::vector<std::string> inline_images;
+  std::unordered_map<std::string, std::vector<u8>> fb2_inline_images;
+  size_t fb2_inline_images_bytes;
   std::list<InlineImageCacheEntry> inline_image_cache;
   size_t inline_image_cache_bytes;
   std::vector<class Page *> pages;
@@ -82,6 +85,8 @@ public:
   u16 RegisterInlineImage(const std::string &path);
   const std::string *GetInlineImagePath(u16 id) const;
   void ClearInlineImages();
+  bool StoreFb2InlineImage(const std::string &id,
+                           const std::string &base64_data);
   bool DrawInlineImage(Text *ts, u16 image_id);
   void AddChapter(u16 page, const std::string &title);
   void ClearChapters();
