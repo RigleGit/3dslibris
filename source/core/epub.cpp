@@ -420,59 +420,92 @@ static void EpubDiag(App *app, const char *fmt, const char *arg) {
   app->PrintStatus(msg);
 }
 
+static std::string NormalizeZipEntryName(const std::string &name) {
+  std::string n = name;
+  std::replace(n.begin(), n.end(), '\\', '/');
+  return n;
+}
+
+static bool EqualsAsciiNoCase(const std::string &a, const std::string &b) {
+  if (a.size() != b.size())
+    return false;
+  for (size_t i = 0; i < a.size(); i++) {
+    unsigned char ca = (unsigned char)a[i];
+    unsigned char cb = (unsigned char)b[i];
+    if (ca >= 'A' && ca <= 'Z')
+      ca = (unsigned char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z')
+      cb = (unsigned char)(cb - 'A' + 'a');
+    if (ca != cb)
+      return false;
+  }
+  return true;
+}
+
+static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
+                               App *app, const char *tag) {
+  if (!uf || entry_path.empty())
+    return false;
+
+  const char *t = (tag && *tag) ? tag : "ZIP";
+
+  // Fast path: exact match first.
+  if (unzLocateFile(uf, entry_path.c_str(), 0) == UNZ_OK)
+    return true;
+
+  // Fallback: iterate entries and compare with ASCII-only case folding.
+  int rc = unzGoToFirstFile(uf);
+  if (rc != UNZ_OK) {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "EPUB: %s locate first fail rc=%d", t, rc);
+    if (app)
+      app->PrintStatus(msg);
+    return false;
+  }
+
+  std::string wanted = NormalizeZipEntryName(entry_path);
+  size_t scanned = 0;
+  do {
+    scanned++;
+    unz_file_info fi;
+    char fname[1024];
+    int info_rc =
+        unzGetCurrentFileInfo(uf, &fi, fname, sizeof(fname), NULL, 0, NULL, 0);
+    if (info_rc == UNZ_OK) {
+      std::string current = NormalizeZipEntryName(std::string(fname));
+      if (current == wanted || EqualsAsciiNoCase(current, wanted)) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "EPUB: %s locate fallback hit scanned=%u", t,
+                 (unsigned)scanned);
+        if (app)
+          app->PrintStatus(msg);
+        return true;
+      }
+    }
+
+    if (scanned > 32768) {
+      char msg[160];
+      snprintf(msg, sizeof(msg), "EPUB: %s locate fallback abort scanned=%u", t,
+               (unsigned)scanned);
+      if (app)
+        app->PrintStatus(msg);
+      break;
+    }
+    rc = unzGoToNextFile(uf);
+  } while (rc == UNZ_OK);
+
+  {
+    char msg[160];
+    snprintf(msg, sizeof(msg), "EPUB: %s locate fallback miss scanned=%u rc=%d",
+             t, (unsigned)scanned, rc);
+    if (app)
+      app->PrintStatus(msg);
+  }
+  return false;
+}
+
 static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &out,
                              App *app = NULL, const char *tag = NULL) {
-  auto normalize_zip_name = [](const std::string &name) {
-    std::string n = name;
-    std::replace(n.begin(), n.end(), '\\', '/');
-    return n;
-  };
-
-  auto equals_ascii_nocase = [](const std::string &a, const std::string &b) {
-    if (a.size() != b.size())
-      return false;
-    for (size_t i = 0; i < a.size(); i++) {
-      unsigned char ca = (unsigned char)a[i];
-      unsigned char cb = (unsigned char)b[i];
-      if (ca >= 'A' && ca <= 'Z')
-        ca = (unsigned char)(ca - 'A' + 'a');
-      if (cb >= 'A' && cb <= 'Z')
-        cb = (unsigned char)(cb - 'A' + 'a');
-      if (ca != cb)
-        return false;
-    }
-    return true;
-  };
-
-  auto locate_zip_entry_safe = [&](const std::string &entry_path) -> bool {
-    if (entry_path.empty())
-      return false;
-
-    // Fast path: exact match (avoids minizip case-insensitive compare quirks
-    // with non-ASCII filenames inside some EPUB archives).
-    if (unzLocateFile(uf, entry_path.c_str(), 0) == UNZ_OK)
-      return true;
-
-    // Safe fallback: manual iteration with ASCII-only case folding.
-    if (unzGoToFirstFile(uf) != UNZ_OK)
-      return false;
-
-    std::string wanted = normalize_zip_name(entry_path);
-    do {
-      unz_file_info fi;
-      char fname[1024];
-      if (unzGetCurrentFileInfo(uf, &fi, fname, sizeof(fname), NULL, 0, NULL,
-                                0) != UNZ_OK) {
-        continue;
-      }
-      std::string current = normalize_zip_name(std::string(fname));
-      if (current == wanted || equals_ascii_nocase(current, wanted))
-        return true;
-    } while (unzGoToNextFile(uf) == UNZ_OK);
-
-    return false;
-  };
-
   out.clear();
   const char *t = (tag && *tag) ? tag : "ZIP";
   {
@@ -483,7 +516,7 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &o
   if (path.empty())
     return false;
   EpubDiag(app, "EPUB: %s locate begin", t);
-  if (!locate_zip_entry_safe(path)) {
+  if (!LocateZipEntrySafe(uf, path, app, t)) {
     EpubDiag(app, "EPUB: %s locate fail", t);
     return false;
   }
@@ -1012,7 +1045,14 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
       snprintf(msg, sizeof(msg), "EPUB: try NCX %s", toc_doc_path.c_str());
       app->PrintStatus(msg);
     }
-    if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX")) {
+    if (app)
+      app->PrintStatus("EPUB: NCX read call begin");
+    bool ncx_read_ok = ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX");
+    if (app) {
+      app->PrintStatus(ncx_read_ok ? "EPUB: NCX read call ok"
+                                   : "EPUB: NCX read call fail");
+    }
+    if (ncx_read_ok) {
       std::vector<toc_entry_t> ncx_entries;
       if (ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app) &&
           looks_reasonable_toc(ncx_entries)) {
@@ -1502,26 +1542,55 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   App *app = book->GetApp();
   if (app)
     app->PrintStatus("EPUB: TOC resolve begin");
+  if (app)
+    app->PrintStatus("EPUB: TOC open zip begin");
 
   unzFile uf = unzOpen(filepath.c_str());
   if (!uf)
     return 4;
+  if (app)
+    app->PrintStatus("EPUB: TOC open zip ok");
 
   epub_data_t parsedata;
   std::string opf_folder;
+  if (app)
+    app->PrintStatus("EPUB: TOC package load begin");
   int rc = LoadEpubPackageData(uf, book, &parsedata, &opf_folder);
   if (rc != 0) {
+    if (app) {
+      char msg[96];
+      snprintf(msg, sizeof(msg), "EPUB: TOC package load fail rc=%d", rc);
+      app->PrintStatus(msg);
+    }
     epub_data_delete(&parsedata);
     unzClose(uf);
     return rc;
   }
+  if (app)
+    app->PrintStatus("EPUB: TOC package load ok");
 
   std::map<std::string, u16> page_start_by_href;
+  if (app)
+    app->PrintStatus("EPUB: TOC map build begin");
   BuildPageStartMapFromPackage(parsedata, opf_folder, book, &page_start_by_href);
+  if (app) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "EPUB: TOC map build ok size=%u",
+             (unsigned)page_start_by_href.size());
+    app->PrintStatus(msg);
+  }
 
   std::vector<toc_entry_t> toc_entries;
+  if (app)
+    app->PrintStatus("EPUB: TOC entries load begin");
   bool loaded = LoadTocEntriesFromPackage(uf, parsedata, opf_folder, &toc_entries,
                                           app);
+  if (app) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "EPUB: TOC entries load end loaded=%u count=%u",
+             loaded ? 1u : 0u, (unsigned)toc_entries.size());
+    app->PrintStatus(msg);
+  }
   if (!loaded) {
     if (app)
       app->PrintStatus("EPUB: TOC resolve end (no entries)");
