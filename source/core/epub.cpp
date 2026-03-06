@@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <algorithm>
 #include <ctype.h>
 #include <map>
+#include <set>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
@@ -185,7 +186,9 @@ static std::string StripFragmentAndQuery(const std::string &path) {
 
 static std::string ResolveRelativePath(const std::string &base_file,
                                        const std::string &ref_raw) {
-  std::string ref = UrlDecode(StripFragmentAndQuery(ref_raw));
+  // Keep fragment for TOC identity (anchors) and strip it only when needed for
+  // physical file lookups.
+  std::string ref = UrlDecode(ref_raw);
   if (ref.empty())
     return "";
   if (ref.find("://") != std::string::npos)
@@ -842,6 +845,33 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
   std::string toc_doc_path;
   bool toc_loaded = false;
 
+  auto looks_reasonable_toc = [](const std::vector<toc_entry_t> &entries) {
+    if (entries.empty())
+      return false;
+    if (entries.size() == 1)
+      return entries[0].title.size() <= 120;
+
+    size_t too_long = 0;
+    size_t empty_href = 0;
+    std::set<std::string> unique_hrefs;
+    for (const auto &e : entries) {
+      if (e.title.size() > 140)
+        too_long++;
+      if (e.href.empty())
+        empty_href++;
+      else
+        unique_hrefs.insert(StripFragmentAndQuery(e.href));
+    }
+
+    if (too_long * 4 > entries.size())  // >25% suspiciously long labels
+      return false;
+    if (empty_href * 2 > entries.size()) // >50% without href
+      return false;
+    if (entries.size() >= 6 && unique_hrefs.size() < 2)
+      return false;
+    return true;
+  };
+
   if (!parsedata.navid.empty() &&
       FindManifestItemPath(parsedata, parsedata.navid, opf_folder, toc_doc_path)) {
     if (app) {
@@ -850,14 +880,19 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
       app->PrintStatus(msg);
     }
     if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NAV")) {
+      std::vector<toc_entry_t> nav_entries;
       nav_parse_data_t navdata;
-      navdata.entries = toc_entries;
+      navdata.entries = &nav_entries;
       navdata.base_path = toc_doc_path;
       navdata.depth = 0;
       navdata.toc_nav_depth = 0;
       navdata.anchor_depth = 0;
-      if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata)) {
+      if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata) &&
+          looks_reasonable_toc(nav_entries)) {
+        *toc_entries = nav_entries;
         toc_loaded = true;
+      } else if (app) {
+        app->PrintStatus("EPUB: NAV discarded (low-quality TOC)");
       }
     } else if (app) {
       app->PrintStatus("EPUB: NAV skipped (size/format)");
@@ -872,8 +907,14 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
       app->PrintStatus(msg);
     }
     if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX")) {
-      if (ParseNcxLightweight(toc_xml, toc_doc_path, toc_entries, app))
+      std::vector<toc_entry_t> ncx_entries;
+      if (ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app) &&
+          looks_reasonable_toc(ncx_entries)) {
+        *toc_entries = ncx_entries;
         toc_loaded = true;
+      } else if (app) {
+        app->PrintStatus("EPUB: NCX discarded (low-quality TOC)");
+      }
     } else if (app) {
       app->PrintStatus("EPUB: NCX skipped (size/format)");
     }
@@ -892,14 +933,18 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
           app->PrintStatus(msg);
         }
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NAV-FALLBACK")) {
+          std::vector<toc_entry_t> nav_entries;
           nav_parse_data_t navdata;
-          navdata.entries = toc_entries;
+          navdata.entries = &nav_entries;
           navdata.base_path = toc_doc_path;
           navdata.depth = 0;
           navdata.toc_nav_depth = 0;
           navdata.anchor_depth = 0;
-          if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata))
+          if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata) &&
+              looks_reasonable_toc(nav_entries)) {
+            *toc_entries = nav_entries;
             toc_loaded = true;
+          }
         } else if (app) {
           app->PrintStatus("EPUB: fallback NAV skipped");
         }
@@ -921,8 +966,12 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
           app->PrintStatus(msg);
         }
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX-FALLBACK")) {
-          if (ParseNcxLightweight(toc_xml, toc_doc_path, toc_entries, app))
+          std::vector<toc_entry_t> ncx_entries;
+          if (ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app) &&
+              looks_reasonable_toc(ncx_entries)) {
+            *toc_entries = ncx_entries;
             toc_loaded = true;
+          }
         } else if (app) {
           app->PrintStatus("EPUB: fallback NCX skipped");
         }
@@ -1370,13 +1419,27 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     u16 page = 0;
     bool have_page = false;
 
+    const bool has_fragment = toc_entries[i].href.find('#') != std::string::npos;
     std::string key = NormalizePath(toc_entries[i].href);
     if (!key.empty()) {
       auto hit = page_start_by_href.find(key);
+      if (hit == page_start_by_href.end()) {
+        std::string key_no_fragment =
+            NormalizePath(StripFragmentAndQuery(toc_entries[i].href));
+        if (!key_no_fragment.empty())
+          hit = page_start_by_href.find(key_no_fragment);
+      }
       if (hit != page_start_by_href.end()) {
         page = hit->second;
         have_page = true;
       }
+    }
+
+    // If many TOC entries point to the same XHTML with different #anchors,
+    // keep order by falling back to sequential chapter pages instead of
+    // dropping duplicates on the same mapped page.
+    if (have_page && used_pages[page] && has_fragment) {
+      have_page = false;
     }
 
     if (!have_page) {
