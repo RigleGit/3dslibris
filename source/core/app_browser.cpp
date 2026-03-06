@@ -263,6 +263,12 @@ static void AppendAsciiFolded(u32 cp, std::string *out) {
     out->push_back(' ');
     return;
   }
+  // Some mojibake paths collapse accented í into soft hyphen (U+00AD).
+  // In fallback cover labels this is visually/semantically closer to 'i'.
+  if (cp == 0x00AD || cp == 0x0131) {
+    out->push_back('i');
+    return;
+  }
 
   // Latin letters with diacritics -> base ASCII.
   switch (cp) {
