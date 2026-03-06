@@ -800,7 +800,8 @@ void App::ProcessJobs(u32 budget_ms) {
         rc = epub_resolve_toc(book, path);
         book->tocResolveTried = true;
         book->tocResolved = (rc == 0);
-        if (mode == APP_MODE_CHAPTERS && book == bookcurrent && chaptermenu) {
+        if (rc == 0 && mode == APP_MODE_CHAPTERS && book == bookcurrent &&
+            chaptermenu) {
           chaptermenu->Init();
           chaptermenu->SetDirty(true);
         }

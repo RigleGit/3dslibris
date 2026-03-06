@@ -490,8 +490,10 @@ static bool ContainsNoCase(const std::string &haystack,
     return false;
   std::string h = haystack;
   std::string n = needle;
-  std::transform(h.begin(), h.end(), h.begin(), tolower);
-  std::transform(n.begin(), n.end(), n.begin(), tolower);
+  std::transform(h.begin(), h.end(), h.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
+  std::transform(n.begin(), n.end(), n.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
   return h.find(n) != std::string::npos;
 }
 
@@ -823,7 +825,8 @@ static bool IsLikelyContentItem(const epub_item *item) {
     return true;
 
   std::string href = item->href;
-  std::transform(href.begin(), href.end(), href.begin(), tolower);
+  std::transform(href.begin(), href.end(), href.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
   return (href.size() >= 6 && href.substr(href.size() - 6) == ".xhtml") ||
          (href.size() >= 5 && href.substr(href.size() - 5) == ".html") ||
          (href.size() >= 4 && href.substr(href.size() - 4) == ".htm");
@@ -1034,6 +1037,30 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
   }
 
   return !toc_entries->empty();
+}
+
+static std::string NormalizeTocTitle(const std::string &raw) {
+  std::string t = Trim(raw);
+  if (t.empty())
+    return t;
+  std::string out;
+  out.reserve(t.size());
+  bool prev_space = true;
+  for (size_t i = 0; i < t.size(); i++) {
+    unsigned char c = (unsigned char)t[i];
+    bool is_space = isspace(c) || t[i] == '\n' || t[i] == '\r' || t[i] == '\t';
+    if (is_space) {
+      if (!prev_space)
+        out.push_back(' ');
+      prev_space = true;
+    } else {
+      out.push_back((char)c);
+      prev_space = false;
+    }
+    if (out.size() >= 120)
+      break;
+  }
+  return Trim(out);
 }
 
 int epub(Book *book, std::string name, bool metadataonly) {
@@ -1456,9 +1483,10 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   std::map<u16, bool> used_pages;
   size_t fallback_idx = 0;
   const std::vector<ChapterEntry> &current = book->GetChapters();
+  const size_t kResolvedMaxEntries = 512;
 
   for (size_t i = 0; i < toc_entries.size(); i++) {
-    std::string title = Trim(toc_entries[i].title);
+    std::string title = NormalizeTocTitle(toc_entries[i].title);
     if (title.empty())
       continue;
 
@@ -1508,6 +1536,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     entry.page = page;
     entry.title = title;
     resolved.push_back(entry);
+    if (resolved.size() >= kResolvedMaxEntries)
+      break;
   }
 
   if (resolved.empty()) {
