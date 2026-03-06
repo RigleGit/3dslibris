@@ -177,6 +177,24 @@ static std::string NormalizePath(const std::string &path) {
   return out;
 }
 
+static std::string ToLowerAscii(const std::string &s) {
+  std::string out = s;
+  std::transform(out.begin(), out.end(), out.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
+  return out;
+}
+
+static std::string BasenamePath(const std::string &path) {
+  if (path.empty())
+    return "";
+  size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos)
+    return path;
+  if (slash + 1 >= path.size())
+    return "";
+  return path.substr(slash + 1);
+}
+
 static std::string StripFragmentAndQuery(const std::string &path) {
   size_t stop = path.find_first_of("#?");
   if (stop == std::string::npos)
@@ -1601,9 +1619,36 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   }
 
   std::vector<ChapterEntry> resolved;
-  std::map<u16, bool> used_pages;
-  size_t fallback_idx = 0;
-  const std::vector<ChapterEntry> &current = book->GetChapters();
+  std::map<u16, bool> used_pages_non_fragment;
+  std::map<std::string, u16> page_start_by_href_lc;
+  std::map<std::string, u16> page_start_by_basename_lc;
+  std::set<std::string> basename_lc_ambiguous;
+  size_t stat_exact = 0;
+  size_t stat_nofrag = 0;
+  size_t stat_lc = 0;
+  size_t stat_base = 0;
+  size_t stat_skip_unmatched = 0;
+  size_t stat_skip_dup = 0;
+
+  for (const auto &kv : page_start_by_href) {
+    std::string lower_key = ToLowerAscii(kv.first);
+    if (page_start_by_href_lc.find(lower_key) == page_start_by_href_lc.end())
+      page_start_by_href_lc[lower_key] = kv.second;
+
+    std::string base = BasenamePath(lower_key);
+    if (base.empty())
+      continue;
+    if (basename_lc_ambiguous.find(base) != basename_lc_ambiguous.end())
+      continue;
+    auto hit_base = page_start_by_basename_lc.find(base);
+    if (hit_base == page_start_by_basename_lc.end()) {
+      page_start_by_basename_lc[base] = kv.second;
+    } else if (hit_base->second != kv.second) {
+      page_start_by_basename_lc.erase(base);
+      basename_lc_ambiguous.insert(base);
+    }
+  }
+
   const size_t kResolvedMaxEntries = 512;
 
   for (size_t i = 0; i < toc_entries.size(); i++) {
@@ -1618,40 +1663,65 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     std::string key = NormalizePath(toc_entries[i].href);
     if (!key.empty()) {
       auto hit = page_start_by_href.find(key);
-      if (hit == page_start_by_href.end()) {
-        std::string key_no_fragment =
-            NormalizePath(StripFragmentAndQuery(toc_entries[i].href));
-        if (!key_no_fragment.empty())
-          hit = page_start_by_href.find(key_no_fragment);
-      }
       if (hit != page_start_by_href.end()) {
         page = hit->second;
         have_page = true;
+        stat_exact++;
       }
-    }
-
-    // If many TOC entries point to the same XHTML with different #anchors,
-    // keep order by falling back to sequential chapter pages instead of
-    // dropping duplicates on the same mapped page.
-    if (have_page && used_pages[page] && has_fragment) {
-      have_page = false;
+      if (!have_page) {
+        std::string key_no_fragment =
+            NormalizePath(StripFragmentAndQuery(toc_entries[i].href));
+        if (!key_no_fragment.empty()) {
+          auto hit_nofrag = page_start_by_href.find(key_no_fragment);
+          if (hit_nofrag != page_start_by_href.end()) {
+            page = hit_nofrag->second;
+            have_page = true;
+            stat_nofrag++;
+          }
+        }
+      }
+      if (!have_page) {
+        std::string key_lc = ToLowerAscii(key);
+        auto hit_lc = page_start_by_href_lc.find(key_lc);
+        if (hit_lc != page_start_by_href_lc.end()) {
+          page = hit_lc->second;
+          have_page = true;
+          stat_lc++;
+        }
+      }
+      if (!have_page) {
+        std::string key_no_fragment_lc =
+            ToLowerAscii(NormalizePath(StripFragmentAndQuery(toc_entries[i].href)));
+        auto hit_nofrag_lc = page_start_by_href_lc.find(key_no_fragment_lc);
+        if (hit_nofrag_lc != page_start_by_href_lc.end()) {
+          page = hit_nofrag_lc->second;
+          have_page = true;
+          stat_lc++;
+        }
+      }
+      if (!have_page) {
+        std::string base = BasenamePath(ToLowerAscii(key));
+        if (!base.empty()) {
+          auto hit_base = page_start_by_basename_lc.find(base);
+          if (hit_base != page_start_by_basename_lc.end()) {
+            page = hit_base->second;
+            have_page = true;
+            stat_base++;
+          }
+        }
+      }
     }
 
     if (!have_page) {
-      while (fallback_idx < current.size() &&
-             used_pages[current[fallback_idx].page]) {
-        fallback_idx++;
-      }
-      if (fallback_idx < current.size()) {
-        page = current[fallback_idx].page;
-        have_page = true;
-        fallback_idx++;
-      }
-    }
-
-    if (!have_page || used_pages[page])
+      stat_skip_unmatched++;
       continue;
-    used_pages[page] = true;
+    }
+    if (!has_fragment && used_pages_non_fragment[page]) {
+      stat_skip_dup++;
+      continue;
+    }
+    if (!has_fragment)
+      used_pages_non_fragment[page] = true;
 
     ChapterEntry entry;
     entry.page = page;
@@ -1679,6 +1749,13 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
              (unsigned)toc_entries.size(), (unsigned)book->GetChapters().size());
     app->PrintStatus(msg);
+    char map_msg[192];
+    snprintf(map_msg, sizeof(map_msg),
+             "EPUB: TOC map stats exact=%u nofrag=%u lower=%u base=%u skip=%u dup=%u",
+             (unsigned)stat_exact, (unsigned)stat_nofrag, (unsigned)stat_lc,
+             (unsigned)stat_base, (unsigned)stat_skip_unmatched,
+             (unsigned)stat_skip_dup);
+    app->PrintStatus(map_msg);
     app->PrintStatus("EPUB: TOC resolve end");
   }
 
