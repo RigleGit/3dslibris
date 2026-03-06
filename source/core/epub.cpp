@@ -422,6 +422,57 @@ static void EpubDiag(App *app, const char *fmt, const char *arg) {
 
 static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &out,
                              App *app = NULL, const char *tag = NULL) {
+  auto normalize_zip_name = [](const std::string &name) {
+    std::string n = name;
+    std::replace(n.begin(), n.end(), '\\', '/');
+    return n;
+  };
+
+  auto equals_ascii_nocase = [](const std::string &a, const std::string &b) {
+    if (a.size() != b.size())
+      return false;
+    for (size_t i = 0; i < a.size(); i++) {
+      unsigned char ca = (unsigned char)a[i];
+      unsigned char cb = (unsigned char)b[i];
+      if (ca >= 'A' && ca <= 'Z')
+        ca = (unsigned char)(ca - 'A' + 'a');
+      if (cb >= 'A' && cb <= 'Z')
+        cb = (unsigned char)(cb - 'A' + 'a');
+      if (ca != cb)
+        return false;
+    }
+    return true;
+  };
+
+  auto locate_zip_entry_safe = [&](const std::string &entry_path) -> bool {
+    if (entry_path.empty())
+      return false;
+
+    // Fast path: exact match (avoids minizip case-insensitive compare quirks
+    // with non-ASCII filenames inside some EPUB archives).
+    if (unzLocateFile(uf, entry_path.c_str(), 0) == UNZ_OK)
+      return true;
+
+    // Safe fallback: manual iteration with ASCII-only case folding.
+    if (unzGoToFirstFile(uf) != UNZ_OK)
+      return false;
+
+    std::string wanted = normalize_zip_name(entry_path);
+    do {
+      unz_file_info fi;
+      char fname[1024];
+      if (unzGetCurrentFileInfo(uf, &fi, fname, sizeof(fname), NULL, 0, NULL,
+                                0) != UNZ_OK) {
+        continue;
+      }
+      std::string current = normalize_zip_name(std::string(fname));
+      if (current == wanted || equals_ascii_nocase(current, wanted))
+        return true;
+    } while (unzGoToNextFile(uf) == UNZ_OK);
+
+    return false;
+  };
+
   out.clear();
   const char *t = (tag && *tag) ? tag : "ZIP";
   {
@@ -432,7 +483,7 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &o
   if (path.empty())
     return false;
   EpubDiag(app, "EPUB: %s locate begin", t);
-  if (unzLocateFile(uf, path.c_str(), 2) != UNZ_OK) {
+  if (!locate_zip_entry_safe(path)) {
     EpubDiag(app, "EPUB: %s locate fail", t);
     return false;
   }
