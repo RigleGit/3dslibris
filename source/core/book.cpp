@@ -39,6 +39,28 @@ static std::string BasenamePathLocal(const std::string &path) {
   return path.substr(slash + 1);
 }
 
+static std::string AnchorTokenKey(const std::string &s) {
+  std::string out;
+  out.reserve(s.size());
+  for (size_t i = 0; i < s.size(); i++) {
+    unsigned char c = (unsigned char)s[i];
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+      out.push_back((char)c);
+  }
+  return out;
+}
+
+static std::string AnchorDigits(const std::string &s) {
+  std::string out;
+  out.reserve(s.size());
+  for (size_t i = 0; i < s.size(); i++) {
+    unsigned char c = (unsigned char)s[i];
+    if (c >= '0' && c <= '9')
+      out.push_back((char)c);
+  }
+  return out;
+}
+
 static std::string NormalizePathForAnchor(const std::string &path) {
   std::string in = path;
   std::replace(in.begin(), in.end(), '\\', '/');
@@ -885,6 +907,11 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
     bool anchor_found = false;
     u16 anchor_page = 0;
     bool anchor_ambiguous = false;
+    bool fuzzy_doc_found = false;
+    u16 fuzzy_doc_page = 0;
+    bool fuzzy_doc_ambiguous = false;
+    const std::string key_token = AnchorTokenKey(key_anchor_lc);
+    const std::string key_digits = AnchorDigits(key_anchor_lc);
 
     for (const auto &kv : chapter_anchor_pages) {
       size_t kv_hash = kv.first.find('#');
@@ -925,10 +952,39 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
           base_anchor_ambiguous = true;
         }
       }
+
+      if (has_target_doc && !path_anchor_found && !key_token.empty()) {
+        u16 candidate_doc_page = 0;
+        if (FindChapterDocStartPage(kv.first, &candidate_doc_page) &&
+            candidate_doc_page == target_doc_page) {
+          std::string cand_token = AnchorTokenKey(kv_anchor_lc);
+          std::string cand_digits = AnchorDigits(kv_anchor_lc);
+          bool fuzzy_match = false;
+          if (!cand_token.empty() && cand_token == key_token) {
+            fuzzy_match = true;
+          } else if (key_digits.size() >= 3 && cand_digits == key_digits &&
+                     !cand_digits.empty()) {
+            fuzzy_match = true;
+          }
+
+          if (fuzzy_match) {
+            if (!fuzzy_doc_found) {
+              fuzzy_doc_found = true;
+              fuzzy_doc_page = kv.second;
+            } else if (fuzzy_doc_page != kv.second) {
+              fuzzy_doc_ambiguous = true;
+            }
+          }
+        }
+      }
     }
 
     if (path_anchor_found && !path_anchor_ambiguous) {
       *page_out = path_anchor_page;
+      return true;
+    }
+    if (fuzzy_doc_found && !fuzzy_doc_ambiguous) {
+      *page_out = fuzzy_doc_page;
       return true;
     }
     if (base_anchor_found && !base_anchor_ambiguous) {
