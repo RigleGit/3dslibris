@@ -171,13 +171,15 @@ static void log_filename_stage(App *app, const char *stage, const char *value) {
 #endif
 }
 
-static bool has_epub_extension(const char *filename) {
+static format_t detect_book_format(const char *filename) {
   if (!filename)
-    return false;
+    return FORMAT_UNDEF;
   size_t len = strlen(filename);
-  if (len < 5)
-    return false;
-  return strcasecmp(filename + len - 5, ".epub") == 0;
+  if (len >= 5 && strcasecmp(filename + len - 5, ".epub") == 0)
+    return FORMAT_EPUB;
+  if (len >= 4 && strcasecmp(filename + len - 4, ".fb2") == 0)
+    return FORMAT_XHTML;
+  return FORMAT_UNDEF;
 }
 
 static std::string sdmc_to_archive_relpath(const std::string &path) {
@@ -302,7 +304,8 @@ static void append_book_from_filename(App *app, const char *filename) {
     return;
   if (filename[0] == '.')
     return;
-  if (!has_epub_extension(filename))
+  format_t format = detect_book_format(filename);
+  if (format == FORMAT_UNDEF)
     return;
 
   std::string raw_name(filename);
@@ -317,7 +320,7 @@ static void append_book_from_filename(App *app, const char *filename) {
   book->SetTitle(io_name.c_str());
   log_filename_stage(app, "book.filename", book->GetFileName());
   log_filename_stage(app, "book.title", book->GetTitle());
-  book->format = FORMAT_EPUB;
+  book->format = format;
   app->books.push_back(book);
   app->bookcount++;
 }

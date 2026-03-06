@@ -34,7 +34,12 @@ u8 Book::Open() {
 
   // Page layout is a function of the current style.
   app->ts->SetStyle(TEXT_STYLE_REGULAR);
-  u8 err = epub(this, path, false);
+  u8 err = 1;
+  if (format == FORMAT_EPUB) {
+    err = epub(this, path, false);
+  } else {
+    err = Parse(true);
+  }
   if (!err)
     if (position > (int)pages.size())
       position = pages.size() - 1;
@@ -46,11 +51,18 @@ u8 Book::Index() {
     return metadataIndexed ? 0 : 1;
   metadataIndexTried = true;
 
-  std::string path;
-  path.append(GetFolderName());
-  path.append("/");
-  path.append(GetFileName());
-  int err = epub(this, path, true);
+  int err = 1;
+  if (format == FORMAT_EPUB) {
+    std::string path;
+    path.append(GetFolderName());
+    path.append("/");
+    path.append(GetFileName());
+    err = epub(this, path, true);
+  } else {
+    // Non-EPUB files currently use filename labels in browser; defer full parse
+    // until open to keep startup responsive.
+    err = 0;
+  }
   if (!err) {
     metadataIndexed = true;
   }
@@ -69,7 +81,7 @@ u8 Book::Parse(bool fulltext) {
   }
 
   char path[MAXPATHLEN];
-  sprintf(path, "%s%s", GetFolderName(), GetFileName());
+  snprintf(path, sizeof(path), "%s/%s", GetFolderName(), GetFileName());
   FILE *fp = fopen(path, "r");
   if (!fp) {
     delete[] filebuf;
@@ -106,7 +118,7 @@ u8 Book::Parse(bool fulltext) {
     int bytes_read = fread(filebuf, 1, BUFSIZE, fp);
     status = XML_Parse(p, filebuf, bytes_read, (bytes_read == 0));
     if (status == XML_STATUS_ERROR) {
-      parse_error(p);
+      app->parse_error(p);
       rc = 254;
       break;
     }
