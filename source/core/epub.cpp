@@ -1921,8 +1921,11 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
         first_direct_page = p;
       }
       if (query.size() >= 10) {
-        *page_out = p;
-        return true;
+        size_t head_len = std::min((size_t)320, text.size());
+        if (direct_pos < head_len) {
+          *page_out = p;
+          return true;
+        }
       }
     }
 
@@ -2020,8 +2023,11 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
           first_direct_page = p;
         }
         if (query.size() >= 10) {
-          *page_out = p;
-          return true;
+          size_t head_len = std::min((size_t)320, text.size());
+          if (direct_pos < head_len) {
+            *page_out = p;
+            return true;
+          }
         }
       }
 
@@ -2539,6 +2545,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   size_t stat_base = 0;
   size_t stat_skip_unmatched = 0;
   size_t stat_skip_dup = 0;
+  size_t stat_title_empty_norm = 0;
   std::vector<std::string> unresolved_fragment_samples;
   std::map<std::string, std::map<std::string, std::string>> toc_proxy_cache;
   std::set<std::string> toc_proxy_attempted;
@@ -2572,9 +2579,22 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   u16 last_resolved_page = 0;
 
   for (size_t i = 0; i < toc_entries.size(); i++) {
-    std::string title = NormalizeTocTitle(toc_entries[i].title);
-    if (title.empty())
+    std::string raw_title = Trim(toc_entries[i].title);
+    if (raw_title.empty())
       continue;
+    std::string title_match = NormalizeTocTitle(raw_title);
+    if (title_match.empty()) {
+      title_match = raw_title;
+      stat_title_empty_norm++;
+      if (app && stat_title_empty_norm <= 3) {
+        char msg[160];
+        std::string clip = ClipForDiag(raw_title, 100);
+        snprintf(msg, sizeof(msg), "EPUB: TOC title normalize fallback [%u]=%s",
+                 (unsigned)stat_title_empty_norm, clip.c_str());
+        app->PrintStatus(msg);
+      }
+    }
+    std::string title = title_match;
 
     u16 page = 0;
     bool have_page = false;
@@ -2702,7 +2722,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
       bool got_title = false;
       if (!mapped_is_toc_doc) {
         got_title =
-            FindTocTitlePageInDocRange(book, page, doc_starts, title, &title_page);
+            FindTocTitlePageInDocRange(book, page, doc_starts, title_match,
+                                       &title_page);
       } else {
         // Some EPUBs point TOC entries to an index/toc doc with numeric
         // fragments (#3, #7...) that are not real content anchors.
@@ -2716,7 +2737,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
             from_page = next_page;
         }
         got_title =
-            FindTocTitlePageGlobal(book, title, from_page, &title_page, false);
+            FindTocTitlePageGlobal(book, title_match, from_page, &title_page,
+                                   false);
         if (got_title)
           stat_title_global++;
       }
@@ -2724,7 +2746,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         page = title_page;
         stat_title_fallback++;
       } else if (unresolved_fragment_samples.size() < 3) {
-        std::string sample = toc_entries[i].href + " | " + title;
+        std::string sample = toc_entries[i].href + " | " + title_match;
         unresolved_fragment_samples.push_back(sample);
       }
 
