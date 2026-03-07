@@ -251,6 +251,7 @@ static const char *LocalName(const char *name) {
 typedef struct {
   std::string href;
   std::string title;
+  u8 level;
 } toc_entry_t;
 
 typedef struct {
@@ -259,6 +260,8 @@ typedef struct {
   int depth;
   int toc_nav_depth;
   int anchor_depth;
+  int nav_level;
+  int current_level;
   std::string current_href;
   std::string current_title;
 } nav_parse_data_t;
@@ -267,6 +270,7 @@ typedef struct {
   int depth;
   std::string src;
   std::string title;
+  int level;
   bool in_text;
   int text_depth;
 } ncx_navpoint_state_t;
@@ -517,11 +521,16 @@ static void nav_start(void *userdata, const char *el, const char **attr) {
       d->toc_nav_depth = d->depth;
   }
 
+  if (d->toc_nav_depth > 0 && !strcmp(lname, "li")) {
+    d->nav_level++;
+  }
+
   if (d->toc_nav_depth > 0 && !strcmp(lname, "a")) {
     const char *href = AttrValue(attr, "href");
     if (href && *href) {
       d->anchor_depth = d->depth;
       d->current_href = ResolveRelativePath(d->base_path, href);
+      d->current_level = (d->nav_level > 0) ? (d->nav_level - 1) : 0;
       d->current_title.clear();
     }
   }
@@ -545,6 +554,7 @@ static void nav_end(void *userdata, const char *el) {
         toc_entry_t entry;
         entry.href = d->current_href;
         entry.title = title;
+        entry.level = (u8)std::min(15, std::max(0, d->current_level));
         d->entries->push_back(entry);
       }
     }
@@ -555,6 +565,11 @@ static void nav_end(void *userdata, const char *el) {
 
   if (d->toc_nav_depth == d->depth && !strcmp(lname, "nav")) {
     d->toc_nav_depth = 0;
+    d->nav_level = 0;
+  }
+
+  if (d->toc_nav_depth > 0 && !strcmp(lname, "li") && d->nav_level > 0) {
+    d->nav_level--;
   }
 
   d->depth--;
@@ -570,6 +585,7 @@ static void ncx_start(void *userdata, const char *el, const char **attr) {
     node.depth = d->depth;
     node.src.clear();
     node.title.clear();
+    node.level = (int)d->stack.size();
     node.in_text = false;
     node.text_depth = 0;
     d->stack.push_back(node);
@@ -622,6 +638,7 @@ static void ncx_end(void *userdata, const char *el) {
       toc_entry_t entry;
       entry.href = ResolveRelativePath(d->base_path, node.src);
       entry.title = title;
+      entry.level = (u8)std::min(15, std::max(0, node.level));
       if (!entry.href.empty() && !entry.title.empty())
         d->entries->push_back(entry);
     }
@@ -686,6 +703,7 @@ static bool ParseNcxLightweight(const std::string &xml,
     toc_entry_t entry;
     entry.href = ResolveRelativePath(base_path, pending_src);
     entry.title = Trim(pending_title);
+    entry.level = 0;
     if (!entry.href.empty() && !entry.title.empty()) {
       entries->push_back(entry);
       any = true;
@@ -1494,6 +1512,8 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
       navdata.depth = 0;
       navdata.toc_nav_depth = 0;
       navdata.anchor_depth = 0;
+      navdata.nav_level = 0;
+      navdata.current_level = 0;
       if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata) &&
           looks_reasonable_toc(nav_entries)) {
         *toc_entries = nav_entries;
@@ -1556,6 +1576,8 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
           navdata.depth = 0;
           navdata.toc_nav_depth = 0;
           navdata.anchor_depth = 0;
+          navdata.nav_level = 0;
+          navdata.current_level = 0;
           if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata) &&
               looks_reasonable_toc(nav_entries)) {
             *toc_entries = nav_entries;
@@ -2248,6 +2270,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
         navdata.depth = 0;
         navdata.toc_nav_depth = 0;
         navdata.anchor_depth = 0;
+        navdata.nav_level = 0;
+        navdata.current_level = 0;
         if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata)) {
           toc_loaded = true;
         }
@@ -2296,6 +2320,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
             navdata.depth = 0;
             navdata.toc_nav_depth = 0;
             navdata.anchor_depth = 0;
+            navdata.nav_level = 0;
+            navdata.current_level = 0;
             if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata))
               toc_loaded = true;
           } else if (book && book->GetApp()) {
@@ -2352,6 +2378,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
         ChapterEntry entry;
         entry.page = hit->second;
         entry.title = Trim(toc_entries[i].title);
+        entry.level = toc_entries[i].level;
         if (entry.title.empty())
           continue;
         resolved.push_back(entry);
@@ -2360,7 +2387,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
       if (!resolved.empty()) {
         book->ClearChapters();
         for (size_t i = 0; i < resolved.size(); i++) {
-          book->AddChapter(resolved[i].page, resolved[i].title);
+          book->AddChapter(resolved[i].page, resolved[i].title,
+                           resolved[i].level);
         }
       }
     }
@@ -2805,6 +2833,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     ChapterEntry entry;
     entry.page = page;
     entry.title = title;
+    entry.level = toc_entries[i].level;
     resolved.push_back(entry);
     have_last_resolved_page = true;
     last_resolved_page = page;
@@ -2822,7 +2851,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
 
   book->ClearChapters();
   for (size_t i = 0; i < resolved.size(); i++) {
-    book->AddChapter(resolved[i].page, resolved[i].title);
+    book->AddChapter(resolved[i].page, resolved[i].title, resolved[i].level);
   }
 
   if (app) {

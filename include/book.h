@@ -29,6 +29,7 @@ void end(void *userdata, const char *el);
 
 struct ChapterEntry {
   u16 page; // page index where chapter starts
+  u8 level; // toc nesting depth (0 = top-level)
   std::string title;
 };
 
@@ -144,7 +145,7 @@ public:
   bool StoreFb2InlineImage(const std::string &id,
                            const std::string &base64_data);
   bool DrawInlineImage(Text *ts, u16 image_id);
-  void AddChapter(u16 page, const std::string &title);
+  void AddChapter(u16 page, const std::string &title, u8 level = 0);
   void ClearChapters();
   int GetNextBookmark(void);
   int GetPreviousBookmark(void);

@@ -43,6 +43,29 @@ static std::string BuildTwoLineLabelIfNeeded(const std::string &raw) {
   return title + "\n" + subtitle;
 }
 
+static std::string ApplyLevelPrefix(const std::string &label, u8 level) {
+  if (label.empty() || level == 0)
+    return label;
+
+  const u8 capped = (level > 6) ? 6 : level;
+  std::string prefix((size_t)capped * 2, ' ');
+  prefix += "- ";
+
+  std::string out;
+  out.reserve(label.size() + prefix.size() * 2);
+  bool line_start = true;
+  for (size_t i = 0; i < label.size(); i++) {
+    if (line_start) {
+      out += prefix;
+      line_start = false;
+    }
+    out.push_back(label[i]);
+    if (label[i] == '\n')
+      line_start = true;
+  }
+  return out;
+}
+
 static const char *TocQualityLabel(TocQuality q) {
   switch (q) {
   case TOC_QUALITY_STRONG:
@@ -75,7 +98,8 @@ void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
   pages.reserve(chapters.size());
 
   for (const auto &ch : chapters) {
-    labels.push_back(BuildTwoLineLabelIfNeeded(ch.title));
+    std::string label = BuildTwoLineLabelIfNeeded(ch.title);
+    labels.push_back(ApplyLevelPrefix(label, ch.level));
     pages.push_back(ch.page);
   }
 }

@@ -33,7 +33,13 @@ static bool CanOpenBookIndexInCurrentContext(App *app) {
     return false;
   if (app->bookcurrent->format != FORMAT_EPUB)
     return false;
-  return !app->bookcurrent->GetChapters().empty();
+  return true;
+}
+
+static bool CanOpenSelectedBookIndex(App *app) {
+  if (!app || !app->bookselected)
+    return false;
+  return app->bookselected->format == FORMAT_EPUB;
 }
 
 u8 App::PrefsVisibleButtonCount() const {
@@ -79,6 +85,10 @@ void App::PrefsDraw() {
     visibleCount = 1;
   if (prefsSelected >= visibleCount)
     prefsSelected = visibleCount - 1;
+
+  // Dynamic rows depend on current context/book; refresh before drawing.
+  PrefsRefreshButton(PREFS_BUTTON_INDEX);
+  PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
 
   for (int i = 0; i < visibleCount; i++)
     prefsButtons[i].Draw(ts->screenright, i == prefsSelected);
@@ -300,11 +310,11 @@ void App::PrefsRefreshButton(int index) {
   case PREFS_BUTTON_INDEX:
     if (CanOpenBookIndexInCurrentContext(this)) {
       prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
-    } else if (prefs_book_context) {
-      prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string("(not available)"));
-    } else {
+    } else if (CanOpenSelectedBookIndex(this)) {
       prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(
           std::string("(open selected book)"));
+    } else {
+      prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string("(not available)"));
     }
     break;
   case PREFS_BUTTON_BOOKMARKS:
@@ -344,16 +354,14 @@ void App::PrefsHandlePress() {
   }
 
   if (prefsSelected == PREFS_BUTTON_INDEX) {
-    if (prefs_book_context && bookcurrent) {
-      if (CanOpenBookIndexInCurrentContext(this)) {
-        ShowChaptersView();
-      } else {
-        PrintStatus("Index unavailable for this book");
-        PrefsRefreshButton(PREFS_BUTTON_INDEX);
-        prefs_view_dirty = true;
-      }
-    } else if (!prefs_book_context && bookselected) {
+    if (CanOpenBookIndexInCurrentContext(this)) {
+      ShowChaptersView();
+    } else if (CanOpenSelectedBookIndex(this)) {
       OpenBook();
+    } else {
+      PrintStatus("Index unavailable for this book");
+      PrefsRefreshButton(PREFS_BUTTON_INDEX);
+      prefs_view_dirty = true;
     }
     return;
   }

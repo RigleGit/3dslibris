@@ -630,8 +630,17 @@ void App::ShowFontView(int app_font_mode) {
 }
 
 void App::ShowLibraryView() {
-  mode = APP_MODE_BROWSER;
+  // Reset shared bottom buttons immediately; prefs view reuses/moves them.
+  buttonprev.Move(2, 302);
+  buttonprev.Resize(50, 16);
+  buttonprev.Label("prev");
+  buttonnext.Move(188, 302);
+  buttonnext.Resize(50, 16);
+  buttonnext.Label("next");
+  buttonprefs.Move(80, 302);
+  buttonprefs.Resize(78, 16);
   buttonprefs.Label("settings");
+  mode = APP_MODE_BROWSER;
   ts->SetScreen(ts->screenright);
   browser_wait_input_release = true;
   browser_view_dirty = true;
@@ -639,6 +648,8 @@ void App::ShowLibraryView() {
 
 void App::ShowSettingsView(bool from_book) {
   prefs_book_context = from_book;
+  PrefsRefreshButton(PREFS_BUTTON_INDEX);
+  PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
   u8 visible_count = PrefsVisibleButtonCount();
   if (visible_count == 0)
     visible_count = 1;

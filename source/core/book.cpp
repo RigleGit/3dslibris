@@ -1056,9 +1056,10 @@ const std::unordered_map<std::string, u16> &Book::GetChapterDocStartPages() cons
 
 void Book::ClearChapterDocStartPages() { chapter_doc_start_pages.clear(); }
 
-void Book::AddChapter(u16 page, const std::string &title) {
+void Book::AddChapter(u16 page, const std::string &title, u8 level) {
   ChapterEntry entry;
   entry.page = page;
+  entry.level = level;
   entry.title = title;
   chapters.push_back(entry);
 }
