@@ -1855,25 +1855,44 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
   if (query.empty())
     return false;
   std::vector<std::string> tokens = ExtractTitleSearchTokens(query);
-  if (tokens.empty() && query.size() < 8)
+  if (tokens.empty() && query.size() < 4)
     return false;
 
   int best_score = -1;
   int best_hits = 0;
   u16 best_page = doc_start;
+  bool have_direct_match = false;
+  u16 first_direct_page = doc_start;
 
   for (u16 p = doc_start; p < doc_end && p < page_count; p++) {
     Page *page = book->GetPage((int)p);
     std::string text = BuildPageSearchText(page, 4096);
     if (text.empty())
       continue;
-    if (query.size() >= 10 && text.find(query) != std::string::npos) {
-      *page_out = p;
-      return true;
+    size_t direct_pos = text.find(query);
+    bool direct_match = (direct_pos != std::string::npos);
+    if (direct_match) {
+      if (!have_direct_match) {
+        have_direct_match = true;
+        first_direct_page = p;
+      }
+      if (query.size() >= 10) {
+        *page_out = p;
+        return true;
+      }
     }
 
     int score = 0;
     int hits = 0;
+    if (direct_match) {
+      score += (int)std::min((size_t)query.size(), (size_t)24);
+      hits += 2;
+      size_t head_len = std::min((size_t)420, text.size());
+      if (text.substr(0, head_len).find(query) != std::string::npos) {
+        score += (int)std::min((size_t)query.size(), (size_t)24);
+        hits += 1;
+      }
+    }
     for (size_t i = 0; i < tokens.size() && i < 6; i++) {
       if (text.find(tokens[i]) != std::string::npos) {
         score += (int)tokens[i].size();
@@ -1888,6 +1907,14 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
   }
 
   if (best_score >= 12 || (best_score >= 8 && best_hits >= 2)) {
+    *page_out = best_page;
+    return true;
+  }
+  if (have_direct_match && query.size() >= 5) {
+    *page_out = first_direct_page;
+    return true;
+  }
+  if (best_score >= 6 && tokens.size() == 1 && tokens[0].size() >= 5) {
     *page_out = best_page;
     return true;
   }
@@ -1909,12 +1936,14 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
   if (query.empty())
     return false;
   std::vector<std::string> tokens = ExtractTitleSearchTokens(query);
-  if (tokens.empty() && query.size() < 8)
+  if (tokens.empty() && query.size() < 4)
     return false;
 
   int best_score = -1;
   int best_hits = 0;
   u16 best_page = from_page;
+  bool have_direct_match = false;
+  u16 first_direct_page = from_page;
 
   for (u16 pass = 0; pass < (allow_wrap ? 2 : 1); pass++) {
     u16 p0 = (pass == 0) ? from_page : 0;
@@ -1925,13 +1954,30 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
       if (text.empty())
         continue;
 
-      if (query.size() >= 10 && text.find(query) != std::string::npos) {
-        *page_out = p;
-        return true;
+      size_t direct_pos = text.find(query);
+      bool direct_match = (direct_pos != std::string::npos);
+      if (direct_match) {
+        if (!have_direct_match) {
+          have_direct_match = true;
+          first_direct_page = p;
+        }
+        if (query.size() >= 10) {
+          *page_out = p;
+          return true;
+        }
       }
 
       int score = 0;
       int hits = 0;
+      if (direct_match) {
+        score += (int)std::min((size_t)query.size(), (size_t)24);
+        hits += 2;
+        size_t head_len = std::min((size_t)420, text.size());
+        if (text.substr(0, head_len).find(query) != std::string::npos) {
+          score += (int)std::min((size_t)query.size(), (size_t)24);
+          hits += 1;
+        }
+      }
       for (size_t i = 0; i < tokens.size() && i < 6; i++) {
         if (text.find(tokens[i]) != std::string::npos) {
           score += (int)tokens[i].size();
@@ -1947,6 +1993,14 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
   }
 
   if (best_score >= 12 || (best_score >= 8 && best_hits >= 2)) {
+    *page_out = best_page;
+    return true;
+  }
+  if (have_direct_match && query.size() >= 5) {
+    *page_out = first_direct_page;
+    return true;
+  }
+  if (best_score >= 6 && tokens.size() == 1 && tokens[0].size() >= 5) {
     *page_out = best_page;
     return true;
   }
