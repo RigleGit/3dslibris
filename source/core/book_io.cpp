@@ -270,7 +270,80 @@ static bool LooksLikeTocLeaderLine(const std::string &folded) {
   return digits > 0;
 }
 
-static bool LooksLikePlainChapterHeading(const std::string &line) {
+static int CountAsciiWords(const std::string &line) {
+  int words = 0;
+  bool in_word = false;
+  for (size_t i = 0; i < line.size(); i++) {
+    unsigned char c = (unsigned char)line[i];
+    if (isspace(c)) {
+      in_word = false;
+      continue;
+    }
+    if (!in_word) {
+      words++;
+      in_word = true;
+    }
+  }
+  return words;
+}
+
+static bool EndsWithStandaloneDigits(const std::string &folded, int *digits_out) {
+  if (digits_out)
+    *digits_out = 0;
+  if (folded.empty())
+    return false;
+
+  int i = (int)folded.size() - 1;
+  while (i >= 0 && isspace((unsigned char)folded[(size_t)i]))
+    i--;
+  if (i < 0)
+    return false;
+
+  int digits = 0;
+  while (i >= 0 && isdigit((unsigned char)folded[(size_t)i])) {
+    digits++;
+    i--;
+  }
+  if (digits == 0)
+    return false;
+  if (digits_out)
+    *digits_out = digits;
+
+  if (i < 0)
+    return false;
+  return isspace((unsigned char)folded[(size_t)i]) != 0;
+}
+
+static bool LooksLikeFalsePositiveHeading(const std::string &compact,
+                                          const std::string &folded,
+                                          bool strong_signal) {
+  if (compact.empty())
+    return true;
+
+  if (folded == "contents" || folded == "table of contents" ||
+      folded == "indice" || folded == "indice de contenido" ||
+      folded == "contenido")
+    return true;
+
+  if (LooksLikeTocLeaderLine(folded))
+    return true;
+
+  int trailing_digits = 0;
+  if (!strong_signal && EndsWithStandaloneDigits(folded, &trailing_digits) &&
+      trailing_digits >= 1 && trailing_digits <= 4 &&
+      CountAsciiWords(compact) >= 3) {
+    // Common "title .... page" / "title page" in printed TOCs.
+    return true;
+  }
+
+  return false;
+}
+
+static bool LooksLikePlainChapterHeading(const std::string &line,
+                                         bool *strong_signal_out) {
+  if (strong_signal_out)
+    *strong_signal_out = false;
+
   std::string trimmed = TrimAsciiWhitespace(line);
   if (trimmed.size() < 4 || trimmed.size() > 120)
     return false;
@@ -279,29 +352,63 @@ static bool LooksLikePlainChapterHeading(const std::string &line) {
   std::string folded = FoldLatinForMatch(compact);
   if (folded.size() < 4)
     return false;
-  if (LooksLikeTocLeaderLine(folded))
-    return false;
-  if (StartsWithChapterPrefix(folded))
+  if (StartsWithChapterPrefix(folded)) {
+    if (strong_signal_out)
+      *strong_signal_out = true;
     return true;
+  }
 
   size_t split = folded.find(' ');
-  std::string first = split == std::string::npos ? folded : folded.substr(0, split);
+  std::string first =
+      split == std::string::npos ? folded : folded.substr(0, split);
   std::string rest = split == std::string::npos ? "" : folded.substr(split + 1);
-  if (IsRomanHeadingToken(first) && !TrimAsciiWhitespace(rest).empty())
+  if (IsRomanHeadingToken(first) && !TrimAsciiWhitespace(rest).empty()) {
+    if (strong_signal_out)
+      *strong_signal_out = true;
     return true;
+  }
 
   size_t p = 0;
   while (p < folded.size() && isdigit((unsigned char)folded[p]))
     p++;
   if (p > 0 && p < folded.size() &&
       (folded[p] == '.' || folded[p] == ')' || folded[p] == '-') &&
-      p + 1 < folded.size() && folded[p + 1] == ' ')
+      p + 1 < folded.size() && folded[p + 1] == ' ') {
+    if (strong_signal_out)
+      *strong_signal_out = true;
     return true;
+  }
 
   return false;
 }
 
-static void AddChapterIfUnique(Book *book, const std::string &title, u8 level) {
+static bool IsBlankLine(const std::string &line) {
+  return TrimAsciiWhitespace(line).empty();
+}
+
+static bool ShouldAcceptHeuristicHeading(const std::string &line,
+                                         bool prev_blank, bool next_blank,
+                                         bool prev_candidate,
+                                         bool next_candidate,
+                                         bool strong_signal) {
+  std::string compact = CollapseAsciiWhitespace(TrimAsciiWhitespace(line));
+  std::string folded = FoldLatinForMatch(compact);
+  if (LooksLikeFalsePositiveHeading(compact, folded, strong_signal))
+    return false;
+
+  if (prev_blank || next_blank)
+    return true;
+
+  // Dense clusters of candidate lines are usually in-book printed TOCs.
+  if (prev_candidate || next_candidate)
+    return false;
+
+  // Allow compact chapter-like headings even without blank separators.
+  return strong_signal && CountAsciiWords(compact) <= 8;
+}
+
+static void AddChapterAtPageIfUnique(Book *book, u16 page,
+                                     const std::string &title, u8 level) {
   if (!book)
     return;
   std::string clean = CollapseAsciiWhitespace(TrimAsciiWhitespace(title));
@@ -310,7 +417,6 @@ static void AddChapterIfUnique(Book *book, const std::string &title, u8 level) {
   if (book->GetChapters().size() >= 512)
     return;
 
-  u16 page = book->GetPageCount();
   const std::vector<ChapterEntry> &chapters = book->GetChapters();
   if (!chapters.empty()) {
     const ChapterEntry &last = chapters.back();
@@ -318,6 +424,12 @@ static void AddChapterIfUnique(Book *book, const std::string &title, u8 level) {
       return;
   }
   book->AddChapter(page, clean, level);
+}
+
+static void AddChapterIfUnique(Book *book, const std::string &title, u8 level) {
+  if (!book)
+    return;
+  AddChapterAtPageIfUnique(book, book->GetPageCount(), title, level);
 }
 
 static void SetNonEpubTocConfidence(Book *book, bool strong) {
@@ -377,6 +489,37 @@ static void FinalizePlainPage(parsedata_t *p) {
   }
 }
 
+struct PlainLineChunk {
+  std::string text;
+  bool has_newline;
+  bool valid;
+};
+
+static PlainLineChunk ReadNextLineChunk(const std::string &text, size_t *cursor) {
+  PlainLineChunk out;
+  out.text.clear();
+  out.has_newline = false;
+  out.valid = false;
+  if (!cursor)
+    return out;
+  if (*cursor > text.size())
+    return out;
+
+  size_t start = *cursor;
+  size_t end = text.find('\n', start);
+  if (end == std::string::npos) {
+    out.text = text.substr(start);
+    out.has_newline = false;
+    *cursor = text.size() + 1;
+  } else {
+    out.text = text.substr(start, end - start);
+    out.has_newline = true;
+    *cursor = end + 1;
+  }
+  out.valid = true;
+  return out;
+}
+
 static u8 ParsePlainTextBuffer(Book *book, const std::string &text_utf8) {
   if (!book || !book->GetApp() || !book->GetApp()->ts)
     return 1;
@@ -392,30 +535,139 @@ static u8 ParsePlainTextBuffer(Book *book, const std::string &text_utf8) {
 
   parse_push(&parsedata, TAG_PRE);
   if (!text_utf8.empty()) {
-    size_t start = 0;
-    while (start <= text_utf8.size()) {
-      size_t end = text_utf8.find('\n', start);
-      bool has_nl = (end != std::string::npos);
-      size_t len = has_nl ? (end - start) : (text_utf8.size() - start);
+    size_t cursor = 0;
+    PlainLineChunk curr = ReadNextLineChunk(text_utf8, &cursor);
+    PlainLineChunk next = ReadNextLineChunk(text_utf8, &cursor);
+    bool prev_blank = true;
+    bool prev_candidate = false;
 
-      if (len > 0) {
-        std::string line = text_utf8.substr(start, len);
-        if (LooksLikePlainChapterHeading(line))
-          AddChapterIfUnique(book, line, 0);
-        xml::book::chardata(&parsedata, line.c_str(), (int)line.size());
+    while (curr.valid) {
+      bool curr_blank = IsBlankLine(curr.text);
+      bool next_blank = !next.valid || IsBlankLine(next.text);
+
+      bool curr_strong = false;
+      bool curr_candidate = LooksLikePlainChapterHeading(curr.text, &curr_strong);
+      bool next_strong = false;
+      bool next_candidate =
+          next.valid && LooksLikePlainChapterHeading(next.text, &next_strong);
+
+      if (curr_candidate &&
+          ShouldAcceptHeuristicHeading(curr.text, prev_blank, next_blank,
+                                       prev_candidate, next_candidate,
+                                       curr_strong)) {
+        AddChapterIfUnique(book, curr.text, 0);
       }
-      if (has_nl) {
+
+      if (!curr.text.empty()) {
+        xml::book::chardata(&parsedata, curr.text.c_str(), (int)curr.text.size());
+      }
+      if (curr.has_newline) {
         xml::book::chardata(&parsedata, "\n", 1);
-        start = end + 1;
-      } else {
-        break;
       }
+
+      prev_blank = curr_blank;
+      prev_candidate = curr_candidate;
+      curr = next;
+      next = ReadNextLineChunk(text_utf8, &cursor);
     }
   }
   parse_pop(&parsedata);
   FinalizePlainPage(&parsedata);
   SetNonEpubTocConfidence(book, false);
   return 0;
+}
+
+static std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
+  std::vector<std::string> lines;
+  if (!page)
+    return lines;
+  const u8 *buf = page->GetBuffer();
+  const int len = page->GetLength();
+  if (!buf || len <= 0)
+    return lines;
+
+  std::string line;
+  line.reserve((size_t)len);
+  int i = 0;
+  while (i < len) {
+    u8 c = buf[i];
+    if (c == '\r' || c == '\n') {
+      lines.push_back(line);
+      line.clear();
+      i++;
+      continue;
+    }
+    if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
+        c == TEXT_ITALIC_OFF) {
+      i++;
+      continue;
+    }
+    if (c == TEXT_IMAGE) {
+      if (!line.empty()) {
+        lines.push_back(line);
+        line.clear();
+      }
+      lines.push_back(std::string());
+      if (i + 2 < len)
+        i += 3;
+      else
+        i++;
+      continue;
+    }
+    line.push_back((char)c);
+    i++;
+  }
+
+  if (!line.empty() || lines.empty())
+    lines.push_back(line);
+  return lines;
+}
+
+static void BuildFb2FallbackChapters(Book *book) {
+  if (!book)
+    return;
+  if (!book->GetChapters().empty())
+    return;
+  if (book->GetPageCount() == 0)
+    return;
+
+  std::vector<std::string> lines;
+  std::vector<u16> line_pages;
+  for (u16 page = 0; page < book->GetPageCount(); page++) {
+    const std::vector<std::string> page_lines =
+        ExtractTextLinesFromPage(book->GetPage(page));
+    for (size_t i = 0; i < page_lines.size(); i++) {
+      lines.push_back(page_lines[i]);
+      line_pages.push_back(page);
+    }
+  }
+
+  if (lines.empty())
+    return;
+
+  bool prev_blank = true;
+  bool prev_candidate = false;
+  for (size_t i = 0; i < lines.size(); i++) {
+    bool curr_blank = IsBlankLine(lines[i]);
+    bool next_blank = (i + 1 >= lines.size()) || IsBlankLine(lines[i + 1]);
+
+    bool curr_strong = false;
+    bool curr_candidate = LooksLikePlainChapterHeading(lines[i], &curr_strong);
+    bool next_strong = false;
+    bool next_candidate =
+        (i + 1 < lines.size()) &&
+        LooksLikePlainChapterHeading(lines[i + 1], &next_strong);
+
+    if (curr_candidate &&
+        ShouldAcceptHeuristicHeading(lines[i], prev_blank, next_blank,
+                                     prev_candidate, next_candidate,
+                                     curr_strong)) {
+      AddChapterAtPageIfUnique(book, line_pages[i], lines[i], 0);
+    }
+
+    prev_blank = curr_blank;
+    prev_candidate = curr_candidate;
+  }
 }
 
 static int HexDigit(char c) {
@@ -1006,8 +1258,15 @@ u8 Book::Parse(bool fulltext) {
   fclose(fp);
   delete[] filebuf;
 
-  if (rc == 0 && fulltext && parsedata.fb2_mode)
-    SetNonEpubTocConfidence(this, !chapters.empty());
+  if (rc == 0 && fulltext && parsedata.fb2_mode) {
+    bool has_structured_toc = !chapters.empty();
+    if (!has_structured_toc)
+      BuildFb2FallbackChapters(this);
+    if (!chapters.empty())
+      SetNonEpubTocConfidence(this, has_structured_toc);
+    else
+      ClearTocConfidence();
+  }
 
   return (rc);
 }
