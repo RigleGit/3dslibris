@@ -11,6 +11,7 @@ class FontMenu : public Menu {
 public:
     FontMenu(App* app);
     ~FontMenu();
+    void Open(u8 requested_mode);
     void draw();
     void Draw() override { draw(); } // Override to use the draw method
     void HandleInput(u32 keys) override {
@@ -22,13 +23,29 @@ public:
     inline bool isDirty() const { return dirty; }
     inline void setDirty(bool d = true) { dirty = d; }
 private:
+    enum ViewState {
+        VIEW_TARGETS,
+        VIEW_FILES
+    };
+
     void findFiles();
+    void refreshTargetButtons();
+    void enterTargetView(u8 requested_mode);
+    void enterFileView();
+    void handleTargetInput(u32 keys);
+    void handleFileInput(u32 keys);
+    void handleTargetTouchInput();
     void handleButtonPress();
-    void handleTouchInput();
+    void handleFileTouchInput();
     void nextPage();
     void previousPage();
     void selectNext();
     void selectPrevious();
+    void selectNextTarget();
+    void selectPreviousTarget();
     std::string dir;
     std::vector<std::string> files;
+    std::vector<Button *> targetButtons;
+    ViewState viewState;
+    u8 targetSelected;
 };

@@ -64,6 +64,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         app->ts->SetFontFile((char *)attr[i + 1], TEXT_STYLE_ITALIC);
       else if (!strcmp(attr[i], "bolditalic"))
         app->ts->SetFontFile((char *)attr[i + 1], TEXT_STYLE_BOLDITALIC);
+      else if (!strcmp(attr[i], "browser"))
+        app->ts->SetFontFile((char *)attr[i + 1], TEXT_STYLE_BROWSER);
       else if (!strcmp(attr[i], "path")) {
         if (strlen(attr[i + 1]))
           app->fontdir = std::string(attr[i + 1]);
@@ -250,12 +252,13 @@ int Prefs::Write() {
           app->ts->margin.right);
   fprintf(fp,
           "\t<font size=\"%d\" normal=\"%s\" bold=\"%s\" italic=\"%s\" "
-          "bolditalic=\"%s\" />\n",
+          "bolditalic=\"%s\" browser=\"%s\" />\n",
           app->ts->GetPixelSize(),
           app->ts->GetFontFile(TEXT_STYLE_REGULAR).c_str(),
           app->ts->GetFontFile(TEXT_STYLE_BOLD).c_str(),
           app->ts->GetFontFile(TEXT_STYLE_ITALIC).c_str(),
-          app->ts->GetFontFile(TEXT_STYLE_BOLDITALIC).c_str());
+          app->ts->GetFontFile(TEXT_STYLE_BOLDITALIC).c_str(),
+          app->ts->GetFontFile(TEXT_STYLE_BROWSER).c_str());
   fprintf(fp, "\t<paragraph indent=\"%d\" spacing=\"%d\" />\n", app->paraindent,
           app->paraspacing);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);

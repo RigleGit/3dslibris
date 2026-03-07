@@ -623,10 +623,9 @@ touchPosition App::TouchRead() {
 }
 
 void App::ShowFontView(int app_font_mode) {
-  mode = app_font_mode;
-  buttonprefs.Label("cancel");
+  mode = APP_MODE_PREFS_FONT;
   ts->SetScreen(ts->screenright);
-  fontmenu->setDirty();
+  fontmenu->Open((u8)app_font_mode);
 }
 
 void App::ShowLibraryView() {
