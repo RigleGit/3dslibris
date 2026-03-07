@@ -382,6 +382,130 @@ static void toc_proxy_end(void *userdata, const char *el) {
     d->id_stack.pop_back();
 }
 
+static bool IsHtmlNameChar(unsigned char c) {
+  return isalnum(c) || c == '_' || c == ':' || c == '-';
+}
+
+static std::string ExtractHtmlAttrValue(const std::string &tag,
+                                        const std::string &attr_name_lc) {
+  size_t i = 0;
+  while (i < tag.size()) {
+    while (i < tag.size() && isspace((unsigned char)tag[i]))
+      i++;
+    if (i >= tag.size())
+      break;
+
+    size_t key0 = i;
+    while (i < tag.size() && IsHtmlNameChar((unsigned char)tag[i]))
+      i++;
+    if (i == key0) {
+      i++;
+      continue;
+    }
+    std::string key = tag.substr(key0, i - key0);
+    std::transform(key.begin(), key.end(), key.begin(),
+                   [](unsigned char c) { return (char)tolower(c); });
+
+    while (i < tag.size() && isspace((unsigned char)tag[i]))
+      i++;
+    if (i >= tag.size() || tag[i] != '=')
+      continue;
+    i++;
+    while (i < tag.size() && isspace((unsigned char)tag[i]))
+      i++;
+    if (i >= tag.size())
+      break;
+
+    char quote = 0;
+    if (tag[i] == '"' || tag[i] == '\'') {
+      quote = tag[i];
+      i++;
+    }
+    size_t val0 = i;
+    if (quote) {
+      while (i < tag.size() && tag[i] != quote)
+        i++;
+      std::string val = tag.substr(val0, i - val0);
+      if (i < tag.size())
+        i++;
+      if (key == attr_name_lc)
+        return val;
+    } else {
+      while (i < tag.size() && !isspace((unsigned char)tag[i]) && tag[i] != '>')
+        i++;
+      if (key == attr_name_lc)
+        return tag.substr(val0, i - val0);
+    }
+  }
+  return "";
+}
+
+static void BuildTocProxyMapFromHtmlScan(
+    const std::string &xml, const std::string &base_path,
+    std::map<std::string, std::string> *proxy_map) {
+  if (!proxy_map)
+    return;
+
+  std::deque<std::string> pending_ids;
+  size_t pos = 0;
+  while (pos < xml.size()) {
+    size_t lt = xml.find('<', pos);
+    if (lt == std::string::npos)
+      break;
+    size_t gt = xml.find('>', lt + 1);
+    if (gt == std::string::npos)
+      break;
+    pos = gt + 1;
+
+    std::string tag = Trim(xml.substr(lt + 1, gt - lt - 1));
+    if (tag.empty())
+      continue;
+    if (tag[0] == '!' || tag[0] == '?' || tag[0] == '/')
+      continue;
+
+    size_t name_end = 0;
+    while (name_end < tag.size() && !isspace((unsigned char)tag[name_end]) &&
+           tag[name_end] != '/')
+      name_end++;
+    std::string name = tag.substr(0, name_end);
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return (char)tolower(c); });
+
+    // We only care about tags that can carry links or section IDs.
+    if (name != "a" && name != "area" && name != "span" && name != "div")
+      continue;
+
+    std::string id =
+        NormalizeFragmentId(ExtractHtmlAttrValue(tag, "id"));
+    if (id.empty())
+      id = NormalizeFragmentId(ExtractHtmlAttrValue(tag, "name"));
+
+    std::string href = ExtractHtmlAttrValue(tag, "href");
+    if (href.empty())
+      href = ExtractHtmlAttrValue(tag, "src");
+
+    if (!id.empty())
+      pending_ids.push_back(id);
+
+    if (href.empty())
+      continue;
+
+    std::string resolved = ResolveRelativePath(base_path, href);
+    if (resolved.empty())
+      continue;
+
+    if (!id.empty() && proxy_map->find(id) == proxy_map->end())
+      (*proxy_map)[id] = resolved;
+
+    if (!pending_ids.empty()) {
+      std::string pid = pending_ids.front();
+      pending_ids.pop_front();
+      if (!pid.empty() && proxy_map->find(pid) == proxy_map->end())
+        (*proxy_map)[pid] = resolved;
+    }
+  }
+}
+
 static void nav_start(void *userdata, const char *el, const char **attr) {
   nav_parse_data_t *d = (nav_parse_data_t *)userdata;
   d->depth++;
@@ -817,6 +941,12 @@ BuildTocFragmentProxyMap(unzFile uf, const std::string &doc_path,
 
   if (!ParseXmlBuffer(xml, toc_proxy_start, toc_proxy_end, NULL, &data))
     return false;
+
+  if (proxy_map->size() < 4) {
+    // Some generated index_split files are not well-formed XML; salvage
+    // id->href mapping with a tolerant tag scanner.
+    BuildTocProxyMapFromHtmlScan(xml, doc_path, proxy_map);
+  }
 
   if (app) {
     char msg[128];
