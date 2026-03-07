@@ -49,6 +49,22 @@ static const int kBrowserGridX0 = 5;
 static const int kBrowserGridY0 = 3;
 static const int kBrowserFooterY = 302;
 
+static void LayoutBrowserNavButtons(App *app) {
+  if (!app)
+    return;
+  app->buttonprev.Move(2, kBrowserFooterY);
+  app->buttonprev.Resize(50, 16);
+  app->buttonprev.Label("prev");
+
+  app->buttonnext.Move(188, kBrowserFooterY);
+  app->buttonnext.Resize(50, 16);
+  app->buttonnext.Label("next");
+
+  app->buttonprefs.Move(80, kBrowserFooterY);
+  app->buttonprefs.Resize(78, 16);
+  app->buttonprefs.Label("settings");
+}
+
 static std::string TrimSpaces(const std::string &s) {
   size_t start = 0;
   while (start < s.size() && s[start] == ' ')
@@ -831,6 +847,9 @@ void App::ProcessJobs(u32 budget_ms) {
 }
 
 void App::browser_handleevent() {
+  // Re-apply browser layout in case another view reused/moved shared buttons.
+  LayoutBrowserNavButtons(this);
+
   u32 keys = hidKeysDown();
   const u32 release_mask = KEY_TOUCH | KEY_A | KEY_B | KEY_X | KEY_Y |
                            KEY_START | KEY_SELECT | KEY_UP | KEY_DOWN |
@@ -991,17 +1010,9 @@ void App::browser_init(void) {
   }
 
   buttonprev.Init(ts);
-  buttonprev.Move(2, kBrowserFooterY);
-  buttonprev.Resize(50, 16);
-  buttonprev.Label("prev");
   buttonnext.Init(ts);
-  buttonnext.Move(188, kBrowserFooterY);
-  buttonnext.Resize(50, 16);
-  buttonnext.Label("next");
   buttonprefs.Init(ts);
-  buttonprefs.Move(80, kBrowserFooterY);
-  buttonprefs.Resize(78, 16);
-  buttonprefs.Label("settings");
+  LayoutBrowserNavButtons(this);
 
   if (!bookselected) {
     browserstart = 0;
@@ -1029,6 +1040,9 @@ void App::browser_prevpage() {
 }
 
 void App::browser_draw(void) {
+  // Keep footer controls stable after view switches.
+  LayoutBrowserNavButtons(this);
+
   // save state
   int colorMode = ts->GetColorMode();
   u16 *screen = ts->GetScreen();
