@@ -71,7 +71,15 @@ void PagedListMenu::Init() {
     b->Init();
     b->Resize(LIST_ROW_W, LIST_ROW_H);
     b->Move(LIST_ROW_X, LIST_ROW_Y0 + (i % pagesize) * (LIST_ROW_H + LIST_ROW_GAP));
-    b->SetLabel1(labels[i]);
+    std::string line1 = labels[i];
+    std::string line2;
+    size_t nl = line1.find('\n');
+    if (nl != std::string::npos) {
+      line2 = line1.substr(nl + 1);
+      line1 = line1.substr(0, nl);
+    }
+    b->SetLabel1(line1);
+    b->SetLabel2(line2);
     buttons.push_back(b);
     target_pages.push_back(pages[i]);
   }

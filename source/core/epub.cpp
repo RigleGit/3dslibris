@@ -2838,6 +2838,25 @@ int epub_resolve_toc(Book *book, std::string filepath) {
              (unsigned)stat_title_fallback, (unsigned)stat_title_global,
              (unsigned)stat_skip_unmatched, (unsigned)stat_skip_dup);
     app->PrintStatus(map_msg);
+
+    size_t direct_count =
+        stat_anchor + stat_exact + stat_nofrag + stat_lc + stat_base + stat_proxy;
+    size_t heuristic_count = stat_title_fallback + stat_title_global;
+    const char *quality = "strong";
+    if (heuristic_count > 0 || stat_skip_unmatched > 0) {
+      quality = "mixed";
+      if (heuristic_count >= (resolved.size() / 2) ||
+          stat_skip_unmatched >= (toc_entries.size() / 3)) {
+        quality = "heuristic";
+      }
+    }
+    char quality_msg[176];
+    snprintf(quality_msg, sizeof(quality_msg),
+             "EPUB: TOC quality=%s direct=%u heuristic=%u unresolved=%u",
+             quality, (unsigned)direct_count, (unsigned)heuristic_count,
+             (unsigned)stat_skip_unmatched);
+    app->PrintStatus(quality_msg);
+
     if (stat_anchor_miss > 0) {
       char warn_msg[160];
       snprintf(warn_msg, sizeof(warn_msg),

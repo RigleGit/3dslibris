@@ -115,14 +115,18 @@ void Button::Draw(u16 *screen, bool highlight) {
 
   if (text1.length()) {
     ts->SetPen(ul.x + 6, ul.y + ts->GetHeight());
+    int text_width = (lr.x - ul.x - 8);
     u8 len =
-        ts->GetCharCountInsideWidth(text1.c_str(), text.style, lr.x - ul.x - 4);
+        ts->GetCharCountInsideWidth(text1.c_str(), text.style, text_width);
     ts->PrintString(text1.substr(0, len).c_str(), text.style);
   }
 
   if (text2.length()) {
     ts->SetPen(ul.x + 6, ts->GetPenY() + ts->GetHeight());
-    ts->PrintString(text2.c_str(), text.style);
+    int text_width = (lr.x - ul.x - 8);
+    u8 len2 =
+        ts->GetCharCountInsideWidth(text2.c_str(), text.style, text_width);
+    ts->PrintString(text2.substr(0, len2).c_str(), text.style);
   }
 
   // pop state
