@@ -11,6 +11,7 @@
 #include "button.h"
 #include "main.h"
 #include "text.h"
+#include "touch_utils.h"
 
 #define MIN(x, y) (x < y ? x : y)
 
@@ -111,20 +112,6 @@ static void LayoutTargetFooterButtons(App *app) {
   app->buttonprefs.Move(86, 292);
   app->buttonprefs.Resize(68, 22);
   app->buttonprefs.Label("back");
-}
-
-static bool EnclosesWithSlack(Button &button, int x, int y) {
-  for (int dy = -4; dy <= 4; dy += 4) {
-    for (int dx = -4; dx <= 4; dx += 4) {
-      int tx = x + dx;
-      int ty = y + dy;
-      if (tx < 0 || ty < 0)
-        continue;
-      if (button.EnclosesPoint((u16)tx, (u16)ty))
-        return true;
-    }
-  }
-  return false;
 }
 
 } // namespace
@@ -291,53 +278,83 @@ void FontMenu::handleFileInput(u32 keys) {
 
 void FontMenu::handleTargetTouchInput() {
   LayoutTargetFooterButtons(app);
-  touchPosition coord = app->TouchRead();
-  if (coord.py >= 284 || EnclosesWithSlack(app->buttonprefs, coord.px, coord.py)) {
+  TouchCandidates candidates;
+  touch::BuildCandidates(app, &candidates);
+
+  if (touch::HitsButton(candidates, &app->buttonprefs, 4)) {
     app->ShowSettingsView(app->IsBookSettingsContext());
     return;
   }
 
   for (u8 i = 0; i < targetButtons.size() && i < FONT_TARGET_COUNT; i++) {
-    if (EnclosesWithSlack(*targetButtons[i], coord.px, coord.py)) {
+    if (touch::HitsButton(candidates, targetButtons[i], 4)) {
       targetSelected = i;
       enterFileView();
       return;
     }
   }
+
+  int footerX = -1;
+  if (touch::FirstXInBottomBand(candidates, 284, &footerX)) {
+    app->ShowSettingsView(app->IsBookSettingsContext());
+    return;
+  }
 }
 
 void FontMenu::handleFileTouchInput() {
   LayoutFileFooterButtons(app);
-  touchPosition coord = app->TouchRead();
-  if (coord.py >= 284) {
-    if (coord.px < 80) {
-      previousPage();
-    } else if (coord.px < 160) {
-      enterTargetView(targetSelected);
-    } else {
-      nextPage();
-    }
-    return;
-  }
+  TouchCandidates candidates;
+  touch::BuildCandidates(app, &candidates);
 
-  if (EnclosesWithSlack(app->buttonprefs, coord.px, coord.py)) {
-    enterTargetView(targetSelected);
-    return;
-  } else if (EnclosesWithSlack(app->buttonnext, coord.px, coord.py)) {
-    nextPage();
-    return;
-  } else if (EnclosesWithSlack(app->buttonprev, coord.px, coord.py)) {
-    previousPage();
-    return;
-  }
+  int footerX = -1;
+  touch::FirstXInBottomBand(candidates, 284, &footerX);
 
   for (u8 i = page * pagesize;
        (i < buttons.size()) && (i < (page + 1) * pagesize); i++) {
-    if (buttons[i]->EnclosesPoint(coord.px, coord.py)) {
+    if (touch::HitsButton(candidates, buttons[i], 4)) {
       selected = i;
       handleButtonPress();
       return;
     }
+  }
+
+  if (touch::HitsButton(candidates, &app->buttonprefs, 4)) {
+    enterTargetView(targetSelected);
+    return;
+  }
+
+  if (page < GetPageCount() - 1 &&
+      touch::HitsButton(candidates, &app->buttonnext, 4)) {
+    nextPage();
+    return;
+  }
+
+  if (page > 0 && touch::HitsButton(candidates, &app->buttonprev, 4)) {
+    previousPage();
+    return;
+  }
+
+  if (footerX < 0)
+    return;
+
+  if (footerX < 80) {
+    if (page > 0)
+      previousPage();
+    else
+      enterTargetView(targetSelected);
+    return;
+  }
+
+  if (footerX < 160) {
+    enterTargetView(targetSelected);
+    return;
+  }
+
+  if (page < GetPageCount() - 1) {
+    nextPage();
+  } else {
+    // Last page has no "next": treat right-bottom band as back.
+    enterTargetView(targetSelected);
   }
 }
 
