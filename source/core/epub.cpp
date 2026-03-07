@@ -1820,6 +1820,31 @@ ExtractTitleSearchTokens(const std::string &normalized_title) {
   return tokens;
 }
 
+static bool IsAsciiWordChar(unsigned char c) {
+  return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+}
+
+static bool ContainsWholeWordNearTop(const std::string &text,
+                                     const std::string &word,
+                                     size_t max_pos) {
+  if (text.empty() || word.empty())
+    return false;
+  size_t pos = text.find(word);
+  while (pos != std::string::npos) {
+    if (pos <= max_pos) {
+      bool left_ok = (pos == 0) ||
+                     !IsAsciiWordChar((unsigned char)text[pos - 1]);
+      size_t end = pos + word.size();
+      bool right_ok =
+          (end >= text.size()) || !IsAsciiWordChar((unsigned char)text[end]);
+      if (left_ok && right_ok)
+        return true;
+    }
+    pos = text.find(word, pos + 1);
+  }
+  return false;
+}
+
 static u16 FindDocEndPage(u16 doc_start, const std::vector<u16> &doc_starts,
                           u16 page_count) {
   for (size_t i = 0; i < doc_starts.size(); i++) {
@@ -1938,6 +1963,21 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
   std::vector<std::string> tokens = ExtractTitleSearchTokens(query);
   if (tokens.empty() && query.size() < 4)
     return false;
+
+  if (query.size() <= 3) {
+    for (u16 pass = 0; pass < (allow_wrap ? 2 : 1); pass++) {
+      u16 p0 = (pass == 0) ? from_page : 0;
+      u16 p1 = (pass == 0) ? page_count : from_page;
+      for (u16 p = p0; p < p1; p++) {
+        Page *page = book->GetPage((int)p);
+        std::string text = BuildPageSearchText(page, 1024);
+        if (ContainsWholeWordNearTop(text, query, 140)) {
+          *page_out = p;
+          return true;
+        }
+      }
+    }
+  }
 
   int best_score = -1;
   int best_hits = 0;
