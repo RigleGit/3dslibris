@@ -24,6 +24,27 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <3ds.h>
 #include <stdio.h>
 
+namespace {
+
+static size_t Utf8BytesForCharCount(Text *ts, const char *s, u8 count) {
+  if (!s || !*s || count == 0)
+    return 0;
+
+  size_t bytes = 0;
+  u8 chars = 0;
+  while (s[bytes] && chars < count) {
+    u32 ucs = 0;
+    u8 step = ts ? ts->GetCharCode(s + bytes, &ucs) : 0;
+    if (!step)
+      step = 1;
+    bytes += step;
+    chars++;
+  }
+  return bytes;
+}
+
+} // namespace
+
 Button::Button() {}
 
 Button::Button(Text *t) { Init(t); }
@@ -118,7 +139,8 @@ void Button::Draw(u16 *screen, bool highlight) {
     int text_width = (lr.x - ul.x - 8);
     u8 len =
         ts->GetCharCountInsideWidth(text1.c_str(), text.style, text_width);
-    ts->PrintString(text1.substr(0, len).c_str(), text.style);
+    size_t bytes = Utf8BytesForCharCount(ts, text1.c_str(), len);
+    ts->PrintString(text1.substr(0, bytes).c_str(), text.style);
   }
 
   if (text2.length()) {
@@ -126,7 +148,8 @@ void Button::Draw(u16 *screen, bool highlight) {
     int text_width = (lr.x - ul.x - 8);
     u8 len2 =
         ts->GetCharCountInsideWidth(text2.c_str(), text.style, text_width);
-    ts->PrintString(text2.substr(0, len2).c_str(), text.style);
+    size_t bytes2 = Utf8BytesForCharCount(ts, text2.c_str(), len2);
+    ts->PrintString(text2.substr(0, bytes2).c_str(), text.style);
   }
 
   // pop state
