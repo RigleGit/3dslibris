@@ -1608,6 +1608,7 @@ static std::string NormalizeTocTitle(const std::string &raw) {
   std::string t = Trim(raw);
   if (t.empty())
     return t;
+  const std::string original_trimmed = t;
   std::string out;
   out.reserve(t.size());
   bool prev_space = true;
@@ -1644,7 +1645,17 @@ static std::string NormalizeTocTitle(const std::string &raw) {
   if (leader_pos != std::string::npos)
     out = Trim(out.substr(0, leader_pos));
 
-  // Drop trailing numeric page suffix.
+  auto has_ascii_alpha = [](const std::string &s) -> bool {
+    for (size_t i = 0; i < s.size(); i++) {
+      unsigned char c = (unsigned char)s[i];
+      if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))
+        return true;
+    }
+    return false;
+  };
+
+  // Drop trailing numeric page suffix when the remaining title still looks
+  // like a real chapter name (avoid erasing numeric-only titles like "1").
   while (!out.empty() && isspace((unsigned char)out.back()))
     out.pop_back();
   size_t end = out.size();
@@ -1654,8 +1665,13 @@ static std::string NormalizeTocTitle(const std::string &raw) {
     size_t ws = end;
     while (ws > 0 && isspace((unsigned char)out[ws - 1]))
       ws--;
-    if (ws < out.size())
-      out = out.substr(0, ws);
+    if (ws < out.size()) {
+      std::string candidate = Trim(out.substr(0, ws));
+      if (!candidate.empty() && candidate.size() >= 4 &&
+          has_ascii_alpha(candidate) && has_ascii_alpha(out)) {
+        out = candidate;
+      }
+    }
   }
 
   while (!out.empty()) {
@@ -1666,7 +1682,10 @@ static std::string NormalizeTocTitle(const std::string &raw) {
       break;
   }
 
-  return Trim(out);
+  out = Trim(out);
+  if (out.empty())
+    out = original_trimmed;
+  return out;
 }
 
 static std::string ClipForDiag(const std::string &s, size_t max_bytes = 120) {
@@ -1880,7 +1899,7 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
   if (query.empty())
     return false;
   std::vector<std::string> tokens = ExtractTitleSearchTokens(query);
-  if (tokens.empty() && query.size() < 4)
+  if (tokens.empty() && query.size() < 2)
     return false;
 
   int best_score = -1;
@@ -1961,9 +1980,6 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
   if (query.empty())
     return false;
   std::vector<std::string> tokens = ExtractTitleSearchTokens(query);
-  if (tokens.empty() && query.size() < 4)
-    return false;
-
   if (query.size() <= 3) {
     for (u16 pass = 0; pass < (allow_wrap ? 2 : 1); pass++) {
       u16 p0 = (pass == 0) ? from_page : 0;
@@ -1978,6 +1994,8 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
       }
     }
   }
+  if (tokens.empty() && query.size() < 2)
+    return false;
 
   int best_score = -1;
   int best_hits = 0;
