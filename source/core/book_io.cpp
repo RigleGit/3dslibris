@@ -254,6 +254,31 @@ static bool IsRomanHeadingToken(const std::string &token) {
   return true;
 }
 
+static std::string TrimRomanTokenSuffix(const std::string &token) {
+  size_t end = token.size();
+  while (end > 0) {
+    char c = token[end - 1];
+    if (c == '.' || c == ')' || c == ':' || c == '-')
+      end--;
+    else
+      break;
+  }
+  return token.substr(0, end);
+}
+
+static bool IsUpperAsciiRomanToken(const std::string &token) {
+  std::string clean = TrimRomanTokenSuffix(token);
+  if (clean.empty() || clean.size() > 8)
+    return false;
+  for (size_t i = 0; i < clean.size(); i++) {
+    char c = clean[i];
+    if (c != 'I' && c != 'V' && c != 'X' && c != 'L' && c != 'C' &&
+        c != 'D' && c != 'M')
+      return false;
+  }
+  return true;
+}
+
 static bool LooksLikeTocLeaderLine(const std::string &folded) {
   if (folded.find("...") == std::string::npos &&
       folded.find(" . .") == std::string::npos)
@@ -328,6 +353,11 @@ static bool LooksLikeFalsePositiveHeading(const std::string &compact,
   if (LooksLikeTocLeaderLine(folded))
     return true;
 
+  if (folded.find('?') != std::string::npos ||
+      folded.find('!') != std::string::npos ||
+      folded.find(';') != std::string::npos)
+    return true;
+
   int trailing_digits = 0;
   if (!strong_signal && EndsWithStandaloneDigits(folded, &trailing_digits) &&
       trailing_digits >= 1 && trailing_digits <= 4 &&
@@ -362,7 +392,18 @@ static bool LooksLikePlainChapterHeading(const std::string &line,
   std::string first =
       split == std::string::npos ? folded : folded.substr(0, split);
   std::string rest = split == std::string::npos ? "" : folded.substr(split + 1);
-  if (IsRomanHeadingToken(first) && !TrimAsciiWhitespace(rest).empty()) {
+
+  size_t split_compact = compact.find(' ');
+  std::string first_compact = split_compact == std::string::npos
+                                  ? compact
+                                  : compact.substr(0, split_compact);
+  std::string rest_compact = split_compact == std::string::npos
+                                 ? ""
+                                 : compact.substr(split_compact + 1);
+
+  if (IsRomanHeadingToken(first) && IsUpperAsciiRomanToken(first_compact) &&
+      !TrimAsciiWhitespace(rest).empty() &&
+      !TrimAsciiWhitespace(rest_compact).empty()) {
     if (strong_signal_out)
       *strong_signal_out = true;
     return true;
