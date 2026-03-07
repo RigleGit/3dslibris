@@ -340,37 +340,54 @@ int App::Run(void) {
     int savedStyle = ts->GetStyle();
     int savedColorMode = ts->GetColorMode();
     u16 *savedScreen = ts->GetScreen();
+    int savedPixelSize = ts->pixelsize;
 
     ts->SetStyle(TEXT_STYLE_BROWSER);
     ts->SetColorMode(0);
+    ts->SetPixelSize(10);
 
     ts->SetScreen(ts->screenleft);
     ts->ClearScreen();
-    ts->SetPen(12, 28);
+    ts->DrawRect(8, 10, 232, 64, 0xC618);
+    ts->SetPixelSize(14);
+    ts->SetPen(14, 20);
     ts->PrintString("3dslibris");
+    ts->SetPixelSize(8);
+    ts->SetPen(176, 22);
+    ts->PrintString("v" VERSION);
+    ts->SetPixelSize(10);
     if (lineTop && *lineTop) {
-      ts->SetPen(12, 52);
+      ts->SetPen(14, 82);
       ts->PrintString(lineTop);
     }
     if (lineBottom && *lineBottom) {
-      ts->SetPen(12, 72);
+      ts->SetPen(14, 102);
       ts->PrintString(lineBottom);
     }
 
     ts->SetScreen(ts->screenright);
     ts->ClearScreen();
+    ts->DrawRect(8, 10, 232, 64, 0xC618);
+    ts->SetPixelSize(14);
+    ts->SetPen(14, 20);
+    ts->PrintString("Booting");
+    ts->SetPixelSize(10);
     if (lineTop && *lineTop) {
-      ts->SetPen(12, 28);
+      ts->SetPen(14, 84);
       ts->PrintString(lineTop);
     }
     if (lineBottom && *lineBottom) {
-      ts->SetPen(12, 48);
+      ts->SetPen(14, 104);
       ts->PrintString(lineBottom);
     }
+
+    // Simple progress rail (visual feedback while booting).
+    ts->DrawRect(14, 138, 226, 152, 0xBDF7);
 
     ts->SetStyle(savedStyle);
     ts->SetColorMode(savedColorMode);
     ts->SetScreen(savedScreen);
+    ts->SetPixelSize(savedPixelSize);
 
     if (ts->BlitToFramebuffer()) {
       gfxFlushBuffers();
