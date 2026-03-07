@@ -106,7 +106,7 @@ void App::PrefsDraw() {
   int tmpSize = ts->pixelsize;
   ts->SetPixelSize(12);
   ts->PrintString(
-      "3dslibris\n---------\n\n"
+      "3dslibris\nby Rigle\n---------\n\n"
       "Controls:\n"
       "A / B / L / R : Turn Pages\n"
       "D-Pad Left/Right : Jump to Bookmarks\n"

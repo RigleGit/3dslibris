@@ -353,6 +353,9 @@ int App::Run(void) {
     ts->SetPen(14, 20);
     ts->PrintString("3dslibris");
     ts->SetPixelSize(8);
+    ts->SetPen(16, 39);
+    ts->PrintString("by Rigle");
+    ts->SetPixelSize(8);
     ts->SetPen(176, 22);
     ts->PrintString("v" VERSION);
     ts->SetPixelSize(10);

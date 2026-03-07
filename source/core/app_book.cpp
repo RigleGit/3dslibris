@@ -206,7 +206,9 @@ u8 App::OpenBook(void) {
     ts->ClearScreen();
     ts->SetPen(12, 28);
     ts->PrintString("3dslibris");
-    ts->SetPen(12, 52);
+    ts->SetPen(12, 42);
+    ts->PrintString("by Rigle");
+    ts->SetPen(12, 62);
     ts->PrintString("opening book ...");
 
     ts->SetScreen(ts->screenright);
