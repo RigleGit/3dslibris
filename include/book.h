@@ -32,6 +32,13 @@ struct ChapterEntry {
   std::string title;
 };
 
+enum TocQuality {
+  TOC_QUALITY_UNKNOWN = 0,
+  TOC_QUALITY_STRONG,
+  TOC_QUALITY_MIXED,
+  TOC_QUALITY_HEURISTIC
+};
+
 //! Encapsulates metadata and Page vector for a single book.
 
 //! Bookmarks are in here too.
@@ -65,6 +72,10 @@ class Book {
   size_t fb2_inline_images_bytes;
   std::list<InlineImageCacheEntry> inline_image_cache;
   size_t inline_image_cache_bytes;
+  TocQuality toc_quality;
+  u16 toc_direct_count;
+  u16 toc_heuristic_count;
+  u16 toc_unresolved_count;
   std::vector<class Page *> pages;
   App *app; //! pointer to the App instance.
 
@@ -99,6 +110,23 @@ public:
   inline void ClearBrowserDisplayNameCache() {
     browser_display_name_cache.clear();
     browser_display_name_cached = false;
+  }
+  inline TocQuality GetTocQuality() const { return toc_quality; }
+  inline u16 GetTocDirectCount() const { return toc_direct_count; }
+  inline u16 GetTocHeuristicCount() const { return toc_heuristic_count; }
+  inline u16 GetTocUnresolvedCount() const { return toc_unresolved_count; }
+  inline void SetTocConfidence(TocQuality quality, u16 direct, u16 heuristic,
+                               u16 unresolved) {
+    toc_quality = quality;
+    toc_direct_count = direct;
+    toc_heuristic_count = heuristic;
+    toc_unresolved_count = unresolved;
+  }
+  inline void ClearTocConfidence() {
+    toc_quality = TOC_QUALITY_UNKNOWN;
+    toc_direct_count = 0;
+    toc_heuristic_count = 0;
+    toc_unresolved_count = 0;
   }
   std::list<u16> *GetBookmarks(void);
   const std::vector<ChapterEntry> &GetChapters() const;

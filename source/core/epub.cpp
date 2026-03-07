@@ -2843,13 +2843,18 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         stat_anchor + stat_exact + stat_nofrag + stat_lc + stat_base + stat_proxy;
     size_t heuristic_count = stat_title_fallback + stat_title_global;
     const char *quality = "strong";
+    TocQuality quality_enum = TOC_QUALITY_STRONG;
     if (heuristic_count > 0 || stat_skip_unmatched > 0) {
       quality = "mixed";
+      quality_enum = TOC_QUALITY_MIXED;
       if (heuristic_count >= (resolved.size() / 2) ||
           stat_skip_unmatched >= (toc_entries.size() / 3)) {
         quality = "heuristic";
+        quality_enum = TOC_QUALITY_HEURISTIC;
       }
     }
+    book->SetTocConfidence(quality_enum, (u16)direct_count,
+                           (u16)heuristic_count, (u16)stat_skip_unmatched);
     char quality_msg[176];
     snprintf(quality_msg, sizeof(quality_msg),
              "EPUB: TOC quality=%s direct=%u heuristic=%u unresolved=%u",

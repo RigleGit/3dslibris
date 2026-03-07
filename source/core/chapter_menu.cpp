@@ -43,6 +43,20 @@ static std::string BuildTwoLineLabelIfNeeded(const std::string &raw) {
   return title + "\n" + subtitle;
 }
 
+static const char *TocQualityLabel(TocQuality q) {
+  switch (q) {
+  case TOC_QUALITY_STRONG:
+    return "index";
+  case TOC_QUALITY_MIXED:
+    return "index (~)";
+  case TOC_QUALITY_HEURISTIC:
+    return "index (approx)";
+  case TOC_QUALITY_UNKNOWN:
+  default:
+    return "index";
+  }
+}
+
 } // namespace
 
 ChapterMenu::ChapterMenu(App *_app) : PagedListMenu(_app, "index") {}
@@ -53,6 +67,8 @@ void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
                                std::vector<u16> &pages) {
   if (!app || !app->bookcurrent)
     return;
+
+  SetHeaderTitle(TocQualityLabel(app->bookcurrent->GetTocQuality()));
 
   const std::vector<ChapterEntry> &chapters = app->bookcurrent->GetChapters();
   labels.reserve(chapters.size());

@@ -633,6 +633,7 @@ u8 Book::Open() {
   app->ts->SetStyle(TEXT_STYLE_REGULAR);
   tocResolveTried = false;
   tocResolved = false;
+  ClearTocConfidence();
   ClearChapterAnchors();
   u8 err = 1;
   if (format == FORMAT_EPUB) {

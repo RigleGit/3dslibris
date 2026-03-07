@@ -814,6 +814,7 @@ Book::Book(App *a) {
   tocResolved = false;
   fb2_inline_images_bytes = 0;
   inline_image_cache_bytes = 0;
+  ClearTocConfidence();
 }
 
 Book::~Book() {
@@ -1136,5 +1137,6 @@ void Book::Close() {
   ClearChapterAnchors();
   ClearChapterDocStartPages();
   ClearInlineImages();
+  ClearTocConfidence();
   // pages.erase(pages.begin(), pages.end());
 }
