@@ -199,19 +199,30 @@ void PagedListMenu::ActivateSelected() {
   if (!app || !app->bookcurrent || buttons.empty() || selected >= target_pages.size())
     return;
 
+  u16 target_page = target_pages[selected];
+  ResolveTargetPage(selected, &target_page);
+
   if (app) {
     char msg[128];
     snprintf(msg, sizeof(msg), "LIST activate title=%s sel=%u page=%u cur=%u",
-             header_title.c_str(), (unsigned)selected,
-             (unsigned)target_pages[selected],
+             header_title.c_str(), (unsigned)selected, (unsigned)target_page,
              (unsigned)app->bookcurrent->GetPosition());
     app->PrintStatus(msg);
   }
-  app->bookcurrent->SetPosition(target_pages[selected]);
+  app->bookcurrent->SetPosition(target_page);
   app->mode = APP_MODE_BOOK;
   app->bookcurrent->GetPage()->Draw(app->ts);
   app->ts->SetScreen(app->ts->screenleft);
   app->ts->PrintSplash(app->ts->screenright);
+}
+
+bool PagedListMenu::ResolveTargetPage(u8 index, u16 *page_out) {
+  if (!page_out)
+    return false;
+  if (index >= target_pages.size())
+    return false;
+  *page_out = target_pages[index];
+  return true;
 }
 
 void PagedListMenu::Back() {
