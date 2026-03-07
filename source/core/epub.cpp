@@ -1970,14 +1970,19 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
 
 static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
                                    u16 from_page, u16 *page_out,
-                                   bool allow_wrap = true) {
+                                   bool allow_wrap = true,
+                                   u16 to_page_exclusive = 0) {
   if (!book || !page_out)
     return false;
   u16 page_count = book->GetPageCount();
   if (page_count == 0)
     return false;
+  if (to_page_exclusive == 0 || to_page_exclusive > page_count)
+    to_page_exclusive = page_count;
   if (from_page >= page_count)
     from_page = 0;
+  if (!allow_wrap && from_page >= to_page_exclusive)
+    return false;
 
   std::string query = NormalizeAsciiSearchText(toc_title, 192);
   if (query.empty())
@@ -1986,7 +1991,8 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
   if (query.size() <= 3) {
     for (u16 pass = 0; pass < (allow_wrap ? 2 : 1); pass++) {
       u16 p0 = (pass == 0) ? from_page : 0;
-      u16 p1 = (pass == 0) ? page_count : from_page;
+      u16 p1 = (pass == 0) ? (allow_wrap ? page_count : to_page_exclusive)
+                           : from_page;
       for (u16 p = p0; p < p1; p++) {
         Page *page = book->GetPage((int)p);
         std::string text = BuildPageSearchText(page, 1024);
@@ -2008,7 +2014,8 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
 
   for (u16 pass = 0; pass < (allow_wrap ? 2 : 1); pass++) {
     u16 p0 = (pass == 0) ? from_page : 0;
-    u16 p1 = (pass == 0) ? page_count : from_page;
+    u16 p1 = (pass == 0) ? (allow_wrap ? page_count : to_page_exclusive)
+                         : from_page;
     for (u16 p = p0; p < p1; p++) {
       Page *page = book->GetPage((int)p);
       std::string text = BuildPageSearchText(page, 4096);
@@ -2047,6 +2054,10 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
           score += (int)tokens[i].size();
           hits++;
         }
+      }
+      if (!allow_wrap && p >= from_page) {
+        int dist_penalty = (int)((p - from_page) / 8);
+        score -= dist_penalty;
       }
       if (score > best_score) {
         best_score = score;
@@ -2736,9 +2747,32 @@ int epub_resolve_toc(Book *book, std::string filepath) {
           if (next_page > from_page)
             from_page = next_page;
         }
-        got_title =
-            FindTocTitlePageGlobal(book, title_match, from_page, &title_page,
-                                   false);
+        u16 search_end = total_pages;
+        if (total_pages > 0 && from_page < total_pages) {
+          size_t remaining_entries = toc_entries.size() - i;
+          u16 remaining_pages = (from_page < total_pages)
+                                    ? (u16)(total_pages - from_page)
+                                    : 1;
+          u16 expected_span = 1;
+          if (remaining_entries > 0)
+            expected_span = (u16)std::max<size_t>(
+                1, (size_t)remaining_pages / remaining_entries);
+          u16 search_window = (u16)(expected_span * 4);
+          if (search_window < 24)
+            search_window = 24;
+          if (search_window > 128)
+            search_window = 128;
+          unsigned int end_u32 = (unsigned int)from_page + search_window;
+          if (end_u32 > (unsigned int)total_pages)
+            end_u32 = total_pages;
+          search_end = (u16)end_u32;
+        }
+        got_title = FindTocTitlePageGlobal(book, title_match, from_page,
+                                           &title_page, false, search_end);
+        if (!got_title && search_end < total_pages) {
+          got_title = FindTocTitlePageGlobal(book, title_match, from_page,
+                                             &title_page, false, total_pages);
+        }
         if (got_title)
           stat_title_global++;
       }
