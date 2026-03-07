@@ -701,6 +701,7 @@ u8 Book::Parse(bool fulltext) {
 
   parsedata_t parsedata;
   parse_init(&parsedata);
+  parsedata.fb2_mode = fulltext && HasExtCI(GetFileName(), ".fb2");
   parsedata.cachefile = fopen("/cache.dat", "w");
   parsedata.app = app;
   parsedata.ts = app ? app->ts : NULL;

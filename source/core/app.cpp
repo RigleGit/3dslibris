@@ -687,15 +687,18 @@ void App::ShowBookmarksView() {
 }
 
 void App::ShowChaptersView() {
-  if (!bookcurrent || bookcurrent->format != FORMAT_EPUB ||
-      bookcurrent->GetChapters().empty()) {
-    PrintStatus("Index unavailable: no EPUB chapters");
+  if (!bookcurrent) {
+    PrintStatus("Index unavailable: no selected book");
     ShowSettingsView(true);
     return;
   }
-  if (bookcurrent && bookcurrent->format == FORMAT_EPUB &&
-      !bookcurrent->tocResolveTried) {
+  if (bookcurrent->format == FORMAT_EPUB && !bookcurrent->tocResolveTried) {
     QueueTocResolve(bookcurrent);
+  }
+  if (bookcurrent->GetChapters().empty()) {
+    PrintStatus("Index unavailable: no chapters");
+    ShowSettingsView(true);
+    return;
   }
   mode = APP_MODE_CHAPTERS;
   ts->SetScreen(ts->screenright);

@@ -280,6 +280,24 @@ static std::string ResolveDocPath(const std::string &base_doc_path,
   return NormalizeDocPath(base + clean_href);
 }
 
+static std::string NormalizeFb2ChapterTitle(const std::string &in) {
+  std::string out;
+  out.reserve(in.size());
+  bool pending_space = false;
+  for (size_t i = 0; i < in.size(); i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+      pending_space = true;
+      continue;
+    }
+    if (pending_space && !out.empty())
+      out.push_back(' ');
+    pending_space = false;
+    out.push_back((char)c);
+  }
+  return out;
+}
+
 void linefeed(parsedata_t *p) {
   p->buf[p->buflen++] = '\n';
   p->pen.x = MARGINLEFT;
@@ -301,6 +319,23 @@ void start(void *data, const char *el, const char **attr) {
 
   parsedata_t *p = (parsedata_t *)data;
   auto app = p->app;
+
+  if (p->fb2_mode && parse_in(p, TAG_BODY)) {
+    if (XmlNameEquals(el, "section")) {
+      if (p->fb2_section_depth < 31)
+        p->fb2_section_depth++;
+      if (p->fb2_section_depth >= 0 && p->fb2_section_depth < 32)
+        p->fb2_section_has_chapter[p->fb2_section_depth] = false;
+    } else if (XmlNameEquals(el, "title") && p->fb2_section_depth > 0) {
+      p->fb2_title_depth++;
+      if (p->fb2_title_depth == 1 && p->fb2_title_capture_depth == 0 &&
+          p->fb2_section_depth < 32 &&
+          !p->fb2_section_has_chapter[p->fb2_section_depth]) {
+        p->fb2_title_capture_depth = p->fb2_section_depth;
+        p->fb2_title_text.clear();
+      }
+    }
+  }
 
   // Register named anchors while parsing EPUB documents so TOC hrefs with
   // fragments (#id) can jump to the closest real page instead of chapter start.
@@ -376,7 +411,7 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_SCRIPT);
   else if (!strcmp(el, "style"))
     parse_push(p, TAG_STYLE);
-  else if (!strcmp(el, "title"))
+  else if (XmlNameEquals(el, "title"))
     parse_push(p, TAG_TITLE);
   else if (!strcmp(el, "td"))
     parse_push(p, TAG_TD);
@@ -498,7 +533,11 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
   }
 
   if (parse_in(p, TAG_TITLE)) {
-    p->doc_title.append((const char *)txt, txtlen);
+    if (p->fb2_mode && p->fb2_title_capture_depth > 0) {
+      p->fb2_title_text.append((const char *)txt, txtlen);
+    } else {
+      p->doc_title.append((const char *)txt, txtlen);
+    }
     return;
   }
   if (parse_in(p, TAG_SCRIPT))
@@ -639,6 +678,46 @@ void end(void *data, const char *el) {
     p->fb2_binary_data.clear();
     parse_pop(p);
     return;
+  }
+
+  if (p->fb2_mode) {
+    if (XmlNameEquals(el, "title")) {
+      if (p->fb2_title_depth > 0) {
+        bool finishing_capture = (p->fb2_title_depth == 1 &&
+                                  p->fb2_title_capture_depth > 0 &&
+                                  p->fb2_title_capture_depth ==
+                                      p->fb2_section_depth);
+        if (finishing_capture && p->book) {
+          std::string chapter_title = NormalizeFb2ChapterTitle(p->fb2_title_text);
+          if (!chapter_title.empty()) {
+            int level = p->fb2_section_depth > 0 ? p->fb2_section_depth - 1 : 0;
+            if (level > 255)
+              level = 255;
+            p->book->AddChapter(p->book->GetPageCount(), chapter_title,
+                                (u8)level);
+            if (p->fb2_section_depth >= 0 && p->fb2_section_depth < 32)
+              p->fb2_section_has_chapter[p->fb2_section_depth] = true;
+          }
+          p->fb2_title_text.clear();
+          p->fb2_title_capture_depth = 0;
+        }
+        p->fb2_title_depth--;
+        if (p->fb2_title_depth < 0)
+          p->fb2_title_depth = 0;
+      }
+    } else if (XmlNameEquals(el, "section")) {
+      if (p->fb2_section_depth > 0) {
+        if (p->fb2_section_depth < 32)
+          p->fb2_section_has_chapter[p->fb2_section_depth] = false;
+        p->fb2_section_depth--;
+      }
+      if (p->fb2_section_depth < 0)
+        p->fb2_section_depth = 0;
+      if (p->fb2_title_capture_depth > p->fb2_section_depth) {
+        p->fb2_title_capture_depth = 0;
+        p->fb2_title_text.clear();
+      }
+    }
   }
 
   if (!strcmp(el, "body")) {

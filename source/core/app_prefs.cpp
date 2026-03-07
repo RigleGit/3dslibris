@@ -31,14 +31,16 @@ static const int PREFS_LIBRARY_BTN_H = 26;
 static bool CanOpenBookIndexInCurrentContext(App *app) {
   if (!app || !app->IsBookSettingsContext() || !app->bookcurrent)
     return false;
-  if (app->bookcurrent->format != FORMAT_EPUB)
-    return false;
-  return true;
+  if (!app->bookcurrent->GetChapters().empty())
+    return true;
+  return app->bookcurrent->format == FORMAT_EPUB;
 }
 
 static bool CanOpenSelectedBookIndex(App *app) {
   if (!app || !app->bookselected)
     return false;
+  if (!app->bookselected->GetChapters().empty())
+    return true;
   return app->bookselected->format == FORMAT_EPUB;
 }
 

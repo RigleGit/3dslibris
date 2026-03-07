@@ -59,6 +59,13 @@ void parse_init(parsedata_t *data)
 	data->fb2_binary_too_large = false;
 	data->fb2_binary_id.clear();
 	data->fb2_binary_data.clear();
+	data->fb2_mode = false;
+	data->fb2_section_depth = 0;
+	data->fb2_title_depth = 0;
+	data->fb2_title_capture_depth = 0;
+	for (int i = 0; i < 32; i++)
+		data->fb2_section_has_chapter[i] = false;
+	data->fb2_title_text.clear();
 	strcpy((char*)data->buf,"");
 	data->cachefile = NULL;
 	data->buflen = 0;

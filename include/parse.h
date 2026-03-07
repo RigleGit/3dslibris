@@ -52,6 +52,12 @@ typedef struct {
 	bool fb2_binary_too_large;
 	std::string fb2_binary_id;
 	std::string fb2_binary_data;
+	bool fb2_mode;
+	int fb2_section_depth;
+	int fb2_title_depth;
+	int fb2_title_capture_depth;
+	bool fb2_section_has_chapter[32];
+	std::string fb2_title_text;
 	int status;
 	int totalbytes;
 	int pagecount;
