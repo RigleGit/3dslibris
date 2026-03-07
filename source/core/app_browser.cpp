@@ -12,7 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <algorithm>
 #include <set>
+#include <vector>
 
 #include <3ds.h>
 
@@ -36,6 +38,8 @@ namespace {
 
 static const char *kCoverCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
 static const char *kCoverCacheDir = "sdmc:/3ds/3dslibris/cache/covers";
+static const size_t kCoverCacheMaxFiles = 256;
+static const size_t kCoverCacheMaxBytes = 6 * 1024 * 1024;
 static const int kCoverThumbMaxW = 85;
 static const int kCoverThumbMaxH = 115;
 static const int kBrowserGridCols = 2;
@@ -94,12 +98,83 @@ static uint64_t Fnv1a64(const std::string &s) {
   return hash;
 }
 
+struct CoverCacheEntry {
+  std::string path;
+  long long mtime;
+  size_t size;
+};
+
+static void PruneCoverCache(bool force) {
+  static u64 last_prune_ms = 0;
+  u64 now = osGetTime();
+  if (!force && now - last_prune_ms < 5000)
+    return;
+  last_prune_ms = now;
+
+  DIR *dp = opendir(kCoverCacheDir);
+  if (!dp)
+    return;
+
+  std::vector<CoverCacheEntry> entries;
+  entries.reserve(64);
+  size_t total_bytes = 0;
+
+  struct dirent *ent;
+  while ((ent = readdir(dp)) != NULL) {
+    if (ent->d_name[0] == '.')
+      continue;
+    if (!HasExtCI(ent->d_name, ".cvr"))
+      continue;
+
+    char full[512];
+    snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir, ent->d_name);
+    struct stat st;
+    if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
+      continue;
+
+    CoverCacheEntry ce;
+    ce.path = full;
+    ce.mtime = (long long)st.st_mtime;
+    ce.size = (st.st_size > 0) ? (size_t)st.st_size : 0;
+    total_bytes += ce.size;
+    entries.push_back(ce);
+  }
+  closedir(dp);
+
+  if (entries.size() <= kCoverCacheMaxFiles &&
+      total_bytes <= kCoverCacheMaxBytes)
+    return;
+
+  std::sort(entries.begin(), entries.end(),
+            [](const CoverCacheEntry &a, const CoverCacheEntry &b) {
+              if (a.mtime != b.mtime)
+                return a.mtime < b.mtime;
+              return a.path < b.path;
+            });
+
+  size_t idx = 0;
+  size_t remaining_count = entries.size();
+  while ((remaining_count > kCoverCacheMaxFiles ||
+          total_bytes > kCoverCacheMaxBytes) &&
+         idx < entries.size()) {
+    remove(entries[idx].path.c_str());
+    if (remaining_count > 0)
+      remaining_count--;
+    if (entries[idx].size <= total_bytes)
+      total_bytes -= entries[idx].size;
+    else
+      total_bytes = 0;
+    idx++;
+  }
+}
+
 static void EnsureCoverCacheDirs() {
   static bool initialized = false;
   if (initialized)
     return;
   mkdir(kCoverCacheBaseDir, 0777);
   mkdir(kCoverCacheDir, 0777);
+  PruneCoverCache(true);
   initialized = true;
 }
 
@@ -196,6 +271,8 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
     ok = fwrite(book->coverPixels, sizeof(u16), count, fp) == count;
   }
   fclose(fp);
+  if (ok)
+    PruneCoverCache(false);
   return ok;
 }
 
