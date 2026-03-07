@@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <algorithm>
 #include <ctype.h>
 #include <deque>
+#include <limits.h>
 #include <map>
 #include <set>
 #include <stdio.h>
@@ -41,6 +42,10 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 static const size_t EPUB_TOC_MAX_BYTES = 192 * 1024;
 static const size_t EPUB_TOC_MAX_ENTRIES = 2048;
+static const size_t EPUB_COVER_MAX_ENTRY_BYTES = 8 * 1024 * 1024;
+static const size_t EPUB_COVER_MAX_NONJPEG_BYTES = 2 * 1024 * 1024;
+static const size_t EPUB_COVER_MAX_DECODED_RGB_BYTES = 16 * 1024 * 1024;
+static const int EPUB_COVER_MAX_DIMENSION = 4096;
 // Safety switch for 3DS stability: TOC/NAV title resolution can be re-enabled
 // once NCX/NAV parsing is fully hardened on real hardware/emulators.
 static const bool EPUB_ENABLE_REAL_TOC_RESOLVE = false;
@@ -2429,29 +2434,83 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
   unz_file_info fi;
   unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0);
 
-  // Safety: limit uncompressed cover to 2 MB to avoid OOM on 3DS
-  if (fi.uncompressed_size > 2 * 1024 * 1024) {
+  if (fi.uncompressed_size == 0 ||
+      fi.uncompressed_size > EPUB_COVER_MAX_ENTRY_BYTES ||
+      fi.uncompressed_size > (uLong)INT_MAX) {
     unzClose(uf);
     return 8;
   }
 
-  u8 *imgbuf = new u8[fi.uncompressed_size];
-  unzOpenCurrentFile(uf);
-  unzReadCurrentFile(uf, imgbuf, fi.uncompressed_size);
+  std::vector<u8> imgbuf((size_t)fi.uncompressed_size);
+  rc = unzOpenCurrentFile(uf);
+  if (rc != UNZ_OK) {
+    unzClose(uf);
+    return 5;
+  }
+
+  int total = 0;
+  while (total < (int)imgbuf.size()) {
+    int n = unzReadCurrentFile(uf, imgbuf.data() + total,
+                               (unsigned int)(imgbuf.size() - (size_t)total));
+    if (n < 0) {
+      unzCloseCurrentFile(uf);
+      unzClose(uf);
+      return 5;
+    }
+    if (n == 0)
+      break;
+    total += n;
+  }
   unzCloseCurrentFile(uf);
   unzClose(uf);
+  if (total <= 0)
+    return 5;
+  imgbuf.resize((size_t)total);
+
+  auto IsJpegCover = [&]() -> bool {
+    if (book->coverImagePath.size() >= 4) {
+      std::string lower = book->coverImagePath;
+      for (size_t i = 0; i < lower.size(); i++)
+        lower[i] = (char)tolower((unsigned char)lower[i]);
+      if (lower.rfind(".jpg") == lower.size() - 4 ||
+          lower.rfind(".jpeg") == lower.size() - 5)
+        return true;
+    }
+    return imgbuf.size() >= 3 && imgbuf[0] == 0xFF && imgbuf[1] == 0xD8 &&
+           imgbuf[2] == 0xFF;
+  };
+
+  if (imgbuf.size() > EPUB_COVER_MAX_NONJPEG_BYTES && !IsJpegCover())
+    return 8;
+
+  int infoW = 0, infoH = 0, infoChannels = 0;
+  bool hasInfo =
+      stbi_info_from_memory(imgbuf.data(), (int)imgbuf.size(), &infoW, &infoH,
+                            &infoChannels) != 0;
+  if (!hasInfo && imgbuf.size() > EPUB_COVER_MAX_NONJPEG_BYTES)
+    return 9;
+
+  if (hasInfo) {
+    if (infoW <= 0 || infoH <= 0 || infoW > EPUB_COVER_MAX_DIMENSION ||
+        infoH > EPUB_COVER_MAX_DIMENSION)
+      return 7;
+    size_t decoded_bytes = (size_t)infoW * (size_t)infoH * 3;
+    if (decoded_bytes > EPUB_COVER_MAX_DECODED_RGB_BYTES)
+      return 9;
+  }
 
   // Decode image using stb_image (supports JPEG + PNG)
   int imgW, imgH, channels;
-  unsigned char *pixels = stbi_load_from_memory(
-      imgbuf, fi.uncompressed_size, &imgW, &imgH, &channels, 3); // Force RGB
-  delete[] imgbuf;
+  unsigned char *pixels = stbi_load_from_memory(imgbuf.data(), (int)imgbuf.size(),
+                                                 &imgW, &imgH, &channels,
+                                                 3); // Force RGB
 
   if (!pixels)
     return 4; // Failed to decode image
 
   // Safety: skip images that are too large for 3DS RAM
-  if (imgW > 2048 || imgH > 2048) {
+  if (imgW <= 0 || imgH <= 0 || imgW > EPUB_COVER_MAX_DIMENSION ||
+      imgH > EPUB_COVER_MAX_DIMENSION) {
     stbi_image_free(pixels);
     return 7;
   }
