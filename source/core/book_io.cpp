@@ -137,6 +137,204 @@ static void NormalizeNewlines(std::string *s) {
   s->swap(out);
 }
 
+static std::string TrimAsciiWhitespace(const std::string &in) {
+  size_t start = 0;
+  while (start < in.size() && isspace((unsigned char)in[start]))
+    start++;
+  size_t end = in.size();
+  while (end > start && isspace((unsigned char)in[end - 1]))
+    end--;
+  return in.substr(start, end - start);
+}
+
+static std::string CollapseAsciiWhitespace(const std::string &in) {
+  std::string out;
+  out.reserve(in.size());
+  bool pending_space = false;
+  for (size_t i = 0; i < in.size(); i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (isspace(c)) {
+      pending_space = true;
+      continue;
+    }
+    if (pending_space && !out.empty())
+      out.push_back(' ');
+    pending_space = false;
+    out.push_back((char)c);
+  }
+  return out;
+}
+
+static std::string FoldLatinForMatch(const std::string &in) {
+  std::string out;
+  out.reserve(in.size());
+  for (size_t i = 0; i < in.size(); i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (c < 0x80) {
+      out.push_back((char)tolower(c));
+      continue;
+    }
+    if (c == 0xC3 && i + 1 < in.size()) {
+      unsigned char c2 = (unsigned char)in[i + 1];
+      switch (c2) {
+      case 0x81:
+      case 0xA1:
+        out.push_back('a');
+        i++;
+        continue;
+      case 0x89:
+      case 0xA9:
+        out.push_back('e');
+        i++;
+        continue;
+      case 0x8D:
+      case 0xAD:
+        out.push_back('i');
+        i++;
+        continue;
+      case 0x93:
+      case 0xB3:
+        out.push_back('o');
+        i++;
+        continue;
+      case 0x9A:
+      case 0xBA:
+      case 0x9C:
+      case 0xBC:
+        out.push_back('u');
+        i++;
+        continue;
+      case 0x91:
+      case 0xB1:
+        out.push_back('n');
+        i++;
+        continue;
+      case 0x87:
+      case 0xA7:
+        out.push_back('c');
+        i++;
+        continue;
+      default:
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+static bool StartsWithChapterPrefix(const std::string &folded) {
+  static const char *kPrefixes[] = {
+      "chapter", "capitulo", "parte", "part", "seccion",
+      "section", "book",     "libro",
+  };
+  for (size_t i = 0; i < sizeof(kPrefixes) / sizeof(kPrefixes[0]); i++) {
+    const char *prefix = kPrefixes[i];
+    size_t len = strlen(prefix);
+    if (folded.size() < len || folded.compare(0, len, prefix) != 0)
+      continue;
+    if (folded.size() == len)
+      return true;
+    char next = folded[len];
+    if (next == ' ' || next == ':' || next == '-' || next == '.' ||
+        next == ')' || isdigit((unsigned char)next))
+      return true;
+  }
+  return false;
+}
+
+static bool IsRomanHeadingToken(const std::string &token) {
+  if (token.empty() || token.size() > 8)
+    return false;
+  for (size_t i = 0; i < token.size(); i++) {
+    char c = token[i];
+    if (c != 'i' && c != 'v' && c != 'x' && c != 'l' && c != 'c' &&
+        c != 'd' && c != 'm')
+      return false;
+  }
+  return true;
+}
+
+static bool LooksLikeTocLeaderLine(const std::string &folded) {
+  if (folded.find("...") == std::string::npos &&
+      folded.find(" . .") == std::string::npos)
+    return false;
+
+  int i = (int)folded.size() - 1;
+  while (i >= 0 && isspace((unsigned char)folded[(size_t)i]))
+    i--;
+  int digits = 0;
+  while (i >= 0 && isdigit((unsigned char)folded[(size_t)i])) {
+    digits++;
+    i--;
+  }
+  return digits > 0;
+}
+
+static bool LooksLikePlainChapterHeading(const std::string &line) {
+  std::string trimmed = TrimAsciiWhitespace(line);
+  if (trimmed.size() < 4 || trimmed.size() > 120)
+    return false;
+
+  std::string compact = CollapseAsciiWhitespace(trimmed);
+  std::string folded = FoldLatinForMatch(compact);
+  if (folded.size() < 4)
+    return false;
+  if (LooksLikeTocLeaderLine(folded))
+    return false;
+  if (StartsWithChapterPrefix(folded))
+    return true;
+
+  size_t split = folded.find(' ');
+  std::string first = split == std::string::npos ? folded : folded.substr(0, split);
+  std::string rest = split == std::string::npos ? "" : folded.substr(split + 1);
+  if (IsRomanHeadingToken(first) && !TrimAsciiWhitespace(rest).empty())
+    return true;
+
+  size_t p = 0;
+  while (p < folded.size() && isdigit((unsigned char)folded[p]))
+    p++;
+  if (p > 0 && p < folded.size() &&
+      (folded[p] == '.' || folded[p] == ')' || folded[p] == '-') &&
+      p + 1 < folded.size() && folded[p + 1] == ' ')
+    return true;
+
+  return false;
+}
+
+static void AddChapterIfUnique(Book *book, const std::string &title, u8 level) {
+  if (!book)
+    return;
+  std::string clean = CollapseAsciiWhitespace(TrimAsciiWhitespace(title));
+  if (clean.empty())
+    return;
+  if (book->GetChapters().size() >= 512)
+    return;
+
+  u16 page = book->GetPageCount();
+  const std::vector<ChapterEntry> &chapters = book->GetChapters();
+  if (!chapters.empty()) {
+    const ChapterEntry &last = chapters.back();
+    if (last.page == page && last.title == clean && last.level == level)
+      return;
+  }
+  book->AddChapter(page, clean, level);
+}
+
+static void SetNonEpubTocConfidence(Book *book, bool strong) {
+  if (!book)
+    return;
+  size_t n = book->GetChapters().size();
+  if (n == 0) {
+    book->ClearTocConfidence();
+    return;
+  }
+  u16 count = (n > 65535) ? 65535 : (u16)n;
+  if (strong)
+    book->SetTocConfidence(TOC_QUALITY_STRONG, count, 0, 0);
+  else
+    book->SetTocConfidence(TOC_QUALITY_HEURISTIC, 0, count, 0);
+}
+
 static bool ReadFileToStringLimited(const char *path, std::string *out,
                                     size_t max_bytes) {
   if (!path || !out)
@@ -182,6 +380,8 @@ static void FinalizePlainPage(parsedata_t *p) {
 static u8 ParsePlainTextBuffer(Book *book, const std::string &text_utf8) {
   if (!book || !book->GetApp() || !book->GetApp()->ts)
     return 1;
+  book->ClearChapters();
+  book->ClearTocConfidence();
 
   parsedata_t parsedata;
   parse_init(&parsedata);
@@ -191,10 +391,30 @@ static u8 ParsePlainTextBuffer(Book *book, const std::string &text_utf8) {
   parsedata.book = book;
 
   parse_push(&parsedata, TAG_PRE);
-  if (!text_utf8.empty())
-    xml::book::chardata(&parsedata, text_utf8.c_str(), (int)text_utf8.size());
+  if (!text_utf8.empty()) {
+    size_t start = 0;
+    while (start <= text_utf8.size()) {
+      size_t end = text_utf8.find('\n', start);
+      bool has_nl = (end != std::string::npos);
+      size_t len = has_nl ? (end - start) : (text_utf8.size() - start);
+
+      if (len > 0) {
+        std::string line = text_utf8.substr(start, len);
+        if (LooksLikePlainChapterHeading(line))
+          AddChapterIfUnique(book, line, 0);
+        xml::book::chardata(&parsedata, line.c_str(), (int)line.size());
+      }
+      if (has_nl) {
+        xml::book::chardata(&parsedata, "\n", 1);
+        start = end + 1;
+      } else {
+        break;
+      }
+    }
+  }
   parse_pop(&parsedata);
   FinalizePlainPage(&parsedata);
+  SetNonEpubTocConfidence(book, false);
   return 0;
 }
 
@@ -403,8 +623,12 @@ static bool OdtIsParagraphTag(const char *local_name) {
 
 struct OdtParseState {
   parsedata_t *parsedata;
+  Book *book;
   int depth;
   int office_text_depth;
+  int heading_depth;
+  int heading_level;
+  std::string heading_text;
   bool pending_space;
 };
 
@@ -474,6 +698,22 @@ static void odt_start(void *userdata, const char *el, const char **attr) {
     s->pending_space = false;
     return;
   }
+  if (!strcmp(local, "h")) {
+    s->heading_depth++;
+    s->heading_level = 0;
+    s->heading_text.clear();
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (!XmlAttrLocalNameEquals(attr[i], "outline-level"))
+        continue;
+      int level = atoi(attr[i + 1] ? attr[i + 1] : "1");
+      if (level < 1)
+        level = 1;
+      if (level > 7)
+        level = 7;
+      s->heading_level = level - 1;
+      break;
+    }
+  }
 }
 
 static void odt_chardata(void *userdata, const char *txt, int txtlen) {
@@ -499,6 +739,11 @@ static void odt_chardata(void *userdata, const char *txt, int txtlen) {
   }
   if (!out.empty())
     OdtEmit(s, out.c_str(), (int)out.size());
+  if (s->heading_depth > 0 && !out.empty()) {
+    if (!s->heading_text.empty() && s->heading_text.back() != ' ')
+      s->heading_text.push_back(' ');
+    s->heading_text += out;
+  }
 }
 
 static void odt_end(void *userdata, const char *el) {
@@ -507,6 +752,14 @@ static void odt_end(void *userdata, const char *el) {
     return;
 
   const char *local = XmlLocalName(el);
+  if (s->office_text_depth > 0 && !strcmp(local, "h") && s->heading_depth > 0) {
+    s->heading_depth--;
+    if (s->heading_depth == 0 && s->book) {
+      AddChapterIfUnique(s->book, s->heading_text, (u8)s->heading_level);
+      s->heading_text.clear();
+      s->heading_level = 0;
+    }
+  }
   if (s->office_text_depth > 0 && OdtIsParagraphTag(local)) {
     OdtEmitParagraphBreak(s);
   }
@@ -568,6 +821,8 @@ static u8 ParseOdtFile(Book *book, const char *path) {
   parsedata.prefs = parsedata.app ? parsedata.app->prefs : NULL;
   parsedata.book = book;
   parse_push(&parsedata, TAG_PRE);
+  book->ClearChapters();
+  book->ClearTocConfidence();
 
   XML_Parser p = XML_ParserCreate(NULL);
   if (!p) {
@@ -577,8 +832,12 @@ static u8 ParseOdtFile(Book *book, const char *path) {
 
   OdtParseState odt_state;
   odt_state.parsedata = &parsedata;
+  odt_state.book = book;
   odt_state.depth = 0;
   odt_state.office_text_depth = 0;
+  odt_state.heading_depth = 0;
+  odt_state.heading_level = 0;
+  odt_state.heading_text.clear();
   odt_state.pending_space = false;
 
   XML_SetUserData(p, &odt_state);
@@ -598,6 +857,7 @@ static u8 ParseOdtFile(Book *book, const char *path) {
     return 255;
 
   FinalizePlainPage(&parsedata);
+  SetNonEpubTocConfidence(book, true);
   return 0;
 }
 
@@ -745,6 +1005,9 @@ u8 Book::Parse(bool fulltext) {
   XML_ParserFree(p);
   fclose(fp);
   delete[] filebuf;
+
+  if (rc == 0 && fulltext && parsedata.fb2_mode)
+    SetNonEpubTocConfidence(this, !chapters.empty());
 
   return (rc);
 }
