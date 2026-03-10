@@ -5,7 +5,12 @@
     Ported from dslibris (Nintendo DS).
 
     Copyright (C) 2007-2025 Ray Haleblian
-    3DS port 2025
+    3DS port 2025, modified by Rigle.
+
+    Changes by Rigle (summary):
+    - 3DS service/bootstrap flow and framebuffer lifecycle.
+    - SD directory initialization for books/prefs/cache paths.
+    - Main loop integration for App run/shutdown and 3DS cleanup.
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -86,6 +91,7 @@ int main(int argc, char **argv) {
   mkdir("sdmc:/3ds/3dslibris", 0777);
   mkdir("sdmc:/3ds/3dslibris/book", 0777);
   mkdir("sdmc:/3ds/3dslibris/font", 0777);
+  mkdir("sdmc:/3ds/3dslibris/resources", 0777);
   mkdir("sdmc:/3ds/3dslibris/cache", 0777);
   mkdir("sdmc:/3ds/3dslibris/cache/covers", 0777);
 

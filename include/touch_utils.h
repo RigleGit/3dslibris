@@ -1,3 +1,12 @@
+/*
+    3dslibris - touch_utils.h
+    New helper module for Nintendo 3DS port by Rigle.
+
+    Summary:
+    - Touch candidate normalization API shared across menus.
+    - Encapsulates robust button hit testing and bottom-band helpers.
+*/
+
 #pragma once
 
 #include "button.h"
@@ -22,4 +31,3 @@ bool HitsButton(const TouchCandidates &candidates, Button *button, int slack);
 bool FirstXInBottomBand(const TouchCandidates &candidates, int y_min, int *x_out);
 
 } // namespace touch
-

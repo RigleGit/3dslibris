@@ -1,3 +1,13 @@
+/*
+    3dslibris - touch_utils.cpp
+    New helper module for Nintendo 3DS port by Rigle.
+
+    Summary:
+    - Normalizes multiple touch coordinate candidates (mapped/raw transforms).
+    - Centralizes robust hit-testing with optional slack for small buttons.
+    - Provides shared helpers for footer-band and bounds-aware touch handling.
+*/
+
 #include "touch_utils.h"
 
 #include <3ds.h>
@@ -42,6 +52,8 @@ void BuildCandidates(App *app, TouchCandidates *out) {
   touchPosition raw;
   hidTouchRead(&raw);
 
+  // Keep several candidate transforms because touch orientation can vary
+  // between modes/screens and some emulators report different raw axes.
   out->points[0] = {(int)mapped.px, (int)mapped.py};
   out->points[1] = {(int)raw.py, (int)raw.px};
   out->points[2] = {239 - (int)raw.py, (int)raw.px};

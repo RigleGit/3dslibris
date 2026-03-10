@@ -20,23 +20,156 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 */
 
+/*
+  3DS port modifications by Rigle (summary):
+  - Added dual-screen framebuffer management for 400x240 (top) and 320x240
+    (bottom) software pages.
+  - Added splash/background rendering helpers and sepia/gradient background mode.
+  - Hardened UTF-8 handling and clipping paths used by UI labels and book text.
+*/
+
 #include "text.h"
 
+#include <algorithm>
 #include <iostream>
+#include <math.h>
 #include <sstream>
+#include <stdio.h>
 #include <sys/param.h>
+#include <vector>
 
 #include "3ds.h"
 #include "string.h"
 
 #include "app.h"
 #include "main.h"
+#include "stb_image.h"
 #include "version.h"
 
 #define PIXELSIZE 12
 
 extern char msg[];
 std::stringstream ss;
+
+namespace {
+
+static inline u16 RGB565FromU8(float r, float g, float b) {
+  if (r < 0.0f)
+    r = 0.0f;
+  else if (r > 255.0f)
+    r = 255.0f;
+  if (g < 0.0f)
+    g = 0.0f;
+  else if (g > 255.0f)
+    g = 255.0f;
+  if (b < 0.0f)
+    b = 0.0f;
+  else if (b > 255.0f)
+    b = 255.0f;
+
+  const u16 rr = (u16)(((int)r) >> 3);
+  const u16 gg = (u16)(((int)g) >> 2);
+  const u16 bb = (u16)(((int)b) >> 3);
+  return (u16)((rr << 11) | (gg << 5) | bb);
+}
+
+static inline void RGB565ToU8(u16 c, int *r, int *g, int *b) {
+  const int r5 = (c >> 11) & 0x1F;
+  const int g6 = (c >> 5) & 0x3F;
+  const int b5 = c & 0x1F;
+  *r = (r5 << 3) | (r5 >> 2);
+  *g = (g6 << 2) | (g6 >> 4);
+  *b = (b5 << 3) | (b5 >> 2);
+}
+
+static inline u16 BlendRGB565(u16 fg, u16 bg, u8 alpha) {
+  int fr, fgc, fb, br, bgc, bb;
+  RGB565ToU8(fg, &fr, &fgc, &fb);
+  RGB565ToU8(bg, &br, &bgc, &bb);
+  const int a = (int)alpha;
+  const int ia = 255 - a;
+  const int r = (fr * a + br * ia + 127) / 255;
+  const int g = (fgc * a + bgc * ia + 127) / 255;
+  const int b = (fb * a + bb * ia + 127) / 255;
+  return RGB565FromU8((float)r, (float)g, (float)b);
+}
+
+static inline u16 SepiaGradientPixel(int x, int y, int w, int h) {
+  static const u8 kBayer4x4[4][4] = {
+      {0, 8, 2, 10},
+      {12, 4, 14, 6},
+      {3, 11, 1, 9},
+      {15, 7, 13, 5},
+  };
+
+  const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
+  const float dx = (w > 1)
+                       ? (((float)x - (float)(w - 1) * 0.5f) /
+                          ((float)(w - 1) * 0.5f))
+                       : 0.0f;
+  const float edge = fabsf(dx);
+
+  float r = 244.0f + (238.0f - 244.0f) * tY;
+  float g = 226.0f + (220.0f - 226.0f) * tY;
+  float b = 195.0f + (185.0f - 195.0f) * tY;
+
+  const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
+
+  const float bayer =
+      (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) - 0.5f;
+  const u32 h0 = (u32)x * 73856093u;
+  const u32 h1 = (u32)y * 19349663u;
+  const u32 h2 = (h0 ^ h1 ^ 0x9E3779B9u);
+  const float noise = ((((h2 >> 8) & 0xFF) / 255.0f) - 0.5f) * 0.6f;
+
+  r = r * vignette + bayer * 3.8f + noise;
+  g = g * vignette + bayer * 1.9f + noise * 0.6f;
+  b = b * vignette + bayer * 3.8f + noise;
+  return RGB565FromU8(r, g, b);
+}
+
+static const u16 kSepiaTextColor = RGB565FromU8(70.0f, 52.0f, 32.0f);
+static const u16 kSepiaBgMidColor = RGB565FromU8(241.0f, 223.0f, 190.0f);
+
+static void FillSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
+  if (!dst || stride <= 0 || w <= 0 || logical_h <= 0)
+    return;
+
+  static std::vector<u16> grad320;
+  static std::vector<u16> grad400;
+  static int grad320w = 0;
+  static int grad400w = 0;
+
+  std::vector<u16> *grad = nullptr;
+  int *cached_w = nullptr;
+  const int h = (logical_h <= 320) ? 320 : 400;
+  if (h == 320) {
+    grad = &grad320;
+    cached_w = &grad320w;
+  } else {
+    grad = &grad400;
+    cached_w = &grad400w;
+  }
+
+  if (grad->empty() || *cached_w != w) {
+    grad->resize((size_t)w * (size_t)h);
+    *cached_w = w;
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        (*grad)[(size_t)y * (size_t)w + (size_t)x] =
+            SepiaGradientPixel(x, y, w, h);
+      }
+    }
+  }
+
+  const int max_y = std::min(logical_h, h);
+  for (int y = 0; y < max_y; y++) {
+    memcpy(dst + (size_t)y * (size_t)stride,
+           grad->data() + (size_t)y * (size_t)w, (size_t)w * sizeof(u16));
+  }
+}
+
+} // namespace
 
 void Text::CopyScreen(u16 *src, u16 *dst) {
   memcpy(src, dst, display.width * display.height * sizeof(u16));
@@ -94,6 +227,9 @@ Text::Text() {
   // Statistics.
   stats_hits = 0;
   stats_misses = 0;
+  splash_attempted = false;
+  splash_loaded = false;
+  splash_pixels = nullptr;
 
   ClearScreen(offscreen, 255, 255, 255);
   ss.clear();
@@ -104,6 +240,7 @@ Text::~Text() {
   delete[] offscreen;
   delete[] screenleft;
   delete[] screenright;
+  delete[] splash_pixels;
 
   // homemade cache
   ClearCache();
@@ -323,13 +460,17 @@ void Text::ClearScreen() {
   MarkCurrentScreenDirty();
   // Buffer is PAGE_HEIGHT * PAGE_HEIGHT entries
   const int bufsize = PAGE_HEIGHT * PAGE_HEIGHT;
+  const int logicalHeight = (screen == screenleft) ? 400 : 320;
   u16 bg_color;
   if (colorMode == 1)
     bg_color = 0x0000;
-  else if (colorMode == 2)
-    bg_color = 0xD6B4; // Sepia background (cream-ish)
   else
     bg_color = 0xFFFF; // Normal background (white)
+
+  if (colorMode == 2) {
+    FillSepiaGradient(screen, display.height, display.width, logicalHeight);
+    return;
+  }
 
   for (int i = 0; i < bufsize; i++) {
     screen[i] = bg_color;
@@ -341,15 +482,19 @@ void Text::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
   u16 clearcolor;
   if (colorMode == 1)
     clearcolor = 0x0000;
-  else if (colorMode == 2)
-    clearcolor = 0xD6B4;
   else
     clearcolor = 0xFFFF;
   int maxHeight = (screen == screenleft ? 400 : 320);
   for (u16 y = yl; y < yh; y++) {
     for (u16 x = xl; x < xh; x++) {
-      if (y < maxHeight && x < (u16)display.width)
-        screen[y * display.height + x] = clearcolor;
+      if (y < maxHeight && x < (u16)display.width) {
+        if (colorMode == 2) {
+          screen[y * display.height + x] =
+              SepiaGradientPixel((int)x, (int)y, (int)display.width, maxHeight);
+        } else {
+          screen[y * display.height + x] = clearcolor;
+        }
+      }
     }
   }
 }
@@ -359,7 +504,7 @@ u16 Text::GetFgColor() {
     return 0x0000;
   if (colorMode == 1)
     return 0xFFFF;
-  return 0x38C0; // Sepia foreground
+  return kSepiaTextColor;
 }
 
 u16 Text::GetBgColor() {
@@ -367,7 +512,7 @@ u16 Text::GetBgColor() {
     return 0xFFFF;
   if (colorMode == 1)
     return 0x0000;
-  return 0xD6B4; // Sepia background
+  return kSepiaBgMidColor;
 }
 
 void Text::FillRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
@@ -721,30 +866,28 @@ void Text::PrintChar(u32 ucs, FT_Face face) {
       // Mode 1 (Dark): bg = black (0), fg = white (255). v = a
       // Mode 2 (Sepia): bg = 0xD6B4 (Cream: R=26, G=53, B=20)
       //                 fg = 0x38C0 (DarkBrown: R=7, G=6, B=0)
+      u16 sx = (pen.x + gx + bx);
+      u16 sy = (pen.y + gy - by);
+      // Bounds check to prevent buffer overrun
+      if (sy >= (u16)maxY || sx >= display.width)
+        continue;
+      const size_t dst_index =
+          (size_t)sy * (size_t)display.height + (size_t)sx;
+
       u16 pixel;
       if (colorMode == 0) {
-        u8 v = (255 - a) >> 3;
-        pixel = (v << 11) | (v << 6) | v;
+        // Blend black text over current background for correct AA on buttons.
+        pixel = BlendRGB565(0x0000, screen[dst_index], a);
       } else if (colorMode == 1) {
-        u8 v = a >> 3;
-        pixel = (v << 11) | (v << 6) | v;
+        // Blend white text over current background in dark mode.
+        pixel = BlendRGB565(0xFFFF, screen[dst_index], a);
       } else {
-        // Sepia blending (RGB565).
-        // Background: R=26, G=53, B=20
-        // Foreground: R=7, G=6, B=0
-        u8 R = ((7 * a) + (26 * (255 - a))) / 255;
-        u8 G = ((6 * a) + (53 * (255 - a))) / 255;
-        u8 B = ((0 * a) + (20 * (255 - a))) / 255;
-        pixel = (R << 11) | (G << 5) | B; // G has 6 bits in RGB565
+        pixel = BlendRGB565(kSepiaTextColor, screen[dst_index], a);
       }
 #ifdef DRAW_CACHE_MISSES
       // if(!hit) pixel = RGB15(a>>3,0,0) | BIT(15);
 #endif
-      u16 sx = (pen.x + gx + bx);
-      u16 sy = (pen.y + gy - by);
-      // Bounds check to prevent buffer overrun
-      if (sy < (u16)maxY && sx < display.width)
-        screen[sy * display.height + sx] = pixel;
+      screen[dst_index] = pixel;
     }
   }
 
@@ -819,13 +962,139 @@ void Text::ClearScreen(u16 *screen, u8 r, u8 g, u8 b) {
     screen[i] = pixel;
 }
 
+bool Text::EnsureSplashLoaded() {
+  if (splash_attempted)
+    return splash_loaded;
+  splash_attempted = true;
+
+  static const char *kSplashCandidates[] = {
+      "sdmc:/3ds/3dslibris/resources/splash.jpg",
+      "sdmc:/3ds/3dslibris/resources/splash.jpeg",
+      "sdmc:/3ds/3dslibris/splash.jpg",
+      "sdmc:/3ds/3dslibris/splash.jpeg",
+      nullptr,
+  };
+
+  int srcW = 0;
+  int srcH = 0;
+  int srcChannels = 0;
+  unsigned char *srcRgb = nullptr;
+  for (int i = 0; kSplashCandidates[i] != nullptr; i++) {
+    FILE *fp = fopen(kSplashCandidates[i], "rb");
+    if (!fp)
+      continue;
+    fseek(fp, 0, SEEK_END);
+    long size = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    if (size <= 0) {
+      fclose(fp);
+      continue;
+    }
+    std::vector<unsigned char> encoded((size_t)size);
+    if (fread(encoded.data(), 1, (size_t)size, fp) != (size_t)size) {
+      fclose(fp);
+      continue;
+    }
+    fclose(fp);
+    srcRgb = stbi_load_from_memory(encoded.data(), (int)encoded.size(), &srcW,
+                                   &srcH, &srcChannels, 3);
+    if (srcRgb)
+      break;
+  }
+  if (!srcRgb || srcW <= 0 || srcH <= 0)
+    return false;
+
+  const int targetW = display.width;
+  const int targetH = display.height;
+  splash_pixels = new u16[(size_t)targetW * (size_t)targetH];
+  if (!splash_pixels) {
+    stbi_image_free(srcRgb);
+    return false;
+  }
+
+  int scaledW = 0;
+  int scaledH = 0;
+  int cropX = 0;
+  int cropY = 0;
+
+  if ((long long)srcW * (long long)targetH >
+      (long long)srcH * (long long)targetW) {
+    // Wider than target: fit by height and crop horizontal overflow.
+    scaledH = targetH;
+    scaledW = (int)(((long long)srcW * (long long)targetH + srcH - 1) / srcH);
+    cropX = (scaledW - targetW) / 2;
+  } else {
+    // Taller than target: fit by width and crop vertical overflow.
+    scaledW = targetW;
+    scaledH = (int)(((long long)srcH * (long long)targetW + srcW - 1) / srcW);
+    cropY = (scaledH - targetH) / 2;
+  }
+  if (scaledW <= 0 || scaledH <= 0) {
+    stbi_image_free(srcRgb);
+    delete[] splash_pixels;
+    splash_pixels = nullptr;
+    return false;
+  }
+
+  for (int y = 0; y < targetH; y++) {
+    int sy = ((y + cropY) * srcH) / scaledH;
+    sy = std::max(0, std::min(srcH - 1, sy));
+    for (int x = 0; x < targetW; x++) {
+      int sx = ((x + cropX) * srcW) / scaledW;
+      sx = std::max(0, std::min(srcW - 1, sx));
+
+      const unsigned char *p = srcRgb + ((size_t)sy * (size_t)srcW + sx) * 3;
+      const u16 r = (u16)(p[0] >> 3);
+      const u16 g = (u16)(p[1] >> 2);
+      const u16 b = (u16)(p[2] >> 3);
+      splash_pixels[(size_t)y * (size_t)targetW + (size_t)x] =
+          (u16)((r << 11) | (g << 5) | b);
+    }
+  }
+
+  stbi_image_free(srcRgb);
+  splash_loaded = true;
+  return true;
+}
+
+void Text::DrawFallbackSplash() {
+  int savedStyle = GetStyle();
+  int savedPixelSize = pixelsize;
+
+  SetStyle(TEXT_STYLE_BROWSER);
+  SetPixelSize(16);
+  SetPen(20, 44);
+  PrintString("3dslibris");
+  SetPixelSize(12);
+  SetPen(22, 66);
+  PrintString("by Rigle");
+
+  SetPixelSize(savedPixelSize);
+  SetStyle(savedStyle);
+}
+
 void Text::PrintSplash(u16 *screen) {
   // push
   auto s = GetScreen();
+  int savedColorMode = GetColorMode();
 
   SetScreen(screen);
-  drawstack(screen);
+  SetColorMode(0);
+  ClearScreen();
+  if (screen == screenleft && EnsureSplashLoaded()) {
+    for (int y = 0; y < display.height; y++) {
+      u16 *dst = screen + y * display.height;
+      const u16 *src = splash_pixels + y * display.width;
+      for (int x = 0; x < display.width; x++)
+        dst[x] = src[x];
+    }
+  } else {
+    drawstack(screen);
+    if (screen == screenleft)
+      DrawFallbackSplash();
+  }
   MarkScreenDirty(screen);
+  SetColorMode(savedColorMode);
   // pop
   SetScreen(s);
 }

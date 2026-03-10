@@ -1,3 +1,15 @@
+/*
+    3dslibris - bookmark_menu.cpp
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Builds paged bookmark entries from the current book.
+    - Normalizes labels and maps each row to target page numbers.
+*/
+
 #include "bookmark_menu.h"
 
 #include <stdio.h>
@@ -25,4 +37,3 @@ void BookmarkMenu::BuildEntries(std::vector<std::string> &labels,
     pages.push_back(pg);
   }
 }
-

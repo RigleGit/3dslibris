@@ -18,6 +18,12 @@
  To contact the copyright holder: ray@haleblian.com
  */
 
+/*
+  3DS port modifications by Rigle (summary):
+  - Added 3DS-specific constants for framebuffer layout and app paths.
+  - Declared startup helpers and splash hooks used by the 3DS main loop.
+*/
+
 #pragma once
 
 #include <ft2build.h>

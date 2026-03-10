@@ -1,3 +1,13 @@
+/*
+    3dslibris - paged_list_menu.cpp
+    New shared menu module for the 3DS port by Rigle.
+
+    Summary:
+    - Generic paged list renderer and input handler for index/bookmarks.
+    - Unified footer button layout and touch routing with robust candidates.
+    - Activation/back/navigation hooks reused by specialized menu types.
+*/
+
 #include "paged_list_menu.h"
 
 #include <algorithm>
@@ -92,9 +102,11 @@ void PagedListMenu::Init() {
 }
 
 void PagedListMenu::Draw() {
+  int savedColorMode = app->ts->GetColorMode();
   app->ts->SetScreen(app->ts->screenright);
   app->ts->SetColorMode(0);
   app->ts->ClearScreen();
+  app->DrawBottomGradientBackground();
 
   app->ts->SetPen(LIST_HEADER_X, LIST_HEADER_Y);
   app->ts->PrintString(header_title.c_str());
@@ -117,6 +129,7 @@ void PagedListMenu::Draw() {
   if (page < GetPageCount() - 1)
     app->buttonnext.Draw();
 
+  app->ts->SetColorMode(savedColorMode);
   dirty = false;
 }
 
@@ -212,8 +225,7 @@ void PagedListMenu::ActivateSelected() {
   app->bookcurrent->SetPosition(target_page);
   app->mode = APP_MODE_BOOK;
   app->bookcurrent->GetPage()->Draw(app->ts);
-  app->ts->SetScreen(app->ts->screenleft);
-  app->ts->PrintSplash(app->ts->screenright);
+  app->RequestStatusRedraw();
 }
 
 bool PagedListMenu::ResolveTargetPage(u8 index, u16 *page_out) {
@@ -235,8 +247,7 @@ void PagedListMenu::Back() {
   if (app->bookcurrent) {
     app->bookcurrent->GetPage()->Draw(app->ts);
   }
-  app->ts->SetScreen(app->ts->screenleft);
-  app->ts->PrintSplash(app->ts->screenright);
+  app->RequestStatusRedraw();
 }
 
 void PagedListMenu::HandleTouchInput() {

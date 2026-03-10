@@ -18,6 +18,13 @@
  To contact the copyright holder: rayh23@sourceforge.net
  */
 
+/*
+  3DS port modifications by Rigle (summary):
+  - Added 3DS runtime/application state, menu modes, and screen orchestration.
+  - Integrated browser/settings/reader flows with touch + key input mapping.
+  - Added cover/index preload queue, TOC trust/fallback logic, and telemetry.
+*/
+
 #pragma once
 /*!
 \mainpage
@@ -171,6 +178,7 @@ public:
   void PrefsRefreshButtonFontBoldItalic();
   void ShowSettingsView(bool from_book = false);
   inline bool IsBookSettingsContext() const { return prefs_book_context; }
+  void DrawBottomGradientBackground();
 
 private:
   bool browser_view_dirty;
@@ -179,6 +187,8 @@ private:
   bool prefs_book_context;
   int status_last_minute;
   int status_last_percent_tenths;
+  Book *status_progress_lock_book;
+  int status_progress_pagecount_lock;
   bool status_force_redraw;
   std::deque<app_job_t> job_queue;
 

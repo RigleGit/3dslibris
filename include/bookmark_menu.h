@@ -1,3 +1,12 @@
+/*
+    3dslibris - bookmark_menu.h
+    New 3DS menu module by Rigle.
+
+    Summary:
+    - Concrete paged list menu for user bookmarks in current book.
+    - Builds touch/keyboard selectable entries from persisted bookmark pages.
+*/
+
 #pragma once
 
 #include "button.h"

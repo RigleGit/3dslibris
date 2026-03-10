@@ -1,3 +1,15 @@
+/*
+    3dslibris - font.h
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Font selection menu model and state for UI typeface configuration.
+    - Integrates available font files with menu navigation and persistence.
+*/
+
 #pragma once
 
 #include <3ds.h>

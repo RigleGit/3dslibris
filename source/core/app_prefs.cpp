@@ -1,6 +1,14 @@
 /*
     3dslibris - app_prefs.cpp
     Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Changes by Rigle (summary):
+    - Context-aware settings rows (library vs per-book actions).
+    - 3DS touch handling for row controls and footer button overlays.
+    - Dynamic index/bookmark availability and runtime UI refresh behavior.
 */
 
 #include "app.h"
@@ -23,10 +31,12 @@
 #define MIN(x, y) (x < y ? x : y)
 #define MAX(x, y) (x > y ? x : y)
 
-static const int PREFS_LIBRARY_BTN_X = 158;
+static const int PREFS_LIBRARY_BTN_X = 130;
 static const int PREFS_LIBRARY_BTN_Y = 286;
-static const int PREFS_LIBRARY_BTN_W = 76;
+static const int PREFS_LIBRARY_BTN_W = 104;
 static const int PREFS_LIBRARY_BTN_H = 26;
+static const int PREFS_ROW_X = 5;
+static const int PREFS_ROW_W = 230;
 
 static bool CanOpenBookIndexInCurrentContext(App *app) {
   if (!app || !app->IsBookSettingsContext() || !app->bookcurrent)
@@ -81,6 +91,7 @@ void App::PrefsDraw() {
   ts->SetScreen(ts->screenright);
   ts->SetColorMode(0); // Normal for prefs menu
   ts->ClearScreen();
+  DrawBottomGradientBackground();
 
   u8 visibleCount = PrefsVisibleButtonCount();
   if (visibleCount == 0)
@@ -100,24 +111,7 @@ void App::PrefsDraw() {
   buttonprefs.Resize(PREFS_LIBRARY_BTN_W, PREFS_LIBRARY_BTN_H);
   buttonprefs.Draw(ts->screenright);
 
-  // Draw controls guide on the other screen
-  ts->SetScreen(ts->screenleft);
-  ts->SetColorMode(0); // Normal for controls guide
-  ts->ClearScreen();
-  ts->SetPen(ts->margin.left, 24);
-  int tmpSize = ts->pixelsize;
-  ts->SetPixelSize(12);
-  ts->PrintString(
-      "3dslibris\nby Rigle\n---------\n\n"
-      "Controls:\n"
-      "A / B / L / R : Turn Pages\n"
-      "D-Pad Left/Right : Jump to Bookmarks\n"
-      "START : Return to Library\n"
-      "SELECT : Settings\n"
-      "Y : Toggle Bookmark\n"
-      "X : Invert Colors\n\n"
-      "Settings are saved automatically.");
-  ts->SetPixelSize(tmpSize);
+  ts->PrintSplash(ts->screenleft);
 
   // restore state
   ts->SetStyle(style);
@@ -165,19 +159,15 @@ void App::PrefsHandleEvent() {
 
 void App::PrefsHandleTouch() {
   touchPosition coord = TouchRead();
-  // Robust fallback zone for the footer action area.
-  // If touch mapping drifts, taps in the bottom strip should still go to library.
-  if (coord.py >= 268) {
-    ShowLibraryView();
-    return;
-  }
+  const int footerX = 239 - (int)coord.px;
+  const int footerY = (int)coord.py;
 
   // Keep touch hitbox synced with drawing geometry.
   buttonprefs.Move(PREFS_LIBRARY_BTN_X, PREFS_LIBRARY_BTN_Y);
   buttonprefs.Resize(PREFS_LIBRARY_BTN_W, PREFS_LIBRARY_BTN_H);
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
-    for (int dy = -4; dy <= 4; dy += 4) {
-      for (int dx = -4; dx <= 4; dx += 4) {
+    for (int dy = -8; dy <= 8; dy += 4) {
+      for (int dx = -8; dx <= 8; dx += 4) {
         int tx = x + dx;
         int ty = y + dy;
         if (tx < 0 || ty < 0)
@@ -189,7 +179,24 @@ void App::PrefsHandleTouch() {
     return false;
   };
 
-  if (enclosesWithSlack(buttonprefs, coord.px, coord.py)) {
+  // Footer button overlays the last prefs row ("bookmarks").
+  // Priority must be strict: if touch is on the visible library button, go to
+  // library; otherwise allow normal row hit-tests.
+  const int libHotX0 = PREFS_LIBRARY_BTN_X;
+  const int libHotY0 = PREFS_LIBRARY_BTN_Y;
+  const int libHotX1 = PREFS_LIBRARY_BTN_X + PREFS_LIBRARY_BTN_W;
+  const int libHotY1 = PREFS_LIBRARY_BTN_Y + PREFS_LIBRARY_BTN_H;
+  const int footerBandY0 = PREFS_LIBRARY_BTN_Y - 2;
+  const int footerSplitX = PREFS_LIBRARY_BTN_X - 14;
+  if (footerX >= libHotX0 && footerX <= libHotX1 && footerY >= libHotY0 &&
+      footerY <= libHotY1) {
+    ShowLibraryView();
+    return;
+  }
+
+  // Stable routing in overlapped footer band:
+  // left side remains for the last row ("bookmarks"), right side is library.
+  if (footerY >= footerBandY0 && footerX >= footerSplitX) {
     ShowLibraryView();
     return;
   }
@@ -197,21 +204,30 @@ void App::PrefsHandleTouch() {
   u8 visibleCount = PrefsVisibleButtonCount();
   for (u8 i = 0; i < visibleCount; i++) {
     if (prefsButtons[i].EnclosesPoint(coord.px, coord.py)) {
+      // Last row ("bookmarks") sits behind the footer "library" button.
+      // In the overlapped area, never trigger the row behind.
+      if (i == PREFS_BUTTON_BOOKMARKS &&
+          footerY >= footerBandY0 && footerX >= footerSplitX) {
+        continue;
+      }
+
       if (i != prefsSelected) {
         prefsSelected = i;
       }
 
       if (i == PREFS_BUTTON_FONTSIZE) {
-        if (coord.py > 2 + 188 / 2) {
-          PrefsIncreasePixelSize();
-        } else {
+        int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
+        if (coord.px >= centerX) {
           PrefsDecreasePixelSize();
+        } else {
+          PrefsIncreasePixelSize();
         }
       } else if (i == PREFS_BUTTON_PARASPACING) {
-        if (coord.py > 2 + 188 / 2) {
-          PrefsIncreaseParaspacing();
-        } else {
+        int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
+        if (coord.px >= centerX) {
           PrefsDecreaseParaspacing();
+        } else {
+          PrefsIncreaseParaspacing();
         }
       } else if (i == PREFS_BUTTON_ORIENTATION) {
         PrefsFlipOrientation();
@@ -232,6 +248,13 @@ void App::PrefsHandleTouch() {
 
       break;
     }
+  }
+
+  // Fallback for touch jitter: only after rows fail so bookmarks are not
+  // hijacked by the footer button.
+  if (enclosesWithSlack(buttonprefs, footerX, footerY)) {
+    ShowLibraryView();
+    return;
   }
 
   if (prefs_view_dirty)

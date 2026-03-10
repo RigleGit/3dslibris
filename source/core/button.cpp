@@ -1,28 +1,22 @@
 /*
+    3dslibris - button.cpp
+    Adapted from dslibris for Nintendo 3DS.
 
-dslibris - an ebook reader for the Nintendo DS.
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
 
- Copyright (C) 2007-2008 Ray Haleblian (ray23@sourceforge.net)
-
-This program is free software; you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 2 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-
+    Summary:
+    - Button rendering and hit-testing.
+    - UTF-8-safe label truncation for constrained layouts.
+    - Integration with procedural button skin and icon draw pipeline.
 */
 
 #include "button.h"
+
 #include <3ds.h>
+#include <algorithm>
 #include <stdio.h>
+#include <string.h>
 
 namespace {
 
@@ -59,7 +53,11 @@ void Button::Init(Text *typesetter) {
   text.style = TEXT_STYLE_BROWSER;
   text1.clear();
   text2.clear();
+  icon = UI_BUTTON_ICON_NONE;
+  iconExplicit = false;
+  enabled = true;
   ts = typesetter;
+  UiButtonSkin_Init();
 }
 
 void Button::Label(const char *s) {
@@ -81,18 +79,22 @@ void Button::Resize(u16 x, u16 y) {
   extent.y = y;
 }
 
+UiButtonIconId Button::ResolveIcon() const {
+  if (iconExplicit)
+    return icon;
+  if (extent.x > 140)
+    return UI_BUTTON_ICON_NONE;
+  if (extent.y < 20 || extent.x < 56)
+    return UI_BUTTON_ICON_NONE;
+  return UiButtonSkin_IconFromLabel(text1.c_str());
+}
+
 void Button::Draw(u16 *screen, bool highlight) {
-  // push state
+  if (!ts)
+    return;
+
   auto save_screen = ts->GetScreen();
   auto save_style = ts->GetStyle();
-
-  u16 x, y;
-  coord_t ul, lr;
-  ul.x = origin.x;
-  ul.y = origin.y;
-  lr.x = origin.x + extent.x;
-  lr.y = origin.y + extent.y;
-  int w = ts->display.height; // no really
 
   if (screen == nullptr)
     screen = ts->screen;
@@ -100,59 +102,84 @@ void Button::Draw(u16 *screen, bool highlight) {
   ts->SetScreen(screen);
   ts->SetStyle(text.style);
 
-  // Selected items get a light blue tint, unselected get white
-  u16 bgcolor = highlight ? 0xDF9E /* light cyan */ : 0xFFFF /* white */;
-  for (y = ul.y; y < lr.y; y++) {
-    for (x = ul.x; x < lr.x; x++) {
-      screen[y * w + x] = bgcolor;
+  const int logicalHeight = (screen == ts->screenleft) ? 400 : 320;
+  const int stride = ts->display.height;
+
+  UiButtonIconId resolvedIcon = ResolveIcon();
+  bool hasIcon = resolvedIcon != UI_BUTTON_ICON_NONE;
+  UiButtonSkinState state = UI_BUTTON_STATE_NORMAL;
+  if (!enabled)
+    state = UI_BUTTON_STATE_DISABLED;
+  else if (highlight)
+    state = UI_BUTTON_STATE_SELECTED;
+
+  const int bx = (int)origin.x;
+  const int by = (int)origin.y;
+  const int bw = (int)extent.x;
+  const int bh = (int)extent.y;
+
+  UiButtonSkin_Draw(screen, stride, logicalHeight, bx, by, bw, bh, state,
+                    hasIcon);
+
+  u16 old_color_mode = ts->GetColorMode();
+  if (old_color_mode != 0)
+    ts->SetColorMode(0);
+
+  int line_height = ts->GetHeight();
+  int text_x = bx + ((bw <= 90) ? 6 : 8);
+  int right_pad = (bw <= 90) ? 6 : 8;
+  if (hasIcon)
+    right_pad += UiButtonSkin_IconBlockWidth(bh);
+  int text_width = bw - (text_x - bx) - right_pad - 2;
+  if (text_width < 6)
+    text_width = 6;
+
+  if (!text1.empty()) {
+    int line_count = text2.empty() ? 1 : 2;
+    int block_h = line_count * line_height;
+    int top = by + (bh - block_h) / 2;
+    if (line_count == 1)
+      top -= 2;
+    else if (bh <= 22)
+      top -= 1;
+    if (top < by)
+      top = by;
+    if (top + block_h > by + bh - 1)
+      top = (by + bh - 1) - block_h;
+
+    char line1[256];
+    u8 len1 = ts->GetCharCountInsideWidth(text1.c_str(), text.style, text_width);
+    size_t bytes1 = Utf8BytesForCharCount(ts, text1.c_str(), len1);
+    if (bytes1 > sizeof(line1) - 1)
+      bytes1 = sizeof(line1) - 1;
+    memcpy(line1, text1.c_str(), bytes1);
+    line1[bytes1] = '\0';
+
+    ts->SetPen(text_x, top + line_height);
+    ts->PrintString(line1, text.style);
+
+    if (!text2.empty()) {
+      char line2[256];
+      u8 len2 =
+          ts->GetCharCountInsideWidth(text2.c_str(), text.style, text_width);
+      size_t bytes2 = Utf8BytesForCharCount(ts, text2.c_str(), len2);
+      if (bytes2 > sizeof(line2) - 1)
+        bytes2 = sizeof(line2) - 1;
+      memcpy(line2, text2.c_str(), bytes2);
+      line2[bytes2] = '\0';
+
+      ts->SetPen(text_x, top + line_height * 2);
+      ts->PrintString(line2, text.style);
     }
   }
 
-  if (highlight) {
-    // 3px thick black border for selected item
-    u16 bordercolor = 0x0000;
-    for (int t = 0; t < 3; t++) {
-      for (int x = ul.x; x < lr.x; x++) {
-        screen[(ul.y + t) * w + x] = bordercolor;
-        screen[(lr.y - 1 - t) * w + x] = bordercolor;
-      }
-      for (int y = ul.y; y < lr.y; y++) {
-        screen[y * w + ul.x + t] = bordercolor;
-        screen[y * w + lr.x - 1 - t] = bordercolor;
-      }
-    }
-  } else {
-    // 1px light gray border for unselected
-    u16 bordercolor = 0xBDD7;
-    for (int x = ul.x; x < lr.x; x++) {
-      screen[ul.y * w + x] = bordercolor;
-      screen[(lr.y - 1) * w + x] = bordercolor;
-    }
-    for (int y = ul.y; y < lr.y; y++) {
-      screen[y * w + ul.x] = bordercolor;
-      screen[y * w + lr.x - 1] = bordercolor;
-    }
+  if (hasIcon) {
+    UiButtonSkin_DrawIcon(screen, stride, logicalHeight, bx, by, bw, bh,
+                          resolvedIcon, !enabled);
   }
 
-  if (text1.length()) {
-    ts->SetPen(ul.x + 6, ul.y + ts->GetHeight());
-    int text_width = (lr.x - ul.x - 8);
-    u8 len =
-        ts->GetCharCountInsideWidth(text1.c_str(), text.style, text_width);
-    size_t bytes = Utf8BytesForCharCount(ts, text1.c_str(), len);
-    ts->PrintString(text1.substr(0, bytes).c_str(), text.style);
-  }
-
-  if (text2.length()) {
-    ts->SetPen(ul.x + 6, ts->GetPenY() + ts->GetHeight());
-    int text_width = (lr.x - ul.x - 8);
-    u8 len2 =
-        ts->GetCharCountInsideWidth(text2.c_str(), text.style, text_width);
-    size_t bytes2 = Utf8BytesForCharCount(ts, text2.c_str(), len2);
-    ts->PrintString(text2.substr(0, bytes2).c_str(), text.style);
-  }
-
-  // pop state
+  if (old_color_mode != 0)
+    ts->SetColorMode(old_color_mode);
   ts->SetScreen(save_screen);
   ts->SetStyle(save_style);
 }

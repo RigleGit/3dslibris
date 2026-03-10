@@ -1,3 +1,16 @@
+/*
+    3dslibris - text.h
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Central text renderer/typesetter backed by FreeType.
+    - Manages dual software framebuffers and screen dirty-state tracking.
+    - Exposes glyph caching, UTF-8 decoding, and UI/splash text primitives.
+*/
+
 #pragma once
 
 #include <3ds.h>
@@ -197,6 +210,9 @@ private:
 
   //! It would fully justify, if it worked.
   bool justify;
+  bool splash_attempted;
+  bool splash_loaded;
+  u16 *splash_pixels;
 
   // Keep stats to check efficiency of caching.
 
@@ -226,6 +242,8 @@ private:
 
   int InitCache();
   FT_Error InitFreeTypeCache();
+  bool EnsureSplashLoaded();
+  void DrawFallbackSplash();
 
   void PrintChar(u32 ucs, FT_Face face);
   void PrintString(const char *string, FT_Face face);

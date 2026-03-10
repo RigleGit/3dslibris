@@ -1,3 +1,16 @@
+/*
+    3dslibris - font.cpp
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Font selector/menu flow (target/style/file views).
+    - Touch + physical input handling for paged font lists.
+    - Runtime font application and UI refresh coordination.
+*/
+
 #include "font.h"
 
 #include <3ds.h>
@@ -360,6 +373,7 @@ void FontMenu::handleFileTouchInput() {
 
 void FontMenu::draw() {
   app->ts->ClearScreen();
+  app->DrawBottomGradientBackground();
 
   if (viewState == VIEW_TARGETS) {
     LayoutTargetFooterButtons(app);

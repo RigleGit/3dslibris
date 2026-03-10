@@ -1,3 +1,15 @@
+/*
+    3dslibris - menu.cpp
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Base menu behavior shared by chapter/bookmark/font paged menus.
+    - Selection/page bookkeeping and dirty-state management.
+*/
+
 #include "menu.h"
 #include "app.h"
 

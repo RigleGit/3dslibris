@@ -1,3 +1,15 @@
+/*
+    3dslibris - menu.h
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Abstract menu base class shared by browser/settings/index/bookmark UIs.
+    - Provides common button collection, pagination and selection state.
+*/
+
 #pragma once
 /*  Abstract base for Book, Pref and Font menus. */
 #include <3ds.h>

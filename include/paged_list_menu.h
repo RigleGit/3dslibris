@@ -1,3 +1,12 @@
+/*
+    3dslibris - paged_list_menu.h
+    New 3DS menu module by Rigle.
+
+    Summary:
+    - Reusable paged list controller for chapter/bookmark/font pickers.
+    - Provides button layout, page navigation and target-page activation hooks.
+*/
+
 #pragma once
 
 #include "menu.h"

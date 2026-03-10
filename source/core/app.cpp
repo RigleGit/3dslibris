@@ -2,7 +2,13 @@
     3dslibris - app.cpp
     Adapted from dslibris for Nintendo 3DS.
 
-    NDS-specific hardware calls replaced with libctru equivalents or stubs.
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Changes by Rigle (summary):
+    - Replaced NDS hardware paths with 3DS/libctru equivalents.
+    - Added startup flow, cover cache prep, and runtime timing telemetry.
+    - Added 3DS status redraw control and bottom-screen gradient helpers.
 */
 
 #include "app.h"
@@ -10,6 +16,7 @@
 #include <algorithm>
 #include <dirent.h>
 #include <errno.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +40,30 @@
 #ifndef UTF8_FILENAME_DIAG
 #define UTF8_FILENAME_DIAG 0
 #endif
+
+namespace {
+
+static inline u16 RGB565FromU8(float r, float g, float b) {
+  if (r < 0.0f)
+    r = 0.0f;
+  else if (r > 255.0f)
+    r = 255.0f;
+  if (g < 0.0f)
+    g = 0.0f;
+  else if (g > 255.0f)
+    g = 255.0f;
+  if (b < 0.0f)
+    b = 0.0f;
+  else if (b > 255.0f)
+    b = 255.0f;
+
+  const u16 rr = (u16)(((int)r) >> 3);
+  const u16 gg = (u16)(((int)g) >> 2);
+  const u16 bb = (u16)(((int)b) >> 3);
+  return (u16)((rr << 11) | (gg << 5) | bb);
+}
+
+} // namespace
 
 App::App() {
   melonds = false;
@@ -74,6 +105,8 @@ App::App() {
   prefs_book_context = false;
   status_last_minute = -1;
   status_last_percent_tenths = -1;
+  status_progress_lock_book = NULL;
+  status_progress_pagecount_lock = 0;
   status_force_redraw = true;
 
   ts = new Text();
@@ -96,6 +129,7 @@ App::~App() {
   delete fontmenu;
   delete bookmarkmenu;
   delete chaptermenu;
+  UiButtonSkin_Exit();
 }
 
 // std::sort comparator: books by title
@@ -187,6 +221,8 @@ static format_t detect_book_format(const char *filename) {
   if (len >= 4 && strcasecmp(filename + len - 4, ".rtf") == 0)
     return FORMAT_XHTML;
   if (len >= 4 && strcasecmp(filename + len - 4, ".odt") == 0)
+    return FORMAT_XHTML;
+  if (len >= 5 && strcasecmp(filename + len - 5, ".mobi") == 0)
     return FORMAT_XHTML;
   return FORMAT_UNDEF;
 }
@@ -347,29 +383,11 @@ int App::Run(void) {
     ts->SetPixelSize(10);
 
     ts->SetScreen(ts->screenleft);
-    ts->ClearScreen();
-    ts->DrawRect(8, 10, 232, 64, 0xC618);
-    ts->SetPixelSize(14);
-    ts->SetPen(14, 20);
-    ts->PrintString("3dslibris");
-    ts->SetPixelSize(8);
-    ts->SetPen(16, 39);
-    ts->PrintString("by Rigle");
-    ts->SetPixelSize(8);
-    ts->SetPen(176, 22);
-    ts->PrintString("v" VERSION);
-    ts->SetPixelSize(10);
-    if (lineTop && *lineTop) {
-      ts->SetPen(14, 82);
-      ts->PrintString(lineTop);
-    }
-    if (lineBottom && *lineBottom) {
-      ts->SetPen(14, 102);
-      ts->PrintString(lineBottom);
-    }
+    ts->PrintSplash(ts->screenleft);
 
     ts->SetScreen(ts->screenright);
     ts->ClearScreen();
+    DrawBottomGradientBackground();
     ts->DrawRect(8, 10, 232, 64, 0xC618);
     ts->SetPixelSize(14);
     ts->SetPen(14, 20);
@@ -642,6 +660,72 @@ touchPosition App::TouchRead() {
   return mapped;
 }
 
+void App::DrawBottomGradientBackground() {
+  if (!ts || !ts->screenright)
+    return;
+
+  const int w = ts->display.width;   // 240
+  const int stride = ts->display.height; // 400 (software page stride)
+  const int h = 320;                 // bottom screen logical height
+  if (w <= 0 || stride <= 0)
+    return;
+
+  static std::vector<u16> gradient;
+  static int cachedW = 0;
+  static int cachedH = 0;
+
+  if (gradient.empty() || cachedW != w || cachedH != h) {
+    gradient.resize((size_t)w * (size_t)h);
+    cachedW = w;
+    cachedH = h;
+    static const u8 kBayer4x4[4][4] = {
+        {0, 8, 2, 10},
+        {12, 4, 14, 6},
+        {3, 11, 1, 9},
+        {15, 7, 13, 5},
+    };
+
+    for (int y = 0; y < h; y++) {
+      const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
+      for (int x = 0; x < w; x++) {
+        const float dx = (w > 1)
+                             ? (((float)x - (float)(w - 1) * 0.5f) /
+                                ((float)(w - 1) * 0.5f))
+                             : 0.0f;
+        const float edge = fabsf(dx);
+
+        float r = 244.0f + (238.0f - 244.0f) * tY;
+        float g = 226.0f + (220.0f - 226.0f) * tY;
+        float b = 195.0f + (185.0f - 195.0f) * tY;
+
+        const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
+
+        // Ordered dithering (Bayer 4x4) is the primary anti-banding signal
+        // for RGB565; tiny stable grain helps hide residual steps.
+        const float bayer = (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) -
+                            0.5f; // about [-0.47, +0.47]
+
+        const u32 h0 = (u32)x * 73856093u;
+        const u32 h1 = (u32)y * 19349663u;
+        const u32 h2 = (h0 ^ h1 ^ 0x9E3779B9u);
+        const float noise = ((((h2 >> 8) & 0xFF) / 255.0f) - 0.5f) * 0.6f;
+
+        r = r * vignette + bayer * 3.8f + noise;
+        g = g * vignette + bayer * 1.9f + noise * 0.6f;
+        b = b * vignette + bayer * 3.8f + noise;
+
+        gradient[(size_t)y * (size_t)w + (size_t)x] = RGB565FromU8(r, g, b);
+      }
+    }
+  }
+
+  for (int y = 0; y < h; y++) {
+    u16 *dst = ts->screenright + (size_t)y * (size_t)stride;
+    const u16 *src = gradient.data() + (size_t)y * (size_t)w;
+    memcpy(dst, src, (size_t)w * sizeof(u16));
+  }
+}
+
 void App::ShowFontView(int app_font_mode) {
   mode = APP_MODE_PREFS_FONT;
   ts->SetScreen(ts->screenright);
@@ -650,14 +734,14 @@ void App::ShowFontView(int app_font_mode) {
 
 void App::ShowLibraryView() {
   // Reset shared bottom buttons immediately; prefs view reuses/moves them.
-  buttonprev.Move(2, 302);
-  buttonprev.Resize(50, 16);
+  buttonprev.Move(2, 296);
+  buttonprev.Resize(66, 22);
   buttonprev.Label("prev");
-  buttonnext.Move(188, 302);
-  buttonnext.Resize(50, 16);
+  buttonnext.Move(172, 296);
+  buttonnext.Resize(66, 22);
   buttonnext.Label("next");
-  buttonprefs.Move(80, 302);
-  buttonprefs.Resize(78, 16);
+  buttonprefs.Move(72, 296);
+  buttonprefs.Resize(96, 22);
   buttonprefs.Label("settings");
   mode = APP_MODE_BROWSER;
   ts->SetScreen(ts->screenright);
@@ -675,7 +759,7 @@ void App::ShowSettingsView(bool from_book) {
   if (prefsSelected >= visible_count)
     prefsSelected = visible_count - 1;
   mode = APP_MODE_PREFS;
-  buttonprefs.Label(" library");
+  buttonprefs.Label("library");
   ts->SetScreen(ts->screenright);
   prefs_view_dirty = true;
 }
@@ -718,14 +802,47 @@ void App::UpdateStatus() {
     minute_of_day = timeStruct->tm_hour * 60 + timeStruct->tm_min;
   }
 
+  bool has_progress = false;
+  int page_num = 0;
+  int draw_page_count = 0;
+  float percent_value = 0.0f;
   int percent_tenths = -1;
+
   if (bookcurrent && bookcurrent->GetPageCount() > 0) {
-    int pageNum = bookcurrent->GetPosition();
-    int pageCount = bookcurrent->GetPageCount();
-    float percent = pageCount > 1
-                        ? ((float)pageNum / (float)(pageCount - 1)) * 100.0f
-                        : 100.0f;
-    percent_tenths = (int)(percent * 10.0f + 0.5f);
+    page_num = bookcurrent->GetPosition();
+    int page_count_live = bookcurrent->GetPageCount();
+    bool deferred_pagination = bookcurrent->HasDeferredMobiParse();
+
+    if (status_progress_lock_book != bookcurrent) {
+      status_progress_lock_book = bookcurrent;
+      status_progress_pagecount_lock = 0;
+    }
+
+    if (deferred_pagination) {
+      // During deferred pagination, hide percent/bar to avoid confusing
+      // oscillation while the total page count is still being built.
+      has_progress = false;
+      if (status_progress_pagecount_lock <= 0)
+        status_progress_pagecount_lock = page_count_live;
+      if (status_progress_pagecount_lock < page_num + 1)
+        status_progress_pagecount_lock = page_num + 1;
+    } else {
+      has_progress = true;
+      status_progress_pagecount_lock = 0;
+      draw_page_count = page_count_live;
+
+      if (draw_page_count < 1)
+        draw_page_count = 1;
+
+      percent_value =
+          draw_page_count > 1
+              ? ((float)page_num / (float)(draw_page_count - 1)) * 100.0f
+              : 100.0f;
+      percent_tenths = (int)(percent_value * 10.0f + 0.5f);
+    }
+  } else {
+    status_progress_lock_book = NULL;
+    status_progress_pagecount_lock = 0;
   }
 
   if (!status_force_redraw && minute_of_day == status_last_minute &&
@@ -767,14 +884,9 @@ void App::UpdateStatus() {
 
   // Print Percentage and Page Number (Right)
   int pX = 232;
-  if (bookcurrent && bookcurrent->GetPageCount() > 0) {
-    int pageNum = bookcurrent->GetPosition();
-    int pageCount = bookcurrent->GetPageCount();
-    float percent = pageCount > 1
-                        ? ((float)pageNum / (float)(pageCount - 1)) * 100.0f
-                        : 100.0f;
+  if (has_progress) {
     char pmsg[32];
-    sprintf(pmsg, "%.1f%%", percent);
+    sprintf(pmsg, "%.1f%%", percent_value);
     int pw = ts->GetStringWidth(pmsg, TEXT_STYLE_BROWSER);
     pX = 232 - pw;
     ts->SetPen(pX, textY);
@@ -790,9 +902,10 @@ void App::UpdateStatus() {
       ts->DrawRect(barStart, barY, barEnd, barY + barHeight, fgColor);
 
       // Draw fill
-      if (pageCount > 1 && pageNum > 0) {
+      if (draw_page_count > 1 && page_num > 0) {
         int fillW =
-            (int)(((float)(barEnd - barStart - 4) * pageNum) / (pageCount - 1));
+            (int)(((float)(barEnd - barStart - 4) * page_num) /
+                  (draw_page_count - 1));
         if (fillW > 0) {
           ts->FillRect(barStart + 2, barY + 2, barStart + 2 + fillW,
                        barY + barHeight - 2, fgColor);
