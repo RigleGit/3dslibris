@@ -1,3 +1,16 @@
+/*
+    3dslibris - prefs.cpp
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Changes by Rigle (summary):
+    - Persist and restore 3DS-specific options (color mode, orientation, fonts).
+    - Clamp legacy margin values to sensible 3DS screen bounds.
+    - Keep per-book reading progress and bookmark state in PREFSPATH.
+*/
+
 #include "prefs.h"
 
 #include "3ds.h"
@@ -15,6 +28,8 @@
 namespace xml::prefs {
 
 void start(void *data, const XML_Char *name, const XML_Char **attr) {
+  // Central XML dispatcher for preference tags.
+  // Each branch maps one persisted element into runtime App/Text state.
   parsedata_t *p = (parsedata_t *)data;
   App *app = p->app;
   int position = 0; //! Page position in book.
@@ -26,13 +41,6 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     for (i = 0; attr[i]; i += 2)
       if (!strcmp(attr[i], "modtime"))
         app->prefs->modtime = atoi(attr[i + 1]);
-  }
-  // TODO this will never run
-  else if (!strcmp(name, "library")) {
-    for (i = 0; attr[i]; i += 2) {
-      if (!strcmp(attr[i], "folder"))
-        app->bookdir = std::string(attr[i + 1]);
-    }
   } else if (!strcmp(name, "screen")) {
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "brightness")) {
@@ -99,8 +107,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       }
     }
 
-    // Find the book index for this library entry
-    // and set context for later bookmarks.
+    // Find the book index for this library entry and set parsing context.
+    // Subsequent <bookmark> tags attach to p->book until </book>.
     std::vector<Book *>::iterator it;
     for (it = app->books.begin(); it < app->books.end(); it++) {
       const char *bookname = (*it)->GetFileName();
@@ -196,6 +204,7 @@ int Prefs::Read() {
   XML_SetStartElementHandler(p, xml::prefs::start);
   XML_SetEndElementHandler(p, xml::prefs::end);
   XML_SetUserData(p, (void *)&pdata);
+  // Stream parse to avoid loading the whole XML into memory.
   while (true) {
     void *buff = XML_GetBuffer(p, PARSEBUFSIZE);
     int bytes_read = fread(buff, sizeof(char), PARSEBUFSIZE, fp);
@@ -263,6 +272,7 @@ int Prefs::Write() {
           app->paraspacing);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);
 
+  // Persist all known books so last page and bookmarks survive restarts.
   for (u8 i = 0; i < app->bookcount; i++) {
     Book *book = app->books[i];
     fprintf(fp, "\t\t<book file=\"%s\" page=\"%d\"", book->GetFileName(),

@@ -3737,22 +3737,6 @@ static bool ContinueDeferredMobiState(Book *book, MobiDeferredState *state,
 
 } // namespace
 
-void Book::Cache() {
-  FILE *fp = fopen("/cache.dat", "w");
-  if (!fp)
-    return;
-
-  int buflen = 0;
-  int pagecount = GetPageCount();
-  fprintf(fp, "%d\n", pagecount);
-  for (int i = 0; i < pagecount; i++) {
-    buflen += GetPage(i)->GetLength();
-    fprintf(fp, "%d\n", buflen);
-    GetPage(i)->Cache(fp);
-  }
-  fclose(fp);
-}
-
 u8 Book::Open() {
   std::string path;
   path.append(GetFolderName());
@@ -3838,7 +3822,6 @@ u8 Book::Parse(bool fulltext) {
   parsedata_t parsedata;
   parse_init(&parsedata);
   parsedata.fb2_mode = fulltext && HasExtCI(GetFileName(), ".fb2");
-  parsedata.cachefile = fopen("/cache.dat", "w");
   parsedata.app = app;
   parsedata.ts = app ? app->ts : NULL;
   parsedata.prefs = app ? app->prefs : NULL;
@@ -3893,23 +3876,6 @@ u8 Book::Parse(bool fulltext) {
   }
 
   return (rc);
-}
-
-void Book::Restore() {
-  FILE *fp = fopen("/cache.dat", "r");
-  if (!fp)
-    return;
-
-  int len, pagecount;
-  u8 buf[BUFSIZE];
-
-  fscanf(fp, "%d\n", &pagecount);
-  for (int i = 0; i < pagecount - 1; i++) {
-    fscanf(fp, "%d\n", &len);
-    fread(buf, sizeof(char), len, fp);
-    GetPage(i)->SetBuffer(buf, len);
-  }
-  fclose(fp);
 }
 
 bool Book::HasDeferredMobiParse() const {

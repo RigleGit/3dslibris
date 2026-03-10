@@ -1,3 +1,15 @@
+/*
+    3dslibris - parse.h
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Shared XML/HTML parse state used by EPUB/book content parsers.
+    - Declares tag enums and parsing context used to produce flowed pages.
+*/
+
 #pragma once
 
 #include <expat.h>
@@ -38,7 +50,6 @@ typedef struct {
 	int screen;
 	FT_Vector pen;
 	u8 buf[PAGEBUFSIZE];
-	FILE *cachefile;
 	int buflen;
 	//! Our total parse position in terms of cooked text.
 	int pos;

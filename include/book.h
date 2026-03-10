@@ -182,14 +182,12 @@ public:
   Page *AppendPage();
   Page *AdvancePage();
   Page *RetreatPage();
-  void Cache();
   void Close();
   u8 Index();
   void IndexHTML();
   u8 Open();
   u8 Parse(bool fulltext = true);
   int ParseHTML();
-  void Restore();
   bool HasDeferredMobiParse() const;
   bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
   void CancelDeferredMobiParse();
