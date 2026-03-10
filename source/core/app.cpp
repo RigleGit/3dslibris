@@ -41,6 +41,10 @@
 #define UTF8_FILENAME_DIAG 0
 #endif
 
+#ifndef ORIENTATION_DIAG
+#define ORIENTATION_DIAG 0
+#endif
+
 namespace {
 
 static inline u16 RGB565FromU8(float r, float g, float b) {
@@ -62,6 +66,10 @@ static inline u16 RGB565FromU8(float r, float g, float b) {
   const u16 bb = (u16)(((int)b) >> 3);
   return (u16)((rr << 11) | (gg << 5) | bb);
 }
+
+#if ORIENTATION_DIAG
+static int g_orientation_touch_diag_budget = 0;
+#endif
 
 } // namespace
 
@@ -645,18 +653,39 @@ int App::FindBooks() {
   return 1;
 }
 
-// 3DS touch input — map physical touch to our buffer coordinate system.
-// BlitToFramebuffer maps buffer (sx,sy) → screen via:
-//   physical_X = fbH - 1 - sy   (fbH=320 for bottom screen)
-//   physical_Y = fbW - 1 - sx   (fbW=240 for bottom screen)
-// So to reverse:  sx = 239 - touch.py,  sy = 319 - touch.px
-// We store the result in px/py where px→sx (origin.x), py→sy (origin.y).
+// 3DS touch input — map physical touch to our logical buffer coordinates.
+// The transform must be the inverse of Text::BlitToFramebuffer() for the
+// currently active orientation.
 touchPosition App::TouchRead() {
   touchPosition raw;
   hidTouchRead(&raw);
   touchPosition mapped;
-  mapped.px = 239 - raw.py; // → buffer sx = origin.x
-  mapped.py = 319 - raw.px; // → buffer sy = origin.y
+
+  if (!orientation) {
+    // Default "Turned Left" orientation (historical mapping), X un-mirrored.
+    mapped.px = raw.py;       // -> sx
+    mapped.py = 319 - raw.px; // -> sy
+  } else {
+    // "Turned Right" orientation (opposite page rotation), X un-mirrored.
+    mapped.px = 239 - raw.py; // -> sx
+    mapped.py = raw.px;       // -> sy
+  }
+
+  mapped.px = (u16)std::max(0, std::min(239, (int)mapped.px));
+  mapped.py = (u16)std::max(0, std::min(319, (int)mapped.py));
+
+#if ORIENTATION_DIAG
+  if (g_orientation_touch_diag_budget > 0) {
+    char dmsg[160];
+    snprintf(dmsg, sizeof(dmsg),
+             "ORIENT touch raw=(%u,%u) mapped=(%u,%u) turned_right=%d",
+             (unsigned)raw.px, (unsigned)raw.py, (unsigned)mapped.px,
+             (unsigned)mapped.py, orientation ? 1 : 0);
+    PrintStatus(dmsg);
+    g_orientation_touch_diag_budget--;
+  }
+#endif
+
   return mapped;
 }
 
@@ -923,10 +952,15 @@ void App::UpdateStatus() {
 }
 
 void App::SetOrientation(bool turned_right) {
-  // On 3DS, orientation is fixed.
-  // We keep the variable for preferences compatibility but don't
-  // manipulate hardware registers.
+  // Keep both input remap and software render orientation in sync.
   orientation = turned_right;
+  if (ts) {
+    ts->SetOrientation(turned_right);
+    ts->MarkAllScreensDirty();
+  }
+  status_force_redraw = true;
+  browser_view_dirty = true;
+  prefs_view_dirty = true;
 
   if (turned_right) {
     key.down = KEY_UP;
@@ -943,6 +977,13 @@ void App::SetOrientation(bool turned_right) {
     key.l = KEY_L;
     key.r = KEY_R;
   }
+
+#if ORIENTATION_DIAG
+  g_orientation_touch_diag_budget = 2;
+  char msg[96];
+  snprintf(msg, sizeof(msg), "ORIENT set turned_right=%d", turned_right ? 1 : 0);
+  PrintStatus(msg);
+#endif
 }
 
 void App::InitScreens() {

@@ -56,8 +56,11 @@ static const int kBrowserGridRows = 2;
 static const int kBrowserCoverW = 85;
 static const int kBrowserCoverH = 115;
 static const int kBrowserCellW = 115;
-// Reserve a dedicated footer strip for browser buttons.
-static const int kBrowserCellH = 132;
+// Reserve a dedicated footer strip for browser buttons and keep enough visual
+// gap so row-1 labels never collide with row-2 covers.
+static const int kBrowserCellH = 144;
+static const int kBrowserTitleOffsetY = kBrowserCoverH + 10;
+static const int kBrowserProgressOffsetY = kBrowserCoverH + 22;
 static const int kBrowserGridX0 = 5;
 static const int kBrowserGridY0 = 3;
 static const int kBrowserFooterY = 296;
@@ -1066,12 +1069,8 @@ void App::browser_handleevent() {
       return false;
     };
 
-    // Browser UI on bottom screen: keep X from raw Y, but keep Y in the same
-    // frame as TouchRead (inverted raw X). Using TouchRead() directly mirrors
-    // left/right in some Citra/3DS setups.
-    touchPosition raw;
-    hidTouchRead(&raw);
-    handleTouchAt((int)raw.py, 319 - (int)raw.px);
+    touchPosition mapped = TouchRead();
+    handleTouchAt((int)mapped.px, (int)mapped.py);
   }
 }
 
@@ -1203,7 +1202,7 @@ void App::browser_draw(void) {
         truncTitle[bytes] = '\0';
         truncTitle[19] = '\0';
         LogUtf8StageOnce(books[i], "draw_label_cut", std::string(truncTitle));
-        ts->SetPen(btnX, btnY + kBrowserCoverH + 12);
+        ts->SetPen(btnX, btnY + kBrowserTitleOffsetY);
         ts->PrintString(truncTitle);
       }
     } else {
@@ -1220,7 +1219,7 @@ void App::browser_draw(void) {
       sprintf(msg, "Pg %d", pos + 1);
     else
       sprintf(msg, "NEW");
-    ts->SetPen(btnX, btnY + kBrowserCoverH + 24);
+    ts->SetPen(btnX, btnY + kBrowserProgressOffsetY);
     ts->PrintString(msg);
   }
 

@@ -92,13 +92,10 @@ void App::HandleEventInBook() {
   } else if (keys & KEY_Y) {
     ToggleBookmark();
   } else if (keys & KEY_TOUCH) {
-    // Turn page by touch zones on the physical touchscreen:
-    //   upper half -> previous page
-    //   lower half -> next page
-    // In book orientation this matches: left/up = back, right/down = forward.
-    touchPosition raw;
-    hidTouchRead(&raw);
-    const bool forward_zone = (raw.py >= 120); // bottom half (240px / 2)
+    // Page turn split follows visual horizontal axis (left/right) in both
+    // orientations after central touch un-mirroring.
+    touchPosition mapped = TouchRead();
+    const bool forward_zone = ((int)mapped.px >= 120);
     if (!forward_zone) {
       if (pagecurrent > 0) {
         pagecurrent--;

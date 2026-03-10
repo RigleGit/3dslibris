@@ -203,6 +203,7 @@ Text::Text() {
   bgcolor.b = 15;
   usebgcolor = false;
   colorMode = 0;
+  turned_right = false;
   justify = false;
   linespacing = 1;
   ftc = false;
@@ -684,6 +685,10 @@ void Text::SetColorMode(int state) { colorMode = state; }
 
 int Text::GetColorMode() { return colorMode; }
 
+void Text::SetOrientation(bool right) { turned_right = right; }
+
+bool Text::GetOrientation() const { return turned_right; }
+
 u16 Text::GetPenX() { return pen.x; }
 
 u16 Text::GetPenY() { return pen.y; }
@@ -1153,8 +1158,16 @@ bool Text::BlitToFramebuffer() {
         u8 b = (pixel & 0x1F) << 3;
 
         // Rotate logical page into linear framebuffer layout.
-        const u32 dx = physWidth - 1 - sy;
-        const u32 dy = stride - 1 - sx;
+        // turned_right=false keeps the historical mapping used by the port.
+        // turned_right=true rotates to the opposite handed orientation.
+        u32 dx, dy;
+        if (!turned_right) {
+          dx = physWidth - 1 - sy;
+          dy = stride - 1 - sx;
+        } else {
+          dx = sy;
+          dy = sx;
+        }
         const size_t off = ((size_t)dx * (size_t)stride + (size_t)dy) * 3;
         if (off + 2 >= fbSize)
           continue;

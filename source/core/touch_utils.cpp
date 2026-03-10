@@ -49,15 +49,10 @@ void BuildCandidates(App *app, TouchCandidates *out) {
     return;
 
   touchPosition mapped = app->TouchRead();
-  touchPosition raw;
-  hidTouchRead(&raw);
 
-  // Keep several candidate transforms because touch orientation can vary
-  // between modes/screens and some emulators report different raw axes.
+  // Single source of truth: use the app-level mapped coordinate only.
+  // Multi-transform candidates can hit mirrored controls in turned modes.
   out->points[0] = {(int)mapped.px, (int)mapped.py};
-  out->points[1] = {(int)raw.py, (int)raw.px};
-  out->points[2] = {239 - (int)raw.py, (int)raw.px};
-  out->points[3] = {(int)raw.py, 319 - (int)raw.px};
 }
 
 bool InScreenBounds(int x, int y) {

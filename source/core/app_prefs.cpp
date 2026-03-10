@@ -159,7 +159,7 @@ void App::PrefsHandleEvent() {
 
 void App::PrefsHandleTouch() {
   touchPosition coord = TouchRead();
-  const int footerX = 239 - (int)coord.px;
+  const int footerX = (int)coord.px;
   const int footerY = (int)coord.py;
 
   // Keep touch hitbox synced with drawing geometry.
@@ -179,24 +179,8 @@ void App::PrefsHandleTouch() {
     return false;
   };
 
-  // Footer button overlays the last prefs row ("bookmarks").
-  // Priority must be strict: if touch is on the visible library button, go to
-  // library; otherwise allow normal row hit-tests.
-  const int libHotX0 = PREFS_LIBRARY_BTN_X;
-  const int libHotY0 = PREFS_LIBRARY_BTN_Y;
-  const int libHotX1 = PREFS_LIBRARY_BTN_X + PREFS_LIBRARY_BTN_W;
-  const int libHotY1 = PREFS_LIBRARY_BTN_Y + PREFS_LIBRARY_BTN_H;
-  const int footerBandY0 = PREFS_LIBRARY_BTN_Y - 2;
-  const int footerSplitX = PREFS_LIBRARY_BTN_X - 14;
-  if (footerX >= libHotX0 && footerX <= libHotX1 && footerY >= libHotY0 &&
-      footerY <= libHotY1) {
-    ShowLibraryView();
-    return;
-  }
-
-  // Stable routing in overlapped footer band:
-  // left side remains for the last row ("bookmarks"), right side is library.
-  if (footerY >= footerBandY0 && footerX >= footerSplitX) {
+  // Strict priority for visible library button area.
+  if (enclosesWithSlack(buttonprefs, footerX, footerY)) {
     ShowLibraryView();
     return;
   }
@@ -204,13 +188,6 @@ void App::PrefsHandleTouch() {
   u8 visibleCount = PrefsVisibleButtonCount();
   for (u8 i = 0; i < visibleCount; i++) {
     if (prefsButtons[i].EnclosesPoint(coord.px, coord.py)) {
-      // Last row ("bookmarks") sits behind the footer "library" button.
-      // In the overlapped area, never trigger the row behind.
-      if (i == PREFS_BUTTON_BOOKMARKS &&
-          footerY >= footerBandY0 && footerX >= footerSplitX) {
-        continue;
-      }
-
       if (i != prefsSelected) {
         prefsSelected = i;
       }
@@ -248,13 +225,6 @@ void App::PrefsHandleTouch() {
 
       break;
     }
-  }
-
-  // Fallback for touch jitter: only after rows fail so bookmarks are not
-  // hijacked by the footer button.
-  if (enclosesWithSlack(buttonprefs, footerX, footerY)) {
-    ShowLibraryView();
-    return;
   }
 
   if (prefs_view_dirty)
@@ -297,6 +267,9 @@ void App::PrefsFlipOrientation() {
   SetOrientation(!orientation);
   PrefsRefreshButton(PREFS_BUTTON_ORIENTATION);
   prefs->Write();
+  // Keep settings view synchronized immediately after rotation toggle.
+  if (mode == APP_MODE_PREFS)
+    PrefsDraw();
 }
 
 void App::PrefsRefreshButton(int index) {

@@ -140,6 +140,8 @@ public:
 
   void SetColorMode(int mode);
   int GetColorMode();
+  void SetOrientation(bool turned_right);
+  bool GetOrientation() const;
   void SetPen(u16 x, u16 y);
   void SetPixelSize(u8 size);
   inline void SetFace(u8 astyle) { style = astyle; };
@@ -203,6 +205,8 @@ private:
   FT_Vector pen;
   //! Color mode: 0=normal, 1=invert, 2=sepia
   int colorMode;
+  //! False: default "turned left" render mapping, true: opposite rotation.
+  bool turned_right;
   //! Last printed char code.
   u32 codeprev;
   //! Was the last glyph lookup a cache hit?
