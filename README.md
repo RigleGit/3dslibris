@@ -52,6 +52,37 @@ Expected outputs:
 - `3dslibris.smdh`
 - `3dslibris.elf`
 
+## Build CIA (optional, for console install)
+
+Local (if `bannertool` and `makerom` are already in your PATH):
+
+```bash
+make cia
+```
+
+Docker (tooling included in repo):
+
+```bash
+docker build -f docker/Dockerfile.cia -t 3dslibris/devkitarm-cia .
+
+docker run --rm \
+  -v "$(pwd):/project" -w /project \
+  -e DEVKITPRO=/opt/devkitpro \
+  -e DEVKITARM=/opt/devkitpro/devkitARM \
+  3dslibris/devkitarm-cia make cia
+```
+
+Expected output:
+- `3dslibris.cia`
+
+Assets used by default:
+- `banner.png`
+- `assets/cia/banner-silence.wav` (banner audio, required by `bannertool makebanner`)
+- `icon-32x32.png` (small icon)
+- `icon-64x64.png` (large icon)
+- `icon.png` (48x48, used for `.3dsx/.smdh`)
+- `3dslibris.rsf`
+
 ## Install layout (SD)
 
 ```text
