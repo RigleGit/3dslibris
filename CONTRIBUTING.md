@@ -30,6 +30,15 @@ docker run --rm -v "$(pwd):/project" -w /project \
   devkitpro/devkitarm make
 ```
 
+For `.cia` packaging in Docker, build the extended image once:
+
+```bash
+docker build -f docker/Dockerfile.cia -t 3dslibris/devkitarm-cia .
+docker run --rm -v "$(pwd):/project" -w /project \
+  -e DEVKITPRO=/opt/devkitpro -e DEVKITARM=/opt/devkitpro/devkitARM \
+  3dslibris/devkitarm-cia make cia
+```
+
 ## Code guidelines
 - Keep compatibility with Nintendo 3DS memory/CPU constraints.
 - Prefer deterministic behavior and explicit fallbacks over implicit heuristics.

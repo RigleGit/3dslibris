@@ -2,6 +2,7 @@
 .DS_Store
 *.swp
 *.swo
+*.psd
 
 # Build artifacts (devkitPro / 3DS)
 /build/
@@ -14,9 +15,11 @@
 *.elf
 *.3dsx
 *.smdh
+*.cia
 /3dslibris.3dsx
 /3dslibris.elf
 /3dslibris.smdh
+/3dslibris.cia
 
 # Legacy output names kept out of git
 /dslibris-3ds.3dsx
