@@ -20,6 +20,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 */
 
+/*
+  3DS port modifications by Rigle (summary):
+  - Extended parser state for multi-format book flows (EPUB/FB2/TXT/RTF/ODT).
+  - Added compatibility helpers used by index/TOC heuristics.
+  - Kept legacy parser behavior for dslibris content model compatibility.
+*/
+
 #include "parse.h"
 
 #include <stdio.h>
@@ -67,7 +74,6 @@ void parse_init(parsedata_t *data)
 		data->fb2_section_has_chapter[i] = false;
 	data->fb2_title_text.clear();
 	strcpy((char*)data->buf,"");
-	data->cachefile = NULL;
 	data->buflen = 0;
 	data->status = 0;
 	data->pagecount = 0;

@@ -17,6 +17,12 @@
  
  To contact the copyright holder: rayh23@sourceforge.net
  */
+
+/*
+  3DS port modifications by Rigle (summary):
+  - Preserved dslibris Page model for flowed text storage.
+  - Integrated with 3DS renderer constraints (screen sizing and clipping).
+*/
 /*!
 A Page stores the flowed output from the XML parse and is equipped
 to render a full left and right screen of text.
@@ -49,7 +55,6 @@ class Page {
 	int  GetLength() { return length; }
 	//! Copy src to buf for len bytes.
 	u8   SetBuffer(u8 *src, u16 len); 
-	void Cache(FILE *fp);
 //	void Draw();
 	void Draw(Text *ts);
 };

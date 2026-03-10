@@ -16,7 +16,14 @@
  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
  To contact the copyright holder: rayh23@sourceforge.net
- */
+*/
+
+/*
+  3DS port modifications by Rigle (summary):
+  - Updated page draw flow for 3DS text buffers and status overlays.
+  - Integrated inline-image draw tokens and page number placement.
+  - Added safer clipping/margin behavior for rotated layouts.
+*/
 
 #include "page.h"
 
@@ -44,20 +51,6 @@ u8 Page::SetBuffer(u8 *src, u16 len) {
   length = len;
   return 0;
 }
-
-void Page::Cache(FILE *fp) {
-  if (!buf)
-    return;
-  fwrite((const char *)buf, 1, length, fp);
-}
-
-#if 0
-void Page::Draw()
-{
-	Text *ts = book->app->ts;
-	if(ts) Draw(ts);
-}
-#endif
 
 void Page::Draw(Text *ts) {
   int savedBottomMargin = ts->margin.bottom;
