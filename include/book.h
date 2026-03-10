@@ -1,3 +1,16 @@
+/*
+    3dslibris - book.h
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Book domain model (metadata, pages, chapters, bookmarks, parse context).
+    - Tracks source path/format and reading progress for persistence.
+    - Adds 3DS-side helpers for browser labels and inline image cache bookkeeping.
+*/
+
 #pragma once
 
 #include "app.h"
@@ -177,4 +190,7 @@ public:
   u8 Parse(bool fulltext = true);
   int ParseHTML();
   void Restore();
+  bool HasDeferredMobiParse() const;
+  bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
+  void CancelDeferredMobiParse();
 };

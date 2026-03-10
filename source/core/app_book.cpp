@@ -1,3 +1,16 @@
+/*
+    3dslibris - app_book.cpp
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Handles open/reopen flow for selected books.
+    - Runs parse pipeline by format and switches app mode to reading view.
+    - Applies 3DS input mapping and draw/status refresh synchronization.
+*/
+
 #include "app.h"
 
 #include <errno.h>
@@ -22,6 +35,23 @@ void App::HandleEventInBook() {
   u16 pagecurrent = bookcurrent->GetPosition();
   u16 pagecount = bookcurrent->GetPageCount();
   bool status_dirty = false;
+  bool deferred_pumped = false;
+
+  auto pumpDeferredMobi = [&](u32 budget_ms, u16 page_budget) -> bool {
+    if (!bookcurrent || !bookcurrent->HasDeferredMobiParse())
+      return false;
+    u16 before = bookcurrent->GetPageCount();
+    bool done = bookcurrent->ContinueDeferredMobiParse(budget_ms, page_budget);
+    u16 after = bookcurrent->GetPageCount();
+    if (after != before) {
+      pagecount = after;
+      status_dirty = true;
+    }
+    if (done)
+      status_dirty = true;
+    deferred_pumped = true;
+    return (after != before) || done;
+  };
 
   // Use 3DS edge-triggered key state to avoid carry-over/repeat from the key
   // press used to open the book.
@@ -34,6 +64,16 @@ void App::HandleEventInBook() {
       bookcurrent->SetPosition(pagecurrent);
       bookcurrent->GetPage()->Draw(ts);
       status_dirty = true;
+    } else if (bookcurrent->HasDeferredMobiParse()) {
+      // If we are at the frontier of parsed pages, parse a larger chunk.
+      pumpDeferredMobi(80, 18);
+      pagecount = bookcurrent->GetPageCount();
+      if (pagecurrent < pagecount - 1) {
+        pagecurrent++;
+        bookcurrent->SetPosition(pagecurrent);
+        bookcurrent->GetPage()->Draw(ts);
+        status_dirty = true;
+      }
     }
   } else if (keys & (KEY_B | key.l | key.up)) {
     // page back.
@@ -72,6 +112,15 @@ void App::HandleEventInBook() {
         bookcurrent->SetPosition(pagecurrent);
         bookcurrent->GetPage()->Draw(ts);
         status_dirty = true;
+      } else if (bookcurrent->HasDeferredMobiParse()) {
+        pumpDeferredMobi(80, 18);
+        pagecount = bookcurrent->GetPageCount();
+        if (pagecurrent < pagecount - 1) {
+          pagecurrent++;
+          bookcurrent->SetPosition(pagecurrent);
+          bookcurrent->GetPage()->Draw(ts);
+          status_dirty = true;
+        }
       }
     }
   } else if (keys & KEY_START) {
@@ -118,6 +167,9 @@ void App::HandleEventInBook() {
       status_dirty = true;
     }
   }
+
+  if (!deferred_pumped)
+    pumpDeferredMobi(4, 1);
 
   if (status_dirty)
     RequestStatusRedraw();
@@ -202,17 +254,11 @@ u8 App::OpenBook(void) {
     ts->SetStyle(TEXT_STYLE_BROWSER);
     ts->SetColorMode(0);
 
-    ts->SetScreen(ts->screenleft);
-    ts->ClearScreen();
-    ts->SetPen(12, 28);
-    ts->PrintString("3dslibris");
-    ts->SetPen(12, 42);
-    ts->PrintString("by Rigle");
-    ts->SetPen(12, 62);
-    ts->PrintString("opening book ...");
+    ts->PrintSplash(ts->screenleft);
 
     ts->SetScreen(ts->screenright);
     ts->ClearScreen();
+    DrawBottomGradientBackground();
     ts->SetPen(12, 28);
     ts->PrintString("opening book ...");
 

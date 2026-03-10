@@ -1,3 +1,16 @@
+/*
+    3dslibris - book.cpp
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Core book state/container logic shared across EPUB/FB2/TXT/RTF/ODT.
+    - Chapter/bookmark management and TOC target resolution helpers.
+    - Page ownership/lifetime and parser integration points.
+*/
+
 #include "book.h"
 
 #include "app.h"
@@ -1000,36 +1013,36 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
       std::string kv_path_lc = ToLowerAsciiLocal(kv.first.substr(0, kv_hash));
       std::string kv_base_lc = ToLowerAsciiLocal(BasenamePathLocal(kv_path_lc));
       std::string kv_anchor_lc = ToLowerAsciiLocal(kv.first.substr(kv_hash + 1));
+      bool exact_anchor = (kv_anchor_lc == key_anchor_lc);
 
-      if (kv_anchor_lc != key_anchor_lc)
-        continue;
+      if (exact_anchor) {
+        if (!anchor_found) {
+          anchor_found = true;
+          anchor_page = kv.second;
+        } else if (anchor_page != kv.second) {
+          anchor_ambiguous = true;
+        }
 
-      if (!anchor_found) {
-        anchor_found = true;
-        anchor_page = kv.second;
-      } else if (anchor_page != kv.second) {
-        anchor_ambiguous = true;
-      }
-
-      if (has_target_doc) {
-        u16 candidate_doc_page = 0;
-        if (FindChapterDocStartPage(kv.first, &candidate_doc_page) &&
-            candidate_doc_page == target_doc_page) {
-          if (!path_anchor_found) {
-            path_anchor_found = true;
-            path_anchor_page = kv.second;
-          } else if (path_anchor_page != kv.second) {
-            path_anchor_ambiguous = true;
+        if (has_target_doc) {
+          u16 candidate_doc_page = 0;
+          if (FindChapterDocStartPage(kv.first, &candidate_doc_page) &&
+              candidate_doc_page == target_doc_page) {
+            if (!path_anchor_found) {
+              path_anchor_found = true;
+              path_anchor_page = kv.second;
+            } else if (path_anchor_page != kv.second) {
+              path_anchor_ambiguous = true;
+            }
           }
         }
-      }
 
-      if (!key_base_lc.empty() && kv_base_lc == key_base_lc) {
-        if (!base_anchor_found) {
-          base_anchor_found = true;
-          base_anchor_page = kv.second;
-        } else if (base_anchor_page != kv.second) {
-          base_anchor_ambiguous = true;
+        if (!key_base_lc.empty() && kv_base_lc == key_base_lc) {
+          if (!base_anchor_found) {
+            base_anchor_found = true;
+            base_anchor_page = kv.second;
+          } else if (base_anchor_page != kv.second) {
+            base_anchor_ambiguous = true;
+          }
         }
       }
 
@@ -1042,8 +1055,15 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
           bool fuzzy_match = false;
           if (!cand_token.empty() && cand_token == key_token) {
             fuzzy_match = true;
-          } else if (key_digits.size() >= 3 && cand_digits == key_digits &&
-                     !cand_digits.empty()) {
+          } else if (!key_digits.empty() && !cand_digits.empty() &&
+                     cand_digits == key_digits) {
+            fuzzy_match = true;
+          } else if (!key_digits.empty() && !cand_token.empty() &&
+                     cand_token.size() > key_digits.size() &&
+                     cand_token.size() <= key_digits.size() + 4 &&
+                     cand_token.compare(cand_token.size() - key_digits.size(),
+                                       key_digits.size(),
+                                       key_digits) == 0) {
             fuzzy_match = true;
           }
 
@@ -1206,6 +1226,7 @@ Page *Book::RetreatPage() {
 }
 
 void Book::Close() {
+  CancelDeferredMobiParse();
   std::vector<Page *>::iterator it = pages.begin();
   while (it != pages.end()) {
     delete *it;
