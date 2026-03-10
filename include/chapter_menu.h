@@ -1,3 +1,12 @@
+/*
+    3dslibris - chapter_menu.h
+    New 3DS menu module by Rigle.
+
+    Summary:
+    - Concrete paged list menu for EPUB table-of-contents entries.
+    - Supports direct targets and approximate fallback page resolution.
+*/
+
 #pragma once
 
 #include "paged_list_menu.h"

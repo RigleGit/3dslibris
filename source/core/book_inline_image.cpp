@@ -1,7 +1,20 @@
+/*
+    3dslibris - book_inline_image.cpp
+    New module for the 3DS port by Rigle.
+
+    Summary:
+    - Decodes inline images referenced by EPUB/FB2 content.
+    - Maintains bounded caches for decoded/scaled image payloads.
+    - Provides safe limits for image bytes/dimensions on 3DS memory budget.
+*/
+
 #include "book.h"
 
 #include "stb_image.h"
 #include "unzip.h"
+#include <algorithm>
+#include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 #include <utility>
 
@@ -9,6 +22,8 @@ namespace {
 static const size_t kInlineImageCacheMaxBytes = 1024 * 1024;
 static const size_t kFb2InlineImageMaxBytes = 4 * 1024 * 1024;
 static const size_t kFb2InlineImageMaxTotalBytes = 12 * 1024 * 1024;
+static const size_t kEpubInlineImageMaxBytes = 4 * 1024 * 1024;
+static const size_t kSvgWrapperMaxBytes = 512 * 1024;
 
 static int Base64Value(unsigned char c) {
   if (c >= 'A' && c <= 'Z')
@@ -54,6 +69,349 @@ static bool DecodeBase64Bytes(const std::string &in, std::vector<u8> *out,
     }
   }
   return !out->empty();
+}
+
+static std::string ToLowerAscii(const std::string &s) {
+  std::string out = s;
+  std::transform(out.begin(), out.end(), out.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
+  return out;
+}
+
+static bool StartsWithNoCase(const std::string &s, const char *prefix) {
+  if (!prefix)
+    return false;
+  size_t len = strlen(prefix);
+  if (s.size() < len)
+    return false;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char a = (unsigned char)s[i];
+    unsigned char b = (unsigned char)prefix[i];
+    if (a >= 'A' && a <= 'Z')
+      a = (unsigned char)(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z')
+      b = (unsigned char)(b - 'A' + 'a');
+    if (a != b)
+      return false;
+  }
+  return true;
+}
+
+static std::string UrlDecode(const std::string &input) {
+  std::string out;
+  out.reserve(input.size());
+  for (size_t i = 0; i < input.size(); i++) {
+    if (input[i] == '%' && i + 2 < input.size()) {
+      int value = 0;
+      if (sscanf(input.substr(i + 1, 2).c_str(), "%x", &value) == 1) {
+        out.push_back((char)value);
+        i += 2;
+        continue;
+      }
+    }
+    out.push_back(input[i]);
+  }
+  return out;
+}
+
+static std::string NormalizePath(const std::string &path) {
+  std::string in = path;
+  std::replace(in.begin(), in.end(), '\\', '/');
+  while (!in.empty() && in[0] == '/')
+    in.erase(in.begin());
+
+  std::vector<std::string> parts;
+  std::string cur;
+  for (size_t i = 0; i <= in.size(); i++) {
+    if (i == in.size() || in[i] == '/') {
+      if (cur == "..") {
+        if (!parts.empty())
+          parts.pop_back();
+      } else if (!cur.empty() && cur != ".") {
+        parts.push_back(cur);
+      }
+      cur.clear();
+    } else {
+      cur.push_back(in[i]);
+    }
+  }
+
+  std::string out;
+  for (size_t i = 0; i < parts.size(); i++) {
+    if (i)
+      out.push_back('/');
+    out += parts[i];
+  }
+  return out;
+}
+
+static std::string ResolveRelativePath(const std::string &base_file,
+                                       const std::string &ref_raw) {
+  std::string ref = UrlDecode(ref_raw);
+  if (ref.empty())
+    return "";
+  if (ref.find("://") != std::string::npos)
+    return "";
+
+  if (ref[0] == '/')
+    return NormalizePath(ref);
+
+  std::string base = base_file;
+  size_t slash = base.find_last_of('/');
+  std::string folder =
+      (slash == std::string::npos) ? "" : base.substr(0, slash + 1);
+  return NormalizePath(folder + ref);
+}
+
+static std::string StripFragmentAndQuery(const std::string &path) {
+  size_t stop = path.find_first_of("#?");
+  if (stop == std::string::npos)
+    return path;
+  return path.substr(0, stop);
+}
+
+static bool IsHtmlNameChar(unsigned char c) {
+  return isalnum(c) || c == '_' || c == ':' || c == '-';
+}
+
+static std::string Trim(const std::string &s) {
+  size_t start = 0;
+  while (start < s.size() && isspace((unsigned char)s[start]))
+    start++;
+  size_t end = s.size();
+  while (end > start && isspace((unsigned char)s[end - 1]))
+    end--;
+  return s.substr(start, end - start);
+}
+
+static std::string ExtractHtmlAttrValue(const std::string &tag,
+                                        const std::string &attr_name_lc) {
+  size_t i = 0;
+  while (i < tag.size()) {
+    while (i < tag.size() && isspace((unsigned char)tag[i]))
+      i++;
+    if (i >= tag.size())
+      break;
+
+    size_t key0 = i;
+    while (i < tag.size() && IsHtmlNameChar((unsigned char)tag[i]))
+      i++;
+    if (i == key0) {
+      i++;
+      continue;
+    }
+    std::string key = tag.substr(key0, i - key0);
+    std::transform(key.begin(), key.end(), key.begin(),
+                   [](unsigned char c) { return (char)tolower(c); });
+
+    while (i < tag.size() && isspace((unsigned char)tag[i]))
+      i++;
+    if (i >= tag.size() || tag[i] != '=')
+      continue;
+    i++;
+    while (i < tag.size() && isspace((unsigned char)tag[i]))
+      i++;
+    if (i >= tag.size())
+      break;
+
+    char quote = 0;
+    if (tag[i] == '"' || tag[i] == '\'') {
+      quote = tag[i];
+      i++;
+    }
+    size_t val0 = i;
+    if (quote) {
+      while (i < tag.size() && tag[i] != quote)
+        i++;
+      std::string val = tag.substr(val0, i - val0);
+      if (i < tag.size())
+        i++;
+      if (key == attr_name_lc)
+        return val;
+    } else {
+      while (i < tag.size() && !isspace((unsigned char)tag[i]) && tag[i] != '>')
+        i++;
+      if (key == attr_name_lc)
+        return tag.substr(val0, i - val0);
+    }
+  }
+  return "";
+}
+
+static bool DecodeDataUriImage(const std::string &href, std::vector<u8> *out,
+                               App *app = NULL) {
+  if (!out || !StartsWithNoCase(href, "data:"))
+    return false;
+  size_t comma = href.find(',');
+  if (comma == std::string::npos || comma <= 5 || comma + 1 >= href.size())
+    return false;
+
+  std::string meta = ToLowerAscii(href.substr(5, comma - 5));
+  if (meta.find("image/") == std::string::npos ||
+      meta.find(";base64") == std::string::npos) {
+    return false;
+  }
+
+  std::string payload = href.substr(comma + 1);
+  bool ok = DecodeBase64Bytes(payload, out, kEpubInlineImageMaxBytes);
+  if (app) {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "EPUB: inline SVG data-uri decode %s bytes=%u",
+             ok ? "ok" : "fail", (unsigned)out->size());
+    app->PrintStatus(msg);
+  }
+  return ok;
+}
+
+static bool ReadZipEntryBinary(unzFile uf, const std::string &path,
+                               std::vector<u8> *out, size_t max_bytes) {
+  if (!out || !uf || path.empty())
+    return false;
+  out->clear();
+
+  if (unzLocateFile(uf, path.c_str(), 2) != UNZ_OK)
+    return false;
+  if (unzOpenCurrentFile(uf) != UNZ_OK)
+    return false;
+
+  unz_file_info fi;
+  if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) != UNZ_OK ||
+      fi.uncompressed_size == 0 || fi.uncompressed_size > max_bytes ||
+      fi.uncompressed_size > (uLong)INT_MAX) {
+    unzCloseCurrentFile(uf);
+    return false;
+  }
+
+  out->resize((size_t)fi.uncompressed_size);
+  int total = 0;
+  while (total < (int)out->size()) {
+    int n = unzReadCurrentFile(uf, out->data() + total,
+                               (unsigned int)(out->size() - (size_t)total));
+    if (n < 0) {
+      unzCloseCurrentFile(uf);
+      out->clear();
+      return false;
+    }
+    if (n == 0)
+      break;
+    total += n;
+  }
+  unzCloseCurrentFile(uf);
+  if (total <= 0) {
+    out->clear();
+    return false;
+  }
+  out->resize((size_t)total);
+  return true;
+}
+
+static bool LooksLikeSvgWrapper(const std::string &path_hint,
+                                const std::vector<u8> &buf) {
+  if (buf.empty())
+    return false;
+  std::string lower_path = ToLowerAscii(path_hint);
+  if (lower_path.size() >= 4 &&
+      lower_path.rfind(".svg") == lower_path.size() - 4) {
+    return true;
+  }
+  size_t sample = std::min((size_t)512, buf.size());
+  std::string head((const char *)buf.data(), sample);
+  return ToLowerAscii(head).find("<svg") != std::string::npos;
+}
+
+static bool ResolveSvgWrapperImage(const std::string &epubpath,
+                                   const std::string &svg_path,
+                                   const std::vector<u8> &svg_buf,
+                                   std::vector<u8> *out,
+                                   std::string *resolved_path = NULL,
+                                   App *app = NULL) {
+  if (!out || svg_buf.empty() || svg_buf.size() > kSvgWrapperMaxBytes) {
+    if (app)
+      app->PrintStatus("EPUB: inline SVG wrapper skip (size/empty)");
+    return false;
+  }
+  out->clear();
+  if (resolved_path)
+    resolved_path->clear();
+
+  std::string xml((const char *)svg_buf.data(), svg_buf.size());
+  unzFile uf = unzOpen(epubpath.c_str());
+  if (!uf)
+    return false;
+
+  int image_tags_seen = 0;
+  int href_attempts = 0;
+  size_t pos = 0;
+  while (pos < xml.size()) {
+    size_t lt = xml.find('<', pos);
+    if (lt == std::string::npos)
+      break;
+    size_t gt = xml.find('>', lt + 1);
+    if (gt == std::string::npos)
+      break;
+    pos = gt + 1;
+
+    std::string tag = Trim(xml.substr(lt + 1, gt - lt - 1));
+    if (tag.empty() || tag[0] == '/' || tag[0] == '!' || tag[0] == '?')
+      continue;
+
+    size_t name_end = 0;
+    while (name_end < tag.size() && IsHtmlNameChar((unsigned char)tag[name_end]))
+      name_end++;
+    std::string name = ToLowerAscii(tag.substr(0, name_end));
+    if (name != "image" && name != "img")
+      continue;
+    image_tags_seen++;
+
+    std::string href = ExtractHtmlAttrValue(tag, "href");
+    if (href.empty())
+      href = ExtractHtmlAttrValue(tag, "xlink:href");
+    if (href.empty())
+      href = ExtractHtmlAttrValue(tag, "src");
+    href = Trim(href);
+    if (href.empty())
+      continue;
+    href_attempts++;
+
+    if (StartsWithNoCase(href, "data:")) {
+      if (DecodeDataUriImage(href, out, app)) {
+        if (resolved_path)
+          *resolved_path = "data:image";
+        unzClose(uf);
+        return true;
+      }
+      continue;
+    }
+
+    std::string resolved =
+        StripFragmentAndQuery(ResolveRelativePath(svg_path, href));
+    if (resolved.empty() || resolved == svg_path)
+      continue;
+    if (ReadZipEntryBinary(uf, resolved, out, kEpubInlineImageMaxBytes)) {
+      if (resolved_path)
+        *resolved_path = resolved;
+      if (app) {
+        char msg[192];
+        snprintf(msg, sizeof(msg),
+                 "EPUB: inline SVG wrapper href resolved %s bytes=%u",
+                 resolved.c_str(), (unsigned)out->size());
+        app->PrintStatus(msg);
+      }
+      unzClose(uf);
+      return true;
+    }
+  }
+
+  if (app) {
+    char msg[192];
+    snprintf(msg, sizeof(msg),
+             "EPUB: inline SVG wrapper unresolved tags=%d hrefs=%d path=%s",
+             image_tags_seen, href_attempts, svg_path.c_str());
+    app->PrintStatus(msg);
+  }
+  unzClose(uf);
+  out->clear();
+  return false;
 }
 }
 
@@ -122,6 +480,7 @@ bool Book::StoreFb2InlineImage(const std::string &id,
 bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   if (!ts)
     return false;
+  App *app = GetApp();
   const std::string *image_path = GetInlineImagePath(image_id);
   if (!image_path || image_path->empty())
     return false;
@@ -204,7 +563,7 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
     unz_file_info fi;
     if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) != UNZ_OK ||
         fi.uncompressed_size == 0 ||
-        fi.uncompressed_size > (4 * 1024 * 1024)) {
+        fi.uncompressed_size > kEpubInlineImageMaxBytes) {
       unzCloseCurrentFile(uf);
       unzClose(uf);
       return false;
@@ -223,8 +582,44 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
   }
 
   int info_w = 0, info_h = 0, info_c = 0;
-  if (!stbi_info_from_memory(compressed_data, compressed_size, &info_w, &info_h,
-                             &info_c))
+  bool has_info = stbi_info_from_memory(compressed_data, compressed_size, &info_w,
+                                        &info_h, &info_c) != 0;
+  if (!has_info && image_path->compare(0, 4, "fb2:") != 0) {
+    bool is_svg_wrapper = LooksLikeSvgWrapper(*image_path, compressed);
+    std::vector<u8> resolved_svg_image;
+    std::string resolved_svg_path;
+    if (is_svg_wrapper && app) {
+      char msg[192];
+      snprintf(msg, sizeof(msg), "EPUB: inline SVG wrapper detected id=%u %s",
+               (unsigned)image_id, image_path->c_str());
+      app->PrintStatus(msg);
+    }
+    if (is_svg_wrapper &&
+        ResolveSvgWrapperImage(foldername + "/" + filename, *image_path,
+                               compressed, &resolved_svg_image,
+                               &resolved_svg_path, app)) {
+      compressed.swap(resolved_svg_image);
+      compressed_data = compressed.data();
+      compressed_size = (int)compressed.size();
+      has_info = stbi_info_from_memory(compressed_data, compressed_size, &info_w,
+                                       &info_h, &info_c) != 0;
+      if (app) {
+        char msg[192];
+        snprintf(msg, sizeof(msg),
+                 "EPUB: inline SVG wrapper resolved id=%u src=%s bytes=%u",
+                 (unsigned)image_id,
+                 resolved_svg_path.empty() ? "(unknown)" : resolved_svg_path.c_str(),
+                 (unsigned)compressed.size());
+        app->PrintStatus(msg);
+      }
+    } else if (!has_info && LooksLikeSvgWrapper(*image_path, compressed) && app) {
+      char msg[192];
+        snprintf(msg, sizeof(msg), "EPUB: inline SVG wrapper unresolved id=%u %s",
+               (unsigned)image_id, image_path->c_str());
+      app->PrintStatus(msg);
+    }
+  }
+  if (!has_info)
     return false;
   if (info_w <= 0 || info_h <= 0)
     return false;

@@ -1,3 +1,16 @@
+/*
+    3dslibris - chapter_menu.cpp
+    Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Summary:
+    - Builds chapter/index rows from resolved TOC metadata.
+    - Applies title/subtitle normalization for compact list rows.
+    - Resolves chapter targets with exact or approximate fallback logic.
+*/
+
 #include "chapter_menu.h"
 
 #include <algorithm>
@@ -206,6 +219,125 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 3072) {
   return TrimLabel(out);
 }
 
+static std::vector<std::string> BuildPageHeadingLines(Page *page,
+                                                      size_t max_lines = 12) {
+  std::vector<std::string> lines;
+  if (!page || !page->GetBuffer() || page->GetLength() <= 0 || max_lines == 0)
+    return lines;
+
+  const u8 *buf = page->GetBuffer();
+  const int len = page->GetLength();
+  std::string cur;
+  cur.reserve(96);
+
+  auto flush_line = [&]() {
+    std::string n = NormalizeSearchText(cur);
+    if (!n.empty())
+      lines.push_back(n);
+    cur.clear();
+  };
+
+  for (int i = 0; i < len; i++) {
+    unsigned char c = (unsigned char)buf[i];
+    if (c == TEXT_IMAGE) {
+      i += (i + 2 < len) ? 2 : 0;
+      if (!cur.empty() && cur.back() != ' ')
+        cur.push_back(' ');
+      continue;
+    }
+    if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
+        c == TEXT_ITALIC_OFF) {
+      continue;
+    }
+    if (c == '\r')
+      continue;
+    if (c == '\n') {
+      flush_line();
+      if (lines.size() >= max_lines)
+        break;
+      continue;
+    }
+    if (c < 0x20) {
+      if (!cur.empty() && cur.back() != ' ')
+        cur.push_back(' ');
+      continue;
+    }
+    if (c < 0x80) {
+      cur.push_back((char)c);
+      continue;
+    }
+    int step = 1;
+    if ((c & 0xE0) == 0xC0)
+      step = 2;
+    else if ((c & 0xF0) == 0xE0)
+      step = 3;
+    else if ((c & 0xF8) == 0xF0)
+      step = 4;
+    if (i + step > len)
+      step = 1;
+    for (int j = 0; j < step; j++)
+      cur.push_back((char)buf[i + j]);
+    i += (step - 1);
+  }
+
+  if (lines.size() < max_lines)
+    flush_line();
+  return lines;
+}
+
+static int EvaluateHeadingScore(Page *page, const std::string &query) {
+  if (!page || query.empty())
+    return 0;
+  std::vector<std::string> lines = BuildPageHeadingLines(page, 12);
+  if (lines.empty())
+    return 0;
+
+  int best = 0;
+  for (size_t i = 0; i < lines.size(); i++) {
+    const std::string &line = lines[i];
+    if (line.empty())
+      continue;
+    int s = 0;
+    if (line == query) {
+      s = 160;
+    } else if ((line.find(query) != std::string::npos ||
+                query.find(line) != std::string::npos) &&
+               std::min(line.size(), query.size()) >= 4) {
+      s = 115;
+    }
+
+    if (s == 0 && i + 1 < lines.size()) {
+      std::string joined = line + " " + lines[i + 1];
+      if (joined == query) {
+        s = 145;
+      } else if ((joined.find(query) != std::string::npos ||
+                  query.find(joined) != std::string::npos) &&
+                 std::min(joined.size(), query.size()) >= 5) {
+        s = 108;
+      }
+    }
+
+    if (s > 0) {
+      if (line.size() > 88)
+        s -= 54;
+      else if (line.size() > 68)
+        s -= 32;
+      if (i == 0)
+        s += 20;
+      else if (i == 1)
+        s += 12;
+      else if (i <= 3)
+        s += 6;
+      if (line.size() <= 44)
+        s += 6;
+      if (s > best)
+        best = s;
+    }
+  }
+
+  return best;
+}
+
 static bool FindApproxTitlePage(Book *book, const std::string &title,
                                 u16 hint_page, u16 *page_out) {
   if (!book || !page_out)
@@ -226,16 +358,20 @@ static bool FindApproxTitlePage(Book *book, const std::string &title,
     if (p1 > page_count)
       p1 = page_count;
     for (u16 p = p0; p < p1; p++) {
-      std::string text = BuildPageSearchText(book->GetPage((int)p), 4096);
-      if (text.empty())
+      Page *page = book->GetPage((int)p);
+      std::string text = BuildPageSearchText(page, 4096);
+      int heading_score = EvaluateHeadingScore(page, query);
+      if (text.empty() && heading_score <= 0)
         continue;
       size_t pos = text.find(query);
-      if (pos == std::string::npos)
+      if (pos == std::string::npos && heading_score < 90)
         continue;
 
       // Prefer occurrences near top of page and near current mapped hint.
       int top_bonus = 0;
-      if (pos < 120)
+      if (heading_score >= 170) {
+        top_bonus = 180;
+      } else if (pos < 120)
         top_bonus = 120;
       else if (pos < 320)
         top_bonus = 80;
@@ -247,7 +383,7 @@ static bool FindApproxTitlePage(Book *book, const std::string &title,
       int dist = (int)p - (int)hint_page;
       if (dist < 0)
         dist = -dist;
-      int score = 300 + top_bonus - (dist / 2);
+      int score = 300 + top_bonus - (dist / 2) + (heading_score * 2);
       if (score > *best_score) {
         *best_score = score;
         *best_page = p;
@@ -332,15 +468,46 @@ bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
   u16 resolved = *page_out;
   if (FindApproxTitlePage(app->bookcurrent, entry_titles[index],
                           entry_pages[index], &resolved)) {
-    approx_page_cache[index] = (int)resolved;
-    if (app) {
-      char msg[160];
-      snprintf(msg, sizeof(msg), "INDEX approx remap sel=%u from=%u to=%u",
-               (unsigned)index, (unsigned)entry_pages[index],
-               (unsigned)resolved);
-      app->PrintStatus(msg);
+    bool accept = true;
+    const int from = (int)entry_pages[index];
+    const int to = (int)resolved;
+    const int delta = (to > from) ? (to - from) : (from - to);
+
+    // Trust rule 1: reject big jumps from the original TOC page.
+    if (delta > 32)
+      accept = false;
+
+    // Trust rule 2: preserve chapter order against direct neighbors.
+    if (accept && index > 0) {
+      const int prev_hint = (int)entry_pages[index - 1];
+      if (to < prev_hint)
+        accept = false;
     }
-    *page_out = resolved;
+    if (accept && (size_t)index + 1 < entry_pages.size()) {
+      const int next_hint = (int)entry_pages[index + 1];
+      if (to > next_hint)
+        accept = false;
+    }
+
+    if (accept) {
+      approx_page_cache[index] = to;
+      if (app) {
+        char msg[192];
+        snprintf(msg, sizeof(msg), "INDEX approx remap sel=%u from=%u to=%u",
+                 (unsigned)index, (unsigned)from, (unsigned)to);
+        app->PrintStatus(msg);
+      }
+      *page_out = resolved;
+    } else {
+      approx_page_cache[index] = -2;
+      if (app) {
+        char msg[224];
+        snprintf(msg, sizeof(msg),
+                 "INDEX approx remap rejected sel=%u from=%u to=%u",
+                 (unsigned)index, (unsigned)from, (unsigned)to);
+        app->PrintStatus(msg);
+      }
+    }
   } else {
     approx_page_cache[index] = -2;
   }

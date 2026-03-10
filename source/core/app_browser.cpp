@@ -1,6 +1,14 @@
 /*
     3dslibris - app_browser.cpp
     Adapted from dslibris for Nintendo 3DS.
+
+    Original attribution (dslibris): Ray Haleblian, GPLv2+.
+    Modified for Nintendo 3DS by Rigle.
+
+    Changes by Rigle (summary):
+    - Native FS-based book discovery and UTF-8 normalization hardening.
+    - Browser cover cache/preload integration and deferred metadata jobs.
+    - Touch navigation and footer interactions adapted to 3DS orientation.
 */
 
 #include "app.h"
@@ -24,6 +32,7 @@
 #include "epub.h"
 #include "fb2.h"
 #include "main.h"
+#include "mobi.h"
 #include "parse.h"
 #include "text.h"
 
@@ -51,21 +60,21 @@ static const int kBrowserCellW = 115;
 static const int kBrowserCellH = 132;
 static const int kBrowserGridX0 = 5;
 static const int kBrowserGridY0 = 3;
-static const int kBrowserFooterY = 302;
+static const int kBrowserFooterY = 296;
 
 static void LayoutBrowserNavButtons(App *app) {
   if (!app)
     return;
   app->buttonprev.Move(2, kBrowserFooterY);
-  app->buttonprev.Resize(50, 16);
+  app->buttonprev.Resize(66, 22);
   app->buttonprev.Label("prev");
 
-  app->buttonnext.Move(188, kBrowserFooterY);
-  app->buttonnext.Resize(50, 16);
+  app->buttonnext.Move(172, kBrowserFooterY);
+  app->buttonnext.Resize(66, 22);
   app->buttonnext.Label("next");
 
-  app->buttonprefs.Move(80, kBrowserFooterY);
-  app->buttonprefs.Resize(78, 16);
+  app->buttonprefs.Move(72, kBrowserFooterY);
+  app->buttonprefs.Resize(96, 22);
   app->buttonprefs.Label("settings");
 }
 
@@ -823,9 +832,11 @@ void App::QueueBookWarmup(Book *book) {
     if (!book->metadataIndexTried)
       EnqueueJob(APP_JOB_INDEX_METADATA, book);
     EnqueueJob(APP_JOB_EXTRACT_COVER, book);
-  } else if (book->format == FORMAT_XHTML &&
-             HasExtCI(book->GetFileName(), ".fb2")) {
-    EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+  } else if (book->format == FORMAT_XHTML) {
+    if (HasExtCI(book->GetFileName(), ".fb2") ||
+        HasExtCI(book->GetFileName(), ".mobi")) {
+      EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+    }
   }
 }
 
@@ -890,6 +901,14 @@ void App::ProcessJobs(u32 budget_ms) {
         } else if (book->format == FORMAT_XHTML &&
                    HasExtCI(book->GetFileName(), ".fb2")) {
           rc = fb2_extract_cover(book, path);
+          if (rc == 0 && book->coverPixels) {
+            SaveCoverCache(book, path);
+          }
+          book->coverTried = true;
+          browser_view_dirty = true;
+        } else if (book->format == FORMAT_XHTML &&
+                   HasExtCI(book->GetFileName(), ".mobi")) {
+          rc = mobi_extract_cover(book, path);
           if (rc == 0 && book->coverPixels) {
             SaveCoverCache(book, path);
           }
@@ -1129,6 +1148,7 @@ void App::browser_draw(void) {
   ts->SetScreen(ts->screenright);
   ts->SetColorMode(0); // Normal for browser text
   ts->ClearScreen();
+  DrawBottomGradientBackground();
   if (bookselected)
     QueueBookWarmup(bookselected);
 

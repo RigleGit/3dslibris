@@ -20,6 +20,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 */
 
+/*
+  3DS port modifications by Rigle (summary):
+  - Hardened TOC/NAV parsing paths and bounded memory/entry limits.
+  - Added diagnostic timing/logging and on-demand TOC resolution flow.
+  - Improved cover discovery and resilient chapter mapping fallbacks.
+*/
+
 #include "epub.h"
 
 #include "book.h"
@@ -45,11 +52,14 @@ static const size_t EPUB_TOC_MAX_ENTRIES = 2048;
 static const size_t EPUB_COVER_MAX_ENTRY_BYTES = 8 * 1024 * 1024;
 static const size_t EPUB_COVER_MAX_NONJPEG_BYTES = 2 * 1024 * 1024;
 static const size_t EPUB_COVER_MAX_DECODED_RGB_BYTES = 16 * 1024 * 1024;
+static const size_t EPUB_SVG_WRAPPER_MAX_BYTES = 512 * 1024;
 static const int EPUB_COVER_MAX_DIMENSION = 4096;
 // Safety switch for 3DS stability: TOC/NAV title resolution can be re-enabled
 // once NCX/NAV parsing is fully hardened on real hardware/emulators.
 static const bool EPUB_ENABLE_REAL_TOC_RESOLVE = false;
 static std::string Trim(const std::string &s);
+static std::string NormalizeAsciiSearchText(const std::string &raw,
+                                            size_t max_out);
 static bool ParseXmlBuffer(const std::string &xml, XML_StartElementHandler start,
                            XML_EndElementHandler end,
                            XML_CharacterDataHandler chardata, void *userdata);
@@ -292,7 +302,7 @@ typedef struct {
   std::string base_path;
   std::vector<std::string> id_stack;
   std::vector<bool> pushed_stack;
-  std::deque<std::string> pending_ids;
+  std::vector<std::string> pending_ids;
 } toc_proxy_parse_data_t;
 
 static void EpubDiag(App *app, const char *fmt, const char *arg = NULL);
@@ -364,8 +374,8 @@ static void toc_proxy_start(void *userdata, const char *el, const char **attr) {
       }
 
       if (!mapped && !d->pending_ids.empty()) {
-        std::string id_from_pending = d->pending_ids.front();
-        d->pending_ids.pop_front();
+        std::string id_from_pending = d->pending_ids.back();
+        d->pending_ids.pop_back();
         if (!id_from_pending.empty() &&
             d->fragment_to_href->find(id_from_pending) ==
                 d->fragment_to_href->end()) {
@@ -455,7 +465,7 @@ static void BuildTocProxyMapFromHtmlScan(
   if (!proxy_map)
     return;
 
-  std::deque<std::string> pending_ids;
+  std::vector<std::string> pending_ids;
   size_t pos = 0;
   while (pos < xml.size()) {
     size_t lt = xml.find('<', pos);
@@ -480,18 +490,47 @@ static void BuildTocProxyMapFromHtmlScan(
     std::transform(name.begin(), name.end(), name.begin(),
                    [](unsigned char c) { return (char)tolower(c); });
 
-    // We only care about tags that can carry links or section IDs.
-    if (name != "a" && name != "area" && name != "span" && name != "div")
-      continue;
-
-    std::string id =
-        NormalizeFragmentId(ExtractHtmlAttrValue(tag, "id"));
+    // Collect IDs from any tag; in malformed TOC docs the id may be attached to
+    // li/p/tr elements while href appears in nested <a>.
+    std::string id = NormalizeFragmentId(ExtractHtmlAttrValue(tag, "id"));
     if (id.empty())
       id = NormalizeFragmentId(ExtractHtmlAttrValue(tag, "name"));
+    if (id.empty()) {
+      // Namespace variants like xml:id, epub:id...
+      size_t pos = 0;
+      while (pos < tag.size()) {
+        while (pos < tag.size() && isspace((unsigned char)tag[pos]))
+          pos++;
+        size_t k0 = pos;
+        while (pos < tag.size() && IsHtmlNameChar((unsigned char)tag[pos]))
+          pos++;
+        if (pos == k0) {
+          pos++;
+          continue;
+        }
+        std::string key = tag.substr(k0, pos - k0);
+        std::transform(key.begin(), key.end(), key.begin(),
+                       [](unsigned char c) { return (char)tolower(c); });
+        if (key.size() > 3 && key.substr(key.size() - 3) == ":id") {
+          size_t eq = tag.find('=', pos);
+          if (eq == std::string::npos)
+            break;
+          std::string tail = tag.substr(k0);
+          std::string val = ExtractHtmlAttrValue(tail, key);
+          id = NormalizeFragmentId(val);
+          break;
+        }
+      }
+    }
 
     std::string href = ExtractHtmlAttrValue(tag, "href");
     if (href.empty())
       href = ExtractHtmlAttrValue(tag, "src");
+    if (href.empty()) {
+      std::string ns_href = ExtractHtmlAttrValue(tag, "xlink:href");
+      if (!ns_href.empty())
+        href = ns_href;
+    }
 
     if (!id.empty())
       pending_ids.push_back(id);
@@ -507,8 +546,8 @@ static void BuildTocProxyMapFromHtmlScan(
       (*proxy_map)[id] = resolved;
 
     if (!pending_ids.empty()) {
-      std::string pid = pending_ids.front();
-      pending_ids.pop_front();
+      std::string pid = pending_ids.back();
+      pending_ids.pop_back();
       if (!pid.empty() && proxy_map->find(pid) == proxy_map->end())
         (*proxy_map)[pid] = resolved;
     }
@@ -942,6 +981,248 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &o
     EpubDiag(app, msg);
   }
   return n >= 0;
+}
+
+static bool ReadZipEntryBinary(unzFile uf, const std::string &path,
+                               std::vector<u8> *out, size_t max_bytes,
+                               App *app = NULL, const char *tag = NULL) {
+  if (!out)
+    return false;
+  out->clear();
+  if (!uf || path.empty() || max_bytes == 0)
+    return false;
+
+  const char *t = (tag && *tag) ? tag : "ZIP-BIN";
+  if (!LocateZipEntrySafe(uf, path, app, t))
+    return false;
+
+  unz_file_info fi;
+  if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) == UNZ_OK) {
+    if (fi.uncompressed_size == 0 || fi.uncompressed_size > max_bytes ||
+        fi.uncompressed_size > (uLong)INT_MAX) {
+      return false;
+    }
+    out->reserve((size_t)fi.uncompressed_size);
+  }
+
+  if (unzOpenCurrentFile(uf) != UNZ_OK)
+    return false;
+
+  unsigned char buf[8 * 1024];
+  int n = 0;
+  size_t total = 0;
+  while ((n = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0) {
+    if (total + (size_t)n > max_bytes) {
+      unzCloseCurrentFile(uf);
+      out->clear();
+      return false;
+    }
+    out->insert(out->end(), buf, buf + n);
+    total += (size_t)n;
+  }
+
+  unzCloseCurrentFile(uf);
+  if (n < 0 || out->empty()) {
+    out->clear();
+    return false;
+  }
+  return true;
+}
+
+static int Base64Value(unsigned char c) {
+  if (c >= 'A' && c <= 'Z')
+    return c - 'A';
+  if (c >= 'a' && c <= 'z')
+    return c - 'a' + 26;
+  if (c >= '0' && c <= '9')
+    return c - '0' + 52;
+  if (c == '+' || c == '-')
+    return 62;
+  if (c == '/' || c == '_')
+    return 63;
+  return -1;
+}
+
+static bool DecodeBase64Bytes(const std::string &in, std::vector<u8> *out,
+                              size_t max_bytes) {
+  if (!out)
+    return false;
+  out->clear();
+  if (in.empty())
+    return false;
+
+  out->reserve((in.size() * 3) / 4);
+  int accum = 0;
+  int bits = -8;
+  for (size_t i = 0; i < in.size(); i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (c == '=')
+      break;
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+      continue;
+    int v = Base64Value(c);
+    if (v < 0)
+      return false;
+    accum = (accum << 6) | v;
+    bits += 6;
+    if (bits >= 0) {
+      out->push_back((u8)((accum >> bits) & 0xFF));
+      bits -= 8;
+      if (out->size() > max_bytes)
+        return false;
+    }
+  }
+  return !out->empty();
+}
+
+static bool StartsWithNoCase(const std::string &s, const char *prefix) {
+  if (!prefix)
+    return false;
+  size_t len = strlen(prefix);
+  if (s.size() < len)
+    return false;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char a = (unsigned char)s[i];
+    unsigned char b = (unsigned char)prefix[i];
+    if (a >= 'A' && a <= 'Z')
+      a = (unsigned char)(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z')
+      b = (unsigned char)(b - 'A' + 'a');
+    if (a != b)
+      return false;
+  }
+  return true;
+}
+
+static bool LooksLikeSvgWrapper(const std::string &path_hint,
+                                const std::vector<u8> &buf) {
+  if (buf.empty())
+    return false;
+
+  std::string lower_path = ToLowerAscii(path_hint);
+  if (lower_path.size() >= 4 &&
+      lower_path.rfind(".svg") == lower_path.size() - 4) {
+    return true;
+  }
+
+  size_t sample = std::min((size_t)512, buf.size());
+  std::string head((const char *)buf.data(), sample);
+  std::string lower_head = ToLowerAscii(head);
+  return lower_head.find("<svg") != std::string::npos;
+}
+
+static bool DecodeDataUriImage(const std::string &href, std::vector<u8> *out,
+                               App *app = NULL) {
+  if (!out || !StartsWithNoCase(href, "data:"))
+    return false;
+  size_t comma = href.find(',');
+  if (comma == std::string::npos || comma <= 5 || comma + 1 >= href.size())
+    return false;
+
+  std::string meta = ToLowerAscii(href.substr(5, comma - 5));
+  if (meta.find("image/") == std::string::npos ||
+      meta.find(";base64") == std::string::npos) {
+    return false;
+  }
+
+  std::string payload = href.substr(comma + 1);
+  bool ok = DecodeBase64Bytes(payload, out, EPUB_COVER_MAX_ENTRY_BYTES);
+  if (app) {
+    char msg[128];
+    snprintf(msg, sizeof(msg), "EPUB: SVG data-uri decode %s bytes=%u",
+             ok ? "ok" : "fail", (unsigned)out->size());
+    app->PrintStatus(msg);
+  }
+  return ok;
+}
+
+static bool ResolveSvgImageWrapperPayload(unzFile uf,
+                                          const std::string &svg_path,
+                                          const std::vector<u8> &svg_buf,
+                                          std::vector<u8> *out,
+                                          std::string *resolved_path,
+                                          App *app = NULL) {
+  if (!out || svg_buf.empty() || svg_buf.size() > EPUB_SVG_WRAPPER_MAX_BYTES) {
+    if (app)
+      app->PrintStatus("EPUB: SVG wrapper skip (size/empty)");
+    return false;
+  }
+  out->clear();
+  if (resolved_path)
+    resolved_path->clear();
+
+  std::string xml((const char *)svg_buf.data(), svg_buf.size());
+  int image_tags_seen = 0;
+  int href_attempts = 0;
+  size_t pos = 0;
+  while (pos < xml.size()) {
+    size_t lt = xml.find('<', pos);
+    if (lt == std::string::npos)
+      break;
+    size_t gt = xml.find('>', lt + 1);
+    if (gt == std::string::npos)
+      break;
+    pos = gt + 1;
+
+    std::string tag = Trim(xml.substr(lt + 1, gt - lt - 1));
+    if (tag.empty() || tag[0] == '/' || tag[0] == '!' || tag[0] == '?')
+      continue;
+
+    size_t name_end = 0;
+    while (name_end < tag.size() && IsHtmlNameChar((unsigned char)tag[name_end]))
+      name_end++;
+    std::string name = ToLowerAscii(tag.substr(0, name_end));
+    if (name != "image" && name != "img")
+      continue;
+    image_tags_seen++;
+
+    std::string href = ExtractHtmlAttrValue(tag, "href");
+    if (href.empty())
+      href = ExtractHtmlAttrValue(tag, "xlink:href");
+    if (href.empty())
+      href = ExtractHtmlAttrValue(tag, "src");
+    href = Trim(href);
+    if (href.empty())
+      continue;
+    href_attempts++;
+
+    if (StartsWithNoCase(href, "data:")) {
+      if (DecodeDataUriImage(href, out, app)) {
+        if (resolved_path)
+          *resolved_path = "data:image";
+        return true;
+      }
+      continue;
+    }
+
+    std::string resolved =
+        StripFragmentAndQuery(ResolveRelativePath(svg_path, href));
+    if (resolved.empty())
+      continue;
+    if (resolved == svg_path)
+      continue;
+    if (ReadZipEntryBinary(uf, resolved, out, EPUB_COVER_MAX_ENTRY_BYTES)) {
+      if (resolved_path)
+        *resolved_path = resolved;
+      if (app) {
+        char msg[192];
+        snprintf(msg, sizeof(msg), "EPUB: SVG wrapper href resolved %s bytes=%u",
+                 resolved.c_str(), (unsigned)out->size());
+        app->PrintStatus(msg);
+      }
+      return true;
+    }
+  }
+
+  if (app) {
+    char msg[192];
+    snprintf(msg, sizeof(msg),
+             "EPUB: SVG wrapper unresolved tags=%d hrefs=%d path=%s",
+             image_tags_seen, href_attempts, svg_path.c_str());
+    app->PrintStatus(msg);
+  }
+  out->clear();
+  return false;
 }
 
 static bool
@@ -1468,11 +1749,28 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
   std::string toc_doc_path;
   bool toc_loaded = false;
 
-  auto looks_reasonable_toc = [](const std::vector<toc_entry_t> &entries) {
+  auto looks_reasonable_toc = [&](const std::vector<toc_entry_t> &entries) {
     if (entries.empty())
       return false;
-    if (entries.size() == 1)
-      return entries[0].title.size() <= 120;
+    if (entries.size() == 1) {
+      // When a NAV document exists, a 1-item NCX is usually low quality
+      // (common in mixed EPUB2/EPUB3 packages). Force fallback NAV probing.
+      bool has_nav_candidate = !parsedata.navid.empty();
+      if (!has_nav_candidate) {
+        for (auto item : parsedata.manifest) {
+          if (!item)
+            continue;
+          if (item->media_type == "application/xhtml+xml" &&
+              ContainsToken(item->properties, "nav")) {
+            has_nav_candidate = true;
+            break;
+          }
+        }
+      }
+      if (has_nav_candidate)
+        return false;
+      return entries[0].title.size() <= 120 && !entries[0].href.empty();
+    }
 
     size_t too_long = 0;
     size_t empty_href = 0;
@@ -1669,7 +1967,8 @@ static std::string NormalizeTocTitle(const std::string &raw) {
       run = 0;
     }
   }
-  if (leader_pos != std::string::npos)
+  const bool had_dotted_leader = (leader_pos != std::string::npos);
+  if (had_dotted_leader)
     out = Trim(out.substr(0, leader_pos));
 
   auto has_ascii_alpha = [](const std::string &s) -> bool {
@@ -1694,7 +1993,23 @@ static std::string NormalizeTocTitle(const std::string &raw) {
       ws--;
     if (ws < out.size()) {
       std::string candidate = Trim(out.substr(0, ws));
-      if (!candidate.empty() && candidate.size() >= 4 &&
+      std::string candidate_norm = NormalizeAsciiSearchText(candidate, 96);
+      bool chapter_like_prefix = false;
+      if (candidate_norm.rfind("chapter", 0) == 0 ||
+          candidate_norm.rfind("capitulo", 0) == 0 ||
+          candidate_norm.rfind("cap", 0) == 0 ||
+          candidate_norm.rfind("part", 0) == 0 ||
+          candidate_norm.rfind("parte", 0) == 0 ||
+          candidate_norm.rfind("book", 0) == 0 ||
+          candidate_norm.rfind("libro", 0) == 0) {
+        chapter_like_prefix = true;
+      }
+
+      // Keep trailing number when it is likely part of the chapter label
+      // ("Capítulo 7", "Part 2"). Drop only probable page suffixes.
+      const bool probable_page_suffix =
+          had_dotted_leader || (!chapter_like_prefix && candidate.size() >= 8);
+      if (probable_page_suffix && !candidate.empty() && candidate.size() >= 4 &&
           has_ascii_alpha(candidate) && has_ascii_alpha(out)) {
         out = candidate;
       }
@@ -1823,6 +2138,153 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 2048) {
   return Trim(out);
 }
 
+static std::vector<std::string> BuildPageHeadingLines(Page *page,
+                                                      size_t max_lines = 12,
+                                                      size_t max_line_bytes = 160) {
+  std::vector<std::string> lines;
+  if (!page || !page->GetBuffer() || page->GetLength() <= 0 || max_lines == 0)
+    return lines;
+
+  const u8 *buf = page->GetBuffer();
+  const int len = page->GetLength();
+  std::string cur;
+  cur.reserve(96);
+
+  auto flush_line = [&]() {
+    std::string n = NormalizeAsciiSearchText(cur, max_line_bytes);
+    if (!n.empty())
+      lines.push_back(n);
+    cur.clear();
+  };
+
+  for (int i = 0; i < len; i++) {
+    unsigned char c = (unsigned char)buf[i];
+    if (c == TEXT_IMAGE) {
+      i += (i + 2 < len) ? 2 : 0;
+      if (!cur.empty() && cur.back() != ' ')
+        cur.push_back(' ');
+      continue;
+    }
+    if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
+        c == TEXT_ITALIC_OFF) {
+      continue;
+    }
+    if (c == '\r')
+      continue;
+    if (c == '\n') {
+      flush_line();
+      if (lines.size() >= max_lines)
+        break;
+      continue;
+    }
+    if (c < 0x20) {
+      if (!cur.empty() && cur.back() != ' ')
+        cur.push_back(' ');
+      continue;
+    }
+    if (c < 0x80) {
+      cur.push_back((char)c);
+      continue;
+    }
+
+    int step = 1;
+    if ((c & 0xE0) == 0xC0)
+      step = 2;
+    else if ((c & 0xF0) == 0xE0)
+      step = 3;
+    else if ((c & 0xF8) == 0xF0)
+      step = 4;
+    if (i + step > len)
+      step = 1;
+    for (int j = 1; j < step; j++) {
+      if (((unsigned char)buf[i + j] & 0xC0) != 0x80) {
+        step = 1;
+        break;
+      }
+    }
+    for (int j = 0; j < step; j++)
+      cur.push_back((char)buf[i + j]);
+    i += (step - 1);
+  }
+
+  if (lines.size() < max_lines)
+    flush_line();
+  return lines;
+}
+
+static int ScoreHeadingLineMatch(const std::string &line,
+                                 const std::string &query,
+                                 const std::vector<std::string> &tokens,
+                                 int line_index) {
+  if (line.empty() || query.empty())
+    return 0;
+
+  int score = 0;
+  if (line == query) {
+    score = 150;
+  } else if ((line.find(query) != std::string::npos ||
+              query.find(line) != std::string::npos) &&
+             std::min(line.size(), query.size()) >= 4) {
+    score = 105;
+  } else {
+    int token_hits = 0;
+    int token_chars = 0;
+    for (size_t i = 0; i < tokens.size() && i < 6; i++) {
+      if (line.find(tokens[i]) != std::string::npos) {
+        token_hits++;
+        token_chars += (int)tokens[i].size();
+      }
+    }
+    if (token_hits >= 2 && token_chars >= 8) {
+      score = 56 + std::min(34, token_chars);
+    } else if (token_hits >= 1 && token_chars >= 5) {
+      score = 34 + std::min(20, token_chars);
+    }
+  }
+
+  if (score > 0) {
+    if (line.size() > 88)
+      score -= 54;
+    else if (line.size() > 68)
+      score -= 32;
+    if (line_index == 0)
+      score += 16;
+    else if (line_index == 1)
+      score += 10;
+    else if (line_index <= 3)
+      score += 6;
+    else if (line_index <= 6)
+      score += 2;
+    if (line.size() <= 44)
+      score += 6;
+  }
+  return score;
+}
+
+static int EvaluatePageHeadingScore(Page *page, const std::string &query,
+                                    const std::vector<std::string> &tokens) {
+  if (!page || query.empty())
+    return 0;
+
+  std::vector<std::string> lines = BuildPageHeadingLines(page, 12, 160);
+  if (lines.empty())
+    return 0;
+
+  int best = 0;
+  for (size_t i = 0; i < lines.size(); i++) {
+    int s = ScoreHeadingLineMatch(lines[i], query, tokens, (int)i);
+    if (s > best)
+      best = s;
+    if (i + 1 < lines.size()) {
+      std::string joined = lines[i] + " " + lines[i + 1];
+      int sj = ScoreHeadingLineMatch(joined, query, tokens, (int)i);
+      if (sj > best)
+        best = sj;
+    }
+  }
+  return best;
+}
+
 static bool PathLooksLikeTocDocForFallback(const std::string &path) {
   if (path.empty())
     return false;
@@ -1932,6 +2394,8 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
   int best_score = -1;
   int best_hits = 0;
   u16 best_page = doc_start;
+  int best_heading_score = -1;
+  u16 best_heading_page = doc_start;
   bool have_direct_match = false;
   u16 first_direct_page = doc_start;
 
@@ -1942,6 +2406,15 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
       continue;
     size_t direct_pos = text.find(query);
     bool direct_match = (direct_pos != std::string::npos);
+    int heading_score = EvaluatePageHeadingScore(page, query, tokens);
+    if (heading_score > best_heading_score) {
+      best_heading_score = heading_score;
+      best_heading_page = p;
+    }
+    if (heading_score >= 156) {
+      *page_out = p;
+      return true;
+    }
     if (direct_match) {
       if (!have_direct_match) {
         have_direct_match = true;
@@ -1973,6 +2446,10 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
         hits++;
       }
     }
+    if (heading_score > 0) {
+      score += heading_score / 2;
+      hits++;
+    }
     if (score > best_score) {
       best_score = score;
       best_hits = hits;
@@ -1980,8 +2457,16 @@ static bool FindTocTitlePageInDocRange(Book *book, u16 doc_start,
     }
   }
 
+  if (best_heading_score >= 118) {
+    *page_out = best_heading_page;
+    return true;
+  }
   if (best_score >= 12 || (best_score >= 8 && best_hits >= 2)) {
     *page_out = best_page;
+    return true;
+  }
+  if (best_heading_score >= 84) {
+    *page_out = best_heading_page;
     return true;
   }
   if (have_direct_match && query.size() >= 5) {
@@ -2036,6 +2521,8 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
   int best_score = -1;
   int best_hits = 0;
   u16 best_page = from_page;
+  int best_heading_score = -1;
+  u16 best_heading_page = from_page;
   bool have_direct_match = false;
   u16 first_direct_page = from_page;
 
@@ -2051,6 +2538,15 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
 
       size_t direct_pos = text.find(query);
       bool direct_match = (direct_pos != std::string::npos);
+      int heading_score = EvaluatePageHeadingScore(page, query, tokens);
+      if (heading_score > best_heading_score) {
+        best_heading_score = heading_score;
+        best_heading_page = p;
+      }
+      if (heading_score >= 156) {
+        *page_out = p;
+        return true;
+      }
       if (direct_match) {
         if (!have_direct_match) {
           have_direct_match = true;
@@ -2082,6 +2578,10 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
           hits++;
         }
       }
+      if (heading_score > 0) {
+        score += heading_score / 2;
+        hits++;
+      }
       if (!allow_wrap && p >= from_page) {
         int dist_penalty = (int)((p - from_page) / 8);
         score -= dist_penalty;
@@ -2094,8 +2594,16 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
     }
   }
 
+  if (best_heading_score >= 118) {
+    *page_out = best_heading_page;
+    return true;
+  }
   if (best_score >= 12 || (best_score >= 8 && best_hits >= 2)) {
     *page_out = best_page;
+    return true;
+  }
+  if (best_heading_score >= 84) {
+    *page_out = best_heading_page;
     return true;
   }
   if (have_direct_match && query.size() >= 5) {
@@ -2513,6 +3021,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
 }
 
 int epub_extract_cover(Book *book, const std::string &epubpath) {
+  App *app = book ? book->GetApp() : NULL;
   if (book->coverImagePath.empty())
     return 1;
 
@@ -2520,8 +3029,7 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
   if (!uf)
     return 2;
 
-  int rc = unzLocateFile(uf, book->coverImagePath.c_str(), 2);
-  if (rc != UNZ_OK) {
+  if (!LocateZipEntrySafe(uf, book->coverImagePath, app, "COVER")) {
     unzClose(uf);
     return 3;
   }
@@ -2537,7 +3045,7 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
   }
 
   std::vector<u8> imgbuf((size_t)fi.uncompressed_size);
-  rc = unzOpenCurrentFile(uf);
+  int rc = unzOpenCurrentFile(uf);
   if (rc != UNZ_OK) {
     unzClose(uf);
     return 5;
@@ -2557,32 +3065,62 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
     total += n;
   }
   unzCloseCurrentFile(uf);
-  unzClose(uf);
   if (total <= 0)
+  {
+    unzClose(uf);
     return 5;
+  }
   imgbuf.resize((size_t)total);
 
+  std::vector<u8> decodebuf = imgbuf;
+  std::string decode_path = book->coverImagePath;
+  if (LooksLikeSvgWrapper(decode_path, decodebuf)) {
+    if (app) {
+      char msg[192];
+      snprintf(msg, sizeof(msg), "EPUB: cover SVG wrapper detected %s",
+               decode_path.c_str());
+      app->PrintStatus(msg);
+    }
+    std::vector<u8> resolved;
+    std::string resolved_path;
+    if (ResolveSvgImageWrapperPayload(uf, decode_path, decodebuf, &resolved,
+                                      &resolved_path, app)) {
+      decodebuf.swap(resolved);
+      if (!resolved_path.empty())
+        decode_path = resolved_path;
+      if (app)
+      {
+        char msg[192];
+        snprintf(msg, sizeof(msg), "EPUB: cover SVG wrapper resolved src=%s bytes=%u",
+                 decode_path.c_str(), (unsigned)decodebuf.size());
+        app->PrintStatus(msg);
+      }
+    } else if (app) {
+      app->PrintStatus("EPUB: cover SVG wrapper unresolved");
+    }
+  }
+  unzClose(uf);
+
   auto IsJpegCover = [&]() -> bool {
-    if (book->coverImagePath.size() >= 4) {
-      std::string lower = book->coverImagePath;
+    if (decode_path.size() >= 4) {
+      std::string lower = decode_path;
       for (size_t i = 0; i < lower.size(); i++)
         lower[i] = (char)tolower((unsigned char)lower[i]);
       if (lower.rfind(".jpg") == lower.size() - 4 ||
           lower.rfind(".jpeg") == lower.size() - 5)
         return true;
     }
-    return imgbuf.size() >= 3 && imgbuf[0] == 0xFF && imgbuf[1] == 0xD8 &&
-           imgbuf[2] == 0xFF;
+    return decodebuf.size() >= 3 && decodebuf[0] == 0xFF &&
+           decodebuf[1] == 0xD8 && decodebuf[2] == 0xFF;
   };
 
-  if (imgbuf.size() > EPUB_COVER_MAX_NONJPEG_BYTES && !IsJpegCover())
+  if (decodebuf.size() > EPUB_COVER_MAX_NONJPEG_BYTES && !IsJpegCover())
     return 8;
 
   int infoW = 0, infoH = 0, infoChannels = 0;
-  bool hasInfo =
-      stbi_info_from_memory(imgbuf.data(), (int)imgbuf.size(), &infoW, &infoH,
-                            &infoChannels) != 0;
-  if (!hasInfo && imgbuf.size() > EPUB_COVER_MAX_NONJPEG_BYTES)
+  bool hasInfo = stbi_info_from_memory(decodebuf.data(), (int)decodebuf.size(),
+                                       &infoW, &infoH, &infoChannels) != 0;
+  if (!hasInfo && decodebuf.size() > EPUB_COVER_MAX_NONJPEG_BYTES)
     return 9;
 
   if (hasInfo) {
@@ -2596,9 +3134,9 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
 
   // Decode image using stb_image (supports JPEG + PNG)
   int imgW, imgH, channels;
-  unsigned char *pixels = stbi_load_from_memory(imgbuf.data(), (int)imgbuf.size(),
-                                                 &imgW, &imgH, &channels,
-                                                 3); // Force RGB
+  unsigned char *pixels =
+      stbi_load_from_memory(decodebuf.data(), (int)decodebuf.size(), &imgW,
+                            &imgH, &channels, 3); // Force RGB
 
   if (!pixels)
     return 4; // Failed to decode image

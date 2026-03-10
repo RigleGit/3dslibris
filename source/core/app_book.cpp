@@ -43,10 +43,10 @@ void App::HandleEventInBook() {
     u16 before = bookcurrent->GetPageCount();
     bool done = bookcurrent->ContinueDeferredMobiParse(budget_ms, page_budget);
     u16 after = bookcurrent->GetPageCount();
-    if (after != before) {
+    if (after != before)
       pagecount = after;
-      status_dirty = true;
-    }
+    // Page count may grow while deferred parse runs. Do not force status redraw
+    // on every growth step, as it causes noisy progress jitter in the HUD.
     if (done)
       status_dirty = true;
     deferred_pumped = true;

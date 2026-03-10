@@ -1,3 +1,13 @@
+/*
+    3dslibris - fb2.cpp
+    New module for the 3DS port by Rigle.
+
+    Summary:
+    - FB2 metadata and cover extraction.
+    - FB2 chapter/index entry generation.
+    - Safe XML/image parsing limits for 3DS runtime constraints.
+*/
+
 #include "fb2.h"
 
 #include "stb_image.h"
