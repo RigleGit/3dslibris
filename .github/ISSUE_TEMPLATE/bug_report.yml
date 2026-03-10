@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible defect
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: What happened?
+      description: Describe the bug and expected behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Reproduction steps
+      description: Include book format/file context when relevant.
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Logs
+      description: Paste status log lines if available.
+
+  - type: input
+    attributes:
+      label: Environment
+      description: Hardware/emulator and version (3DS Old/New, Citra/Azahar, app version)

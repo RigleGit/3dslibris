@@ -1,0 +1,65 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  hygiene-and-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Required docs/legal files
+        run: |
+          set -euo pipefail
+          required=(README.md LICENSE THIRD_PARTY_NOTICES.md CONTRIBUTING.md DOCS.md)
+          for f in "${required[@]}"; do
+            if [[ ! -f "$f" ]]; then
+              echo "Missing required file: $f"
+              exit 1
+            fi
+          done
+
+      - name: No generated artifacts tracked
+        run: |
+          set -euo pipefail
+          bad="$(git ls-files | grep -E '^(build/|.*\.(o|d|map|lst|elf|3dsx|smdh)$)' || true)"
+          if [[ -n "$bad" ]]; then
+            echo "Tracked generated artifacts are forbidden:"
+            echo "$bad"
+            exit 1
+          fi
+
+  build-3dsx:
+    runs-on: ubuntu-latest
+    container:
+      image: devkitpro/devkitarm
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEVKITARM: /opt/devkitpro/devkitARM
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          make clean
+          make -j2
+
+      - name: Verify outputs
+        run: |
+          set -euo pipefail
+          test -f 3dslibris.3dsx
+          test -f 3dslibris.smdh
+          test -f 3dslibris.elf
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 3dslibris-build
+          path: |
+            3dslibris.3dsx
+            3dslibris.smdh
+            3dslibris.elf

@@ -1,0 +1,15 @@
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.bmp binary
+*.t3x binary
+*.ttf binary
+*.otf binary
+*.3dsx binary
+*.elf binary
+*.smdh binary
+*.a binary
