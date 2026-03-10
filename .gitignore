@@ -1,0 +1,30 @@
+# macOS / editor
+.DS_Store
+*.swp
+*.swo
+
+# Build artifacts (devkitPro / 3DS)
+/build/
+*.o
+*.d
+*.map
+*.lst
+
+# Generated binaries
+*.elf
+*.3dsx
+*.smdh
+/3dslibris.3dsx
+/3dslibris.elf
+/3dslibris.smdh
+
+# Legacy output names kept out of git
+/dslibris-3ds.3dsx
+/dslibris-3ds.elf
+/dslibris-3ds.smdh
+/src.3dsx
+/src.elf
+/src.smdh
+
+# Runtime logs (on host-side tests)
+*.log
