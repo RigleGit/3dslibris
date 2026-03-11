@@ -44,8 +44,6 @@
 #define CACHESIZE 512
 
 class App;
-int asciiart();
-const char *ErrorString(u8);
 
 typedef struct TextFaceRec_ {
   char file_path[128];
@@ -112,8 +110,6 @@ public:
   ~Text();
   int Init();
   void InitPen(void);
-  void Begin();
-  void End();
 
   inline u8 GetAdvance(u32 ucs) { return GetAdvance(ucs, GetFace(style)); };
   inline u8 GetAdvance(u32 ucs, u8 astyle) {
@@ -169,7 +165,6 @@ public:
   void ClearScreen();
   void ClearScreen(u16 *, u8, u8, u8);
   void CopyScreen(u16 *src, u16 *dst);
-  void SwapScreens();
   bool BlitToFramebuffer();
 
   void PrintChar(u32 ucs);

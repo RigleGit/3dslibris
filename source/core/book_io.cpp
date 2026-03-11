@@ -13,14 +13,15 @@
 #include "epub.h"
 #include "main.h"
 #include "parse.h"
+#include "string_utils.h"
 #include "unzip.h"
+#include <algorithm>
 #include <ctype.h>
+#include <set>
 #include <stdio.h>
 #include <string.h>
 #include <sys/param.h>
 #include <sys/stat.h>
-#include <algorithm>
-#include <set>
 #include <unordered_map>
 #include <vector>
 
@@ -47,15 +48,6 @@ struct MobiPageCacheHeader {
   u16 toc_heuristic;
   u16 toc_unresolved;
 };
-
-static uint64_t Fnv1a64(const std::string &s) {
-  uint64_t hash = 1469598103934665603ULL;
-  for (size_t i = 0; i < s.size(); i++) {
-    hash ^= (uint8_t)s[i];
-    hash *= 1099511628211ULL;
-  }
-  return hash;
-}
 
 static void EnsureMobiCacheDirs() {
   static bool initialized = false;
@@ -106,8 +98,8 @@ static std::string BuildMobiPageCachePath(const char *book_path, App *app) {
 
   uint64_t h = Fnv1a64(key);
   char out[192];
-  snprintf(out, sizeof(out), "%s/%016llx.mpc",
-           kMobiCacheDir, (unsigned long long)h);
+  snprintf(out, sizeof(out), "%s/%016llx.mpc", kMobiCacheDir,
+           (unsigned long long)h);
   return std::string(out);
 }
 
@@ -130,9 +122,9 @@ static bool TryLoadMobiPageCache(Book *book, const char *book_path, App *app) {
     return false;
   }
   if (hdr.magic != kMobiPageCacheMagic ||
-      hdr.version != kMobiPageCacheVersion ||
-      hdr.page_count == 0 || hdr.page_count > 10000 ||
-      hdr.chapter_count > 4000 || hdr.title_len > 1000) {
+      hdr.version != kMobiPageCacheVersion || hdr.page_count == 0 ||
+      hdr.page_count > 10000 || hdr.chapter_count > 4000 ||
+      hdr.title_len > 1000) {
     fclose(fp);
     remove(cache_path.c_str());
     return false;
@@ -179,8 +171,7 @@ static bool TryLoadMobiPageCache(Book *book, const char *book_path, App *app) {
       }
       std::string ctitle;
       ctitle.resize(title_len);
-      if (title_len > 0 &&
-          fread(&ctitle[0], 1, title_len, fp) != title_len) {
+      if (title_len > 0 && fread(&ctitle[0], 1, title_len, fp) != title_len) {
         ok = false;
         break;
       }
@@ -282,16 +273,6 @@ static void SaveMobiPageCache(Book *book, const char *book_path, App *app) {
   fclose(fp);
   if (!ok)
     remove(cache_path.c_str());
-}
-
-static bool HasExtCI(const char *name, const char *ext) {
-  if (!name || !ext)
-    return false;
-  size_t nlen = strlen(name);
-  size_t elen = strlen(ext);
-  if (elen == 0 || nlen < elen)
-    return false;
-  return strcasecmp(name + nlen - elen, ext) == 0;
 }
 
 static bool LooksLikeValidUtf8Bytes(const std::string &s) {
@@ -495,12 +476,12 @@ static size_t CountMojibakeMarkers(const std::string &utf8) {
   // Typical markers when valid UTF-8 bytes were decoded as Windows-1252 first
   // (e.g. “ -> â€œ, ’ -> â€™, accented letters -> Ã¡, Ã©, ...).
   size_t score = 0;
-  score += CountNeedleOccurrences(utf8, "\xC3\x83");               // Ã
-  score += CountNeedleOccurrences(utf8, "\xC3\x82");               // Â
-  score += CountNeedleOccurrences(utf8, "\xC3\xA2\xE2\x82\xAC");   // â€
-  score += CountNeedleOccurrences(utf8, "\xC3\xA2\xE2\x80\x99");   // â€™
-  score += CountNeedleOccurrences(utf8, "\xC3\xA2\xE2\x80\x9C");   // â€œ
-  score += CountNeedleOccurrences(utf8, "\xC3\xA2\xE2\x80\x9D");   // â€
+  score += CountNeedleOccurrences(utf8, "\xC3\x83");             // Ã
+  score += CountNeedleOccurrences(utf8, "\xC3\x82");             // Â
+  score += CountNeedleOccurrences(utf8, "\xC3\xA2\xE2\x82\xAC"); // â€
+  score += CountNeedleOccurrences(utf8, "\xC3\xA2\xE2\x80\x99"); // â€™
+  score += CountNeedleOccurrences(utf8, "\xC3\xA2\xE2\x80\x9C"); // â€œ
+  score += CountNeedleOccurrences(utf8, "\xC3\xA2\xE2\x80\x9D"); // â€
   return score;
 }
 
@@ -530,7 +511,8 @@ static std::string DecodeMobiBytesToUtf8(const std::string &in, u32 encoding,
     return DecodeUtf16ToUtf8(in);
 
   const bool raw_is_utf8 = LooksLikeValidUtf8Bytes(in);
-  const size_t invalid_utf8_leads = raw_is_utf8 ? 0 : CountUtf8InvalidLeadBytes(in);
+  const size_t invalid_utf8_leads =
+      raw_is_utf8 ? 0 : CountUtf8InvalidLeadBytes(in);
   const bool mostly_utf8 =
       !in.empty() && (invalid_utf8_leads * 1000 <= in.size() * 2); // <=0.2%
   if (IsMobiUtf8Encoding(encoding))
@@ -711,8 +693,8 @@ static std::string FoldLatinForMatch(const std::string &in) {
 
 static bool StartsWithChapterPrefix(const std::string &folded) {
   static const char *kPrefixes[] = {
-      "chapter", "capitulo", "parte", "part", "seccion",
-      "section", "book",     "libro",
+      "chapter", "capitulo", "parte", "part",
+      "seccion", "section",  "book",  "libro",
   };
   for (size_t i = 0; i < sizeof(kPrefixes) / sizeof(kPrefixes[0]); i++) {
     const char *prefix = kPrefixes[i];
@@ -734,8 +716,8 @@ static bool IsRomanHeadingToken(const std::string &token) {
     return false;
   for (size_t i = 0; i < token.size(); i++) {
     char c = token[i];
-    if (c != 'i' && c != 'v' && c != 'x' && c != 'l' && c != 'c' &&
-        c != 'd' && c != 'm')
+    if (c != 'i' && c != 'v' && c != 'x' && c != 'l' && c != 'c' && c != 'd' &&
+        c != 'm')
       return false;
   }
   return true;
@@ -759,8 +741,8 @@ static bool IsUpperAsciiRomanToken(const std::string &token) {
     return false;
   for (size_t i = 0; i < clean.size(); i++) {
     char c = clean[i];
-    if (c != 'I' && c != 'V' && c != 'X' && c != 'L' && c != 'C' &&
-        c != 'D' && c != 'M')
+    if (c != 'I' && c != 'V' && c != 'X' && c != 'L' && c != 'C' && c != 'D' &&
+        c != 'M')
       return false;
   }
   return true;
@@ -799,7 +781,8 @@ static int CountAsciiWords(const std::string &line) {
   return words;
 }
 
-static bool EndsWithStandaloneDigits(const std::string &folded, int *digits_out) {
+static bool EndsWithStandaloneDigits(const std::string &folded,
+                                     int *digits_out) {
   if (digits_out)
     *digits_out = 0;
   if (folded.empty())
@@ -1043,10 +1026,11 @@ static size_t PruneMobiFrontMatterTocCluster(Book *book, App *app) {
 
   if (app) {
     char msg[224];
-    snprintf(msg, sizeof(msg),
-             "MOBI: TOC front-matter pruned removed=%u remain=%u front_limit<=%u",
-             (unsigned)prefix_count, (unsigned)kept.size(),
-             (unsigned)front_page_limit);
+    snprintf(
+        msg, sizeof(msg),
+        "MOBI: TOC front-matter pruned removed=%u remain=%u front_limit<=%u",
+        (unsigned)prefix_count, (unsigned)kept.size(),
+        (unsigned)front_page_limit);
     app->PrintStatus(msg);
   }
   return prefix_count;
@@ -1061,7 +1045,8 @@ static bool LooksLikeStructuredMobiChapterTitle(const std::string &title) {
     return true;
 
   size_t sp = compact.find(' ');
-  std::string first = (sp == std::string::npos) ? compact : compact.substr(0, sp);
+  std::string first =
+      (sp == std::string::npos) ? compact : compact.substr(0, sp);
   std::string first_folded =
       (sp == std::string::npos) ? folded : folded.substr(0, folded.find(' '));
   if (IsUpperAsciiRomanToken(first) && IsRomanHeadingToken(first_folded))
@@ -1078,8 +1063,8 @@ static bool LooksLikeStructuredMobiChapterTitle(const std::string &title) {
   return false;
 }
 
-static bool IsMobiHeuristicChapterSetNoisy(
-    Book *book, MobiChapterQualityStats *stats_out) {
+static bool IsMobiHeuristicChapterSetNoisy(Book *book,
+                                           MobiChapterQualityStats *stats_out) {
   if (!book)
     return false;
   const std::vector<ChapterEntry> &chapters = book->GetChapters();
@@ -1215,7 +1200,8 @@ struct PlainTextStreamState {
   bool completed;
 };
 
-static PlainLineChunk ReadNextLineChunk(const std::string &text, size_t *cursor) {
+static PlainLineChunk ReadNextLineChunk(const std::string &text,
+                                        size_t *cursor) {
   PlainLineChunk out;
   out.text.clear();
   out.has_newline = false;
@@ -1290,9 +1276,10 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
     bool next_strong = false;
     bool next_candidate = false;
     if (state->detect_heuristic_headings) {
-      curr_candidate = LooksLikePlainChapterHeading(state->curr.text, &curr_strong);
-      next_candidate = state->next.valid &&
-                       LooksLikePlainChapterHeading(state->next.text, &next_strong);
+      curr_candidate =
+          LooksLikePlainChapterHeading(state->curr.text, &curr_strong);
+      next_candidate = state->next.valid && LooksLikePlainChapterHeading(
+                                                state->next.text, &next_strong);
     }
 
     if (state->detect_heuristic_headings && curr_candidate &&
@@ -1433,10 +1420,9 @@ static void BuildFb2FallbackChapters(Book *book) {
         (i + 1 < lines.size()) &&
         LooksLikePlainChapterHeading(lines[i + 1], &next_strong);
 
-    if (curr_candidate &&
-        ShouldAcceptHeuristicHeading(lines[i], prev_blank, next_blank,
-                                     prev_candidate, next_candidate,
-                                     curr_strong)) {
+    if (curr_candidate && ShouldAcceptHeuristicHeading(
+                              lines[i], prev_blank, next_blank, prev_candidate,
+                              next_candidate, curr_strong)) {
       AddChapterAtPageIfUnique(book, line_pages[i], lines[i], 0);
     }
 
@@ -1565,8 +1551,8 @@ static std::string DecodeRtfToUtf8(const std::string &rtf) {
       while (p < rtf.size() && isalpha((unsigned char)rtf[p]))
         p++;
       std::string word = rtf.substr(i + 1, p - (i + 1));
-      if (p < rtf.size() && (rtf[p] == '-' || rtf[p] == '+' ||
-                             isdigit((unsigned char)rtf[p]))) {
+      if (p < rtf.size() &&
+          (rtf[p] == '-' || rtf[p] == '+' || isdigit((unsigned char)rtf[p]))) {
         p++;
         while (p < rtf.size() && isdigit((unsigned char)rtf[p]))
           p++;
@@ -1625,15 +1611,14 @@ static u8 ParseRtfFile(Book *book, const char *path) {
   return ParsePlainTextBuffer(book, text);
 }
 
-static u16 ReadBE16(const u8 *p) {
-  return (u16)((u16)p[0] << 8 | (u16)p[1]);
-}
+static u16 ReadBE16(const u8 *p) { return (u16)((u16)p[0] << 8 | (u16)p[1]); }
 
 static u32 ReadBE32(const u8 *p) {
   return (u32)((u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | (u32)p[3]);
 }
 
-static bool ParseMobiOffsets(const std::string &raw, std::vector<u32> *offsets) {
+static bool ParseMobiOffsets(const std::string &raw,
+                             std::vector<u32> *offsets) {
   if (!offsets || raw.size() < 78)
     return false;
 
@@ -1877,10 +1862,10 @@ static bool ParseMobiTagMap(const u8 *data, size_t len, u32 control_bytes,
   return true;
 }
 
-static void ParseMobiCncxRecords(
-    const std::string &raw, const std::vector<u32> &offsets, u32 first_record,
-    u32 record_count, u32 encoding,
-    std::unordered_map<u32, std::string> *cncx_text) {
+static void
+ParseMobiCncxRecords(const std::string &raw, const std::vector<u32> &offsets,
+                     u32 first_record, u32 record_count, u32 encoding,
+                     std::unordered_map<u32, std::string> *cncx_text) {
   if (!cncx_text)
     return;
   cncx_text->clear();
@@ -1997,7 +1982,8 @@ static bool ParseMobiStructuredToc(const std::string &raw,
     if (hdr.count == 0)
       continue;
 
-    const size_t idxt_entries_end = (size_t)hdr.start + 4 + (size_t)hdr.count * 2;
+    const size_t idxt_entries_end =
+        (size_t)hdr.start + 4 + (size_t)hdr.count * 2;
     if (idxt_entries_end > rec_len)
       continue;
 
@@ -2105,10 +2091,11 @@ static std::string DecodeUtf16ToUtf8(const std::string &in) {
   }
 
   while (i + 1 < in.size()) {
-    u16 w1 = little_endian ? ((u16)(unsigned char)in[i] |
-                              ((u16)(unsigned char)in[i + 1] << 8))
-                           : (((u16)(unsigned char)in[i] << 8) |
-                              (u16)(unsigned char)in[i + 1]);
+    u16 w1 =
+        little_endian
+            ? ((u16)(unsigned char)in[i] | ((u16)(unsigned char)in[i + 1] << 8))
+            : (((u16)(unsigned char)in[i] << 8) |
+               (u16)(unsigned char)in[i + 1]);
     i += 2;
     u32 cp = w1;
     if (w1 >= 0xD800 && w1 <= 0xDBFF && i + 1 < in.size()) {
@@ -2173,8 +2160,8 @@ static bool DecompressPalmDocRecord(const u8 *src, size_t src_len,
 static void AppendParagraphBreak(std::string *out) {
   if (!out)
     return;
-  while (!out->empty() && (out->back() == ' ' || out->back() == '\t' ||
-                           out->back() == '\r'))
+  while (!out->empty() &&
+         (out->back() == ' ' || out->back() == '\t' || out->back() == '\r'))
     out->pop_back();
   if (out->empty()) {
     out->append("\n\n");
@@ -2200,12 +2187,11 @@ static void AppendSingleSpace(std::string *out) {
 }
 
 static bool IsMobiBlockTag(const std::string &name) {
-  static const char *kTags[] = {"p",     "div",      "section", "article",
-                                "h1",    "h2",       "h3",      "h4",
-                                "h5",    "h6",       "tr",      "table",
-                                "li",    "ul",       "ol",      "blockquote",
-                                "pre",   "header",   "footer",  "aside",
-                                "title", "mbp:pagebreak"};
+  static const char *kTags[] = {
+      "p",      "div",   "section", "article",      "h1",  "h2",
+      "h3",     "h4",    "h5",      "h6",           "tr",  "table",
+      "li",     "ul",    "ol",      "blockquote",   "pre", "header",
+      "footer", "aside", "title",   "mbp:pagebreak"};
   for (size_t i = 0; i < sizeof(kTags) / sizeof(kTags[0]); i++) {
     if (name == kTags[i])
       return true;
@@ -2239,7 +2225,8 @@ struct MobiDeferredState {
   u64 t_after_toc;
 };
 
-static std::unordered_map<const Book *, MobiDeferredState> g_mobi_deferred_states;
+static std::unordered_map<const Book *, MobiDeferredState>
+    g_mobi_deferred_states;
 
 static int MobiHeadingTagLevel(const std::string &name) {
   if (name.size() == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6')
@@ -2268,8 +2255,9 @@ static bool PageHasHeadingNeedle(const std::vector<std::string> &lines,
   return false;
 }
 
-static size_t BuildMobiChaptersFromHints(Book *book,
-                                         const std::vector<MobiHeadingHint> &hints) {
+static size_t
+BuildMobiChaptersFromHints(Book *book,
+                           const std::vector<MobiHeadingHint> &hints) {
   if (!book || hints.empty() || book->GetPageCount() == 0)
     return 0;
 
@@ -2311,9 +2299,9 @@ static size_t BuildMobiChaptersFromHints(Book *book,
   return mapped;
 }
 
-static int FindMobiHeadingNearPage(
-    const std::vector<std::vector<std::string>> &page_lines,
-    const std::string &needle, u16 guess_page, u16 radius) {
+static int
+FindMobiHeadingNearPage(const std::vector<std::vector<std::string>> &page_lines,
+                        const std::string &needle, u16 guess_page, u16 radius) {
   if (needle.size() < 3 || page_lines.empty())
     return -1;
   const u16 page_count = (u16)page_lines.size();
@@ -2366,7 +2354,8 @@ static size_t BuildMobiChaptersFromStructuredToc(
   const u32 denom = (text_len > 0) ? text_len : 1;
 
   for (size_t i = 0; i < entries.size(); i++) {
-    std::string clean = CollapseAsciiWhitespace(TrimAsciiWhitespace(entries[i].title));
+    std::string clean =
+        CollapseAsciiWhitespace(TrimAsciiWhitespace(entries[i].title));
     if (clean.empty())
       continue;
 
@@ -2383,7 +2372,8 @@ static size_t BuildMobiChaptersFromStructuredToc(
       const u16 guess = (u16)(ratio * (double)(page_count - 1));
       best_page = (int)guess;
 
-      // Refine around the expected position when title appears in heading lines.
+      // Refine around the expected position when title appears in heading
+      // lines.
       if (needs_heading_search) {
         int refined = FindMobiHeadingNearPage(page_lines, needle, guess, 32);
         if (refined >= 0)
@@ -2436,7 +2426,8 @@ struct MobiTocFinalizeResult {
 };
 
 static void FinalizeMobiPreparedToc(
-    Book *book, App *app, const std::vector<MobiStructuredTocEntry> &structured_toc,
+    Book *book, App *app,
+    const std::vector<MobiStructuredTocEntry> &structured_toc,
     bool have_structured_toc, bool structured_from_filepos,
     const std::vector<MobiHeadingHint> &heading_hints, u32 text_len_for_pos,
     MobiTocFinalizeResult *out) {
@@ -2490,7 +2481,8 @@ static void FinalizeMobiPreparedToc(
     } else {
       book->ClearChapters();
       for (size_t i = 0; i < fallback.size(); i++) {
-        book->AddChapter(fallback[i].page, fallback[i].title, fallback[i].level);
+        book->AddChapter(fallback[i].page, fallback[i].title,
+                         fallback[i].level);
       }
     }
   }
@@ -2503,7 +2495,8 @@ static void FinalizeMobiPreparedToc(
     if (mapped_hints < 2) {
       book->ClearChapters();
       for (size_t i = 0; i < fallback.size(); i++) {
-        book->AddChapter(fallback[i].page, fallback[i].title, fallback[i].level);
+        book->AddChapter(fallback[i].page, fallback[i].title,
+                         fallback[i].level);
       }
     } else {
       mapped_chapters = mapped_hints;
@@ -2517,7 +2510,8 @@ static void FinalizeMobiPreparedToc(
       size_t miss = heading_hints.size() - mapped_hints;
       unresolved = (miss > 65535) ? 65535 : (u16)miss;
     }
-    TocQuality quality = (unresolved == 0) ? TOC_QUALITY_STRONG : TOC_QUALITY_MIXED;
+    TocQuality quality =
+        (unresolved == 0) ? TOC_QUALITY_STRONG : TOC_QUALITY_MIXED;
     book->SetTocConfidence(quality, mapped, 0, unresolved);
   } else if (!structured_used) {
     PruneMobiFrontMatterTocCluster(book, app);
@@ -2528,13 +2522,14 @@ static void FinalizeMobiPreparedToc(
       book->ClearTocConfidence();
       if (app) {
         char msg[224];
-        snprintf(msg, sizeof(msg),
-                 "MOBI: TOC heuristic rejected ch=%u uniq=%u early=%u/%u noisy=%u "
-                 "structured=%u win<=%u",
-                 (unsigned)q.chapters, (unsigned)q.unique_pages,
-                 (unsigned)q.early_hits, (unsigned)q.chapters,
-                 (unsigned)(q.tiny_titles + q.noisy_titles),
-                 (unsigned)q.structured_titles, (unsigned)q.early_window);
+        snprintf(
+            msg, sizeof(msg),
+            "MOBI: TOC heuristic rejected ch=%u uniq=%u early=%u/%u noisy=%u "
+            "structured=%u win<=%u",
+            (unsigned)q.chapters, (unsigned)q.unique_pages,
+            (unsigned)q.early_hits, (unsigned)q.chapters,
+            (unsigned)(q.tiny_titles + q.noisy_titles),
+            (unsigned)q.structured_titles, (unsigned)q.early_window);
         app->PrintStatus(msg);
       }
     }
@@ -2757,7 +2752,8 @@ static bool IsMobiLikelyTocTitle(const std::string &title) {
       contains_ci("search") || contains_ci("table of contents") ||
       contains_ci("contents"))
     return false;
-  if (contains_ci("ep_prh_") || contains_ci("kindle:") || contains_ci("navpoint"))
+  if (contains_ci("ep_prh_") || contains_ci("kindle:") ||
+      contains_ci("navpoint"))
     return false;
 
   // Avoid obvious long prose lines.
@@ -2800,7 +2796,8 @@ static int ScoreMobiTocTitle(const std::string &title) {
   return score;
 }
 
-static bool ParseMobiInlineFileposToc(const std::string &markup_utf8, u32 text_len,
+static bool ParseMobiInlineFileposToc(const std::string &markup_utf8,
+                                      u32 text_len,
                                       std::vector<MobiStructuredTocEntry> *out,
                                       App *app) {
   if (!out)
@@ -2869,8 +2866,8 @@ static bool ParseMobiInlineFileposToc(const std::string &markup_utf8, u32 text_l
           std::min(scan_limit, tag_end + (size_t)2048);
       size_t close = markup_utf8.find("</a", tag_end + 1);
       if (close == std::string::npos || close >= close_probe_limit)
-        close = FindAsciiNoCase(markup_utf8, "</a", tag_end + 1,
-                                close_probe_limit);
+        close =
+            FindAsciiNoCase(markup_utf8, "</a", tag_end + 1, close_probe_limit);
       if (close == std::string::npos || close <= tag_end) {
         pos = tag_end + 1;
         continue;
@@ -2934,7 +2931,8 @@ static bool ParseMobiInlineFileposToc(const std::string &markup_utf8, u32 text_l
       structured_like++;
     if (ScoreMobiTocTitle(e.title) < 0)
       low_quality++;
-    if (!out->empty() && out->back().pos == e.pos && out->back().title == e.title)
+    if (!out->empty() && out->back().pos == e.pos &&
+        out->back().title == e.title)
       continue;
     out->push_back(e);
   }
@@ -2949,14 +2947,16 @@ static bool ParseMobiInlineFileposToc(const std::string &markup_utf8, u32 text_l
   bool weak_size = out->size() < min_entries;
   bool weak_structure =
       (out->size() >= 4 && structured_like * 100 < out->size() * 30);
-  bool weak_quality = (out->size() >= 4 && low_quality * 100 > out->size() * 55);
+  bool weak_quality =
+      (out->size() >= 4 && low_quality * 100 > out->size() * 55);
   if (weak_size || weak_structure || weak_quality) {
     if (app) {
       char msg[220];
-      snprintf(msg, sizeof(msg),
-               "MOBI: filepos TOC rejected kept=%u structured=%u lowq=%u min=%u",
-               (unsigned)out->size(), (unsigned)structured_like,
-               (unsigned)low_quality, (unsigned)min_entries);
+      snprintf(
+          msg, sizeof(msg),
+          "MOBI: filepos TOC rejected kept=%u structured=%u lowq=%u min=%u",
+          (unsigned)out->size(), (unsigned)structured_like,
+          (unsigned)low_quality, (unsigned)min_entries);
       app->PrintStatus(msg);
     }
     out->clear();
@@ -2974,8 +2974,9 @@ static bool ParseMobiInlineFileposToc(const std::string &markup_utf8, u32 text_l
   return true;
 }
 
-static std::string ExtractMobiMarkupToText(
-    const std::string &in, std::vector<MobiHeadingHint> *heading_hints) {
+static std::string
+ExtractMobiMarkupToText(const std::string &in,
+                        std::vector<MobiHeadingHint> *heading_hints) {
   std::string out;
   out.reserve(in.size());
   bool in_script = false;
@@ -3035,7 +3036,8 @@ static std::string ExtractMobiMarkupToText(
       } else if (closing && tag_heading_level >= 0 && heading_level >= 0) {
         std::string normalized =
             CollapseAsciiWhitespace(TrimAsciiWhitespace(heading_text));
-        if (heading_hints && normalized.size() >= 3 && normalized.size() <= 180) {
+        if (heading_hints && normalized.size() >= 3 &&
+            normalized.size() <= 180) {
           if (heading_hints->empty() ||
               heading_hints->back().title != normalized ||
               heading_hints->back().level != (u8)heading_level) {
@@ -3148,8 +3150,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   if (TryLoadMobiPageCache(book, path, app)) {
     if (app) {
       char msg[224];
-      snprintf(msg, sizeof(msg),
-               "MOBI: page cache hit pages=%u chapters=%u",
+      snprintf(msg, sizeof(msg), "MOBI: page cache hit pages=%u chapters=%u",
                (unsigned)book->GetPageCount(),
                (unsigned)book->GetChapters().size());
       app->PrintStatus(msg);
@@ -3207,7 +3208,8 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   if (app) {
     char msg[224];
     snprintf(msg, sizeof(msg),
-             "MOBI: header comp=%u enc=%u text_len=%u text_recs=%u first_non_book=%u ncx=%u",
+             "MOBI: header comp=%u enc=%u text_len=%u text_recs=%u "
+             "first_non_book=%u ncx=%u",
              (unsigned)compression, (unsigned)encoding, (unsigned)text_len,
              (unsigned)text_rec_count, (unsigned)first_non_book_index,
              (unsigned)ncx_index);
@@ -3243,14 +3245,15 @@ static u8 ParseMobiFile(Book *book, const char *path) {
                        (size_t)mobi_full_name_len);
       title_ok = true;
     } else if ((size_t)16 + (size_t)mobi_full_name_off +
-                       (size_t)mobi_full_name_len <=
+                   (size_t)mobi_full_name_len <=
                rec0_len) {
       title_raw.assign((const char *)rec0 + 16 + (size_t)mobi_full_name_off,
                        (size_t)mobi_full_name_len);
       title_ok = true;
     }
     if (title_ok) {
-      std::string title_utf8 = DecodeMobiBytesToUtf8(title_raw, encoding, NULL, NULL);
+      std::string title_utf8 =
+          DecodeMobiBytesToUtf8(title_raw, encoding, NULL, NULL);
       title_utf8 = CollapseAsciiWhitespace(TrimAsciiWhitespace(title_utf8));
       if (!title_utf8.empty() && title_utf8.size() < 220)
         book->SetTitle(title_utf8.c_str());
@@ -3282,8 +3285,8 @@ static u8 ParseMobiFile(Book *book, const char *path) {
 
   bool used_utf8_guess = false;
   bool used_legacy_guess = false;
-  std::string utf8 =
-      DecodeMobiBytesToUtf8(merged, encoding, &used_utf8_guess, &used_legacy_guess);
+  std::string utf8 = DecodeMobiBytesToUtf8(merged, encoding, &used_utf8_guess,
+                                           &used_legacy_guess);
   const u64 t_after_decode = osGetTime();
 
   std::vector<MobiHeadingHint> heading_hints;
@@ -3296,9 +3299,9 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   bool have_structured_toc = ParseMobiStructuredToc(
       raw, offsets, ncx_index, encoding, &structured_toc, app);
   if (!have_structured_toc &&
-      ParseMobiInlineFileposToc(
-          utf8, (text_len > 0) ? text_len : (u32)merged.size(), &structured_toc,
-          app)) {
+      ParseMobiInlineFileposToc(utf8,
+                                (text_len > 0) ? text_len : (u32)merged.size(),
+                                &structured_toc, app)) {
     have_structured_toc = true;
     structured_from_filepos = true;
   }
@@ -3327,8 +3330,8 @@ static u8 ParseMobiFile(Book *book, const char *path) {
     return 1;
   }
 
-  const bool pages_done_initial =
-      ContinuePlainTextStreamState(&deferred.stream, deferred.text_utf8, 1200, 96, 1);
+  const bool pages_done_initial = ContinuePlainTextStreamState(
+      &deferred.stream, deferred.text_utf8, 1200, 96, 1);
   deferred.t_after_pages = osGetTime();
 
   if (!pages_done_initial) {
@@ -3342,15 +3345,15 @@ static u8 ParseMobiFile(Book *book, const char *path) {
       app->PrintStatus(msg);
 
       char tmsg[320];
-      snprintf(
-          tmsg, sizeof(tmsg),
-          "MOBI: timing read=%llums decomp=%llums decode=%llums markup=%llums initial=%llums total_open=%llums",
-          (unsigned long long)(t_after_read - t_parse_begin),
-          (unsigned long long)(t_after_decompress - t_after_read),
-          (unsigned long long)(t_after_decode - t_after_decompress),
-          (unsigned long long)(t_after_markup - t_after_decode),
-          (unsigned long long)(deferred.t_after_pages - t_after_markup),
-          (unsigned long long)(deferred.t_after_pages - t_parse_begin));
+      snprintf(tmsg, sizeof(tmsg),
+               "MOBI: timing read=%llums decomp=%llums decode=%llums "
+               "markup=%llums initial=%llums total_open=%llums",
+               (unsigned long long)(t_after_read - t_parse_begin),
+               (unsigned long long)(t_after_decompress - t_after_read),
+               (unsigned long long)(t_after_decode - t_after_decompress),
+               (unsigned long long)(t_after_markup - t_after_decode),
+               (unsigned long long)(deferred.t_after_pages - t_after_markup),
+               (unsigned long long)(deferred.t_after_pages - t_parse_begin));
       app->PrintStatus(tmsg);
       app->PrintStatus("MOBI: parse end");
     }
@@ -3358,34 +3361,39 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   }
 
   MobiTocFinalizeResult toc_result;
-  FinalizeMobiPreparedToc(book, app, deferred.structured_toc, deferred.have_structured_toc,
-                          deferred.structured_from_filepos, deferred.heading_hints,
-                          deferred.text_len_for_pos, &toc_result);
+  FinalizeMobiPreparedToc(
+      book, app, deferred.structured_toc, deferred.have_structured_toc,
+      deferred.structured_from_filepos, deferred.heading_hints,
+      deferred.text_len_for_pos, &toc_result);
   deferred.t_after_toc = osGetTime();
 
   if (app) {
     char msg[320];
-    snprintf(msg, sizeof(msg),
-             "MOBI: text bytes=%u headings=%u mapped=%u structured=%u direct=%u "
-             "chapters=%u guess_utf8=%u guess_legacy=%u filepos_toc=%u",
-             (unsigned)deferred.text_utf8.size(),
-             (unsigned)deferred.heading_hints.size(),
-             (unsigned)toc_result.mapped_chapters,
-             (unsigned)toc_result.structured_entries,
-             (unsigned)toc_result.structured_direct,
-             (unsigned)book->GetChapters().size(),
-             deferred.used_utf8_guess ? 1u : 0u,
-             deferred.used_legacy_guess ? 1u : 0u,
-             toc_result.structured_from_filepos ? 1u : 0u);
+    snprintf(
+        msg, sizeof(msg),
+        "MOBI: text bytes=%u headings=%u mapped=%u structured=%u direct=%u "
+        "chapters=%u guess_utf8=%u guess_legacy=%u filepos_toc=%u",
+        (unsigned)deferred.text_utf8.size(),
+        (unsigned)deferred.heading_hints.size(),
+        (unsigned)toc_result.mapped_chapters,
+        (unsigned)toc_result.structured_entries,
+        (unsigned)toc_result.structured_direct,
+        (unsigned)book->GetChapters().size(),
+        deferred.used_utf8_guess ? 1u : 0u,
+        deferred.used_legacy_guess ? 1u : 0u,
+        toc_result.structured_from_filepos ? 1u : 0u);
     app->PrintStatus(msg);
 
     char tmsg[320];
     snprintf(
         tmsg, sizeof(tmsg),
-        "MOBI: timing read=%llums decomp=%llums decode=%llums markup=%llums pages=%llums toc=%llums total=%llums",
+        "MOBI: timing read=%llums decomp=%llums decode=%llums markup=%llums "
+        "pages=%llums toc=%llums total=%llums",
         (unsigned long long)(deferred.t_after_read - deferred.t_parse_begin),
-        (unsigned long long)(deferred.t_after_decompress - deferred.t_after_read),
-        (unsigned long long)(deferred.t_after_decode - deferred.t_after_decompress),
+        (unsigned long long)(deferred.t_after_decompress -
+                             deferred.t_after_read),
+        (unsigned long long)(deferred.t_after_decode -
+                             deferred.t_after_decompress),
         (unsigned long long)(deferred.t_after_markup - deferred.t_after_decode),
         (unsigned long long)(deferred.t_after_pages - deferred.t_after_markup),
         (unsigned long long)(deferred.t_after_toc - deferred.t_after_pages),
@@ -3672,7 +3680,8 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
 
   App *app = book->GetApp();
   MobiTocFinalizeResult toc_result;
-  FinalizeMobiPreparedToc(book, app, state->structured_toc, state->have_structured_toc,
+  FinalizeMobiPreparedToc(book, app, state->structured_toc,
+                          state->have_structured_toc,
                           state->structured_from_filepos, state->heading_hints,
                           state->text_len_for_pos, &toc_result);
   state->t_after_toc = osGetTime();
@@ -3680,24 +3689,25 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
 
   if (app) {
     char msg[320];
-    snprintf(msg, sizeof(msg),
-             "MOBI: text bytes=%u headings=%u mapped=%u structured=%u direct=%u "
-             "chapters=%u guess_utf8=%u guess_legacy=%u filepos_toc=%u",
-             (unsigned)state->text_utf8.size(),
-             (unsigned)state->heading_hints.size(),
-             (unsigned)toc_result.mapped_chapters,
-             (unsigned)toc_result.structured_entries,
-             (unsigned)toc_result.structured_direct,
-             (unsigned)book->GetChapters().size(),
-             state->used_utf8_guess ? 1u : 0u,
-             state->used_legacy_guess ? 1u : 0u,
-             toc_result.structured_from_filepos ? 1u : 0u);
+    snprintf(
+        msg, sizeof(msg),
+        "MOBI: text bytes=%u headings=%u mapped=%u structured=%u direct=%u "
+        "chapters=%u guess_utf8=%u guess_legacy=%u filepos_toc=%u",
+        (unsigned)state->text_utf8.size(),
+        (unsigned)state->heading_hints.size(),
+        (unsigned)toc_result.mapped_chapters,
+        (unsigned)toc_result.structured_entries,
+        (unsigned)toc_result.structured_direct,
+        (unsigned)book->GetChapters().size(), state->used_utf8_guess ? 1u : 0u,
+        state->used_legacy_guess ? 1u : 0u,
+        toc_result.structured_from_filepos ? 1u : 0u);
     app->PrintStatus(msg);
 
     char tmsg[320];
     snprintf(
         tmsg, sizeof(tmsg),
-        "MOBI: timing read=%llums decomp=%llums decode=%llums markup=%llums pages=%llums toc=%llums total=%llums",
+        "MOBI: timing read=%llums decomp=%llums decode=%llums markup=%llums "
+        "pages=%llums toc=%llums total=%llums",
         (unsigned long long)(state->t_after_read - state->t_parse_begin),
         (unsigned long long)(state->t_after_decompress - state->t_after_read),
         (unsigned long long)(state->t_after_decode - state->t_after_decompress),
@@ -3725,8 +3735,8 @@ static bool ContinueDeferredMobiState(Book *book, MobiDeferredState *state,
     return true;
 
   const u16 pages_before = book->GetPageCount();
-  const bool done = ContinuePlainTextStreamState(&state->stream, state->text_utf8,
-                                                 budget_ms, page_budget, 0);
+  const bool done = ContinuePlainTextStreamState(
+      &state->stream, state->text_utf8, budget_ms, page_budget, 0);
   if (book->GetPageCount() > pages_before)
     state->t_after_pages = osGetTime();
 

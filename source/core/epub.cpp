@@ -29,11 +29,14 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "epub.h"
 
+#include "base64_utils.h"
 #include "book.h"
 #include "expat.h"
 #include "main.h"
 #include "parse.h"
+#include "path_utils.h"
 #include "stb_image.h"
+#include "string_utils.h"
 #include "unzip.h"
 #include "zlib.h"
 #include <3ds.h>
@@ -57,10 +60,10 @@ static const int EPUB_COVER_MAX_DIMENSION = 4096;
 // Safety switch for 3DS stability: TOC/NAV title resolution can be re-enabled
 // once NCX/NAV parsing is fully hardened on real hardware/emulators.
 static const bool EPUB_ENABLE_REAL_TOC_RESOLVE = false;
-static std::string Trim(const std::string &s);
 static std::string NormalizeAsciiSearchText(const std::string &raw,
                                             size_t max_out);
-static bool ParseXmlBuffer(const std::string &xml, XML_StartElementHandler start,
+static bool ParseXmlBuffer(const std::string &xml,
+                           XML_StartElementHandler start,
                            XML_EndElementHandler end,
                            XML_CharacterDataHandler chardata, void *userdata);
 
@@ -115,8 +118,8 @@ static std::string BuildChapterLabelFromText(const std::string &raw_title,
   bool prev_space = true;
   for (size_t i = 0; i < title.size(); i++) {
     unsigned char uc = (unsigned char)title[i];
-    bool is_space = isspace(uc) || title[i] == '\n' || title[i] == '\r' ||
-                    title[i] == '\t';
+    bool is_space =
+        isspace(uc) || title[i] == '\n' || title[i] == '\r' || title[i] == '\t';
     if (is_space) {
       if (!prev_space)
         normalized.push_back(' ');
@@ -136,109 +139,6 @@ static std::string BuildChapterLabelFromText(const std::string &raw_title,
   char label[192];
   snprintf(label, sizeof(label), "%02d - %s", chapter_num, normalized.c_str());
   return std::string(label);
-}
-
-static std::string Trim(const std::string &s) {
-  size_t start = 0;
-  while (start < s.size() && isspace((unsigned char)s[start]))
-    start++;
-  size_t end = s.size();
-  while (end > start && isspace((unsigned char)s[end - 1]))
-    end--;
-  return s.substr(start, end - start);
-}
-
-static std::string UrlDecode(const std::string &input) {
-  std::string out;
-  out.reserve(input.size());
-  for (size_t i = 0; i < input.size(); i++) {
-    if (input[i] == '%' && i + 2 < input.size()) {
-      int value = 0;
-      if (sscanf(input.substr(i + 1, 2).c_str(), "%x", &value) == 1) {
-        out.push_back((char)value);
-        i += 2;
-        continue;
-      }
-    }
-    out.push_back(input[i]);
-  }
-  return out;
-}
-
-static std::string NormalizePath(const std::string &path) {
-  std::string in = path;
-  std::replace(in.begin(), in.end(), '\\', '/');
-  while (!in.empty() && in[0] == '/')
-    in.erase(in.begin());
-
-  std::vector<std::string> parts;
-  std::string cur;
-  for (size_t i = 0; i <= in.size(); i++) {
-    if (i == in.size() || in[i] == '/') {
-      if (cur == "..") {
-        if (!parts.empty())
-          parts.pop_back();
-      } else if (!cur.empty() && cur != ".") {
-        parts.push_back(cur);
-      }
-      cur.clear();
-    } else {
-      cur.push_back(in[i]);
-    }
-  }
-
-  std::string out;
-  for (size_t i = 0; i < parts.size(); i++) {
-    if (i)
-      out.push_back('/');
-    out += parts[i];
-  }
-  return out;
-}
-
-static std::string ToLowerAscii(const std::string &s) {
-  std::string out = s;
-  std::transform(out.begin(), out.end(), out.begin(),
-                 [](unsigned char c) { return (char)tolower(c); });
-  return out;
-}
-
-static std::string BasenamePath(const std::string &path) {
-  if (path.empty())
-    return "";
-  size_t slash = path.find_last_of('/');
-  if (slash == std::string::npos)
-    return path;
-  if (slash + 1 >= path.size())
-    return "";
-  return path.substr(slash + 1);
-}
-
-static std::string StripFragmentAndQuery(const std::string &path) {
-  size_t stop = path.find_first_of("#?");
-  if (stop == std::string::npos)
-    return path;
-  return path.substr(0, stop);
-}
-
-static std::string ResolveRelativePath(const std::string &base_file,
-                                       const std::string &ref_raw) {
-  // Keep fragment for TOC identity (anchors) and strip it only when needed for
-  // physical file lookups.
-  std::string ref = UrlDecode(ref_raw);
-  if (ref.empty())
-    return "";
-  if (ref.find("://") != std::string::npos)
-    return "";
-
-  if (ref[0] == '/') {
-    return NormalizePath(ref);
-  }
-
-  std::string base = base_file;
-  size_t slash = base.find_last_of('/');
-  std::string folder = (slash == std::string::npos) ? "" : base.substr(0, slash + 1);
-  return NormalizePath(folder + ref);
 }
 
 static const char *AttrValue(const char **attr, const char *name) {
@@ -360,7 +260,8 @@ static void toc_proxy_start(void *userdata, const char *el, const char **attr) {
     if (!resolved.empty()) {
       bool mapped = false;
       if (!current_id.empty()) {
-        if (d->fragment_to_href->find(current_id) == d->fragment_to_href->end()) {
+        if (d->fragment_to_href->find(current_id) ==
+            d->fragment_to_href->end()) {
           (*d->fragment_to_href)[current_id] = resolved;
         }
         mapped = true;
@@ -401,67 +302,10 @@ static void toc_proxy_end(void *userdata, const char *el) {
     d->id_stack.pop_back();
 }
 
-static bool IsHtmlNameChar(unsigned char c) {
-  return isalnum(c) || c == '_' || c == ':' || c == '-';
-}
-
-static std::string ExtractHtmlAttrValue(const std::string &tag,
-                                        const std::string &attr_name_lc) {
-  size_t i = 0;
-  while (i < tag.size()) {
-    while (i < tag.size() && isspace((unsigned char)tag[i]))
-      i++;
-    if (i >= tag.size())
-      break;
-
-    size_t key0 = i;
-    while (i < tag.size() && IsHtmlNameChar((unsigned char)tag[i]))
-      i++;
-    if (i == key0) {
-      i++;
-      continue;
-    }
-    std::string key = tag.substr(key0, i - key0);
-    std::transform(key.begin(), key.end(), key.begin(),
-                   [](unsigned char c) { return (char)tolower(c); });
-
-    while (i < tag.size() && isspace((unsigned char)tag[i]))
-      i++;
-    if (i >= tag.size() || tag[i] != '=')
-      continue;
-    i++;
-    while (i < tag.size() && isspace((unsigned char)tag[i]))
-      i++;
-    if (i >= tag.size())
-      break;
-
-    char quote = 0;
-    if (tag[i] == '"' || tag[i] == '\'') {
-      quote = tag[i];
-      i++;
-    }
-    size_t val0 = i;
-    if (quote) {
-      while (i < tag.size() && tag[i] != quote)
-        i++;
-      std::string val = tag.substr(val0, i - val0);
-      if (i < tag.size())
-        i++;
-      if (key == attr_name_lc)
-        return val;
-    } else {
-      while (i < tag.size() && !isspace((unsigned char)tag[i]) && tag[i] != '>')
-        i++;
-      if (key == attr_name_lc)
-        return tag.substr(val0, i - val0);
-    }
-  }
-  return "";
-}
-
-static void BuildTocProxyMapFromHtmlScan(
-    const std::string &xml, const std::string &base_path,
-    std::map<std::string, std::string> *proxy_map) {
+static void
+BuildTocProxyMapFromHtmlScan(const std::string &xml,
+                             const std::string &base_path,
+                             std::map<std::string, std::string> *proxy_map) {
   if (!proxy_map)
     return;
 
@@ -816,7 +660,8 @@ static bool ParseNcxLightweight(const std::string &xml,
   return any;
 }
 
-static bool ParseXmlBuffer(const std::string &xml, XML_StartElementHandler start,
+static bool ParseXmlBuffer(const std::string &xml,
+                           XML_StartElementHandler start,
                            XML_EndElementHandler end,
                            XML_CharacterDataHandler chardata, void *userdata) {
   if (xml.size() > EPUB_TOC_MAX_BYTES)
@@ -927,8 +772,9 @@ static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
   return false;
 }
 
-static bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &out,
-                             App *app = NULL, const char *tag = NULL) {
+static bool ReadZipEntryText(unzFile uf, const std::string &path,
+                             std::string &out, App *app = NULL,
+                             const char *tag = NULL) {
   out.clear();
   const char *t = (tag && *tag) ? tag : "ZIP";
   {
@@ -1029,52 +875,6 @@ static bool ReadZipEntryBinary(unzFile uf, const std::string &path,
   return true;
 }
 
-static int Base64Value(unsigned char c) {
-  if (c >= 'A' && c <= 'Z')
-    return c - 'A';
-  if (c >= 'a' && c <= 'z')
-    return c - 'a' + 26;
-  if (c >= '0' && c <= '9')
-    return c - '0' + 52;
-  if (c == '+' || c == '-')
-    return 62;
-  if (c == '/' || c == '_')
-    return 63;
-  return -1;
-}
-
-static bool DecodeBase64Bytes(const std::string &in, std::vector<u8> *out,
-                              size_t max_bytes) {
-  if (!out)
-    return false;
-  out->clear();
-  if (in.empty())
-    return false;
-
-  out->reserve((in.size() * 3) / 4);
-  int accum = 0;
-  int bits = -8;
-  for (size_t i = 0; i < in.size(); i++) {
-    unsigned char c = (unsigned char)in[i];
-    if (c == '=')
-      break;
-    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
-      continue;
-    int v = Base64Value(c);
-    if (v < 0)
-      return false;
-    accum = (accum << 6) | v;
-    bits += 6;
-    if (bits >= 0) {
-      out->push_back((u8)((accum >> bits) & 0xFF));
-      bits -= 8;
-      if (out->size() > max_bytes)
-        return false;
-    }
-  }
-  return !out->empty();
-}
-
 static bool StartsWithNoCase(const std::string &s, const char *prefix) {
   if (!prefix)
     return false;
@@ -1136,12 +936,9 @@ static bool DecodeDataUriImage(const std::string &href, std::vector<u8> *out,
   return ok;
 }
 
-static bool ResolveSvgImageWrapperPayload(unzFile uf,
-                                          const std::string &svg_path,
-                                          const std::vector<u8> &svg_buf,
-                                          std::vector<u8> *out,
-                                          std::string *resolved_path,
-                                          App *app = NULL) {
+static bool ResolveSvgImageWrapperPayload(
+    unzFile uf, const std::string &svg_path, const std::vector<u8> &svg_buf,
+    std::vector<u8> *out, std::string *resolved_path, App *app = NULL) {
   if (!out || svg_buf.empty() || svg_buf.size() > EPUB_SVG_WRAPPER_MAX_BYTES) {
     if (app)
       app->PrintStatus("EPUB: SVG wrapper skip (size/empty)");
@@ -1169,7 +966,8 @@ static bool ResolveSvgImageWrapperPayload(unzFile uf,
       continue;
 
     size_t name_end = 0;
-    while (name_end < tag.size() && IsHtmlNameChar((unsigned char)tag[name_end]))
+    while (name_end < tag.size() &&
+           IsHtmlNameChar((unsigned char)tag[name_end]))
       name_end++;
     std::string name = ToLowerAscii(tag.substr(0, name_end));
     if (name != "image" && name != "img")
@@ -1206,7 +1004,8 @@ static bool ResolveSvgImageWrapperPayload(unzFile uf,
         *resolved_path = resolved;
       if (app) {
         char msg[192];
-        snprintf(msg, sizeof(msg), "EPUB: SVG wrapper href resolved %s bytes=%u",
+        snprintf(msg, sizeof(msg),
+                 "EPUB: SVG wrapper href resolved %s bytes=%u",
                  resolved.c_str(), (unsigned)out->size());
         app->PrintStatus(msg);
       }
@@ -1661,8 +1460,8 @@ static bool IsLikelyContentItem(const epub_item *item) {
   if (!item)
     return false;
   if (item->media_type == "application/xhtml+xml" ||
-      item->media_type == "text/html" || item->media_type == "application/xml" ||
-      item->media_type == "text/xml")
+      item->media_type == "text/html" ||
+      item->media_type == "application/xml" || item->media_type == "text/xml")
     return true;
 
   std::string href = item->href;
@@ -1788,7 +1587,7 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
       }
     }
 
-    if (too_long * 4 > entries.size())  // >25% suspiciously long labels
+    if (too_long * 4 > entries.size()) // >25% suspiciously long labels
       return false;
     if (empty_href * 2 > entries.size()) // >50% without href
       return false;
@@ -1801,7 +1600,8 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
   };
 
   if (!parsedata.navid.empty() &&
-      FindManifestItemPath(parsedata, parsedata.navid, opf_folder, toc_doc_path)) {
+      FindManifestItemPath(parsedata, parsedata.navid, opf_folder,
+                           toc_doc_path)) {
     if (app) {
       char msg[192];
       snprintf(msg, sizeof(msg), "EPUB: try NAV %s", toc_doc_path.c_str());
@@ -1830,7 +1630,8 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
   }
 
   if (!toc_loaded && !parsedata.tocid.empty() &&
-      FindManifestItemPath(parsedata, parsedata.tocid, opf_folder, toc_doc_path)) {
+      FindManifestItemPath(parsedata, parsedata.tocid, opf_folder,
+                           toc_doc_path)) {
     if (app) {
       char msg[192];
       snprintf(msg, sizeof(msg), "EPUB: try NCX %s", toc_doc_path.c_str());
@@ -1868,7 +1669,8 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
         toc_doc_path = BuildDocPath(opf_folder, item->href);
         if (app) {
           char msg[192];
-          snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s", toc_doc_path.c_str());
+          snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s",
+                   toc_doc_path.c_str());
           app->PrintStatus(msg);
         }
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NAV-FALLBACK")) {
@@ -1903,7 +1705,8 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
         toc_doc_path = BuildDocPath(opf_folder, item->href);
         if (app) {
           char msg[192];
-          snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s", toc_doc_path.c_str());
+          snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s",
+                   toc_doc_path.c_str());
           app->PrintStatus(msg);
         }
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX-FALLBACK")) {
@@ -2138,9 +1941,9 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 2048) {
   return Trim(out);
 }
 
-static std::vector<std::string> BuildPageHeadingLines(Page *page,
-                                                      size_t max_lines = 12,
-                                                      size_t max_line_bytes = 160) {
+static std::vector<std::string>
+BuildPageHeadingLines(Page *page, size_t max_lines = 12,
+                      size_t max_line_bytes = 160) {
   std::vector<std::string> lines;
   if (!page || !page->GetBuffer() || page->GetLength() <= 0 || max_lines == 0)
     return lines;
@@ -2333,15 +2136,14 @@ static bool IsAsciiWordChar(unsigned char c) {
 }
 
 static bool ContainsWholeWordNearTop(const std::string &text,
-                                     const std::string &word,
-                                     size_t max_pos) {
+                                     const std::string &word, size_t max_pos) {
   if (text.empty() || word.empty())
     return false;
   size_t pos = text.find(word);
   while (pos != std::string::npos) {
     if (pos <= max_pos) {
-      bool left_ok = (pos == 0) ||
-                     !IsAsciiWordChar((unsigned char)text[pos - 1]);
+      bool left_ok =
+          (pos == 0) || !IsAsciiWordChar((unsigned char)text[pos - 1]);
       size_t end = pos + word.size();
       bool right_ok =
           (end >= text.size()) || !IsAsciiWordChar((unsigned char)text[end]);
@@ -2528,8 +2330,8 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
 
   for (u16 pass = 0; pass < (allow_wrap ? 2 : 1); pass++) {
     u16 p0 = (pass == 0) ? from_page : 0;
-    u16 p1 = (pass == 0) ? (allow_wrap ? page_count : to_page_exclusive)
-                         : from_page;
+    u16 p1 =
+        (pass == 0) ? (allow_wrap ? page_count : to_page_exclusive) : from_page;
     for (u16 p = p0; p < p1; p++) {
       Page *page = book->GetPage((int)p);
       std::string text = BuildPageSearchText(page, 4096);
@@ -2617,9 +2419,10 @@ static bool FindTocTitlePageGlobal(Book *book, const std::string &toc_title,
   return false;
 }
 
-static bool FindChapterPageFromParsedHeadings(
-    const std::vector<ChapterEntry> &chapters, const std::string &toc_title,
-    u16 min_page, u16 *page_out) {
+static bool
+FindChapterPageFromParsedHeadings(const std::vector<ChapterEntry> &chapters,
+                                  const std::string &toc_title, u16 min_page,
+                                  u16 *page_out) {
   if (!page_out || chapters.empty())
     return false;
 
@@ -2651,7 +2454,8 @@ static bool FindChapterPageFromParsedHeadings(
     } else if ((ctitle.find(query) != std::string::npos ||
                 query.find(ctitle) != std::string::npos) &&
                std::min(ctitle.size(), query.size()) >= 5) {
-      score = 80 + (int)std::min((size_t)20, std::min(ctitle.size(), query.size()) / 2);
+      score = 80 + (int)std::min((size_t)20,
+                                 std::min(ctitle.size(), query.size()) / 2);
     } else if (!tokens.empty()) {
       int token_hits = 0;
       int token_chars = 0;
@@ -2864,7 +2668,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
     }
 
     if (!parsedata.navid.empty() &&
-        FindManifestItemPath(parsedata, parsedata.navid, folder, toc_doc_path)) {
+        FindManifestItemPath(parsedata, parsedata.navid, folder,
+                             toc_doc_path)) {
       if (book && book->GetApp()) {
         char msg[192];
         snprintf(msg, sizeof(msg), "EPUB: try NAV %s", toc_doc_path.c_str());
@@ -2889,7 +2694,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
     }
 
     if (!toc_loaded && !parsedata.tocid.empty() &&
-        FindManifestItemPath(parsedata, parsedata.tocid, folder, toc_doc_path)) {
+        FindManifestItemPath(parsedata, parsedata.tocid, folder,
+                             toc_doc_path)) {
       if (book && book->GetApp()) {
         char msg[192];
         snprintf(msg, sizeof(msg), "EPUB: try NCX %s", toc_doc_path.c_str());
@@ -2917,7 +2723,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
           toc_doc_path = BuildDocPath(folder, item->href);
           if (book && book->GetApp()) {
             char msg[192];
-            snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s", toc_doc_path.c_str());
+            snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s",
+                     toc_doc_path.c_str());
             book->GetApp()->PrintStatus(msg);
           }
           if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
@@ -2947,14 +2754,14 @@ int epub(Book *book, std::string name, bool metadataonly) {
           toc_doc_path = BuildDocPath(folder, item->href);
           if (book && book->GetApp()) {
             char msg[192];
-            snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s", toc_doc_path.c_str());
+            snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s",
+                     toc_doc_path.c_str());
             book->GetApp()->PrintStatus(msg);
           }
-          if (ReadZipEntryText(uf, toc_doc_path, toc_xml, book ? book->GetApp() : NULL,
-                               "NCX-FALLBACK")) {
-            bool parsed =
-                ParseNcxWithExpat(toc_xml, toc_doc_path, &toc_entries,
-                                  book ? book->GetApp() : NULL);
+          if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
+                               book ? book->GetApp() : NULL, "NCX-FALLBACK")) {
+            bool parsed = ParseNcxWithExpat(toc_xml, toc_doc_path, &toc_entries,
+                                            book ? book->GetApp() : NULL);
             if (!parsed)
               parsed = ParseNcxLightweight(toc_xml, toc_doc_path, &toc_entries,
                                            book ? book->GetApp() : NULL);
@@ -3004,7 +2811,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
     if (book && book->GetApp()) {
       char msg[96];
       snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
-               (unsigned)toc_entries.size(), (unsigned)book->GetChapters().size());
+               (unsigned)toc_entries.size(),
+               (unsigned)book->GetChapters().size());
       book->GetApp()->PrintStatus(msg);
       book->GetApp()->PrintStatus("EPUB: TOC resolve end");
     }
@@ -3065,8 +2873,7 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
     total += n;
   }
   unzCloseCurrentFile(uf);
-  if (total <= 0)
-  {
+  if (total <= 0) {
     unzClose(uf);
     return 5;
   }
@@ -3088,10 +2895,10 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
       decodebuf.swap(resolved);
       if (!resolved_path.empty())
         decode_path = resolved_path;
-      if (app)
-      {
+      if (app) {
         char msg[192];
-        snprintf(msg, sizeof(msg), "EPUB: cover SVG wrapper resolved src=%s bytes=%u",
+        snprintf(msg, sizeof(msg),
+                 "EPUB: cover SVG wrapper resolved src=%s bytes=%u",
                  decode_path.c_str(), (unsigned)decodebuf.size());
         app->PrintStatus(msg);
       }
@@ -3231,7 +3038,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   std::map<std::string, u16> page_start_by_href;
   if (app)
     app->PrintStatus("EPUB: TOC map build begin");
-  BuildPageStartMapFromPackage(parsedata, opf_folder, book, &page_start_by_href);
+  BuildPageStartMapFromPackage(parsedata, opf_folder, book,
+                               &page_start_by_href);
   if (app) {
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: TOC map build ok size=%u",
@@ -3242,8 +3050,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   std::vector<toc_entry_t> toc_entries;
   if (app)
     app->PrintStatus("EPUB: TOC entries load begin");
-  bool loaded = LoadTocEntriesFromPackage(uf, parsedata, opf_folder, &toc_entries,
-                                          app);
+  bool loaded =
+      LoadTocEntriesFromPackage(uf, parsedata, opf_folder, &toc_entries, app);
   if (app) {
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: TOC entries load end loaded=%u count=%u",
@@ -3335,7 +3143,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     bool anchor_lookup_failed = false;
     std::string mapped_doc_key;
 
-    const bool has_fragment = toc_entries[i].href.find('#') != std::string::npos;
+    const bool has_fragment =
+        toc_entries[i].href.find('#') != std::string::npos;
     if (has_fragment)
       stat_with_fragment++;
     if (has_fragment) {
@@ -3384,8 +3193,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         }
       }
       if (!have_page) {
-        std::string key_no_fragment_lc =
-            ToLowerAscii(NormalizePath(StripFragmentAndQuery(toc_entries[i].href)));
+        std::string key_no_fragment_lc = ToLowerAscii(
+            NormalizePath(StripFragmentAndQuery(toc_entries[i].href)));
         auto hit_nofrag_lc = page_start_by_href_lc.find(key_no_fragment_lc);
         if (hit_nofrag_lc != page_start_by_href_lc.end()) {
           page = hit_nofrag_lc->second;
@@ -3409,8 +3218,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     }
 
     bool mapped_is_toc_doc = PathLooksLikeTocDocForFallback(mapped_doc_key);
-    if (has_fragment && anchor_lookup_failed && have_page && page_from_doc_start &&
-        mapped_is_toc_doc) {
+    if (has_fragment && anchor_lookup_failed && have_page &&
+        page_from_doc_start && mapped_is_toc_doc) {
       std::string fragment = ExtractHrefFragment(toc_entries[i].href);
       std::string proxy_href;
       if (LookupTocProxyHref(uf, mapped_doc_key, fragment, &toc_proxy_cache,
@@ -3429,7 +3238,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
             }
           }
           if (!proxy_ok) {
-            std::string proxy_nofrag = NormalizePath(StripFragmentAndQuery(proxy_href));
+            std::string proxy_nofrag =
+                NormalizePath(StripFragmentAndQuery(proxy_href));
             if (!proxy_nofrag.empty()) {
               auto hit_nofrag = page_start_by_href.find(proxy_nofrag);
               if (hit_nofrag != page_start_by_href.end()) {
@@ -3450,7 +3260,8 @@ int epub_resolve_toc(Book *book, std::string filepath) {
       }
     }
 
-    if (has_fragment && anchor_lookup_failed && have_page && page_from_doc_start) {
+    if (has_fragment && anchor_lookup_failed && have_page &&
+        page_from_doc_start) {
       u16 heading_page = 0;
       u16 min_heading_page = page;
       if (have_last_resolved_page && last_resolved_page > min_heading_page)
@@ -3465,13 +3276,13 @@ int epub_resolve_toc(Book *book, std::string filepath) {
       }
     }
 
-    if (has_fragment && anchor_lookup_failed && have_page && page_from_doc_start) {
+    if (has_fragment && anchor_lookup_failed && have_page &&
+        page_from_doc_start) {
       u16 title_page = 0;
       bool got_title = false;
       if (!mapped_is_toc_doc) {
-        got_title =
-            FindTocTitlePageInDocRange(book, page, doc_starts, title_match,
-                                       &title_page);
+        got_title = FindTocTitlePageInDocRange(book, page, doc_starts,
+                                               title_match, &title_page);
       } else {
         // Some EPUBs point TOC entries to an index/toc doc with numeric
         // fragments (#3, #7...) that are not real content anchors.
@@ -3487,13 +3298,12 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         u16 search_end = total_pages;
         if (total_pages > 0 && from_page < total_pages) {
           size_t remaining_entries = toc_entries.size() - i;
-          u16 remaining_pages = (from_page < total_pages)
-                                    ? (u16)(total_pages - from_page)
-                                    : 1;
+          u16 remaining_pages =
+              (from_page < total_pages) ? (u16)(total_pages - from_page) : 1;
           u16 expected_span = 1;
           if (remaining_entries > 0)
-            expected_span = (u16)std::max<size_t>(
-                1, (size_t)remaining_pages / remaining_entries);
+            expected_span = (u16)std::max<size_t>(1, (size_t)remaining_pages /
+                                                         remaining_entries);
           u16 search_window = (u16)(expected_span * 4);
           if (search_window < 24)
             search_window = 24;
@@ -3566,20 +3376,22 @@ int epub_resolve_toc(Book *book, std::string filepath) {
   if (app) {
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
-             (unsigned)toc_entries.size(), (unsigned)book->GetChapters().size());
+             (unsigned)toc_entries.size(),
+             (unsigned)book->GetChapters().size());
     app->PrintStatus(msg);
     char map_msg[192];
     snprintf(map_msg, sizeof(map_msg),
-             "EPUB: TOC map stats anchor=%u exact=%u nofrag=%u lower=%u base=%u proxy=%u headfb=%u titlefb=%u titleg=%u skip=%u dup=%u",
+             "EPUB: TOC map stats anchor=%u exact=%u nofrag=%u lower=%u "
+             "base=%u proxy=%u headfb=%u titlefb=%u titleg=%u skip=%u dup=%u",
              (unsigned)stat_anchor, (unsigned)stat_exact, (unsigned)stat_nofrag,
              (unsigned)stat_lc, (unsigned)stat_base, (unsigned)stat_proxy,
-             (unsigned)stat_heading_fallback,
-             (unsigned)stat_title_fallback, (unsigned)stat_title_global,
-             (unsigned)stat_skip_unmatched, (unsigned)stat_skip_dup);
+             (unsigned)stat_heading_fallback, (unsigned)stat_title_fallback,
+             (unsigned)stat_title_global, (unsigned)stat_skip_unmatched,
+             (unsigned)stat_skip_dup);
     app->PrintStatus(map_msg);
 
-    size_t direct_count =
-        stat_anchor + stat_exact + stat_nofrag + stat_lc + stat_base + stat_proxy;
+    size_t direct_count = stat_anchor + stat_exact + stat_nofrag + stat_lc +
+                          stat_base + stat_proxy;
     size_t heuristic_count = stat_heading_fallback + stat_title_fallback;
     const char *quality = "strong";
     TocQuality quality_enum = TOC_QUALITY_STRONG;
@@ -3612,8 +3424,9 @@ int epub_resolve_toc(Book *book, std::string filepath) {
       for (size_t i = 0; i < unresolved_fragment_samples.size(); i++) {
         char sample_msg[192];
         std::string clipped = ClipForDiag(unresolved_fragment_samples[i], 100);
-        snprintf(sample_msg, sizeof(sample_msg), "EPUB: TOC unresolved href[%u]=%s",
-                 (unsigned)i, clipped.c_str());
+        snprintf(sample_msg, sizeof(sample_msg),
+                 "EPUB: TOC unresolved href[%u]=%s", (unsigned)i,
+                 clipped.c_str());
         app->PrintStatus(sample_msg);
       }
     } else if (stat_with_fragment > 0 && stat_anchor == 0) {

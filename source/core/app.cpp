@@ -29,8 +29,8 @@
 
 #include "book.h"
 #include "bookmark_menu.h"
-#include "chapter_menu.h"
 #include "button.h"
+#include "chapter_menu.h"
 #include "font.h"
 #include "main.h"
 #include "parse.h"
@@ -45,27 +45,9 @@
 #define ORIENTATION_DIAG 0
 #endif
 
+namespace {} // end anonymous namespace
+#include "color_utils.h"
 namespace {
-
-static inline u16 RGB565FromU8(float r, float g, float b) {
-  if (r < 0.0f)
-    r = 0.0f;
-  else if (r > 255.0f)
-    r = 255.0f;
-  if (g < 0.0f)
-    g = 0.0f;
-  else if (g > 255.0f)
-    g = 255.0f;
-  if (b < 0.0f)
-    b = 0.0f;
-  else if (b > 255.0f)
-    b = 255.0f;
-
-  const u16 rr = (u16)(((int)r) >> 3);
-  const u16 gg = (u16)(((int)g) >> 2);
-  const u16 bb = (u16)(((int)b) >> 3);
-  return (u16)((rr << 11) | (gg << 5) | bb);
-}
 
 #if ORIENTATION_DIAG
 static int g_orientation_touch_diag_budget = 0;
@@ -88,7 +70,6 @@ App::App() {
   orientation = false;
   paraspacing = 1;
   paraindent = 0;
-  brightness = 1;
   colorMode = 0;
 
   key.down = KEY_DOWN;
@@ -524,7 +505,6 @@ int App::Run(void) {
     case APP_MODE_QUIT:
       prefs->Write();
       return 0;
-      break;
 
     case APP_MODE_PREFS:
       PrefsHandleEvent();
@@ -561,16 +541,6 @@ int App::Run(void) {
     }
   }
   return 0;
-}
-
-void App::SetBrightness(u8 b) {
-  // Not available on 3DS - brightness is system-controlled
-  brightness = b % 4;
-}
-
-void App::CycleBrightness() {
-  // Not available on 3DS
-  ++brightness %= 4;
 }
 
 int App::FindBooks() {
@@ -693,9 +663,9 @@ void App::DrawBottomGradientBackground() {
   if (!ts || !ts->screenright)
     return;
 
-  const int w = ts->display.width;   // 240
+  const int w = ts->display.width;       // 240
   const int stride = ts->display.height; // 400 (software page stride)
-  const int h = 320;                 // bottom screen logical height
+  const int h = 320;                     // bottom screen logical height
   if (w <= 0 || stride <= 0)
     return;
 
@@ -717,10 +687,10 @@ void App::DrawBottomGradientBackground() {
     for (int y = 0; y < h; y++) {
       const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
       for (int x = 0; x < w; x++) {
-        const float dx = (w > 1)
-                             ? (((float)x - (float)(w - 1) * 0.5f) /
-                                ((float)(w - 1) * 0.5f))
-                             : 0.0f;
+        const float dx =
+            (w > 1)
+                ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
+                : 0.0f;
         const float edge = fabsf(dx);
 
         float r = 244.0f + (238.0f - 244.0f) * tY;
@@ -932,9 +902,8 @@ void App::UpdateStatus() {
 
       // Draw fill
       if (draw_page_count > 1 && page_num > 0) {
-        int fillW =
-            (int)(((float)(barEnd - barStart - 4) * page_num) /
-                  (draw_page_count - 1));
+        int fillW = (int)(((float)(barEnd - barStart - 4) * page_num) /
+                          (draw_page_count - 1));
         if (fillW > 0) {
           ts->FillRect(barStart + 2, barY + 2, barStart + 2 + fillW,
                        barY + barHeight - 2, fgColor);
@@ -981,7 +950,8 @@ void App::SetOrientation(bool turned_right) {
 #if ORIENTATION_DIAG
   g_orientation_touch_diag_budget = 2;
   char msg[96];
-  snprintf(msg, sizeof(msg), "ORIENT set turned_right=%d", turned_right ? 1 : 0);
+  snprintf(msg, sizeof(msg), "ORIENT set turned_right=%d",
+           turned_right ? 1 : 0);
   PrintStatus(msg);
 #endif
 }
@@ -1018,9 +988,3 @@ void App::PrintStatus(const char *msg) {
 }
 
 void App::PrintStatus(std::string msg) { PrintStatus(msg.c_str()); }
-
-void App::SetProgress(int amount) {
-  // TODO: implement progress bar for 3DS
-}
-
-// parse_error is defined in app_book.cpp

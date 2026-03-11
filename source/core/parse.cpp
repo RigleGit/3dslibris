@@ -1,4 +1,4 @@
-/* 
+/*
 
 dslibris - an ebook reader for the Nintendo DS.
 
@@ -29,81 +29,72 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "parse.h"
 
-#include <stdio.h>
 #include "app.h"
+#include <stdio.h>
 
-bool iswhitespace(u8 c)
-{
-	switch (c)
-	{
-	case ' ':
-	case '\t':
-	case '\n':
-		return true;
-		break;
-	default:
-		return false;
-		break;
-	}
+bool iswhitespace(u8 c) {
+  switch (c) {
+  case ' ':
+  case '\t':
+  case '\n':
+    return true;
+  default:
+    return false;
+  }
 }
 
-void parse_init(parsedata_t *data)
-{
-	data->stacksize = 0;
-	data->pos = 0;
-	data->book = NULL;
-	data->prefs = NULL;
-	data->screen = 0;
-	data->pen.x = 0;
-	data->pen.y = 0;
-	data->linebegan = false;
-	data->bold = false;
-	data->italic = false;
-	data->docpath.clear();
-	data->doc_title.clear();
-	data->doc_heading.clear();
-	data->collecting_fb2_binary = false;
-	data->fb2_binary_too_large = false;
-	data->fb2_binary_id.clear();
-	data->fb2_binary_data.clear();
-	data->fb2_mode = false;
-	data->fb2_section_depth = 0;
-	data->fb2_title_depth = 0;
-	data->fb2_title_capture_depth = 0;
-	for (int i = 0; i < 32; i++)
-		data->fb2_section_has_chapter[i] = false;
-	data->fb2_title_text.clear();
-	strcpy((char*)data->buf,"");
-	data->buflen = 0;
-	data->status = 0;
-	data->pagecount = 0;
+void parse_init(parsedata_t *data) {
+  data->stacksize = 0;
+  data->pos = 0;
+  data->book = NULL;
+  data->prefs = NULL;
+  data->screen = 0;
+  data->pen.x = 0;
+  data->pen.y = 0;
+  data->linebegan = false;
+  data->bold = false;
+  data->italic = false;
+  data->docpath.clear();
+  data->doc_title.clear();
+  data->doc_heading.clear();
+  data->collecting_fb2_binary = false;
+  data->fb2_binary_too_large = false;
+  data->fb2_binary_id.clear();
+  data->fb2_binary_data.clear();
+  data->fb2_mode = false;
+  data->fb2_section_depth = 0;
+  data->fb2_title_depth = 0;
+  data->fb2_title_capture_depth = 0;
+  for (int i = 0; i < 32; i++)
+    data->fb2_section_has_chapter[i] = false;
+  data->fb2_title_text.clear();
+  strcpy((char *)data->buf, "");
+  data->buflen = 0;
+  data->status = 0;
+  data->pagecount = 0;
 }
 
-void parse_error(XML_Parser p, char* msg)
-{
-	sprintf(msg, "%d:%d: %s\n",
-		(int)XML_GetCurrentLineNumber(p),
-		(int)XML_GetCurrentColumnNumber(p),
-		XML_ErrorString(XML_GetErrorCode(p)));
+void parse_error(XML_Parser p, char *msg) {
+  sprintf(msg, "%d:%d: %s\n", (int)XML_GetCurrentLineNumber(p),
+          (int)XML_GetCurrentColumnNumber(p),
+          XML_ErrorString(XML_GetErrorCode(p)));
 }
 
-void parse_push(parsedata_t *data, context_t context)
-{
-	data->stack[data->stacksize++] = context;
+void parse_push(parsedata_t *data, context_t context) {
+  data->stack[data->stacksize++] = context;
 }
 
-context_t parse_pop(parsedata_t *data)
-{
-	if (data->stacksize) data->stacksize--;
-	return data->stack[data->stacksize];
+context_t parse_pop(parsedata_t *data) {
+  if (data->stacksize)
+    data->stacksize--;
+  return data->stack[data->stacksize];
 }
 
-bool parse_in(parsedata_t *data, context_t context)
-{
-	u8 i;
-	for (i=0;i<data->stacksize;i++)
-	{
-		if (data->stack[i] == context) return true;
-	}
-	return false;
+bool parse_in(parsedata_t *data, context_t context) {
+  u8 i;
+  for (i = 0; i < data->stacksize; i++) {
+    if (data->stack[i] == context)
+      return true;
+  }
+  return false;
 }

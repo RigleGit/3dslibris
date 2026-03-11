@@ -49,8 +49,8 @@ https://github.com/rhaleblian/dslibris
 
 */
 
-#include <list>
 #include <deque>
+#include <list>
 #include <sstream>
 #include <unistd.h>
 #include <vector>
@@ -114,7 +114,6 @@ public:
 
   Text *ts;
   Prefs *prefs;        //! User-configurable settings.
-  u8 brightness;       //! DISABLED. 4 levels for the Lite.
   u8 mode;             //! Current mode (browser, prefs, book, font)
   std::string fontdir; //! Directory to search for font files
   bool melonds;        //! Are we running in melonDS?
@@ -147,18 +146,16 @@ public:
   u8 paraspacing, paraindent;
 
   Button prefsButtons[PREFS_BUTTON_COUNT];
-  u8 prefsSelected;
+  int prefsSelected;
 
   class FontMenu *fontmenu; //! Font selection menu.
   class BookmarkMenu *bookmarkmenu;
   class ChapterMenu *chaptermenu;
 
   // app.cpp
-  void CycleBrightness();
   void PrintStatus(const char *msg);
   void PrintStatus(std::string msg);
   int Run(void);
-  void SetProgress(int amount);
   touchPosition TouchRead();
   void UpdateStatus();
   void RequestStatusRedraw();
@@ -194,7 +191,6 @@ private:
 
   int FindBooks();
   void InitScreens();
-  void SetBrightness(u8 b);
   void SetOrientation(bool flipped);
   void ShowFontView(int app_mode);
   void ShowLibraryView();

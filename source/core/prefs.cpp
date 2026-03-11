@@ -44,8 +44,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
   } else if (!strcmp(name, "screen")) {
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "brightness")) {
-        app->brightness = atoi(attr[i + 1]);
-        app->brightness = app->brightness % 4;
+        // Ignored on 3DS (brightness is system-managed).
       } else if (!strcmp(attr[i], "colorMode")) {
         app->colorMode = atoi(attr[i + 1]);
         app->ts->SetColorMode(atoi(attr[i + 1]));

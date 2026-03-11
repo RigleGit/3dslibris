@@ -8,7 +8,8 @@
     Summary:
     - Book domain model (metadata, pages, chapters, bookmarks, parse context).
     - Tracks source path/format and reading progress for persistence.
-    - Adds 3DS-side helpers for browser labels and inline image cache bookkeeping.
+    - Adds 3DS-side helpers for browser labels and inline image cache
+   bookkeeping.
 */
 
 #pragma once
@@ -18,8 +19,8 @@
 #include <3ds.h>
 #include <list>
 #include <stddef.h>
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 typedef enum { FORMAT_UNDEF, FORMAT_XHTML, FORMAT_EPUB } format_t;
@@ -94,6 +95,7 @@ class Book {
   App *app; //! pointer to the App instance.
 
   void ClearInlineImageCache();
+
 public:
   //! Cover thumbnail for library grid (RGB565, scaled to fit)
   u16 *coverPixels;
@@ -145,7 +147,8 @@ public:
   std::list<u16> *GetBookmarks(void);
   const std::vector<ChapterEntry> &GetChapters() const;
   u16 RegisterInlineImage(const std::string &path);
-  void AddChapterAnchor(const std::string &docpath, const std::string &anchor_id);
+  void AddChapterAnchor(const std::string &docpath,
+                        const std::string &anchor_id);
   bool FindChapterAnchorPage(const std::string &href, u16 *page_out) const;
   size_t GetChapterAnchorCount() const;
   void ClearChapterAnchors();
@@ -160,17 +163,12 @@ public:
   bool DrawInlineImage(Text *ts, u16 image_id);
   void AddChapter(u16 page, const std::string &title, u8 level = 0);
   void ClearChapters();
-  int GetNextBookmark(void);
-  int GetPreviousBookmark(void);
-  int GetNextBookmarkedPage(void);
-  int GetPreviousBookmarkedPage(void);
   const char *GetFileName(void);
   const char *GetFolderName(void);
   Page *GetPage();
   Page *GetPage(int i);
   u16 GetPageCount();
   int GetPosition(void);
-  int GetPosition(int offset);
   const char *GetTitle();
   void SetAuthor(std::string &s);
   void SetFileName(const char *filename);
@@ -180,8 +178,6 @@ public:
   void SetPosition(int pos);
   void SetTitle(const char *title);
   Page *AppendPage();
-  Page *AdvancePage();
-  Page *RetreatPage();
   void Close();
   u8 Index();
   void IndexHTML();

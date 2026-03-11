@@ -627,8 +627,8 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     }
 
     int maxHeight = (p->screen == 1) ? 320 : 400;
-    int bottomMargin = (p->screen == 1) ? MIN(ts->margin.bottom, 16)
-                                        : ts->margin.bottom;
+    int bottomMargin =
+        (p->screen == 1) ? MIN(ts->margin.bottom, 16) : ts->margin.bottom;
     if ((p->pen.y + lineheight) > (maxHeight - bottomMargin)) {
       // reached bottom of screen.
       if (p->screen == 1) {
@@ -696,12 +696,12 @@ void end(void *data, const char *el) {
   if (p->fb2_mode) {
     if (XmlNameEquals(el, "title")) {
       if (p->fb2_title_depth > 0) {
-        bool finishing_capture = (p->fb2_title_depth == 1 &&
-                                  p->fb2_title_capture_depth > 0 &&
-                                  p->fb2_title_capture_depth ==
-                                      p->fb2_section_depth);
+        bool finishing_capture =
+            (p->fb2_title_depth == 1 && p->fb2_title_capture_depth > 0 &&
+             p->fb2_title_capture_depth == p->fb2_section_depth);
         if (finishing_capture && p->book) {
-          std::string chapter_title = NormalizeFb2ChapterTitle(p->fb2_title_text);
+          std::string chapter_title =
+              NormalizeFb2ChapterTitle(p->fb2_title_text);
           if (!chapter_title.empty()) {
             int level = p->fb2_section_depth > 0 ? p->fb2_section_depth - 1 : 0;
             if (level > 255)
@@ -959,6 +959,28 @@ void Book::AddChapterAnchor(const std::string &docpath,
   }
 }
 
+/*
+ * FindChapterAnchorPage — resolve a TOC href to the page that contains
+ * the corresponding anchor.
+ *
+ * Real-world EPUBs (especially hand-converted or poorly-tooled ones) can have
+ * inconsistent paths or casing between the TOC and the actual XHTML documents.
+ * This function uses a multi-tier lookup to maximise the chance of finding the
+ * correct page:
+ *
+ *  1. Exact match on the normalised href key (path#anchor).
+ *  2. Case-insensitive exact match (covers case-folding mismatches).
+ *  3. Same-document match: find an anchor in the same document as the target
+ *     href (determined by doc-start page), even if paths differ textually.
+ *  4. Fuzzy anchor match: if the anchor ID's "token" prefix or trailing digits
+ *     match another anchor in the same document, accept it.
+ *  5. Basename match: same anchor ID under the same filename, ignoring dirs.
+ *  6. Global anchor match: any registered anchor with the same ID, regardless
+ *     of which document it appears in.
+ *
+ * Ambiguous results (multiple distinct pages for the same tier) are skipped in
+ * favour of the next tier to avoid silently jumping to the wrong page.
+ */
 bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
   if (!page_out)
     return false;
@@ -981,15 +1003,16 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
     }
   }
 
-  // Robust fallback for malformed EPUBs where TOC path and parsed doc path differ
-  // but anchor IDs are still consistent.
+  // Robust fallback for malformed EPUBs where TOC path and parsed doc path
+  // differ but anchor IDs are still consistent.
   size_t hash = key.find('#');
   if (hash != std::string::npos && hash + 1 < key.size()) {
     std::string key_path_lc = ToLowerAsciiLocal(key.substr(0, hash));
     std::string key_base_lc = ToLowerAsciiLocal(BasenamePathLocal(key_path_lc));
     std::string key_anchor_lc = ToLowerAsciiLocal(key.substr(hash + 1));
     u16 target_doc_page = 0;
-    bool has_target_doc = FindChapterDocStartPage(key_path_lc, &target_doc_page);
+    bool has_target_doc =
+        FindChapterDocStartPage(key_path_lc, &target_doc_page);
 
     bool path_anchor_found = false;
     u16 path_anchor_page = 0;
@@ -1012,7 +1035,8 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
         continue;
       std::string kv_path_lc = ToLowerAsciiLocal(kv.first.substr(0, kv_hash));
       std::string kv_base_lc = ToLowerAsciiLocal(BasenamePathLocal(kv_path_lc));
-      std::string kv_anchor_lc = ToLowerAsciiLocal(kv.first.substr(kv_hash + 1));
+      std::string kv_anchor_lc =
+          ToLowerAsciiLocal(kv.first.substr(kv_hash + 1));
       bool exact_anchor = (kv_anchor_lc == key_anchor_lc);
 
       if (exact_anchor) {
@@ -1062,8 +1086,7 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
                      cand_token.size() > key_digits.size() &&
                      cand_token.size() <= key_digits.size() + 4 &&
                      cand_token.compare(cand_token.size() - key_digits.size(),
-                                       key_digits.size(),
-                                       key_digits) == 0) {
+                                        key_digits.size(), key_digits) == 0) {
             fuzzy_match = true;
           }
 
@@ -1100,7 +1123,9 @@ bool Book::FindChapterAnchorPage(const std::string &href, u16 *page_out) const {
   return false;
 }
 
-size_t Book::GetChapterAnchorCount() const { return chapter_anchor_pages.size(); }
+size_t Book::GetChapterAnchorCount() const {
+  return chapter_anchor_pages.size();
+}
 
 void Book::ClearChapterAnchors() { chapter_anchor_pages.clear(); }
 
@@ -1114,7 +1139,8 @@ void Book::SetChapterDocStartPage(const std::string &docpath, u16 page) {
     chapter_doc_start_pages[key] = page;
 }
 
-bool Book::FindChapterDocStartPage(const std::string &href, u16 *page_out) const {
+bool Book::FindChapterDocStartPage(const std::string &href,
+                                   u16 *page_out) const {
   if (!page_out)
     return false;
   if (href.empty())
@@ -1149,7 +1175,8 @@ bool Book::FindChapterDocStartPage(const std::string &href, u16 *page_out) const
   return false;
 }
 
-const std::unordered_map<std::string, u16> &Book::GetChapterDocStartPages() const {
+const std::unordered_map<std::string, u16> &
+Book::GetChapterDocStartPages() const {
   return chapter_doc_start_pages;
 }
 
@@ -1164,30 +1191,6 @@ void Book::AddChapter(u16 page, const std::string &title, u8 level) {
 }
 
 void Book::ClearChapters() { chapters.clear(); }
-
-int Book::GetNextBookmark() {
-  //! nyi
-  return -1337;
-}
-
-int GotoNextBookmarkedPage() {
-  //! nyi
-  return -1337;
-}
-
-int Book::GetPreviousBookmark() {
-  //! Return previous page index,
-  //! relative to current one.
-  //! nyi
-  return -1337;
-}
-
-int GotoPreviousBookmarkedPage() { return -1337; }
-
-int Book::GetPosition(int offset) {
-  //! For the character offset, get the page.
-  return -1337;
-}
 
 Page *Book::GetPage() { return pages[position]; }
 
@@ -1213,18 +1216,6 @@ Page *Book::AppendPage() {
   return page;
 }
 
-Page *Book::AdvancePage() {
-  if (position < (int)pages.size())
-    position++;
-  return GetPage();
-}
-
-Page *Book::RetreatPage() {
-  if (position > 0)
-    position--;
-  return GetPage();
-}
-
 void Book::Close() {
   CancelDeferredMobiParse();
   std::vector<Page *>::iterator it = pages.begin();
@@ -1239,5 +1230,4 @@ void Book::Close() {
   ClearChapterDocStartPages();
   ClearInlineImages();
   ClearTocConfidence();
-  // pages.erase(pages.begin(), pages.end());
 }

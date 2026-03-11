@@ -10,6 +10,7 @@
 
 #include "fb2.h"
 
+#include "base64_utils.h"
 #include "stb_image.h"
 #include <ctype.h>
 #include <expat.h>
@@ -107,7 +108,8 @@ static bool BinaryIdMatches(const char *raw, const std::string &wanted) {
   return false;
 }
 
-static void binary_scan_start(void *userData, const char *el, const char **attr) {
+static void binary_scan_start(void *userData, const char *el,
+                              const char **attr) {
   BinaryScanState *s = (BinaryScanState *)userData;
   if (!XmlNameEquals(el, "binary"))
     return;
@@ -149,55 +151,8 @@ static void binary_scan_end(void *userData, const char *el) {
   }
 }
 
-static int Base64Value(unsigned char c) {
-  if (c >= 'A' && c <= 'Z')
-    return c - 'A';
-  if (c >= 'a' && c <= 'z')
-    return c - 'a' + 26;
-  if (c >= '0' && c <= '9')
-    return c - '0' + 52;
-  if (c == '+' || c == '-')
-    return 62;
-  if (c == '/' || c == '_')
-    return 63;
-  return -1;
-}
-
-static bool DecodeBase64Bytes(const std::string &in, std::vector<u8> *out,
-                              size_t max_bytes) {
-  if (!out)
-    return false;
-  out->clear();
-  if (in.empty())
-    return false;
-
-  out->reserve((in.size() * 3) / 4);
-  int accum = 0;
-  int bits = -8;
-  for (size_t i = 0; i < in.size(); i++) {
-    unsigned char c = (unsigned char)in[i];
-    if (c == '=')
-      break;
-    if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
-      continue;
-    int v = Base64Value(c);
-    if (v < 0)
-      return false;
-    accum = (accum << 6) | v;
-    bits += 6;
-    if (bits >= 0) {
-      out->push_back((u8)((accum >> bits) & 0xFF));
-      bits -= 8;
-      if (out->size() > max_bytes)
-        return false;
-    }
-  }
-  return !out->empty();
-}
-
 static bool ParsePass(const std::string &path, void *userData,
-                      XML_StartElementHandler start,
-                      XML_EndElementHandler end,
+                      XML_StartElementHandler start, XML_EndElementHandler end,
                       XML_CharacterDataHandler chardata,
                       bool (*done_check)(void *)) {
   FILE *fp = fopen(path.c_str(), "rb");
@@ -244,8 +199,8 @@ static int DecodeAndScaleToCover(Book *book, const u8 *data, int size) {
     return 10;
 
   int imgW = 0, imgH = 0, channels = 0;
-  unsigned char *pixels = stbi_load_from_memory(data, size, &imgW, &imgH,
-                                                 &channels, 3);
+  unsigned char *pixels =
+      stbi_load_from_memory(data, size, &imgW, &imgH, &channels, 3);
   if (!pixels)
     return 11;
   if (imgW <= 0 || imgH <= 0 || imgW > 2048 || imgH > 2048) {
@@ -312,7 +267,8 @@ int fb2_extract_cover(Book *book, const std::string &fb2path) {
     return 2;
   }
 
-  std::string wanted_id = ids.cover_id.empty() ? ids.first_image_id : ids.cover_id;
+  std::string wanted_id =
+      ids.cover_id.empty() ? ids.first_image_id : ids.cover_id;
   if (wanted_id.empty())
     return 3;
 

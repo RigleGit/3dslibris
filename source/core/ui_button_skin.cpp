@@ -10,6 +10,7 @@
 
 #include "ui_button_skin.h"
 
+#include "color_utils.h"
 #include <algorithm>
 #include <cmath>
 #include <ctype.h>
@@ -66,13 +67,6 @@ static inline float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 static inline float smoothstepf(float a, float b, float x) {
   float t = clampf((x - a) / (b - a), 0.0f, 1.0f);
   return t * t * (3.0f - 2.0f * t);
-}
-
-static inline u16 RGB565FromU8(float r, float g, float b) {
-  const int ri = (int)clampf(r, 0.0f, 255.0f);
-  const int gi = (int)clampf(g, 0.0f, 255.0f);
-  const int bi = (int)clampf(b, 0.0f, 255.0f);
-  return (u16)(((ri >> 3) << 11) | ((gi >> 2) << 5) | (bi >> 3));
 }
 
 static inline void RGB565ToU8(u16 c, int *r, int *g, int *b) {
@@ -171,10 +165,8 @@ static void try_load_icons_once() {
     UiButtonIconId id;
     const char *filename;
   } specs[] = {
-      {UI_BUTTON_ICON_GEAR, "gear.png"},
-      {UI_BUTTON_ICON_NEXT, "next.png"},
-      {UI_BUTTON_ICON_PREV, "prev.png"},
-      {UI_BUTTON_ICON_BACK, "back.png"},
+      {UI_BUTTON_ICON_GEAR, "gear.png"}, {UI_BUTTON_ICON_NEXT, "next.png"},
+      {UI_BUTTON_ICON_PREV, "prev.png"}, {UI_BUTTON_ICON_BACK, "back.png"},
       {UI_BUTTON_ICON_HOME, "home.png"},
   };
 
@@ -249,8 +241,8 @@ static ButtonCacheEntry *cache_alloc(const ButtonCacheKey &key) {
   return slot;
 }
 
-static void put_layer(float *r, float *g, float *b, float *a, float sr, float sg,
-                      float sb, float sa) {
+static void put_layer(float *r, float *g, float *b, float *a, float sr,
+                      float sg, float sb, float sa) {
   float outA = sa + (*a) * (1.0f - sa);
   if (outA <= 0.0001f) {
     *r = *g = *b = *a = 0.0f;
@@ -326,9 +318,10 @@ static void generate_button_bitmap(ButtonCacheEntry *entry) {
         float fg = lerpf(fillTopG, fillBotG, ty);
         float fb = lerpf(fillTopB, fillBotB, ty);
 
-        float nx = (w > 1) ? (((float)x - (float)(w - 1) * 0.5f) /
-                              ((float)(w - 1) * 0.5f))
-                           : 0.0f;
+        float nx =
+            (w > 1)
+                ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
+                : 0.0f;
         float vignette = 1.0f - 0.05f * powf(fabsf(nx), 1.8f);
         fr *= vignette;
         fg *= vignette;
@@ -341,8 +334,8 @@ static void generate_button_bitmap(ButtonCacheEntry *entry) {
         fg = lerpf(fg, borderOuterG, outerBand);
         fb = lerpf(fb, borderOuterB, outerBand);
 
-        float innerBand =
-            smoothstepf(-3.0f, -2.0f, sd) * (1.0f - smoothstepf(-1.3f, -0.4f, sd));
+        float innerBand = smoothstepf(-3.0f, -2.0f, sd) *
+                          (1.0f - smoothstepf(-1.3f, -0.4f, sd));
         fr = lerpf(fr, borderInnerR, innerBand * 0.58f);
         fg = lerpf(fg, borderInnerG, innerBand * 0.58f);
         fb = lerpf(fb, borderInnerB, innerBand * 0.58f);
@@ -370,14 +363,15 @@ static void generate_button_bitmap(ButtonCacheEntry *entry) {
         }
 
         if (state == UI_BUTTON_STATE_SELECTED) {
-          float sel =
-              smoothstepf(-4.0f, -1.4f, sd) * (1.0f - smoothstepf(-1.1f, -0.1f, sd));
+          float sel = smoothstepf(-4.0f, -1.4f, sd) *
+                      (1.0f - smoothstepf(-1.1f, -0.1f, sd));
           fr = lerpf(fr, 250.0f, sel * 0.18f);
           fg = lerpf(fg, 236.0f, sel * 0.18f);
           fb = lerpf(fb, 192.0f, sel * 0.18f);
         }
 
-        float alpha = (state == UI_BUTTON_STATE_DISABLED) ? shapeA * 0.65f : shapeA;
+        float alpha =
+            (state == UI_BUTTON_STATE_DISABLED) ? shapeA * 0.65f : shapeA;
         put_layer(&dr, &dg, &db, &da, fr / 255.0f, fg / 255.0f, fb / 255.0f,
                   alpha);
       }
@@ -389,8 +383,8 @@ static void generate_button_bitmap(ButtonCacheEntry *entry) {
   }
 }
 
-static ButtonCacheEntry *get_or_build_cache(int w, int h, UiButtonSkinState state,
-                                            bool with_icon) {
+static ButtonCacheEntry *
+get_or_build_cache(int w, int h, UiButtonSkinState state, bool with_icon) {
   if (w <= 2 || h <= 2)
     return nullptr;
 
@@ -438,8 +432,8 @@ static void fill_rect_clip(u16 *screen, int stride, int logicalHeight, int x0,
   }
 }
 
-static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight, int x,
-                               int y, int w, int h, UiButtonIconId icon,
+static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight,
+                               int x, int y, int w, int h, UiButtonIconId icon,
                                bool disabled) {
   int iconBlock = UiButtonSkin_IconBlockWidth(h);
   int boxSize = iconBlock - 8;
@@ -486,8 +480,8 @@ static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight, int x
     int bh = boxSize / 2;
     int bx = ox + (boxSize - bw) / 2;
     int by = oy + boxSize / 2;
-    fill_rect_clip(screen, stride, logicalHeight, bx, by, bx + bw, by + bh,
-                   ink, alpha);
+    fill_rect_clip(screen, stride, logicalHeight, bx, by, bx + bw, by + bh, ink,
+                   alpha);
     int roofH = boxSize / 2;
     int cx = ox + boxSize / 2;
     for (int i = 0; i < roofH; i++) {
@@ -520,14 +514,15 @@ static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight, int x
       }
     }
     int tooth = std::max(1, boxSize / 8);
-    fill_rect_clip(screen, stride, logicalHeight, cx - tooth, oy, cx + tooth + 1,
-                   oy + tooth + 2, ink, alpha);
-    fill_rect_clip(screen, stride, logicalHeight, cx - tooth, oy + boxSize - tooth - 2,
-                   cx + tooth + 1, oy + boxSize, ink, alpha);
-    fill_rect_clip(screen, stride, logicalHeight, ox, cy - tooth, ox + tooth + 2,
-                   cy + tooth + 1, ink, alpha);
-    fill_rect_clip(screen, stride, logicalHeight, ox + boxSize - tooth - 2, cy - tooth,
-                   ox + boxSize, cy + tooth + 1, ink, alpha);
+    fill_rect_clip(screen, stride, logicalHeight, cx - tooth, oy,
+                   cx + tooth + 1, oy + tooth + 2, ink, alpha);
+    fill_rect_clip(screen, stride, logicalHeight, cx - tooth,
+                   oy + boxSize - tooth - 2, cx + tooth + 1, oy + boxSize, ink,
+                   alpha);
+    fill_rect_clip(screen, stride, logicalHeight, ox, cy - tooth,
+                   ox + tooth + 2, cy + tooth + 1, ink, alpha);
+    fill_rect_clip(screen, stride, logicalHeight, ox + boxSize - tooth - 2,
+                   cy - tooth, ox + boxSize, cy + tooth + 1, ink, alpha);
   }
 }
 
@@ -630,8 +625,9 @@ void UiButtonSkin_Draw(u16 *screen, int stride, int logicalHeight, int x, int y,
   }
 }
 
-void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalHeight, int x, int y,
-                           int w, int h, UiButtonIconId icon, bool disabled) {
+void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalHeight, int x,
+                           int y, int w, int h, UiButtonIconId icon,
+                           bool disabled) {
   if (!screen || stride <= 0 || w <= 0 || h <= 0 || icon < 0 ||
       icon >= UI_BUTTON_ICON_COUNT)
     return;

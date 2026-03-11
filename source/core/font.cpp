@@ -23,6 +23,7 @@
 #include "app.h"
 #include "button.h"
 #include "main.h"
+#include "string_utils.h"
 #include "text.h"
 #include "touch_utils.h"
 
@@ -42,13 +43,6 @@ enum FontTarget : u8 {
 static const char *kFontTargetLabels[FONT_TARGET_COUNT] = {
     "regular font", "bold font", "italic font", "bold italic font",
     "mono/ui font"};
-
-static std::string ToLowerAscii(const std::string &s) {
-  std::string out = s;
-  for (char &ch : out)
-    ch = (char)tolower((unsigned char)ch);
-  return out;
-}
 
 static std::string BasenameOnly(const std::string &path) {
   size_t slash = path.find_last_of("/\\");
@@ -134,10 +128,10 @@ FontMenu::FontMenu(App *_app)
   dir = app->fontdir;
   findFiles();
 
-  std::sort(files.begin(), files.end(), [](const std::string &a,
-                                           const std::string &b) {
-    return ToLowerAscii(a) < ToLowerAscii(b);
-  });
+  std::sort(files.begin(), files.end(),
+            [](const std::string &a, const std::string &b) {
+              return ToLowerAscii(a) < ToLowerAscii(b);
+            });
 
   for (auto &filename : files) {
     Button *b = new Button(app->ts);
@@ -392,7 +386,8 @@ void FontMenu::draw() {
   LayoutFileFooterButtons(app);
   app->ts->SetPen(6, 14);
   char header[72];
-  snprintf(header, sizeof(header), "select %s", kFontTargetLabels[targetSelected]);
+  snprintf(header, sizeof(header), "select %s",
+           kFontTargetLabels[targetSelected]);
   app->ts->PrintString(header);
 
   for (u8 i = page * pagesize;

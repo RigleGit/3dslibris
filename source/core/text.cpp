@@ -24,16 +24,15 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
   3DS port modifications by Rigle (summary):
   - Added dual-screen framebuffer management for 400x240 (top) and 320x240
     (bottom) software pages.
-  - Added splash/background rendering helpers and sepia/gradient background mode.
+  - Added splash/background rendering helpers and sepia/gradient background
+  mode.
   - Hardened UTF-8 handling and clipping paths used by UI labels and book text.
 */
 
 #include "text.h"
 
 #include <algorithm>
-#include <iostream>
 #include <math.h>
-#include <sstream>
 #include <stdio.h>
 #include <sys/param.h>
 #include <vector>
@@ -47,31 +46,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "version.h"
 
 #define PIXELSIZE 12
-
-extern char msg[];
-std::stringstream ss;
+#include "color_utils.h"
 
 namespace {
-
-static inline u16 RGB565FromU8(float r, float g, float b) {
-  if (r < 0.0f)
-    r = 0.0f;
-  else if (r > 255.0f)
-    r = 255.0f;
-  if (g < 0.0f)
-    g = 0.0f;
-  else if (g > 255.0f)
-    g = 255.0f;
-  if (b < 0.0f)
-    b = 0.0f;
-  else if (b > 255.0f)
-    b = 255.0f;
-
-  const u16 rr = (u16)(((int)r) >> 3);
-  const u16 gg = (u16)(((int)g) >> 2);
-  const u16 bb = (u16)(((int)b) >> 3);
-  return (u16)((rr << 11) | (gg << 5) | bb);
-}
 
 static inline void RGB565ToU8(u16 c, int *r, int *g, int *b) {
   const int r5 = (c >> 11) & 0x1F;
@@ -103,10 +80,9 @@ static inline u16 SepiaGradientPixel(int x, int y, int w, int h) {
   };
 
   const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
-  const float dx = (w > 1)
-                       ? (((float)x - (float)(w - 1) * 0.5f) /
-                          ((float)(w - 1) * 0.5f))
-                       : 0.0f;
+  const float dx =
+      (w > 1) ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
+              : 0.0f;
   const float edge = fabsf(dx);
 
   float r = 244.0f + (238.0f - 244.0f) * tY;
@@ -115,8 +91,7 @@ static inline u16 SepiaGradientPixel(int x, int y, int w, int h) {
 
   const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
 
-  const float bayer =
-      (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) - 0.5f;
+  const float bayer = (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) - 0.5f;
   const u32 h0 = (u32)x * 73856093u;
   const u32 h1 = (u32)y * 19349663u;
   const u32 h2 = (h0 ^ h1 ^ 0x9E3779B9u);
@@ -172,7 +147,8 @@ static void FillSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
 } // namespace
 
 void Text::CopyScreen(u16 *src, u16 *dst) {
-  memcpy(src, dst, display.width * display.height * sizeof(u16));
+  // memcpy(dest, src, n): copy from src buffer into dst buffer.
+  memcpy(dst, src, display.width * display.height * sizeof(u16));
 }
 
 Text::Text() {
@@ -233,7 +209,6 @@ Text::Text() {
   splash_pixels = nullptr;
 
   ClearScreen(offscreen, 255, 255, 255);
-  ss.clear();
 }
 
 Text::~Text() {
@@ -330,11 +305,17 @@ int Text::InitCache(void) {
   //! Use our own cheesey glyph cache.
 
   FT_Init_FreeType(&library);
-  error |= CreateFace(TEXT_STYLE_BROWSER);
-  error |= CreateFace(TEXT_STYLE_REGULAR);
-  error |= CreateFace(TEXT_STYLE_ITALIC);
-  error |= CreateFace(TEXT_STYLE_BOLD);
-  error |= CreateFace(TEXT_STYLE_BOLDITALIC);
+
+  // Load each typeface; keep the first non-zero error code (if any) so callers
+  // can report which face failed, rather than a meaningless bitwise-OR.
+  const int styles[] = {TEXT_STYLE_BROWSER, TEXT_STYLE_REGULAR,
+                        TEXT_STYLE_ITALIC, TEXT_STYLE_BOLD,
+                        TEXT_STYLE_BOLDITALIC};
+  for (int i = 0; i < (int)(sizeof(styles) / sizeof(styles[0])); i++) {
+    FT_Error err = CreateFace(styles[i]);
+    if (err && !error)
+      error = err;
+  }
 
   return error;
 }
@@ -357,17 +338,6 @@ void Text::ReportFace(FT_Face face) {
            face->available_sizes[i].height);
   }
 }
-
-void Text::Begin() {
-  bold = false;
-  italic = false;
-  linebegan = false;
-  stats_hits = 0;
-  stats_misses = 0;
-  hit = false;
-}
-
-void Text::End() {}
 
 int Text::CacheGlyph(u32 ucs, FT_Face face) {
   //! Cache glyph at ucs if there's space.
@@ -636,8 +606,8 @@ u8 Text::GetCharCode(const char *utf8, u32 *ucs) {
       *ucs = cp1252ToUcs(c0);
       return 1;
     }
-    *ucs = ((u32)(c0 & 0x0F) << 12) | ((u32)(c1 & 0x3F) << 6) |
-           (u32)(c2 & 0x3F);
+    *ucs =
+        ((u32)(c0 & 0x0F) << 12) | ((u32)(c1 & 0x3F) << 6) | (u32)(c2 & 0x3F);
     return 3;
   }
 
@@ -842,8 +812,7 @@ void Text::PrintChar(u32 ucs, FT_Face face) {
   // UI text (browser/status) is allowed to use the full screen height.
   int maxY = (screen == screenleft) ? 400 : 320;
   int bottomClip = margin.bottom;
-  if (faces.count(TEXT_STYLE_BROWSER) &&
-      face == faces[TEXT_STYLE_BROWSER]) {
+  if (faces.count(TEXT_STYLE_BROWSER) && face == faces[TEXT_STYLE_BROWSER]) {
     bottomClip = 0;
   }
   if (pen.y > maxY - bottomClip) {
@@ -876,8 +845,7 @@ void Text::PrintChar(u32 ucs, FT_Face face) {
       // Bounds check to prevent buffer overrun
       if (sy >= (u16)maxY || sx >= display.width)
         continue;
-      const size_t dst_index =
-          (size_t)sy * (size_t)display.height + (size_t)sx;
+      const size_t dst_index = (size_t)sy * (size_t)display.height + (size_t)sx;
 
       u16 pixel;
       if (colorMode == 0) {
@@ -1094,7 +1062,6 @@ void Text::PrintSplash(u16 *screen) {
         dst[x] = src[x];
     }
   } else {
-    drawstack(screen);
     if (screen == screenleft)
       DrawFallbackSplash();
   }
@@ -1120,6 +1087,26 @@ void Text::MarkScreenDirty(u16 *target) {
     screenright_dirty = true;
 }
 
+/*
+ * BlitToFramebuffer — transfer our software-rendered pages to 3DS hardware.
+ *
+ * The 3DS framebuffer has a peculiar memory layout: it is column-major and
+ * stored bottom-to-top, with pixels in BGR888 byte order, while our software
+ * pages use row-major RGB565 with a portrait logical coordinate system
+ * (width=240, height=320/400).
+ *
+ * The rotation transform converts from (sx, sy) in logical space to (dx, dy)
+ * in the linear framebuffer.  `turned_right` selects between two mirror-image
+ * orientations — the two ways the user can hold the console sideways.
+ *
+ * Because libctru double-buffers both screens jointly (a single swap flips
+ * both), both the top and bottom backbuffers must be refreshed even if only
+ * one logical page is dirty, otherwise the non-dirty side would show stale
+ * content from a previous backbuffer.
+ *
+ * Returns true if anything was written (and gfxFlushBuffers/gfxSwapBuffers
+ * should be called), false if nothing changed.
+ */
 bool Text::BlitToFramebuffer() {
   if (!screenleft_dirty && !screenright_dirty)
     return false;
@@ -1132,8 +1119,8 @@ bool Text::BlitToFramebuffer() {
 
     // libctru can report dimensions in either orientation depending on screen.
     // Use stride=min and width=max to keep mapping stable.
-    const u32 stride = (fbW < fbH) ? fbW : fbH;         // usually 240
-    const u32 physWidth = (fbW > fbH) ? fbW : fbH;      // 320 or 400
+    const u32 stride = (fbW < fbH) ? fbW : fbH;    // usually 240
+    const u32 physWidth = (fbW > fbH) ? fbW : fbH; // 320 or 400
     const size_t fbSize = (size_t)fbW * (size_t)fbH * 3;
     if (!stride || !physWidth || !fbSize)
       return;

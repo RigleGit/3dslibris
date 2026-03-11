@@ -13,15 +13,15 @@
 
 #include "app.h"
 
+#include <algorithm>
 #include <dirent.h>
 #include <errno.h>
+#include <set>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <algorithm>
-#include <set>
 #include <vector>
 
 #include <3ds.h>
@@ -34,6 +34,7 @@
 #include "main.h"
 #include "mobi.h"
 #include "parse.h"
+#include "string_utils.h"
 #include "text.h"
 
 #ifndef UTF8_FILENAME_DIAG
@@ -89,25 +90,6 @@ static std::string TrimSpaces(const std::string &s) {
   while (end > start && s[end - 1] == ' ')
     end--;
   return s.substr(start, end - start);
-}
-
-static bool HasExtCI(const char *name, const char *ext) {
-  if (!name || !ext)
-    return false;
-  size_t nlen = strlen(name);
-  size_t elen = strlen(ext);
-  if (elen == 0 || nlen < elen)
-    return false;
-  return strcasecmp(name + nlen - elen, ext) == 0;
-}
-
-static uint64_t Fnv1a64(const std::string &s) {
-  uint64_t hash = 1469598103934665603ULL;
-  for (size_t i = 0; i < s.size(); i++) {
-    hash ^= (uint8_t)s[i];
-    hash *= 1099511628211ULL;
-  }
-  return hash;
 }
 
 struct CoverCacheEntry {
@@ -523,9 +505,10 @@ static std::string ComposeLatinCombiningMarks(const std::string &in) {
 
   for (size_t i = 0; i < in.size(); i++) {
     unsigned char c = (unsigned char)in[i];
-    if (i + 2 < in.size() && (c == 'a' || c == 'e' || c == 'i' || c == 'o' ||
-                              c == 'u' || c == 'A' || c == 'E' || c == 'I' ||
-                              c == 'O' || c == 'U' || c == 'n' || c == 'N') &&
+    if (i + 2 < in.size() &&
+        (c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' || c == 'A' ||
+         c == 'E' || c == 'I' || c == 'O' || c == 'U' || c == 'n' ||
+         c == 'N') &&
         (unsigned char)in[i + 1] == 0xCC) {
       unsigned char mark = (unsigned char)in[i + 2];
       const char *rep = nullptr;
@@ -704,9 +687,8 @@ static std::string BuildBrowserDisplayName(Book *book) {
   bool repaired_fullwidth = false;
   bool repaired_legacy = false;
   bool composed_accents = false;
-  std::string normalized =
-      NormalizeDisplayUtf8(raw, &repaired_fullwidth, &repaired_legacy,
-                           &composed_accents);
+  std::string normalized = NormalizeDisplayUtf8(
+      raw, &repaired_fullwidth, &repaired_legacy, &composed_accents);
   if (repaired_fullwidth)
     LogUtf8StageOnce(book, "filename_ff_repair", normalized);
   if (repaired_legacy)
@@ -952,9 +934,8 @@ void App::browser_handleevent() {
   u32 keys = hidKeysDown();
   const u32 release_mask = KEY_TOUCH | KEY_A | KEY_B | KEY_X | KEY_Y |
                            KEY_START | KEY_SELECT | KEY_UP | KEY_DOWN |
-                           KEY_LEFT | KEY_RIGHT | KEY_L | KEY_R |
-                           KEY_CPAD_UP | KEY_CPAD_DOWN | KEY_CPAD_LEFT |
-                           KEY_CPAD_RIGHT;
+                           KEY_LEFT | KEY_RIGHT | KEY_L | KEY_R | KEY_CPAD_UP |
+                           KEY_CPAD_DOWN | KEY_CPAD_LEFT | KEY_CPAD_RIGHT;
   if (browser_wait_input_release) {
     if (hidKeysHeld() & release_mask)
       return;
@@ -1179,8 +1160,7 @@ void App::browser_draw(void) {
                    btnY + kBrowserCellH + 2,
                    0xF800); // Red thick outer bounding box
       ts->DrawRect(btnX - 3, btnY - 3, btnX + kBrowserCellW + 3,
-                   btnY + kBrowserCellH + 3,
-                   0xF800);
+                   btnY + kBrowserCellH + 3, 0xF800);
       ts->SetStyle(TEXT_STYLE_BOLD);
     } else {
       ts->SetStyle(TEXT_STYLE_REGULAR);

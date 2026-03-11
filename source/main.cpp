@@ -27,15 +27,9 @@
 #include <string.h>
 
 #include "app.h"
-#include "book.h"
-#include "button.h"
-#include "expat.h"
-#include "parse.h"
-#include "text.h"
 #include "version.h"
 
 App *app;
-char msg[256];
 
 //! \param vblanks blanking intervals to wait, -1 for forever, default = -1
 int halt(int vblanks) {
@@ -123,28 +117,4 @@ int main(int argc, char **argv) {
 
   gfxExit();
   return 0;
-}
-
-u8 GetParserFace(parsedata_t *pdata) {
-  if (pdata->italic)
-    return TEXT_STYLE_ITALIC;
-  else if (pdata->bold)
-    return TEXT_STYLE_BOLD;
-  else
-    return TEXT_STYLE_REGULAR;
-}
-
-void WriteBufferToCache(parsedata_t *pdata) {
-  // Caching disabled for now
-}
-
-// Splash screen functions - stubbed out for 3DS
-// The DS version used LZ77 decompression to VRAM
-int getSize(u8 *source, u16 *dest, u32 arg) { return *(u32 *)source; }
-
-u8 readByte(u8 *source) { return *source; }
-
-void drawstack(u16 *screen) {
-  // DS splash decompression not available on 3DS
-  // TODO: implement 3DS splash screen
 }
