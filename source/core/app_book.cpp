@@ -25,6 +25,7 @@
 
 #include "book.h"
 #include "button.h"
+#include "debug_log.h"
 #include "main.h"
 #include "parse.h"
 #include "text.h"
@@ -221,9 +222,9 @@ u8 App::OpenBook(void) {
   if (!bookselected)
     return 254;
 
-  PrintStatus("opening book ...");
+  DBG_LOG(this, "opening book ...");
   if (bookselected->GetTitle())
-    PrintStatus(bookselected->GetTitle());
+    DBG_LOG(this, bookselected->GetTitle());
 
   // Fast path: selected book is already parsed and resident.
   if (bookselected->GetPageCount() > 0) {
@@ -233,7 +234,7 @@ u8 App::OpenBook(void) {
         // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
       }
       mode = APP_MODE_BOOK;
-      PrintStatus("OpenBook: reused parsed book");
+      DBG_LOG(this, "OpenBook: reused parsed book");
     }
     if (bookcurrent->GetPosition() >= bookcurrent->GetPageCount())
       bookcurrent->SetPosition(0);
@@ -290,10 +291,8 @@ u8 App::OpenBook(void) {
   }
   bookcurrent = bookselected;
 
-  char msg[64];
   int pageCount = bookcurrent->GetPageCount();
-  sprintf(msg, "Generated %d pages", pageCount);
-  PrintStatus(msg);
+  DBG_LOGF(this, "Generated %d pages", pageCount);
 
   if (pageCount <= 0) {
     PrintStatus("error: book has no parsed pages");
@@ -309,7 +308,7 @@ u8 App::OpenBook(void) {
       // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
     }
     mode = APP_MODE_BOOK;
-    PrintStatus("OpenBook: switched mode to APP_MODE_BOOK");
+    DBG_LOG(this, "OpenBook: switched mode to APP_MODE_BOOK");
   }
 
   if (bookcurrent->GetPosition() >= pageCount)

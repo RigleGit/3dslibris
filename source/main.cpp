@@ -5,7 +5,7 @@
     Ported from dslibris (Nintendo DS).
 
     Copyright (C) 2007-2025 Ray Haleblian
-    3DS port 2025, modified by Rigle.
+    3DS port 2026, modified by Rigle.
 
     Changes by Rigle (summary):
     - 3DS service/bootstrap flow and framebuffer lifecycle.

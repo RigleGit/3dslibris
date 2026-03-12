@@ -18,6 +18,7 @@
 
 #include "app.h"
 #include "book.h"
+#include "debug_log.h"
 #include "text.h"
 
 namespace {
@@ -495,7 +496,7 @@ bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
         char msg[192];
         snprintf(msg, sizeof(msg), "INDEX approx remap sel=%u from=%u to=%u",
                  (unsigned)index, (unsigned)from, (unsigned)to);
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
       *page_out = resolved;
     } else {
@@ -505,7 +506,7 @@ bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
         snprintf(msg, sizeof(msg),
                  "INDEX approx remap rejected sel=%u from=%u to=%u",
                  (unsigned)index, (unsigned)from, (unsigned)to);
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
     }
   } else {

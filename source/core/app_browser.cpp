@@ -29,6 +29,7 @@
 #include "book.h"
 #include "button.h"
 #include "chapter_menu.h"
+#include "debug_log.h"
 #include "epub.h"
 #include "fb2.h"
 #include "main.h"
@@ -628,7 +629,7 @@ static void LogUtf8StageOnce(Book *book, const char *stage,
            "UTF8 flow %-18s len=%u valid=%d bytes=[%s] text=\"%s\"", stage,
            (unsigned)value.size(), LooksLikeValidUtf8(value) ? 1 : 0,
            bytes.c_str(), clipped.c_str());
-  book->GetApp()->PrintStatus(msg);
+  DBG_LOG(book->GetApp(), msg);
 #endif
 }
 
@@ -920,7 +921,7 @@ void App::ProcessJobs(u32 budget_ms) {
     snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%d ms=%llums book=%s",
              job_name(job.type), rc, (unsigned long long)elapsed,
              book->GetFileName() ? book->GetFileName() : "(null)");
-    PrintStatus(msg);
+    DBG_LOG(this, msg);
 
     if (osGetTime() - start_ms >= budget_ms)
       break;

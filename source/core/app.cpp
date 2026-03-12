@@ -32,6 +32,7 @@
 #include "button.h"
 #include "chapter_menu.h"
 #include "font.h"
+#include "debug_log.h"
 #include "main.h"
 #include "parse.h"
 #include "text.h"
@@ -193,7 +194,7 @@ static void log_filename_stage(App *app, const char *stage, const char *value) {
            "FindBooks %-20s len=%u valid=%d bytes=[%s] text=\"%s\"", stage,
            (unsigned)strlen(value), looks_like_valid_utf8(value) ? 1 : 0,
            bytes.c_str(), value);
-  app->PrintStatus(msg);
+  DBG_LOG(app, msg);
 #endif
 }
 
@@ -426,7 +427,7 @@ int App::Run(void) {
   drawBootStatus("Searching for books...", "");
 
   // Construct library.
-  PrintStatus("Searching for books...");
+  DBG_LOG(this, "Searching for books...");
   u64 t_scan_ms = osGetTime();
   if (FindBooks() != ok) {
     PrintStatus("error: no book directory");
@@ -439,13 +440,9 @@ int App::Run(void) {
     drawBootStatus("No se encontraron EPUB", bookdir.c_str());
     return 1;
   }
-  {
-    char msg[96];
-    snprintf(msg, sizeof(msg), "TIMING: scan_books=%llums count=%u",
-             (unsigned long long)(osGetTime() - t_scan_ms),
-             (unsigned)bookcount);
-    PrintStatus(msg);
-  }
+  DBG_LOGF(this, "TIMING: scan_books=%llums count=%u",
+           (unsigned long long)(osGetTime() - t_scan_ms),
+           (unsigned)bookcount);
 
   std::sort(books.begin(), books.end(), &book_title_lessthan);
 
@@ -453,25 +450,21 @@ int App::Run(void) {
   drawBootStatus("Preparing library...", "");
   // Apply key mapping/orientation loaded from prefs.
   SetOrientation(orientation);
-  PrintStatus("Preparing library...");
+  DBG_LOG(this, "Preparing library...");
   u64 t_prepare_ms = osGetTime();
   for (auto &book : books) {
     book->GetBookmarks()->sort();
   }
-  {
-    char msg[96];
-    snprintf(msg, sizeof(msg), "TIMING: prepare_library=%llums",
-             (unsigned long long)(osGetTime() - t_prepare_ms));
-    PrintStatus(msg);
-  }
-  PrintStatus("Library ready.");
+  DBG_LOGF(this, "TIMING: prepare_library=%llums",
+           (unsigned long long)(osGetTime() - t_prepare_ms));
+  DBG_LOG(this, "Library ready.");
 
   // Set up menus.
   PrefsInit();
   browser_init();
   browser_view_dirty = true;
 
-  PrintStatus(VERSION);
+  DBG_LOG(this, VERSION);
 
   // Resume reading from the last session.
   if (reopen && bookcurrent) {
@@ -651,7 +644,7 @@ touchPosition App::TouchRead() {
              "ORIENT touch raw=(%u,%u) mapped=(%u,%u) turned_right=%d",
              (unsigned)raw.px, (unsigned)raw.py, (unsigned)mapped.px,
              (unsigned)mapped.py, orientation ? 1 : 0);
-    PrintStatus(dmsg);
+    DBG_LOG(this, dmsg);
     g_orientation_touch_diag_budget--;
   }
 #endif
@@ -949,10 +942,7 @@ void App::SetOrientation(bool turned_right) {
 
 #if ORIENTATION_DIAG
   g_orientation_touch_diag_budget = 2;
-  char msg[96];
-  snprintf(msg, sizeof(msg), "ORIENT set turned_right=%d",
-           turned_right ? 1 : 0);
-  PrintStatus(msg);
+  DBG_LOGF(this, "ORIENT set turned_right=%d", turned_right ? 1 : 0);
 #endif
 }
 
