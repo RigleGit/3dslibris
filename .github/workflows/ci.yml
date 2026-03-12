@@ -54,7 +54,7 @@ jobs:
             -e DEVKITPRO="$DEVKITPRO" \
             -e DEVKITARM="$DEVKITARM" \
             devkitpro/devkitarm \
-            sh -lc 'make clean && make -j2'
+            sh -lc 'make clean && make -j2 && make debug-3dsx'
 
       - name: Verify outputs
         run: |
@@ -62,6 +62,7 @@ jobs:
           test -f 3dslibris.3dsx
           test -f 3dslibris.smdh
           test -f 3dslibris.elf
+          test -f 3dslibris-debug.3dsx
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -71,3 +72,4 @@ jobs:
             3dslibris.3dsx
             3dslibris.smdh
             3dslibris.elf
+            3dslibris-debug.3dsx

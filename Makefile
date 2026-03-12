@@ -31,17 +31,27 @@ include $(DEVKITARM)/3ds_rules
 #     - icon.png
 #     - <libctru folder>/default_icon.png
 #---------------------------------------------------------------------------------
-TARGET		:=	3dslibris
-BUILD		:=	build
+BASE_TARGET	:=	3dslibris
+DEBUG_TARGET	:=	$(BASE_TARGET)-debug
+DEBUG_BUILD	:=	build-debug
+TARGET		?=	$(BASE_TARGET)
+BUILD		?=	build
 SOURCES		:=	source source/core source/expat
 DATA		:=	data
 INCLUDES	:=	include
 GRAPHICS	:=	gfx
 GFXBUILD	:=	$(BUILD)
-APP_TITLE	:=	3dslibris
-APP_DESCRIPTION	:=	eBook reader for Nintendo 3DS
-APP_AUTHOR	:=	Rigle
+DEFAULT_APP_TITLE	:=	3dslibris
+DEFAULT_APP_DESCRIPTION	:=	eBook reader for Nintendo 3DS
+DEFAULT_APP_AUTHOR	:=	Rigle
+APP_TITLE_OVERRIDE	?=
+APP_DESCRIPTION_OVERRIDE ?=
+APP_AUTHOR_OVERRIDE	?=
+APP_TITLE	:=	$(if $(APP_TITLE_OVERRIDE),$(APP_TITLE_OVERRIDE),$(DEFAULT_APP_TITLE))
+APP_DESCRIPTION	:=	$(if $(APP_DESCRIPTION_OVERRIDE),$(APP_DESCRIPTION_OVERRIDE),$(DEFAULT_APP_DESCRIPTION))
+APP_AUTHOR	:=	$(if $(APP_AUTHOR_OVERRIDE),$(APP_AUTHOR_OVERRIDE),$(DEFAULT_APP_AUTHOR))
 ICON		:=	assets/release/icon.png
+DEBUG_LOGGING	?=	0
 
 # CIA packaging assets (for console testing/install)
 BANNER_IMAGE	:=	assets/release/banner.png
@@ -82,6 +92,11 @@ CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include -I$(P
 			-D__3DS__ -DXML_STATIC -DHAVE_MEMMOVE -DXML_POOR_ENTROPY
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
+
+ifeq ($(DEBUG_LOGGING),1)
+CFLAGS		+=	-DDSLIBRIS_DEBUG
+CXXFLAGS	+=	-DDSLIBRIS_DEBUG
+endif
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
@@ -187,7 +202,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean cia package-sdmc zip-sdmc
+.PHONY: all clean cia package-sdmc zip-sdmc debug-3dsx
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -209,7 +224,21 @@ endif
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf $(GFXBUILD) $(CIA_OUTPUT) $(DISTDIR)
+	@rm -fr $(BUILD) $(DEBUG_BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
+		$(GFXBUILD) $(CIA_OUTPUT) $(DISTDIR) \
+		$(BASE_TARGET).3dsx $(BASE_TARGET).smdh $(BASE_TARGET).elf \
+		$(DEBUG_TARGET).3dsx $(DEBUG_TARGET).smdh $(DEBUG_TARGET).elf
+
+#---------------------------------------------------------------------------------
+debug-3dsx:
+#---------------------------------------------------------------------------------
+	@$(MAKE) --no-print-directory \
+		TARGET=$(DEBUG_TARGET) \
+		BUILD=$(DEBUG_BUILD) \
+		APP_TITLE_OVERRIDE="3dslibris debug" \
+		APP_DESCRIPTION_OVERRIDE="eBook reader for Nintendo 3DS (debug)" \
+		DEBUG_LOGGING=1 \
+		all
 
 #---------------------------------------------------------------------------------
 cia: all
