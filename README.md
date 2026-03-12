@@ -86,6 +86,7 @@ Assets used by default:
 ## Install layout (SD)
 
 Versioned SD template in this repo:
+- `sdmc/books/README.md`
 - `sdmc/3ds/3dslibris/resources/splash.jpg`
 - `sdmc/3ds/3dslibris/resources/ui/icons/png/*.png`
 - `sdmc/3ds/3dslibris/book/README.md`
@@ -99,14 +100,16 @@ Generated install package targets:
 - GitHub Releases: pushing a tag like `v1.0.0` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris.cia`, and `dist/3dslibris-sdmc.zip` to the release
 
 Notes:
+- Homebrew Launcher path: keep the app at `sdmc:/3ds/3dslibris/3dslibris.3dsx`
+- Recommended ebook drop folder: `sdmc:/books/`
 - Default Liberation fonts are bundled in `sdmc:/3ds/3dslibris/font/`
 - You can replace them with other `.ttf`, `.otf`, or `.ttc` fonts if you want to customize the reading/UI typefaces
-- Books are not bundled; place your own `.epub/.fb2/.txt/.rtf/.odt/.mobi` files in `sdmc:/3ds/3dslibris/book/`
+- Legacy per-app book folder also works: `sdmc:/3ds/3dslibris/book/`
 - Runtime files such as `3dslibris.xml`, `3dslibris.log`, and `cache/*` are created by the app on first run
 
 ```text
 sdmc:/3ds/3dslibris/3dslibris.3dsx
-sdmc:/3ds/3dslibris/book/*.epub|*.fb2|*.txt|*.rtf|*.odt|*.mobi
+sdmc:/books/*.epub|*.fb2|*.txt|*.rtf|*.odt|*.mobi
 sdmc:/3ds/3dslibris/font/*.ttf
 sdmc:/3ds/3dslibris/resources/splash.jpg
 sdmc:/3ds/3dslibris/resources/ui/icons/png/{back,gear,home,next,prev}.png

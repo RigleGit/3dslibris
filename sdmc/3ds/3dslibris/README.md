@@ -3,7 +3,7 @@
 This directory mirrors the expected install path on the SD card:
 
 - `3dslibris.3dsx` goes here after build/package
-- `book/` holds user ebooks
+- `book/` is still supported for per-app ebook storage
 - `font/` ships with bundled Liberation `.ttf` files plus the font license text
 - `resources/` contains versioned UI assets from this repository
 
@@ -15,6 +15,8 @@ make package-sdmc
 
 That command creates `dist/sdmc/3ds/3dslibris/` and copies the built
 `3dslibris.3dsx` into it.
+
+For the simplest setup, put user ebooks in `sdmc:/books/`.
 
 The bundled fonts are only defaults. Users can swap them for other compatible
 `.ttf`, `.otf`, or `.ttc` files if they want to customize typography.
