@@ -49,6 +49,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <set>
 #include <stdio.h>
 #include <string.h>
+#include <unordered_map>
 #include <vector>
 
 static const size_t EPUB_TOC_MAX_BYTES = 192 * 1024;
@@ -67,6 +68,11 @@ static bool ParseXmlBuffer(const std::string &xml,
                            XML_StartElementHandler start,
                            XML_EndElementHandler end,
                            XML_CharacterDataHandler chardata, void *userdata);
+
+struct ZipEntryIndex {
+  bool built = false;
+  std::unordered_map<std::string, uLong> offset_by_key;
+};
 
 static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
   std::string base = path;
@@ -712,11 +718,47 @@ static bool EqualsAsciiNoCase(const std::string &a, const std::string &b) {
 }
 
 static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
-                               App *app, const char *tag) {
+                               App *app, const char *tag,
+                               ZipEntryIndex *index = NULL) {
   if (!uf || entry_path.empty())
     return false;
 
   const char *t = (tag && *tag) ? tag : "ZIP";
+
+  if (index && !index->built) {
+    index->built = true;
+    int rc = unzGoToFirstFile(uf);
+    if (rc == UNZ_OK) {
+      do {
+        char fname[1024];
+        unz_file_info fi;
+        if (unzGetCurrentFileInfo(uf, &fi, fname, sizeof(fname), NULL, 0, NULL,
+                                  0) == UNZ_OK) {
+          std::string key = ToLowerAscii(NormalizeZipEntryName(fname));
+          if (!key.empty() && index->offset_by_key.find(key) ==
+                                  index->offset_by_key.end()) {
+            index->offset_by_key[key] = unzGetOffset(uf);
+          }
+        }
+        rc = unzGoToNextFile(uf);
+      } while (rc == UNZ_OK);
+      if (app) {
+        DBG_LOGF(app, "EPUB: ZIP index built entries=%u",
+                 (unsigned)index->offset_by_key.size());
+      }
+    } else if (app) {
+      DBG_LOGF(app, "EPUB: ZIP index build failed rc=%d", rc);
+    }
+  }
+
+  if (index && !index->offset_by_key.empty()) {
+    std::string wanted = ToLowerAscii(NormalizeZipEntryName(entry_path));
+    auto hit = index->offset_by_key.find(wanted);
+    if (hit != index->offset_by_key.end()) {
+      if (unzSetOffset(uf, hit->second) == UNZ_OK)
+        return true;
+    }
+  }
 
   // Fast path: exact match first.
   if (unzLocateFile(uf, entry_path.c_str(), 0) == UNZ_OK)
@@ -775,7 +817,8 @@ static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
 
 static bool ReadZipEntryText(unzFile uf, const std::string &path,
                              std::string &out, App *app = NULL,
-                             const char *tag = NULL) {
+                             const char *tag = NULL,
+                             ZipEntryIndex *index = NULL) {
   out.clear();
   const char *t = (tag && *tag) ? tag : "ZIP";
   {
@@ -786,7 +829,7 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path,
   if (path.empty())
     return false;
   EpubDiag(app, "EPUB: %s locate begin", t);
-  if (!LocateZipEntrySafe(uf, path, app, t)) {
+  if (!LocateZipEntrySafe(uf, path, app, t, index)) {
     EpubDiag(app, "EPUB: %s locate fail", t);
     return false;
   }
@@ -832,7 +875,8 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path,
 
 static bool ReadZipEntryBinary(unzFile uf, const std::string &path,
                                std::vector<u8> *out, size_t max_bytes,
-                               App *app = NULL, const char *tag = NULL) {
+                               App *app = NULL, const char *tag = NULL,
+                               ZipEntryIndex *index = NULL) {
   if (!out)
     return false;
   out->clear();
@@ -840,7 +884,7 @@ static bool ReadZipEntryBinary(unzFile uf, const std::string &path,
     return false;
 
   const char *t = (tag && *tag) ? tag : "ZIP-BIN";
-  if (!LocateZipEntrySafe(uf, path, app, t))
+  if (!LocateZipEntrySafe(uf, path, app, t, index))
     return false;
 
   unz_file_info fi;
@@ -2522,6 +2566,13 @@ int epub(Book *book, std::string name, bool metadataonly) {
   //! Set metadataonly to true if you only want the title and author.
   int rc = 0;
   static epub_data_t parsedata;
+  ZipEntryIndex zip_index;
+#ifdef DSLIBRIS_DEBUG
+  u64 t_parse_begin = osGetTime();
+  u64 t_after_container = t_parse_begin;
+  u64 t_after_rootfile = t_parse_begin;
+  u64 t_after_content = t_parse_begin;
+#endif
   if (book && book->GetApp()) {
     DBG_LOG(book->GetApp(), "EPUB: parse begin");
   }
@@ -2542,6 +2593,9 @@ int epub(Book *book, std::string name, bool metadataonly) {
   parsedata.type = PARSE_CONTAINER;
   rc = epub_parse_currentfile(uf, &parsedata);
   rc = unzCloseCurrentFile(uf);
+#ifdef DSLIBRIS_DEBUG
+  t_after_container = osGetTime();
+#endif
 
   // Extract any leading path for the rootfile.
   // The manifest in the rootfile will list filenames
@@ -2562,6 +2616,9 @@ int epub(Book *book, std::string name, bool metadataonly) {
     epub_parse_currentfile(uf, &parsedata);
     rc = unzCloseCurrentFile(uf);
   }
+#ifdef DSLIBRIS_DEBUG
+  t_after_rootfile = osGetTime();
+#endif
 
   // Stop here if only metadata is required.
   if (metadataonly) {
@@ -2580,6 +2637,11 @@ int epub(Book *book, std::string name, bool metadataonly) {
     unzClose(uf);
     epub_data_delete(&parsedata);
     if (book && book->GetApp()) {
+      DBG_LOGF(book->GetApp(),
+               "EPUB: metadata timing container=%llums opf=%llums total=%llums",
+               (unsigned long long)(t_after_container - t_parse_begin),
+               (unsigned long long)(t_after_rootfile - t_after_container),
+               (unsigned long long)(osGetTime() - t_parse_begin));
       DBG_LOG(book->GetApp(), "EPUB: metadata done");
     }
     return rc;
@@ -2616,17 +2678,23 @@ int epub(Book *book, std::string name, bool metadataonly) {
 
   std::map<std::string, u16> page_start_by_href;
   int chapter_num = 1;
+  size_t spine_doc_index = 0;
   std::vector<std::string *>::iterator it;
   for (it = href.begin(); it != href.end(); it++) {
+    spine_doc_index++;
     size_t pos = (*it)->find_last_of('.');
     if (pos < (*it)->length()) {
       std::string path = BuildDocPath(folder, (*it)->c_str());
       std::string path_key = NormalizePath(path);
 
-      rc = unzLocateFile(uf, path.c_str(), 2); // 2 = case insensitive
-      if (rc == UNZ_OK) {
+      if (LocateZipEntrySafe(uf, path, book ? book->GetApp() : NULL, "SPINE",
+                             &zip_index)) {
         u16 chapter_start_page = book->GetPageCount();
         std::string chapter_label = BuildChapterLabel(path, chapter_num);
+#ifdef DSLIBRIS_DEBUG
+        u64 t_doc_begin = osGetTime();
+        size_t anchors_before = book->GetChapterAnchorCount();
+#endif
         rc = unzOpenCurrentFile(uf);
         parsedata.docpath = path;
         epub_parse_currentfile(uf, &parsedata);
@@ -2643,6 +2711,22 @@ int epub(Book *book, std::string name, bool metadataonly) {
             page_start_by_href[path_key] = chapter_start_page;
           }
         }
+#ifdef DSLIBRIS_DEBUG
+        if (book && book->GetApp()) {
+          u64 doc_ms = osGetTime() - t_doc_begin;
+          unsigned int pages_added =
+              (unsigned int)(book->GetPageCount() - chapter_start_page);
+          unsigned int anchors_added =
+              (unsigned int)(book->GetChapterAnchorCount() - anchors_before);
+          if (doc_ms >= 200 || pages_added >= 40 || anchors_added >= 100) {
+            DBG_LOGF(book->GetApp(),
+                     "EPUB: spine doc %u/%u ms=%llums pages=%u anchors=%u path=%s",
+                     (unsigned)spine_doc_index, (unsigned)href.size(),
+                     (unsigned long long)doc_ms, pages_added, anchors_added,
+                     path.c_str());
+          }
+        }
+#endif
       } else {
         char msg[256];
         sprintf(msg, "NOT FOUND IN ZIP: %s", path.c_str());
@@ -2651,11 +2735,22 @@ int epub(Book *book, std::string name, bool metadataonly) {
     }
     delete *it;
   }
+#ifdef DSLIBRIS_DEBUG
+  t_after_content = osGetTime();
+#endif
   if (book && book->GetApp()) {
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: content done pages=%u",
              (unsigned)book->GetPageCount());
     DBG_LOG(book->GetApp(), msg);
+    DBG_LOGF(book->GetApp(),
+             "EPUB: timing container=%llums opf=%llums spine=%llums total=%llums docs=%u pages=%u",
+             (unsigned long long)(t_after_container - t_parse_begin),
+             (unsigned long long)(t_after_rootfile - t_after_container),
+             (unsigned long long)(t_after_content - t_after_rootfile),
+             (unsigned long long)(t_after_content - t_parse_begin),
+             (unsigned)page_start_by_href.size(),
+             (unsigned)book->GetPageCount());
   }
 
   // Replace fallback chapter names with real TOC/NAV names when available.
