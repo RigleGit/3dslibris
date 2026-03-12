@@ -1,0 +1,32 @@
+FROM devkitpro/devkitarm:latest
+
+ARG BANNERTOOL_REF=master
+ARG MAKEROM_REF=master
+
+# Adds CIA packaging tools missing from the base devkitPro image.
+# Built from source so this image works on amd64 and arm64 hosts.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl git g++ make libpng-dev zlib1g-dev; \
+    rm -rf /var/lib/apt/lists/*; \
+    tmpdir="$(mktemp -d)"; \
+    jobs="$(nproc)"; \
+    \
+    git clone --depth 1 --branch "${BANNERTOOL_REF}" https://github.com/diasurgical/bannertool.git "${tmpdir}/bannertool"; \
+    cd "${tmpdir}/bannertool"; \
+    g++ -std=c++11 -O2 -DVERSION_MAJOR=1 -DVERSION_MINOR=2 -DVERSION_MICRO=0 \
+        source/main.cpp source/cmd.cpp \
+        source/3ds/cbmd.cpp source/3ds/cwav.cpp source/3ds/lz11.cpp \
+        source/pc/wav.cpp source/pc/stb_image.c source/pc/stb_vorbis.c \
+        -Isource -Isource/3ds -Isource/pc -lpng -lz -lm \
+        -o /usr/local/bin/bannertool; \
+    \
+    git clone --depth 1 --branch "${MAKEROM_REF}" https://github.com/3DSGuy/Project_CTR.git "${tmpdir}/Project_CTR"; \
+    cd "${tmpdir}/Project_CTR/makerom"; \
+    make deps -j"${jobs}"; \
+    make -j"${jobs}"; \
+    install -m 0755 bin/makerom /usr/local/bin/makerom; \
+    \
+    rm -rf "${tmpdir}"; \
+    bannertool >/dev/null 2>&1 || true; \
+    makerom >/dev/null 2>&1 || true

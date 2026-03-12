@@ -428,7 +428,9 @@ int App::Run(void) {
 
   // Construct library.
   DBG_LOG(this, "Searching for books...");
+#ifdef DSLIBRIS_DEBUG
   u64 t_scan_ms = osGetTime();
+#endif
   if (FindBooks() != ok) {
     PrintStatus("error: no book directory");
     drawBootStatus("No se encontro carpeta de libros",
@@ -440,9 +442,11 @@ int App::Run(void) {
     drawBootStatus("No se encontraron EPUB", bookdir.c_str());
     return 1;
   }
+#ifdef DSLIBRIS_DEBUG
   DBG_LOGF(this, "TIMING: scan_books=%llums count=%u",
            (unsigned long long)(osGetTime() - t_scan_ms),
            (unsigned)bookcount);
+#endif
 
   std::sort(books.begin(), books.end(), &book_title_lessthan);
 
@@ -451,12 +455,16 @@ int App::Run(void) {
   // Apply key mapping/orientation loaded from prefs.
   SetOrientation(orientation);
   DBG_LOG(this, "Preparing library...");
+#ifdef DSLIBRIS_DEBUG
   u64 t_prepare_ms = osGetTime();
+#endif
   for (auto &book : books) {
     book->GetBookmarks()->sort();
   }
+#ifdef DSLIBRIS_DEBUG
   DBG_LOGF(this, "TIMING: prepare_library=%llums",
            (unsigned long long)(osGetTime() - t_prepare_ms));
+#endif
   DBG_LOG(this, "Library ready.");
 
   // Set up menus.
