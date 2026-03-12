@@ -19,7 +19,7 @@ This repository contains third-party code and assets used by `3dslibris`.
 ### stb_image
 - Location: `include/stb_image.h`, `source/core/stb_image_impl.cpp`
 - Upstream: [nothings/stb](https://github.com/nothings/stb)
-- License: public domain or MIT (at your option)
+- License: public domain
 - Notes: image decoding for covers and inline images.
 
 ## Runtime/toolchain libraries (provided by devkitPro)

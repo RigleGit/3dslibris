@@ -26,7 +26,7 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
   - Subsequent opens are accelerated by persistent page cache
   - TOC quality is heuristic for many files (can be approximate)
 
-## Known limitations (realistic)
+## Known limitations
 - Some EPUB files have malformed anchors; index jumps can be approximate when source metadata is broken.
 - MOBI TOC extraction depends on file structure and may omit or merge entries in some books.
 - No DRM support.
@@ -96,9 +96,10 @@ sdmc:/3ds/3dslibris/resources/...
 - `A/B/L/R`: turn pages
 - `D-Pad Left/Right`: jump between bookmarks
 - `Y`: toggle bookmark
+- `X`: change background color
 - `SELECT`: settings
 - `START`: return to library
-- Touch UI for library, settings, index, bookmarks, font menus
+- Touch UI for library, settings, index, bookmarks, font menus...
 
 ## Documentation
 - Technical deep-dive: [DOCS.md](DOCS.md)

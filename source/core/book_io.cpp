@@ -13,6 +13,7 @@
 #include "epub.h"
 #include "main.h"
 #include "parse.h"
+#include "debug_log.h"
 #include "string_utils.h"
 #include "unzip.h"
 #include <algorithm>
@@ -1031,7 +1032,7 @@ static size_t PruneMobiFrontMatterTocCluster(Book *book, App *app) {
         "MOBI: TOC front-matter pruned removed=%u remain=%u front_limit<=%u",
         (unsigned)prefix_count, (unsigned)kept.size(),
         (unsigned)front_page_limit);
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
   return prefix_count;
 }
@@ -2069,7 +2070,7 @@ static bool ParseMobiStructuredToc(const std::string &raw,
              "MOBI: INDX structured entries=%u with_pos=%u cncx=%u",
              (unsigned)out->size(), (unsigned)with_pos,
              (unsigned)cncx_text.size());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
 
   return !out->empty();
@@ -2476,7 +2477,7 @@ static void FinalizeMobiPreparedToc(
                  "MOBI: filepos TOC mapped=%u direct=%u unresolved=%u",
                  (unsigned)mapped_structured, (unsigned)direct,
                  (unsigned)unresolved);
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
     } else {
       book->ClearChapters();
@@ -2530,7 +2531,7 @@ static void FinalizeMobiPreparedToc(
             (unsigned)q.early_hits, (unsigned)q.chapters,
             (unsigned)(q.tiny_titles + q.noisy_titles),
             (unsigned)q.structured_titles, (unsigned)q.early_window);
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
     }
   }
@@ -2957,7 +2958,7 @@ static bool ParseMobiInlineFileposToc(const std::string &markup_utf8,
           "MOBI: filepos TOC rejected kept=%u structured=%u lowq=%u min=%u",
           (unsigned)out->size(), (unsigned)structured_like,
           (unsigned)low_quality, (unsigned)min_entries);
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
     }
     out->clear();
     return false;
@@ -2969,7 +2970,7 @@ static bool ParseMobiInlineFileposToc(const std::string &markup_utf8,
              "MOBI: filepos TOC entries raw=%u kept=%u structured=%u scan=%uKB",
              (unsigned)raw_entries.size(), (unsigned)out->size(),
              (unsigned)structured_like, (unsigned)(used_scan_limit / 1024));
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
   return true;
 }
@@ -3143,7 +3144,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   App *app = book->GetApp();
   const u64 t_parse_begin = osGetTime();
   if (app)
-    app->PrintStatus("MOBI: parse begin");
+    DBG_LOG(app, "MOBI: parse begin");
 
   g_mobi_deferred_states.erase(book);
 
@@ -3153,13 +3154,13 @@ static u8 ParseMobiFile(Book *book, const char *path) {
       snprintf(msg, sizeof(msg), "MOBI: page cache hit pages=%u chapters=%u",
                (unsigned)book->GetPageCount(),
                (unsigned)book->GetChapters().size());
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
 
       char tmsg[160];
       snprintf(tmsg, sizeof(tmsg), "MOBI: timing cache_total=%llums",
                (unsigned long long)(osGetTime() - t_parse_begin));
-      app->PrintStatus(tmsg);
-      app->PrintStatus("MOBI: parse end");
+      DBG_LOG(app, tmsg);
+      DBG_LOG(app, "MOBI: parse end");
     }
     return 0;
   }
@@ -3213,7 +3214,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
              (unsigned)compression, (unsigned)encoding, (unsigned)text_len,
              (unsigned)text_rec_count, (unsigned)first_non_book_index,
              (unsigned)ncx_index);
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
 
   if (compression != 1 && compression != 2) {
@@ -3342,7 +3343,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
                "MOBI: deferred pagination pending pages=%u text_bytes=%u",
                (unsigned)book->GetPageCount(),
                (unsigned)g_mobi_deferred_states[book].text_utf8.size());
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
 
       char tmsg[320];
       snprintf(tmsg, sizeof(tmsg),
@@ -3354,8 +3355,8 @@ static u8 ParseMobiFile(Book *book, const char *path) {
                (unsigned long long)(t_after_markup - t_after_decode),
                (unsigned long long)(deferred.t_after_pages - t_after_markup),
                (unsigned long long)(deferred.t_after_pages - t_parse_begin));
-      app->PrintStatus(tmsg);
-      app->PrintStatus("MOBI: parse end");
+      DBG_LOG(app, tmsg);
+      DBG_LOG(app, "MOBI: parse end");
     }
     return 0;
   }
@@ -3382,7 +3383,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
         deferred.used_utf8_guess ? 1u : 0u,
         deferred.used_legacy_guess ? 1u : 0u,
         toc_result.structured_from_filepos ? 1u : 0u);
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
 
     char tmsg[320];
     snprintf(
@@ -3398,12 +3399,12 @@ static u8 ParseMobiFile(Book *book, const char *path) {
         (unsigned long long)(deferred.t_after_pages - deferred.t_after_markup),
         (unsigned long long)(deferred.t_after_toc - deferred.t_after_pages),
         (unsigned long long)(deferred.t_after_toc - deferred.t_parse_begin));
-    app->PrintStatus(tmsg);
+    DBG_LOG(app, tmsg);
   }
 
   SaveMobiPageCache(book, path, app);
   if (app)
-    app->PrintStatus("MOBI: parse end");
+    DBG_LOG(app, "MOBI: parse end");
   return 0;
 }
 
@@ -3701,7 +3702,7 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
         (unsigned)book->GetChapters().size(), state->used_utf8_guess ? 1u : 0u,
         state->used_legacy_guess ? 1u : 0u,
         toc_result.structured_from_filepos ? 1u : 0u);
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
 
     char tmsg[320];
     snprintf(
@@ -3715,14 +3716,14 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
         (unsigned long long)(state->t_after_pages - state->t_after_markup),
         (unsigned long long)(state->t_after_toc - state->t_after_pages),
         (unsigned long long)(state->t_after_toc - state->t_parse_begin));
-    app->PrintStatus(tmsg);
+    DBG_LOG(app, tmsg);
 
     char dmsg[160];
     snprintf(dmsg, sizeof(dmsg),
              "MOBI: deferred pagination complete pages=%u chapters=%u",
              (unsigned)book->GetPageCount(),
              (unsigned)book->GetChapters().size());
-    app->PrintStatus(dmsg);
+    DBG_LOG(app, dmsg);
   }
 
   SaveMobiPageCache(book, state->source_path.c_str(), app);
@@ -3755,7 +3756,7 @@ u8 Book::Open() {
 
   char logmsg[256];
   sprintf(logmsg, "Opening: %s", path.c_str());
-  app->PrintStatus(logmsg);
+  DBG_LOG(app, logmsg);
 
   // Page layout is a function of the current style.
   app->ts->SetStyle(TEXT_STYLE_REGULAR);

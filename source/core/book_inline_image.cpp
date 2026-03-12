@@ -11,6 +11,7 @@
 #include "book.h"
 
 #include "base64_utils.h"
+#include "debug_log.h"
 #include "path_utils.h"
 #include "stb_image.h"
 #include "string_utils.h"
@@ -67,7 +68,7 @@ static bool DecodeDataUriImage(const std::string &href, std::vector<u8> *out,
     char msg[128];
     snprintf(msg, sizeof(msg), "EPUB: inline SVG data-uri decode %s bytes=%u",
              ok ? "ok" : "fail", (unsigned)out->size());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
   return ok;
 }
@@ -134,7 +135,7 @@ ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
                        std::string *resolved_path = NULL, App *app = NULL) {
   if (!out || svg_buf.empty() || svg_buf.size() > kSvgWrapperMaxBytes) {
     if (app)
-      app->PrintStatus("EPUB: inline SVG wrapper skip (size/empty)");
+      DBG_LOG(app, "EPUB: inline SVG wrapper skip (size/empty)");
     return false;
   }
   out->clear();
@@ -203,7 +204,7 @@ ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
         snprintf(msg, sizeof(msg),
                  "EPUB: inline SVG wrapper href resolved %s bytes=%u",
                  resolved.c_str(), (unsigned)out->size());
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
       unzClose(uf);
       return true;
@@ -215,7 +216,7 @@ ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
     snprintf(msg, sizeof(msg),
              "EPUB: inline SVG wrapper unresolved tags=%d hrefs=%d path=%s",
              image_tags_seen, href_attempts, svg_path.c_str());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
   unzClose(uf);
   out->clear();
@@ -401,7 +402,7 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
       char msg[192];
       snprintf(msg, sizeof(msg), "EPUB: inline SVG wrapper detected id=%u %s",
                (unsigned)image_id, image_path->c_str());
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
     }
     if (is_svg_wrapper &&
         ResolveSvgWrapperImage(foldername + "/" + filename, *image_path,
@@ -420,14 +421,14 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id) {
                  resolved_svg_path.empty() ? "(unknown)"
                                            : resolved_svg_path.c_str(),
                  (unsigned)compressed.size());
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
     } else if (!has_info && LooksLikeSvgWrapper(*image_path, compressed) &&
                app) {
       char msg[192];
       snprintf(msg, sizeof(msg), "EPUB: inline SVG wrapper unresolved id=%u %s",
                (unsigned)image_id, image_path->c_str());
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
     }
   }
   if (!has_info)

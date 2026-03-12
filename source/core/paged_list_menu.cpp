@@ -16,6 +16,7 @@
 #include "app.h"
 #include "book.h"
 #include "button.h"
+#include "debug_log.h"
 #include "touch_utils.h"
 
 namespace {
@@ -220,7 +221,7 @@ void PagedListMenu::ActivateSelected() {
     snprintf(msg, sizeof(msg), "LIST activate title=%s sel=%u page=%u cur=%u",
              header_title.c_str(), (unsigned)selected, (unsigned)target_page,
              (unsigned)app->bookcurrent->GetPosition());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
   app->bookcurrent->SetPosition(target_page);
   app->mode = APP_MODE_BOOK;

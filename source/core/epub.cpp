@@ -30,6 +30,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "epub.h"
 
 #include "base64_utils.h"
+#include "debug_log.h"
 #include "book.h"
 #include "expat.h"
 #include "main.h"
@@ -544,7 +545,7 @@ static bool ParseNcxWithExpat(const std::string &xml,
     return false;
 
   if (app)
-    app->PrintStatus("EPUB: NCX expat parse begin");
+    DBG_LOG(app, "EPUB: NCX expat parse begin");
 
   ncx_parse_data_t d;
   d.entries = entries;
@@ -557,7 +558,7 @@ static bool ParseNcxWithExpat(const std::string &xml,
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: NCX expat parse end ok=%u entries=%u",
              ok ? 1u : 0u, (unsigned)entries->size());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
 
   return ok && !entries->empty();
@@ -685,7 +686,7 @@ static void EpubDiag(App *app, const char *fmt, const char *arg) {
     snprintf(msg, sizeof(msg), fmt, arg);
   else
     snprintf(msg, sizeof(msg), "%s", fmt);
-  app->PrintStatus(msg);
+  DBG_LOG(app, msg);
 }
 
 static std::string NormalizeZipEntryName(const std::string &name) {
@@ -727,7 +728,7 @@ static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
     char msg[128];
     snprintf(msg, sizeof(msg), "EPUB: %s locate first fail rc=%d", t, rc);
     if (app)
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
     return false;
   }
 
@@ -746,7 +747,7 @@ static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
         snprintf(msg, sizeof(msg), "EPUB: %s locate fallback hit scanned=%u", t,
                  (unsigned)scanned);
         if (app)
-          app->PrintStatus(msg);
+          DBG_LOG(app, msg);
         return true;
       }
     }
@@ -756,7 +757,7 @@ static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
       snprintf(msg, sizeof(msg), "EPUB: %s locate fallback abort scanned=%u", t,
                (unsigned)scanned);
       if (app)
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       break;
     }
     rc = unzGoToNextFile(uf);
@@ -767,7 +768,7 @@ static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
     snprintf(msg, sizeof(msg), "EPUB: %s locate fallback miss scanned=%u rc=%d",
              t, (unsigned)scanned, rc);
     if (app)
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
   }
   return false;
 }
@@ -931,7 +932,7 @@ static bool DecodeDataUriImage(const std::string &href, std::vector<u8> *out,
     char msg[128];
     snprintf(msg, sizeof(msg), "EPUB: SVG data-uri decode %s bytes=%u",
              ok ? "ok" : "fail", (unsigned)out->size());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
   return ok;
 }
@@ -941,7 +942,7 @@ static bool ResolveSvgImageWrapperPayload(
     std::vector<u8> *out, std::string *resolved_path, App *app = NULL) {
   if (!out || svg_buf.empty() || svg_buf.size() > EPUB_SVG_WRAPPER_MAX_BYTES) {
     if (app)
-      app->PrintStatus("EPUB: SVG wrapper skip (size/empty)");
+      DBG_LOG(app, "EPUB: SVG wrapper skip (size/empty)");
     return false;
   }
   out->clear();
@@ -1007,7 +1008,7 @@ static bool ResolveSvgImageWrapperPayload(
         snprintf(msg, sizeof(msg),
                  "EPUB: SVG wrapper href resolved %s bytes=%u",
                  resolved.c_str(), (unsigned)out->size());
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
       return true;
     }
@@ -1018,7 +1019,7 @@ static bool ResolveSvgImageWrapperPayload(
     snprintf(msg, sizeof(msg),
              "EPUB: SVG wrapper unresolved tags=%d hrefs=%d path=%s",
              image_tags_seen, href_attempts, svg_path.c_str());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
   out->clear();
   return false;
@@ -1055,7 +1056,7 @@ BuildTocFragmentProxyMap(unzFile uf, const std::string &doc_path,
     char msg[128];
     snprintf(msg, sizeof(msg), "EPUB: TOC-PROXY map size=%u",
              (unsigned)proxy_map->size());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
 
   return !proxy_map->empty();
@@ -1605,7 +1606,7 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
     if (app) {
       char msg[192];
       snprintf(msg, sizeof(msg), "EPUB: try NAV %s", toc_doc_path.c_str());
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
     }
     if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NAV")) {
       std::vector<toc_entry_t> nav_entries;
@@ -1622,10 +1623,10 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
         *toc_entries = nav_entries;
         toc_loaded = true;
       } else if (app) {
-        app->PrintStatus("EPUB: NAV discarded (low-quality TOC)");
+        DBG_LOG(app, "EPUB: NAV discarded (low-quality TOC)");
       }
     } else if (app) {
-      app->PrintStatus("EPUB: NAV skipped (size/format)");
+      DBG_LOG(app, "EPUB: NAV skipped (size/format)");
     }
   }
 
@@ -1635,13 +1636,13 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
     if (app) {
       char msg[192];
       snprintf(msg, sizeof(msg), "EPUB: try NCX %s", toc_doc_path.c_str());
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
     }
     if (app)
-      app->PrintStatus("EPUB: NCX read call begin");
+      DBG_LOG(app, "EPUB: NCX read call begin");
     bool ncx_read_ok = ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX");
     if (app) {
-      app->PrintStatus(ncx_read_ok ? "EPUB: NCX read call ok"
+      DBG_LOG(app, ncx_read_ok ? "EPUB: NCX read call ok"
                                    : "EPUB: NCX read call fail");
     }
     if (ncx_read_ok) {
@@ -1653,10 +1654,10 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
         *toc_entries = ncx_entries;
         toc_loaded = true;
       } else if (app) {
-        app->PrintStatus("EPUB: NCX discarded (low-quality TOC)");
+        DBG_LOG(app, "EPUB: NCX discarded (low-quality TOC)");
       }
     } else if (app) {
-      app->PrintStatus("EPUB: NCX skipped (size/format)");
+      DBG_LOG(app, "EPUB: NCX skipped (size/format)");
     }
   }
 
@@ -1671,7 +1672,7 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
           char msg[192];
           snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s",
                    toc_doc_path.c_str());
-          app->PrintStatus(msg);
+          DBG_LOG(app, msg);
         }
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NAV-FALLBACK")) {
           std::vector<toc_entry_t> nav_entries;
@@ -1689,7 +1690,7 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
             toc_loaded = true;
           }
         } else if (app) {
-          app->PrintStatus("EPUB: fallback NAV skipped");
+          DBG_LOG(app, "EPUB: fallback NAV skipped");
         }
         if (toc_loaded)
           break;
@@ -1707,7 +1708,7 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
           char msg[192];
           snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s",
                    toc_doc_path.c_str());
-          app->PrintStatus(msg);
+          DBG_LOG(app, msg);
         }
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX-FALLBACK")) {
           std::vector<toc_entry_t> ncx_entries;
@@ -1721,7 +1722,7 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
             toc_loaded = true;
           }
         } else if (app) {
-          app->PrintStatus("EPUB: fallback NCX skipped");
+          DBG_LOG(app, "EPUB: fallback NCX skipped");
         }
         if (toc_loaded)
           break;
@@ -2522,7 +2523,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
   int rc = 0;
   static epub_data_t parsedata;
   if (book && book->GetApp()) {
-    book->GetApp()->PrintStatus("EPUB: parse begin");
+    DBG_LOG(book->GetApp(), "EPUB: parse begin");
   }
 
   // Parse top-level container XML for the rootfile.
@@ -2579,7 +2580,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
     unzClose(uf);
     epub_data_delete(&parsedata);
     if (book && book->GetApp()) {
-      book->GetApp()->PrintStatus("EPUB: metadata done");
+      DBG_LOG(book->GetApp(), "EPUB: metadata done");
     }
     return rc;
   }
@@ -2645,7 +2646,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
       } else {
         char msg[256];
         sprintf(msg, "NOT FOUND IN ZIP: %s", path.c_str());
-        book->GetApp()->PrintStatus(msg);
+        DBG_LOG(book->GetApp(), msg);
       }
     }
     delete *it;
@@ -2654,7 +2655,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: content done pages=%u",
              (unsigned)book->GetPageCount());
-    book->GetApp()->PrintStatus(msg);
+    DBG_LOG(book->GetApp(), msg);
   }
 
   // Replace fallback chapter names with real TOC/NAV names when available.
@@ -2664,7 +2665,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
     std::string toc_doc_path;
     bool toc_loaded = false;
     if (book && book->GetApp()) {
-      book->GetApp()->PrintStatus("EPUB: TOC resolve begin");
+      DBG_LOG(book->GetApp(), "EPUB: TOC resolve begin");
     }
 
     if (!parsedata.navid.empty() &&
@@ -2673,7 +2674,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
       if (book && book->GetApp()) {
         char msg[192];
         snprintf(msg, sizeof(msg), "EPUB: try NAV %s", toc_doc_path.c_str());
-        book->GetApp()->PrintStatus(msg);
+        DBG_LOG(book->GetApp(), msg);
       }
       if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
                            book ? book->GetApp() : NULL, "NAV")) {
@@ -2689,7 +2690,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
           toc_loaded = true;
         }
       } else if (book && book->GetApp()) {
-        book->GetApp()->PrintStatus("EPUB: NAV skipped (size/format)");
+        DBG_LOG(book->GetApp(), "EPUB: NAV skipped (size/format)");
       }
     }
 
@@ -2699,7 +2700,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
       if (book && book->GetApp()) {
         char msg[192];
         snprintf(msg, sizeof(msg), "EPUB: try NCX %s", toc_doc_path.c_str());
-        book->GetApp()->PrintStatus(msg);
+        DBG_LOG(book->GetApp(), msg);
       }
       if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
                            book ? book->GetApp() : NULL, "NCX")) {
@@ -2711,7 +2712,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
         if (parsed)
           toc_loaded = true;
       } else if (book && book->GetApp()) {
-        book->GetApp()->PrintStatus("EPUB: NCX skipped (size/format)");
+        DBG_LOG(book->GetApp(), "EPUB: NCX skipped (size/format)");
       }
     }
 
@@ -2725,7 +2726,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
             char msg[192];
             snprintf(msg, sizeof(msg), "EPUB: fallback NAV %s",
                      toc_doc_path.c_str());
-            book->GetApp()->PrintStatus(msg);
+            DBG_LOG(book->GetApp(), msg);
           }
           if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
                                book ? book->GetApp() : NULL, "NAV-FALLBACK")) {
@@ -2740,7 +2741,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
             if (ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata))
               toc_loaded = true;
           } else if (book && book->GetApp()) {
-            book->GetApp()->PrintStatus("EPUB: fallback NAV skipped");
+            DBG_LOG(book->GetApp(), "EPUB: fallback NAV skipped");
           }
           if (toc_loaded)
             break;
@@ -2756,7 +2757,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
             char msg[192];
             snprintf(msg, sizeof(msg), "EPUB: fallback NCX %s",
                      toc_doc_path.c_str());
-            book->GetApp()->PrintStatus(msg);
+            DBG_LOG(book->GetApp(), msg);
           }
           if (ReadZipEntryText(uf, toc_doc_path, toc_xml,
                                book ? book->GetApp() : NULL, "NCX-FALLBACK")) {
@@ -2768,7 +2769,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
             if (parsed)
               toc_loaded = true;
           } else if (book && book->GetApp()) {
-            book->GetApp()->PrintStatus("EPUB: fallback NCX skipped");
+            DBG_LOG(book->GetApp(), "EPUB: fallback NCX skipped");
           }
           if (toc_loaded)
             break;
@@ -2813,17 +2814,17 @@ int epub(Book *book, std::string name, bool metadataonly) {
       snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
                (unsigned)toc_entries.size(),
                (unsigned)book->GetChapters().size());
-      book->GetApp()->PrintStatus(msg);
-      book->GetApp()->PrintStatus("EPUB: TOC resolve end");
+      DBG_LOG(book->GetApp(), msg);
+      DBG_LOG(book->GetApp(), "EPUB: TOC resolve end");
     }
   } else if (book && book->GetApp()) {
-    book->GetApp()->PrintStatus("EPUB: TOC resolve skipped (safe mode)");
+    DBG_LOG(book->GetApp(), "EPUB: TOC resolve skipped (safe mode)");
   }
 
   unzClose(uf);
   epub_data_delete(&parsedata);
   if (book && book->GetApp()) {
-    book->GetApp()->PrintStatus("EPUB: parse end");
+    DBG_LOG(book->GetApp(), "EPUB: parse end");
   }
   return rc;
 }
@@ -2886,7 +2887,7 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
       char msg[192];
       snprintf(msg, sizeof(msg), "EPUB: cover SVG wrapper detected %s",
                decode_path.c_str());
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
     }
     std::vector<u8> resolved;
     std::string resolved_path;
@@ -2900,10 +2901,10 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
         snprintf(msg, sizeof(msg),
                  "EPUB: cover SVG wrapper resolved src=%s bytes=%u",
                  decode_path.c_str(), (unsigned)decodebuf.size());
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
     } else if (app) {
-      app->PrintStatus("EPUB: cover SVG wrapper unresolved");
+      DBG_LOG(app, "EPUB: cover SVG wrapper unresolved");
     }
   }
   unzClose(uf);
@@ -3007,60 +3008,60 @@ int epub_resolve_toc(Book *book, std::string filepath) {
 
   App *app = book->GetApp();
   if (app)
-    app->PrintStatus("EPUB: TOC resolve begin");
+    DBG_LOG(app, "EPUB: TOC resolve begin");
   if (app)
-    app->PrintStatus("EPUB: TOC open zip begin");
+    DBG_LOG(app, "EPUB: TOC open zip begin");
 
   unzFile uf = unzOpen(filepath.c_str());
   if (!uf)
     return 4;
   if (app)
-    app->PrintStatus("EPUB: TOC open zip ok");
+    DBG_LOG(app, "EPUB: TOC open zip ok");
 
   epub_data_t parsedata;
   std::string opf_folder;
   if (app)
-    app->PrintStatus("EPUB: TOC package load begin");
+    DBG_LOG(app, "EPUB: TOC package load begin");
   int rc = LoadEpubPackageData(uf, book, &parsedata, &opf_folder);
   if (rc != 0) {
     if (app) {
       char msg[96];
       snprintf(msg, sizeof(msg), "EPUB: TOC package load fail rc=%d", rc);
-      app->PrintStatus(msg);
+      DBG_LOG(app, msg);
     }
     epub_data_delete(&parsedata);
     unzClose(uf);
     return rc;
   }
   if (app)
-    app->PrintStatus("EPUB: TOC package load ok");
+    DBG_LOG(app, "EPUB: TOC package load ok");
 
   std::map<std::string, u16> page_start_by_href;
   if (app)
-    app->PrintStatus("EPUB: TOC map build begin");
+    DBG_LOG(app, "EPUB: TOC map build begin");
   BuildPageStartMapFromPackage(parsedata, opf_folder, book,
                                &page_start_by_href);
   if (app) {
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: TOC map build ok size=%u",
              (unsigned)page_start_by_href.size());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
 
   std::vector<toc_entry_t> toc_entries;
   if (app)
-    app->PrintStatus("EPUB: TOC entries load begin");
+    DBG_LOG(app, "EPUB: TOC entries load begin");
   bool loaded =
       LoadTocEntriesFromPackage(uf, parsedata, opf_folder, &toc_entries, app);
   if (app) {
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: TOC entries load end loaded=%u count=%u",
              loaded ? 1u : 0u, (unsigned)toc_entries.size());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
   }
   if (!loaded) {
     if (app)
-      app->PrintStatus("EPUB: TOC resolve end (no entries)");
+      DBG_LOG(app, "EPUB: TOC resolve end (no entries)");
     epub_data_delete(&parsedata);
     unzClose(uf);
     return 5;
@@ -3132,7 +3133,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
         std::string clip = ClipForDiag(raw_title, 100);
         snprintf(msg, sizeof(msg), "EPUB: TOC title normalize fallback [%u]=%s",
                  (unsigned)stat_title_empty_norm, clip.c_str());
-        app->PrintStatus(msg);
+        DBG_LOG(app, msg);
       }
     }
     std::string title = title_match;
@@ -3362,7 +3363,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
 
   if (resolved.empty()) {
     if (app)
-      app->PrintStatus("EPUB: TOC resolve end (unmatched)");
+      DBG_LOG(app, "EPUB: TOC resolve end (unmatched)");
     epub_data_delete(&parsedata);
     unzClose(uf);
     return 6;
@@ -3378,7 +3379,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
     snprintf(msg, sizeof(msg), "EPUB: toc entries=%u chapters=%u",
              (unsigned)toc_entries.size(),
              (unsigned)book->GetChapters().size());
-    app->PrintStatus(msg);
+    DBG_LOG(app, msg);
     char map_msg[192];
     snprintf(map_msg, sizeof(map_msg),
              "EPUB: TOC map stats anchor=%u exact=%u nofrag=%u lower=%u "
@@ -3388,7 +3389,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
              (unsigned)stat_heading_fallback, (unsigned)stat_title_fallback,
              (unsigned)stat_title_global, (unsigned)stat_skip_unmatched,
              (unsigned)stat_skip_dup);
-    app->PrintStatus(map_msg);
+    DBG_LOG(app, map_msg);
 
     size_t direct_count = stat_anchor + stat_exact + stat_nofrag + stat_lc +
                           stat_base + stat_proxy;
@@ -3411,7 +3412,7 @@ int epub_resolve_toc(Book *book, std::string filepath) {
              "EPUB: TOC quality=%s direct=%u heuristic=%u unresolved=%u",
              quality, (unsigned)direct_count, (unsigned)heuristic_count,
              (unsigned)stat_skip_unmatched);
-    app->PrintStatus(quality_msg);
+    DBG_LOG(app, quality_msg);
 
     if (stat_anchor_miss > 0) {
       char warn_msg[160];
@@ -3420,14 +3421,14 @@ int epub_resolve_toc(Book *book, std::string filepath) {
                (unsigned)stat_anchor_miss,
                (unsigned)book->GetChapterAnchorCount(),
                (unsigned)stat_title_fallback);
-      app->PrintStatus(warn_msg);
+      DBG_LOG(app, warn_msg);
       for (size_t i = 0; i < unresolved_fragment_samples.size(); i++) {
         char sample_msg[192];
         std::string clipped = ClipForDiag(unresolved_fragment_samples[i], 100);
         snprintf(sample_msg, sizeof(sample_msg),
                  "EPUB: TOC unresolved href[%u]=%s", (unsigned)i,
                  clipped.c_str());
-        app->PrintStatus(sample_msg);
+        DBG_LOG(app, sample_msg);
       }
     } else if (stat_with_fragment > 0 && stat_anchor == 0) {
       char warn_msg[160];
@@ -3436,9 +3437,9 @@ int epub_resolve_toc(Book *book, std::string filepath) {
                (unsigned)stat_with_fragment,
                (unsigned)book->GetChapterAnchorCount(),
                (unsigned)stat_title_fallback);
-      app->PrintStatus(warn_msg);
+      DBG_LOG(app, warn_msg);
     }
-    app->PrintStatus("EPUB: TOC resolve end");
+    DBG_LOG(app, "EPUB: TOC resolve end");
   }
 
   epub_data_delete(&parsedata);
