@@ -18,11 +18,12 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
 </table>
 
 ## Project status
-- Current app version: `1.0.1`
+- Current app version: `1.0.2`
 - Focus: stable daily reading on 3DS hardware and Citra/Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 - `1.0.1` improves cold EPUB open times by indexing ZIP entries before spine parsing
+- `1.0.2` blocks startup with install guidance if the SD runtime package is incomplete
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
 
 ## Supported formats
@@ -99,9 +100,25 @@ Assets used by default:
 - `assets/release/icon.png` (48x48, used for `.3dsx/.smdh`)
 - `3dslibris.rsf`
 
-## Install layout (SD)
+## Install
 
-Versioned SD template in this repo:
+Recommended install:
+1. Download `3dslibris-sdmc.zip` from [GitHub Releases](https://github.com/RigleGit/3dslibris/releases).
+2. Extract that zip into the root of your SD card, so it expands into `sdmc:/`.
+3. Put your books in `sdmc:/3ds/3dslibris/book/`.
+4. Launch `sdmc:/3ds/3dslibris/3dslibris.3dsx` from Homebrew Launcher, or install `3dslibris.cia`.
+
+Important:
+- Keep the packaged `font/` and `resources/` folders exactly inside `sdmc:/3ds/3dslibris/`.
+- If those runtime files are missing, `3dslibris` now stops at boot and tells you to reinstall `3dslibris-sdmc.zip`.
+- `3dslibris-debug.3dsx` uses the same SD layout and writes verbose diagnostics to `sdmc:/3ds/3dslibris/3dslibris.log`.
+
+Generated install package targets:
+- `make package-sdmc` stages `dist/sdmc/...` with `3dslibris.3dsx` included
+- `make zip-sdmc` creates `dist/3dslibris-sdmc.zip`
+- GitHub Releases: pushing a tag like `v1.0.2` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `3dslibris.cia`, and `dist/3dslibris-sdmc.zip` to the release
+
+Bundled runtime files:
 - `sdmc/3ds/3dslibris/resources/splash.jpg`
 - `sdmc/3ds/3dslibris/resources/ui/icons/png/*.png`
 - `sdmc/3ds/3dslibris/book/README.md`
@@ -109,15 +126,9 @@ Versioned SD template in this repo:
 - `sdmc/3ds/3dslibris/font/Liberation*.ttf`
 - `sdmc/3ds/3dslibris/font/OFL-1.1.txt`
 
-Generated install package targets:
-- `make package-sdmc` stages `dist/sdmc/...` with `3dslibris.3dsx` included
-- `make zip-sdmc` creates `dist/3dslibris-sdmc.zip`
-- GitHub Releases: pushing a tag like `v1.0.1` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `3dslibris.cia`, and `dist/3dslibris-sdmc.zip` to the release
-
 Notes:
 - Homebrew Launcher path: keep the app at `sdmc:/3ds/3dslibris/3dslibris.3dsx`
 - Debug build path: keep `3dslibris-debug.3dsx` in the same `sdmc:/3ds/3dslibris/` folder if you want verbose logs
-- Put your ebooks in `sdmc:/3ds/3dslibris/book/`
 - Default Liberation fonts are bundled in `sdmc:/3ds/3dslibris/font/`
 - You can replace them with other `.ttf`, `.otf`, or `.ttc` fonts if you want to customize the reading/UI typefaces
 - Runtime files such as `3dslibris.xml`, `3dslibris.log`, and `cache/*` are created by the app on first run

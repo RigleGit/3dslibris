@@ -50,6 +50,71 @@ namespace {} // end anonymous namespace
 #include "color_utils.h"
 namespace {
 
+struct RuntimeFileCheck {
+  const char *path;
+  bool directory;
+  const char *label;
+};
+
+static bool PathExistsAndType(const char *path, bool want_dir) {
+  if (!path || !*path)
+    return false;
+  struct stat st;
+  if (stat(path, &st) != 0)
+    return false;
+  if (want_dir)
+    return S_ISDIR(st.st_mode);
+  return S_ISREG(st.st_mode);
+}
+
+static void CollectMissingRuntimeFiles(std::vector<std::string> *missing) {
+  if (!missing)
+    return;
+  missing->clear();
+
+  static const RuntimeFileCheck kRequired[] = {
+      {"sdmc:/3ds/3dslibris/book", true, "book/"},
+      {"sdmc:/3ds/3dslibris/font", true, "font/"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Regular.ttf", false,
+       "font/LiberationSerif-Regular.ttf"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Bold.ttf", false,
+       "font/LiberationSerif-Bold.ttf"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Italic.ttf", false,
+       "font/LiberationSerif-Italic.ttf"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf", false,
+       "font/LiberationSerif-BoldItalic.ttf"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSans-Regular.ttf", false,
+       "font/LiberationSans-Regular.ttf"},
+  };
+
+  for (size_t i = 0; i < sizeof(kRequired) / sizeof(kRequired[0]); i++) {
+    if (!PathExistsAndType(kRequired[i].path, kRequired[i].directory))
+      missing->push_back(kRequired[i].label);
+  }
+}
+
+static void PrintInstallHelpToConsole(const std::vector<std::string> &missing) {
+  printf("\n[FAIL] Incomplete SD install for 3dslibris.\n\n");
+  printf("Download and extract:\n");
+  printf("  3dslibris-sdmc.zip\n");
+  printf("from GitHub Releases into the SD root:\n");
+  printf("  sdmc:/\n\n");
+  printf("Expected layout:\n");
+  printf("  sdmc:/3ds/3dslibris/3dslibris.3dsx\n");
+  printf("  sdmc:/3ds/3dslibris/book/\n");
+  printf("  sdmc:/3ds/3dslibris/font/\n");
+  printf("  sdmc:/3ds/3dslibris/resources/\n\n");
+  if (!missing.empty()) {
+    printf("Missing files:\n");
+    size_t shown = std::min<size_t>(missing.size(), 8);
+    for (size_t i = 0; i < shown; i++)
+      printf("  %s\n", missing[i].c_str());
+    if (missing.size() > shown)
+      printf("  ... and %u more\n", (unsigned)(missing.size() - shown));
+    printf("\n");
+  }
+}
+
 #if ORIENTATION_DIAG
 static int g_orientation_touch_diag_budget = 0;
 #endif
@@ -362,7 +427,8 @@ static void append_book_from_filename(App *app, const char *filename) {
 
 int App::Run(void) {
   const int ok = 0;
-  auto drawBootStatus = [&](const char *lineTop, const char *lineBottom) {
+  auto drawBootStatus = [&](const char *title, const std::vector<std::string> &lines,
+                            bool fatal) {
     int savedStyle = ts->GetStyle();
     int savedColorMode = ts->GetColorMode();
     u16 *savedScreen = ts->GetScreen();
@@ -378,22 +444,23 @@ int App::Run(void) {
     ts->SetScreen(ts->screenright);
     ts->ClearScreen();
     DrawBottomGradientBackground();
-    ts->DrawRect(8, 10, 232, 64, 0xC618);
+    ts->DrawRect(8, 10, 232, fatal ? 76 : 64, 0xC618);
     ts->SetPixelSize(14);
     ts->SetPen(14, 20);
-    ts->PrintString("Booting");
+    ts->PrintString(title && *title ? title : "Booting");
     ts->SetPixelSize(10);
-    if (lineTop && *lineTop) {
-      ts->SetPen(14, 84);
-      ts->PrintString(lineTop);
-    }
-    if (lineBottom && *lineBottom) {
-      ts->SetPen(14, 104);
-      ts->PrintString(lineBottom);
+    for (size_t i = 0; i < lines.size(); i++) {
+      ts->SetPen(14, 84 + (int)i * 18);
+      ts->PrintString(lines[i].c_str());
     }
 
     // Simple progress rail (visual feedback while booting).
-    ts->DrawRect(14, 138, 226, 152, 0xBDF7);
+    if (!fatal)
+      ts->DrawRect(14, 138, 226, 152, 0xBDF7);
+    else {
+      ts->SetPen(14, 216);
+      ts->PrintString("Pulsa START para salir");
+    }
 
     ts->SetStyle(savedStyle);
     ts->SetColorMode(savedColorMode);
@@ -409,22 +476,35 @@ int App::Run(void) {
   // Start up typesetter.
   printf("Loading fonts...\n");
   if (ts->Init() != ok) {
-    printf("\n[FAIL] Could not load fonts!\n");
-    printf("Place TTF files in:\n");
-    printf("  %s/\n\n", fontdir.c_str());
-    printf("Required files:\n");
-    printf("  LiberationSerif-Regular.ttf\n");
-    printf("  LiberationSerif-Bold.ttf\n");
-    printf("  LiberationSerif-Italic.ttf\n");
-    printf("  LiberationSerif-BoldItalic.ttf\n");
-    printf("  LiberationSans-Regular.ttf\n");
+    std::vector<std::string> missing;
+    CollectMissingRuntimeFiles(&missing);
+    PrintInstallHelpToConsole(missing);
     return 1;
   }
 
   // Initialize screens for 3DS.
   InitScreens();
   ts->SetStyle(TEXT_STYLE_BROWSER);
-  drawBootStatus("Searching for books...", "");
+  drawBootStatus("Booting", {"Searching for books..."}, false);
+
+  std::vector<std::string> missing_runtime;
+  CollectMissingRuntimeFiles(&missing_runtime);
+  if (!missing_runtime.empty()) {
+    PrintStatus("error: incomplete sdmc install");
+    std::vector<std::string> lines;
+    lines.push_back("Descarga 3dslibris-sdmc.zip");
+    lines.push_back("y extraelo en sdmc:/");
+    lines.push_back("Ruta esperada: sdmc:/3ds/3dslibris/");
+    lines.push_back("Faltan archivos del paquete SD");
+    lines.push_back(missing_runtime[0]);
+    if (missing_runtime.size() > 1) {
+      char extra[48];
+      snprintf(extra, sizeof(extra), "+%u mas", (unsigned)(missing_runtime.size() - 1));
+      lines.push_back(extra);
+    }
+    drawBootStatus("Instalacion incompleta", lines, true);
+    return 1;
+  }
 
   // Construct library.
   DBG_LOG(this, "Searching for books...");
@@ -433,13 +513,19 @@ int App::Run(void) {
 #endif
   if (FindBooks() != ok) {
     PrintStatus("error: no book directory");
-    drawBootStatus("No se encontro carpeta de libros",
-                   "Usa sdmc:/3ds/3dslibris/book");
+    drawBootStatus("Instalacion incompleta",
+                   {"Descarga 3dslibris-sdmc.zip",
+                    "y extraelo en sdmc:/",
+                    "Debe existir sdmc:/3ds/3dslibris/book"},
+                   true);
     return 1;
   }
   if (bookcount == 0) {
     PrintStatus("error: no epub files found");
-    drawBootStatus("No se encontraron EPUB", bookdir.c_str());
+    drawBootStatus("No se encontraron libros",
+                   {"Coloca tus EPUB/FB2/TXT/RTF/ODT",
+                    "en sdmc:/3ds/3dslibris/book"},
+                   true);
     return 1;
   }
 #ifdef DSLIBRIS_DEBUG
@@ -451,7 +537,7 @@ int App::Run(void) {
   std::sort(books.begin(), books.end(), &book_title_lessthan);
 
   prefs->Read();
-  drawBootStatus("Preparing library...", "");
+  drawBootStatus("Booting", {"Preparing library..."}, false);
   // Apply key mapping/orientation loaded from prefs.
   SetOrientation(orientation);
   DBG_LOG(this, "Preparing library...");
@@ -478,7 +564,10 @@ int App::Run(void) {
   if (reopen && bookcurrent) {
     bookselected = bookcurrent;
     const char *title = bookcurrent->GetTitle();
-    drawBootStatus("Opening last book...", (title && *title) ? title : "");
+    drawBootStatus("Booting",
+                   {"Opening last book...",
+                    (title && *title) ? title : "(untitled)"},
+                   false);
     OpenBook();
   }
 
