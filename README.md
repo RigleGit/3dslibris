@@ -10,7 +10,7 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
 ## Project status
 - Current app version: `1.0.0`
 - Focus: stable daily reading on 3DS hardware and Citra/Azahar
-- Repository status: publication-hardening in progress (docs/legal/CI/governance)
+- Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 
 ## Supported formats
