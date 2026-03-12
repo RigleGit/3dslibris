@@ -16,7 +16,7 @@ make package-sdmc
 That command creates `dist/sdmc/3ds/3dslibris/` and copies the built
 `3dslibris.3dsx` into it.
 
-For the simplest setup, put user ebooks in `sdmc:/books/`.
+Put user ebooks in `sdmc:/3ds/3dslibris/book/`.
 
 The bundled fonts are only defaults. Users can swap them for other compatible
 `.ttf`, `.otf`, or `.ttc` files if they want to customize typography.
