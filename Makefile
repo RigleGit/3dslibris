@@ -41,16 +41,22 @@ GFXBUILD	:=	$(BUILD)
 APP_TITLE	:=	3dslibris
 APP_DESCRIPTION	:=	eBook reader for Nintendo 3DS
 APP_AUTHOR	:=	Rigle
-ICON		:=	icon.png
+ICON		:=	assets/release/icon.png
 
 # CIA packaging assets (for console testing/install)
-BANNER_IMAGE	:=	banner.png
+BANNER_IMAGE	:=	assets/release/banner.png
 BANNER_AUDIO	:=	assets/cia/banner-silence.wav
-CIA_ICON_SMALL	:=	icon-32x32.png
-CIA_ICON_LARGE	:=	icon-64x64.png
+CIA_ICON_SMALL	:=	assets/release/icon-32x32.png
+CIA_ICON_LARGE	:=	assets/release/icon-64x64.png
 CIA_RSF		:=	3dslibris.rsf
 CIA_TMPDIR	:=	$(BUILD)/cia
 CIA_OUTPUT	:=	$(TARGET).cia
+SDMC_TEMPLATE	:=	sdmc
+DISTDIR		:=	dist
+SDMC_DISTROOT	:=	$(DISTDIR)/sdmc
+SDMC_APPDIR	:=	$(SDMC_DISTROOT)/3ds/$(TARGET)
+SDMC_TEMPLATE_APPDIR := $(SDMC_TEMPLATE)/3ds/$(TARGET)
+SDMC_ZIP	:=	$(DISTDIR)/$(TARGET)-sdmc.zip
 
 BANNERTOOL	?=	bannertool
 MAKEROM		?=	makerom
@@ -165,8 +171,8 @@ ifeq ($(strip $(ICON)),)
 	ifneq (,$(findstring $(TARGET).png,$(icons)))
 		export APP_ICON := $(TOPDIR)/$(TARGET).png
 	else
-		ifneq (,$(findstring icon.png,$(icons)))
-			export APP_ICON := $(TOPDIR)/icon.png
+		ifneq (,$(wildcard $(TOPDIR)/assets/release/icon.png))
+			export APP_ICON := $(TOPDIR)/assets/release/icon.png
 		endif
 	endif
 else
@@ -181,7 +187,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean cia
+.PHONY: all clean cia package-sdmc zip-sdmc
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -203,7 +209,7 @@ endif
 #---------------------------------------------------------------------------------
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf $(GFXBUILD) $(CIA_OUTPUT)
+	@rm -fr $(BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf $(GFXBUILD) $(CIA_OUTPUT) $(DISTDIR)
 
 #---------------------------------------------------------------------------------
 cia: all
@@ -233,6 +239,26 @@ cia: all
 		-icon $(CIA_SMDH) -banner $(CIA_BNR) \
 		-DAPP_ENCRYPTED=false
 	@echo built ... $(CIA_OUTPUT)
+
+#---------------------------------------------------------------------------------
+package-sdmc: all
+#---------------------------------------------------------------------------------
+	@echo staging sdmc package ...
+	@[ -d $(SDMC_TEMPLATE_APPDIR) ] || (echo "Missing $(SDMC_TEMPLATE_APPDIR)"; exit 1)
+	@mkdir -p $(SDMC_APPDIR)
+	@rsync -a --delete $(SDMC_TEMPLATE)/ $(SDMC_DISTROOT)/
+	@rm -f $(SDMC_APPDIR)/$(TARGET).3dsx
+	@cp $(OUTPUT).3dsx $(SDMC_APPDIR)/$(TARGET).3dsx
+	@echo staged ... $(SDMC_APPDIR)
+
+#---------------------------------------------------------------------------------
+zip-sdmc: package-sdmc
+#---------------------------------------------------------------------------------
+	@echo zipping sdmc package ...
+	@mkdir -p $(DISTDIR)
+	@rm -f $(SDMC_ZIP)
+	@cd $(DISTDIR) && zip -qr $(TARGET)-sdmc.zip sdmc
+	@echo built ... $(SDMC_ZIP)
 
 #---------------------------------------------------------------------------------
 $(GFXBUILD)/%.t3x	$(BUILD)/%.h	:	%.t3s

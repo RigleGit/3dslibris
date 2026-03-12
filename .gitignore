@@ -3,9 +3,11 @@
 *.swp
 *.swo
 *.psd
+.private/
 
 # Build artifacts (devkitPro / 3DS)
 /build/
+/dist/
 *.o
 *.d
 *.map
