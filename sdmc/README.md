@@ -3,6 +3,7 @@
 This folder contains the versioned SD-card template for `3dslibris`.
 
 What is included here:
+- `books/README.md`
 - `3ds/3dslibris/resources/splash.jpg`
 - `3ds/3dslibris/resources/ui/icons/png/*.png`
 - `3ds/3dslibris/font/Liberation*.ttf`
@@ -18,6 +19,9 @@ Recommended flow:
 1. Build `3dslibris.3dsx`
 2. Run `make package-sdmc`
 3. Copy `dist/sdmc/` to the root of the SD card
+
+The recommended drop folder for ebooks is `sdmc:/books/`.
+The app binary itself belongs at `sdmc:/3ds/3dslibris/3dslibris.3dsx`.
 
 The bundled Liberation fonts are the default runtime fonts. Users can replace
 them with other `.ttf`, `.otf`, or `.ttc` files if they want different reading

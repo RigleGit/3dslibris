@@ -433,8 +433,7 @@ int App::Run(void) {
 #endif
   if (FindBooks() != ok) {
     PrintStatus("error: no book directory");
-    drawBootStatus("No se encontro carpeta de libros",
-                   "Usa sdmc:/3ds/3dslibris/book");
+    drawBootStatus("No se encontro carpeta de libros", "Usa sdmc:/books");
     return 1;
   }
   if (bookcount == 0) {
@@ -550,7 +549,7 @@ int App::FindBooks() {
     Result rc = FSUSER_OpenArchive(&sdmc_archive, ARCHIVE_SDMC,
                                    fsMakePath(PATH_EMPTY, ""));
     if (R_FAILED(rc))
-      return 1;
+      return -1;
 
     std::string rel_path = sdmc_to_archive_relpath(dir);
     Handle dir_handle = 0;
@@ -558,8 +557,10 @@ int App::FindBooks() {
                               fsMakePath(PATH_ASCII, rel_path.c_str()));
     if (R_FAILED(rc)) {
       FSUSER_CloseArchive(sdmc_archive);
-      return 1;
+      return -1;
     }
+
+    u8 before_count = bookcount;
 
     while (true) {
       FS_DirectoryEntry entries[16];
@@ -583,39 +584,41 @@ int App::FindBooks() {
 
     FSDIR_Close(dir_handle);
     FSUSER_CloseArchive(sdmc_archive);
-    return 0;
+    return (int)bookcount - (int)before_count;
   };
 
   auto scan_with_posix_fallback = [&](const std::string &dir) -> int {
     DIR *dp = opendir(dir.c_str());
     if (!dp)
-      return 1;
+      return -1;
+
+    u8 before_count = bookcount;
 
     struct dirent *ent;
     while ((ent = readdir(dp))) {
       append_book_from_filename(this, ent->d_name);
     }
     closedir(dp);
-    return 0;
+    return (int)bookcount - (int)before_count;
   };
 
   // Prefer native FS API (UTF-16 filenames), keep POSIX as safety fallback.
-  if (scan_with_native_fs(bookdir) == 0)
+  if (scan_with_native_fs(bookdir) > 0)
     return 0;
 
-  const char *fallbacks[] = {"sdmc:/book", "sdmc:/books", NULL};
+  const char *fallbacks[] = {"sdmc:/books", "sdmc:/book", NULL};
   for (int i = 0; fallbacks[i]; i++) {
-    if (scan_with_native_fs(fallbacks[i]) == 0) {
+    if (scan_with_native_fs(fallbacks[i]) > 0) {
       bookdir = std::string(fallbacks[i]);
       return 0;
     }
   }
 
-  if (scan_with_posix_fallback(bookdir) == 0)
+  if (scan_with_posix_fallback(bookdir) > 0)
     return 0;
 
   for (int i = 0; fallbacks[i]; i++) {
-    if (scan_with_posix_fallback(fallbacks[i]) == 0) {
+    if (scan_with_posix_fallback(fallbacks[i]) > 0) {
       bookdir = std::string(fallbacks[i]);
       return 0;
     }
