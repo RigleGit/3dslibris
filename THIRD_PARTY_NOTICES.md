@@ -41,6 +41,15 @@ Refer to devkitPro package metadata for their exact license texts.
 - Upstream: [Tabler Icons](https://tabler-icons.io/)
 - License: MIT
 
+## Bundled fonts
+
+### Liberation Fonts
+- Bundled files: `sdmc/3ds/3dslibris/font/Liberation*.ttf`
+- Upstream: [liberationfonts/liberation-fonts](https://github.com/liberationfonts/liberation-fonts)
+- License: SIL Open Font License 1.1
+- Local license text: `sdmc/3ds/3dslibris/font/OFL-1.1.txt`
+- Notes: bundled as unmodified runtime defaults for the SD package; users may replace them with other compatible font files.
+
 ## Project origin and attribution
 
 `3dslibris` is derived from `dslibris` (Nintendo DS ebook reader) by Ray Haleblian.

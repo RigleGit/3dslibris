@@ -76,20 +76,40 @@ Expected output:
 - `3dslibris.cia`
 
 Assets used by default:
-- `banner.png`
+- `assets/release/banner.png`
 - `assets/cia/banner-silence.wav` (banner audio, required by `bannertool makebanner`)
-- `icon-32x32.png` (small icon)
-- `icon-64x64.png` (large icon)
-- `icon.png` (48x48, used for `.3dsx/.smdh`)
+- `assets/release/icon-32x32.png` (small icon)
+- `assets/release/icon-64x64.png` (large icon)
+- `assets/release/icon.png` (48x48, used for `.3dsx/.smdh`)
 - `3dslibris.rsf`
 
 ## Install layout (SD)
+
+Versioned SD template in this repo:
+- `sdmc/3ds/3dslibris/resources/splash.jpg`
+- `sdmc/3ds/3dslibris/resources/ui/icons/png/*.png`
+- `sdmc/3ds/3dslibris/book/README.md`
+- `sdmc/3ds/3dslibris/font/README.md`
+- `sdmc/3ds/3dslibris/font/Liberation*.ttf`
+- `sdmc/3ds/3dslibris/font/OFL-1.1.txt`
+
+Generated install package targets:
+- `make package-sdmc` stages `dist/sdmc/...` with `3dslibris.3dsx` included
+- `make zip-sdmc` creates `dist/3dslibris-sdmc.zip`
+- GitHub Releases: pushing a tag like `v1.0.0` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris.cia`, and `dist/3dslibris-sdmc.zip` to the release
+
+Notes:
+- Default Liberation fonts are bundled in `sdmc:/3ds/3dslibris/font/`
+- You can replace them with other `.ttf`, `.otf`, or `.ttc` fonts if you want to customize the reading/UI typefaces
+- Books are not bundled; place your own `.epub/.fb2/.txt/.rtf/.odt/.mobi` files in `sdmc:/3ds/3dslibris/book/`
+- Runtime files such as `3dslibris.xml`, `3dslibris.log`, and `cache/*` are created by the app on first run
 
 ```text
 sdmc:/3ds/3dslibris/3dslibris.3dsx
 sdmc:/3ds/3dslibris/book/*.epub|*.fb2|*.txt|*.rtf|*.odt|*.mobi
 sdmc:/3ds/3dslibris/font/*.ttf
-sdmc:/3ds/3dslibris/resources/...
+sdmc:/3ds/3dslibris/resources/splash.jpg
+sdmc:/3ds/3dslibris/resources/ui/icons/png/{back,gear,home,next,prev}.png
 ```
 
 ## Controls (default)
@@ -102,12 +122,10 @@ sdmc:/3ds/3dslibris/resources/...
 - Touch UI for library, settings, index, bookmarks, font menus...
 
 ## Documentation
-- Technical deep-dive: [DOCS.md](DOCS.md)
-- Chronological change log (git-derived): [revision_cronologica_cambios.md](revision_cronologica_cambios.md)
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- Technical backlog: [BACKLOG_TECNICO.md](BACKLOG_TECNICO.md)
-- Release process: [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md)
+
+Internal planning, release notes, and working docs are kept out of the public repo.
 
 ## License
 This project is distributed under **GNU GPL v2 or later**.
