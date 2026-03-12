@@ -1,5 +1,8 @@
 name: ci
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   pull_request:
   push:
@@ -9,7 +12,7 @@ jobs:
   hygiene-and-docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Required docs/legal files
         run: |
@@ -34,19 +37,24 @@ jobs:
 
   build-3dsx:
     runs-on: ubuntu-latest
-    container:
-      image: devkitpro/devkitarm
     env:
       DEVKITPRO: /opt/devkitpro
       DEVKITARM: /opt/devkitpro/devkitARM
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build
         run: |
           set -euo pipefail
-          make clean
-          make -j2
+          uid="$(id -u)"
+          gid="$(id -g)"
+          docker run --rm \
+            --user "${uid}:${gid}" \
+            -v "$PWD:/project" -w /project \
+            -e DEVKITPRO="$DEVKITPRO" \
+            -e DEVKITARM="$DEVKITARM" \
+            devkitpro/devkitarm \
+            sh -lc 'make clean && make -j2'
 
       - name: Verify outputs
         run: |
