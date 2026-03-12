@@ -1,5 +1,8 @@
 # 3dslibris
 
+[![Release](https://img.shields.io/github/v/release/RigleGit/3dslibris?label=release)](https://github.com/RigleGit/3dslibris/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/RigleGit/3dslibris/ci.yml?branch=main&label=ci)](https://github.com/RigleGit/3dslibris/actions/workflows/ci.yml)
+
 Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `dslibris`.
 
 `3dslibris` ports the original architecture to `libctru`, keeps the fast text-first reading model, and adds practical 3DS UX improvements (grid library, cover thumbs, indexed navigation, procedural UI skin, orientation-aware touch, etc.).
@@ -8,6 +11,7 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
 - Current app version: `1.0.0`
 - Focus: stable daily reading on 3DS hardware and Citra/Azahar
 - Repository status: publication-hardening in progress (docs/legal/CI/governance)
+- Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 
 ## Supported formats
 
@@ -134,4 +138,4 @@ See [LICENSE](LICENSE).
 
 ## Credits
 - Original `dslibris`: Ray Haleblian
-- 3DS port and maintenance: Rigle
+- 3DS port and maintenance: [Rigle](https://rigle.dev)
