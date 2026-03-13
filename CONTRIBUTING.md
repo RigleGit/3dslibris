@@ -23,20 +23,8 @@ Or with Docker (recommended for consistency):
 ```bash
 docker run --rm -v "$(pwd):/project" -w /project \
   -e DEVKITPRO=/opt/devkitpro -e DEVKITARM=/opt/devkitpro/devkitARM \
-  devkitpro/devkitarm make clean && \
-
-docker run --rm -v "$(pwd):/project" -w /project \
-  -e DEVKITPRO=/opt/devkitpro -e DEVKITARM=/opt/devkitpro/devkitARM \
-  devkitpro/devkitarm make
-```
-
-For `.cia` packaging in Docker, build the extended image once:
-
-```bash
-docker build -f docker/Dockerfile.cia -t 3dslibris/devkitarm-cia .
-docker run --rm -v "$(pwd):/project" -w /project \
-  -e DEVKITPRO=/opt/devkitpro -e DEVKITARM=/opt/devkitpro/devkitARM \
-  3dslibris/devkitarm-cia make cia
+  devkitpro/devkitarm \
+  sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx'
 ```
 
 ## Code guidelines

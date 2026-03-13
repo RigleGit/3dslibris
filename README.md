@@ -22,9 +22,9 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
 - Focus: stable daily reading on 3DS hardware and Citra/Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
-- `1.0.1` improves cold EPUB open times by indexing ZIP entries before spine parsing
-- `1.0.2` blocks startup with install guidance if the SD runtime package is incomplete
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
+- Supported install path today: `.3dsx` plus `3dslibris-sdmc.zip`
+- A stable `.cia` build will come later once packaging is reliable across hardware
 
 ## Supported formats
 
@@ -55,50 +55,15 @@ docker run --rm \
   -v "$(pwd):/project" -w /project \
   -e DEVKITPRO=/opt/devkitpro \
   -e DEVKITARM=/opt/devkitpro/devkitARM \
-  devkitpro/devkitarm make clean && \
-
-docker run --rm \
-  -v "$(pwd):/project" -w /project \
-  -e DEVKITPRO=/opt/devkitpro \
-  -e DEVKITARM=/opt/devkitpro/devkitARM \
-  devkitpro/devkitarm make
+  devkitpro/devkitarm \
+  sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx'
 ```
 
 Expected outputs:
 - `3dslibris.3dsx`
+- `3dslibris-debug.3dsx`
 - `3dslibris.smdh`
 - `3dslibris.elf`
-
-## Build CIA (optional, for console install)
-
-Local (if `bannertool` and `makerom` are already in your PATH):
-
-```bash
-make cia
-```
-
-Docker (tooling included in repo):
-
-```bash
-docker build -f docker/Dockerfile.cia -t 3dslibris/devkitarm-cia .
-
-docker run --rm \
-  -v "$(pwd):/project" -w /project \
-  -e DEVKITPRO=/opt/devkitpro \
-  -e DEVKITARM=/opt/devkitpro/devkitARM \
-  3dslibris/devkitarm-cia make cia
-```
-
-Expected output:
-- `3dslibris.cia`
-
-Assets used by default:
-- `assets/release/banner.png`
-- `assets/cia/banner-silence.wav` (banner audio, required by `bannertool makebanner`)
-- `assets/release/icon-32x32.png` (small icon)
-- `assets/release/icon-64x64.png` (large icon)
-- `assets/release/icon.png` (48x48, used for `.3dsx/.smdh`)
-- `3dslibris.rsf`
 
 ## Install
 
@@ -106,17 +71,18 @@ Recommended install:
 1. Download `3dslibris-sdmc.zip` from [GitHub Releases](https://github.com/RigleGit/3dslibris/releases).
 2. Extract that zip into the root of your SD card, so it expands into `sdmc:/`.
 3. Put your books in `sdmc:/3ds/3dslibris/book/`.
-4. Launch `sdmc:/3ds/3dslibris/3dslibris.3dsx` from Homebrew Launcher, or install `3dslibris.cia`.
+4. Launch `sdmc:/3ds/3dslibris/3dslibris.3dsx` from Homebrew Launcher.
 
 Important:
 - Keep the packaged `font/` and `resources/` folders exactly inside `sdmc:/3ds/3dslibris/`.
 - If those runtime files are missing, `3dslibris` now stops at boot and tells you to reinstall `3dslibris-sdmc.zip`.
 - `3dslibris-debug.3dsx` uses the same SD layout and writes verbose diagnostics to `sdmc:/3ds/3dslibris/3dslibris.log`.
+- `.cia` packaging is temporarily unavailable and will return later when it is stable on real hardware.
 
 Generated install package targets:
 - `make package-sdmc` stages `dist/sdmc/...` with `3dslibris.3dsx` included
 - `make zip-sdmc` creates `dist/3dslibris-sdmc.zip`
-- GitHub Releases: pushing a tag like `v1.0.2` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `3dslibris.cia`, and `dist/3dslibris-sdmc.zip` to the release
+- GitHub Releases: pushing a tag like `v1.0.2` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris-debug.3dsx`, and `dist/3dslibris-sdmc.zip` to the release
 
 Bundled runtime files:
 - `sdmc/3ds/3dslibris/resources/splash.jpg`

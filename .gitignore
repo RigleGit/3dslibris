@@ -22,8 +22,6 @@
 /3dslibris.3dsx
 /3dslibris.elf
 /3dslibris.smdh
-/3dslibris.cia
-!/docker/Dockerfile.cia
 
 # Legacy output names kept out of git
 /dslibris-3ds.3dsx
