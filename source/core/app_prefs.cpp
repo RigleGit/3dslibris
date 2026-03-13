@@ -135,13 +135,13 @@ void App::PrefsHandleEvent() {
   } else if (keys & (KEY_SELECT | KEY_START | KEY_B | KEY_Y)) {
     ShowLibraryView();
   } else if (keys & (key.left | key.l)) {
-    if (prefsSelected < visibleCount - 1) {
-      prefsSelected++;
+    if (prefsSelected > 0) {
+      prefsSelected--;
       prefs_view_dirty = true;
     }
   } else if (keys & (key.right | key.r)) {
-    if (prefsSelected > 0) {
-      prefsSelected--;
+    if (prefsSelected < visibleCount - 1) {
+      prefsSelected++;
       prefs_view_dirty = true;
     }
   } else if (prefsSelected == PREFS_BUTTON_FONTSIZE && (keys & key.up)) {
@@ -195,16 +195,16 @@ void App::PrefsHandleTouch() {
       if (i == PREFS_BUTTON_FONTSIZE) {
         int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
         if (coord.px >= centerX) {
-          PrefsDecreasePixelSize();
-        } else {
           PrefsIncreasePixelSize();
+        } else {
+          PrefsDecreasePixelSize();
         }
       } else if (i == PREFS_BUTTON_PARASPACING) {
         int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
         if (coord.px >= centerX) {
-          PrefsDecreaseParaspacing();
-        } else {
           PrefsIncreaseParaspacing();
+        } else {
+          PrefsDecreaseParaspacing();
         }
       } else if (i == PREFS_BUTTON_ORIENTATION) {
         PrefsFlipOrientation();
