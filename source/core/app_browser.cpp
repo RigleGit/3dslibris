@@ -37,6 +37,7 @@
 #include "parse.h"
 #include "string_utils.h"
 #include "text.h"
+#include "version.h"
 
 #ifndef UTF8_FILENAME_DIAG
 #define UTF8_FILENAME_DIAG 0
@@ -1125,6 +1126,23 @@ void App::browser_draw(void) {
   u16 *screen = ts->GetScreen();
   int style = ts->GetStyle();
   int savedPixelSize = ts->pixelsize;
+
+  ts->SetScreen(ts->screenleft);
+  ts->SetColorMode(0);
+  ts->SetStyle(TEXT_STYLE_BROWSER);
+  ts->PrintSplash(ts->screenleft);
+  ts->SetPixelSize(8);
+  {
+    char versionMsg[16];
+    snprintf(versionMsg, sizeof(versionMsg), "v%s", VERSION);
+    const int versionWidth =
+        ts->GetStringWidth(versionMsg, TEXT_STYLE_BROWSER);
+    int versionX = (240 - versionWidth) / 2;
+    if (versionX < 0)
+      versionX = 0;
+    ts->SetPen(versionX, 397);
+    ts->PrintString(versionMsg);
+  }
 
   ts->SetScreen(ts->screenright);
   ts->SetColorMode(0); // Normal for browser text
