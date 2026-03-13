@@ -18,7 +18,7 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
 </table>
 
 ## Project status
-- Current app version: `1.0.2`
+- Current app version: `1.0.3`
 - Focus: stable daily reading on 3DS hardware and Citra/Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
@@ -82,7 +82,7 @@ Important:
 Generated install package targets:
 - `make package-sdmc` stages `dist/sdmc/...` with `3dslibris.3dsx` included
 - `make zip-sdmc` creates `dist/3dslibris-sdmc.zip`
-- GitHub Releases: pushing a tag like `v1.0.2` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris-debug.3dsx`, and `dist/3dslibris-sdmc.zip` to the release
+- GitHub Releases: pushing a tag like `v1.0.3` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris-debug.3dsx`, and `dist/3dslibris-sdmc.zip` to the release
 
 Bundled runtime files:
 - `sdmc/3ds/3dslibris/resources/splash.jpg`
