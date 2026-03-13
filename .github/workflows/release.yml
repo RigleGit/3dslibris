@@ -48,14 +48,8 @@ jobs:
             echo "### Included assets"
             echo "- \`3dslibris.3dsx\`"
             echo "- \`3dslibris-debug.3dsx\`"
-            echo "- \`3dslibris.cia\`"
             echo "- \`3dslibris-sdmc.zip\`"
           } > release-notes.md
-
-      - name: Build CIA tool image
-        run: |
-          set -euo pipefail
-          docker build -f docker/Dockerfile.cia -t 3dslibris/devkitarm-cia:ci .
 
       - name: Build 3DSX and SD package
         run: |
@@ -70,19 +64,6 @@ jobs:
             devkitpro/devkitarm \
             sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx'
 
-      - name: Build CIA
-        run: |
-          set -euo pipefail
-          uid="$(id -u)"
-          gid="$(id -g)"
-          docker run --rm \
-            --user "${uid}:${gid}" \
-            -v "$PWD:/project" -w /project \
-            -e DEVKITPRO="$DEVKITPRO" \
-            -e DEVKITARM="$DEVKITARM" \
-            3dslibris/devkitarm-cia:ci \
-            make cia
-
       - name: Verify release outputs
         run: |
           set -euo pipefail
@@ -90,7 +71,6 @@ jobs:
           test -f 3dslibris.smdh
           test -f 3dslibris.elf
           test -f 3dslibris-debug.3dsx
-          test -f 3dslibris.cia
           test -f dist/3dslibris-sdmc.zip
 
       - name: Publish release assets
@@ -108,7 +88,6 @@ jobs:
               3dslibris-debug.3dsx#3dslibris-debug.3dsx \
               3dslibris.smdh#3dslibris.smdh \
               3dslibris.elf#3dslibris.elf \
-              3dslibris.cia#3dslibris.cia \
               dist/3dslibris-sdmc.zip#3dslibris-sdmc.zip \
               --clobber
           else
@@ -117,7 +96,6 @@ jobs:
               3dslibris-debug.3dsx#3dslibris-debug.3dsx \
               3dslibris.smdh#3dslibris.smdh \
               3dslibris.elf#3dslibris.elf \
-              3dslibris.cia#3dslibris.cia \
               dist/3dslibris-sdmc.zip#3dslibris-sdmc.zip \
               --title "$tag" \
               --notes-file release-notes.md

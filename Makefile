@@ -53,26 +53,12 @@ APP_AUTHOR	:=	$(if $(APP_AUTHOR_OVERRIDE),$(APP_AUTHOR_OVERRIDE),$(DEFAULT_APP_A
 ICON		:=	assets/release/icon.png
 DEBUG_LOGGING	?=	0
 
-# CIA packaging assets (for console testing/install)
-BANNER_IMAGE	:=	assets/release/banner.png
-BANNER_AUDIO	:=	assets/cia/banner-silence.wav
-CIA_ICON_SMALL	:=	assets/release/icon-32x32.png
-CIA_ICON_LARGE	:=	assets/release/icon-64x64.png
-CIA_RSF		:=	3dslibris.rsf
-CIA_TMPDIR	:=	$(BUILD)/cia
-CIA_OUTPUT	:=	$(TARGET).cia
 SDMC_TEMPLATE	:=	sdmc
 DISTDIR		:=	dist
 SDMC_DISTROOT	:=	$(DISTDIR)/sdmc
 SDMC_APPDIR	:=	$(SDMC_DISTROOT)/3ds/$(TARGET)
 SDMC_TEMPLATE_APPDIR := $(SDMC_TEMPLATE)/3ds/$(TARGET)
 SDMC_ZIP	:=	$(DISTDIR)/$(TARGET)-sdmc.zip
-
-BANNERTOOL	?=	bannertool
-MAKEROM		?=	makerom
-
-CIA_BNR		:=	$(CIA_TMPDIR)/$(TARGET).bnr
-CIA_SMDH	:=	$(CIA_TMPDIR)/$(TARGET).smdh
 #ROMFS		:=	romfs
 #GFXBUILD	:=	$(ROMFS)/gfx
 
@@ -202,7 +188,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean cia package-sdmc zip-sdmc debug-3dsx
+.PHONY: all clean package-sdmc zip-sdmc debug-3dsx
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -225,7 +211,7 @@ endif
 clean:
 	@echo clean ...
 	@rm -fr $(BUILD) $(DEBUG_BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
-		$(GFXBUILD) $(CIA_OUTPUT) $(DISTDIR) \
+		$(GFXBUILD) $(DISTDIR) \
 		$(BASE_TARGET).3dsx $(BASE_TARGET).smdh $(BASE_TARGET).elf \
 		$(DEBUG_TARGET).3dsx $(DEBUG_TARGET).smdh $(DEBUG_TARGET).elf
 
@@ -239,35 +225,6 @@ debug-3dsx:
 		APP_DESCRIPTION_OVERRIDE="eBook reader for Nintendo 3DS (debug)" \
 		DEBUG_LOGGING=1 \
 		all
-
-#---------------------------------------------------------------------------------
-cia: all
-#---------------------------------------------------------------------------------
-	@echo building cia ...
-	@mkdir -p $(CIA_TMPDIR)
-	@[ -f $(BANNER_IMAGE) ] || (echo "Missing $(BANNER_IMAGE)"; exit 1)
-	@[ -f $(BANNER_AUDIO) ] || (echo "Missing $(BANNER_AUDIO)"; exit 1)
-	@[ -f $(CIA_ICON_SMALL) ] || (echo "Missing $(CIA_ICON_SMALL)"; exit 1)
-	@[ -f $(CIA_ICON_LARGE) ] || (echo "Missing $(CIA_ICON_LARGE)"; exit 1)
-	@[ -f $(CIA_RSF) ] || (echo "Missing $(CIA_RSF)"; exit 1)
-	@command -v $(BANNERTOOL) >/dev/null 2>&1 || (echo "Missing bannertool in PATH"; exit 1)
-	@command -v $(MAKEROM) >/dev/null 2>&1 || (echo "Missing makerom in PATH"; exit 1)
-	@$(BANNERTOOL) makebanner -i $(BANNER_IMAGE) -a $(BANNER_AUDIO) -o $(CIA_BNR) || \
-		$(BANNERTOOL) makebanner -i $(BANNER_IMAGE) -o $(CIA_BNR)
-	@if $(BANNERTOOL) makesmdh 2>&1 | grep -q "shorttitle"; then \
-		$(BANNERTOOL) makesmdh -i $(ICON) \
-			-s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" -p "$(APP_AUTHOR)" \
-			-o $(CIA_SMDH); \
-	else \
-		$(BANNERTOOL) makesmdh -s $(CIA_ICON_SMALL) -l $(CIA_ICON_LARGE) \
-			-t "$(APP_TITLE)" -d "$(APP_DESCRIPTION)" -a "$(APP_AUTHOR)" \
-			-o $(CIA_SMDH); \
-	fi
-	@$(MAKEROM) -f cia -target t -o $(CIA_OUTPUT) \
-		-elf $(OUTPUT).elf -rsf $(CIA_RSF) \
-		-icon $(CIA_SMDH) -banner $(CIA_BNR) \
-		-DAPP_ENCRYPTED=false
-	@echo built ... $(CIA_OUTPUT)
 
 #---------------------------------------------------------------------------------
 package-sdmc: all
