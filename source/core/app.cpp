@@ -828,6 +828,8 @@ void App::ShowLibraryView() {
 
 void App::ShowSettingsView(bool from_book) {
   prefs_book_context = from_book;
+  // Surface the warning only when the current book was paginated with stale
+  // layout settings.
   prefs_layout_notice_pending =
       from_book && bookcurrent && BookNeedsRelayout(bookcurrent);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
@@ -844,6 +846,8 @@ void App::ShowSettingsView(bool from_book) {
 }
 
 void App::MarkBookLayoutDirty() {
+  // Bump the global layout generation so already-paginated books are reopened
+  // before they are reused.
   layout_revision++;
   if (layout_revision == 0)
     layout_revision = 1;
@@ -855,6 +859,7 @@ void App::MarkBookLayoutDirty() {
 bool App::BookNeedsRelayout(Book *book) const {
   if (!book || book->GetPageCount() == 0)
     return false;
+  // Parsed pages are only reusable if they were built with the current layout.
   return book->GetLayoutRevision() != layout_revision;
 }
 

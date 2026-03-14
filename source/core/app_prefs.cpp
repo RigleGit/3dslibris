@@ -115,6 +115,8 @@ void App::PrefsDraw() {
   ts->PrintSplash(ts->screenleft);
   if (prefs_book_context && prefs_layout_notice_pending && bookcurrent &&
       BookNeedsRelayout(bookcurrent)) {
+    // Settings are saved immediately, but the active book is repaginated only
+    // after it is reopened.
     const u8 savedPixelSize = ts->GetPixelSize();
     static const u16 kLayoutNoticeColor =
         RGB565FromU8(188.0f, 36.0f, 36.0f);

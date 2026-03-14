@@ -28,6 +28,7 @@ int RemapPageIndexApprox(int old_index, int old_page_count, int new_page_count) 
   const int clamped_old = ClampPageIndex(old_index, old_page_count);
   const int old_last = old_page_count - 1;
   const int new_last = new_page_count - 1;
+  // Map by relative progress through the book rather than by chapter/anchor.
   const long long numer =
       (long long)clamped_old * (long long)new_last + (old_last / 2);
   const int mapped = (int)(numer / old_last);

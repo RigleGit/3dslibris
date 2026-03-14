@@ -272,6 +272,7 @@ u8 App::OpenBook(void) {
   int old_position = 0;
   std::list<int> old_bookmarks;
   if (needs_relayout) {
+    // Preserve approximate reading state before closing the stale pagination.
     old_page_count = bookselected->GetPageCount();
     old_position = bookselected->GetPosition();
     old_bookmarks = CopyBookmarksAsInts(*bookselected->GetBookmarks());
@@ -324,6 +325,7 @@ u8 App::OpenBook(void) {
     return err;
   }
   bookcurrent = bookselected;
+  // Remember which layout generation produced these pages.
   bookcurrent->SetLayoutRevision(layout_revision);
 
   int pageCount = bookcurrent->GetPageCount();
@@ -339,6 +341,7 @@ u8 App::OpenBook(void) {
   }
 
   if (needs_relayout) {
+    // Keep the reader roughly in the same part of the book after repagination.
     bookcurrent->SetPosition(layout_reflow::RemapPageIndexApprox(
         old_position, old_page_count, pageCount));
     ApplyRemappedBookmarks(
