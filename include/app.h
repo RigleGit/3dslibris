@@ -223,6 +223,7 @@ private:
   void PrefsIncreaseParaspacing();
   void PrefsDecreaseParaspacing();
   void PrefsFlipOrientation();
+  void ToggleCurrentBookMobiLineWrapFix();
   u8 PrefsVisibleButtonCount() const;
   bool BookNeedsRelayout(Book *book) const;
 };

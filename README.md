@@ -43,12 +43,15 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
   - First open can be slow on large books (decompress + parse + pagination)
   - Subsequent opens are accelerated by persistent page cache
   - TOC quality is heuristic for many files (can be approximate)
+  - Includes an optional per-book `line wrap fix` for badly converted files that hard-wrap prose line by line
+  - Empty or corrupt books are reported with a readable error instead of a raw numeric code
 
 ## Known limitations
 - Some EPUB files have malformed anchors; index jumps can be approximate when source metadata is broken.
 - MOBI TOC extraction depends on file structure and may omit or merge entries in some books.
-- After changing font size, paragraph spacing, orientation, or reading fonts, reopen the current book to apply the new layout.
-- Existing bookmarks are remapped approximately after that reopen and can shift a few pages from their original position.
+- Some malformed MOBI sources still contain encoding or OCR artifacts that cannot be repaired reliably on the reader side.
+- After changing font size, paragraph spacing, orientation, reading fonts, or the per-book MOBI `line wrap fix`, reopen the current book to apply the new layout.
+- Reading position and existing bookmarks are remapped approximately after that reopen and can shift a few pages from their original location.
 - No DRM support.
 
 ## Build (Docker, recommended)

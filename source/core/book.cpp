@@ -43,6 +43,27 @@ static bool EqualsAsciiNoCase(const char *a, const char *b) {
   return *a == '\0' && *b == '\0';
 }
 
+static bool HasExtCaseInsensitive(const std::string &name, const char *ext) {
+  if (!ext)
+    return false;
+  const size_t name_len = name.size();
+  const size_t ext_len = strlen(ext);
+  if (name_len < ext_len)
+    return false;
+  const size_t start = name_len - ext_len;
+  for (size_t i = 0; i < ext_len; i++) {
+    unsigned char a = (unsigned char)name[start + i];
+    unsigned char b = (unsigned char)ext[i];
+    if (a >= 'A' && a <= 'Z')
+      a = (unsigned char)(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z')
+      b = (unsigned char)(b - 'A' + 'a');
+    if (a != b)
+      return false;
+  }
+  return true;
+}
+
 static std::string BasenamePathLocal(const std::string &path) {
   size_t slash = path.find_last_of('/');
   if (slash == std::string::npos)
@@ -904,6 +925,8 @@ Book::Book(App *a) {
   metadataIndexed = false;
   tocResolveTried = false;
   tocResolved = false;
+  mobi_line_wrap_fix = false;
+  parsed_with_mobi_line_wrap_fix = false;
   fb2_inline_images_bytes = 0;
   inline_image_cache_bytes = 0;
   ClearTocConfidence();
@@ -1231,6 +1254,20 @@ void Book::Close() {
   ClearChapterDocStartPages();
   ClearInlineImages();
   ClearTocConfidence();
+}
+
+bool Book::IsMobiFile() const { return HasExtCaseInsensitive(filename, ".mobi"); }
+
+bool Book::GetMobiLineWrapFix() const { return mobi_line_wrap_fix; }
+
+void Book::SetMobiLineWrapFix(bool enabled) { mobi_line_wrap_fix = enabled; }
+
+void Book::MarkMobiRenderSettingsApplied(bool enabled) {
+  parsed_with_mobi_line_wrap_fix = enabled;
+}
+
+bool Book::NeedsMobiRenderRefresh() const {
+  return IsMobiFile() && parsed_with_mobi_line_wrap_fix != mobi_line_wrap_fix;
 }
 
 unsigned int Book::GetLayoutRevision() const { return layout_revision; }

@@ -55,6 +55,24 @@ static bool CanOpenSelectedBookIndex(App *app) {
   return app->bookselected->format == FORMAT_EPUB;
 }
 
+static bool CurrentBookUsesLineWrapFixSlot(App *app) {
+  return app && app->IsBookSettingsContext() && app->bookcurrent &&
+         app->bookcurrent->IsMobiFile();
+}
+
+void App::ToggleCurrentBookMobiLineWrapFix() {
+  if (!CurrentBookUsesLineWrapFixSlot(this))
+    return;
+  Book *book = bookcurrent;
+  book->SetMobiLineWrapFix(!book->GetMobiLineWrapFix());
+  // The new cleanup changes pagination, but only for this book.
+  if (book->GetPageCount() > 0)
+    prefs_layout_notice_pending = true;
+  PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+  prefs->Write();
+  prefs_view_dirty = true;
+}
+
 u8 App::PrefsVisibleButtonCount() const {
   // General settings hide per-book actions like index/bookmarks.
   return prefs_book_context ? PREFS_BUTTON_COUNT : PREFS_BUTTON_INDEX;
@@ -101,6 +119,7 @@ void App::PrefsDraw() {
     prefsSelected = visibleCount - 1;
 
   // Dynamic rows depend on current context/book; refresh before drawing.
+  PrefsRefreshButton(PREFS_BUTTON_TIME24H);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
 
@@ -122,7 +141,7 @@ void App::PrefsDraw() {
         RGB565FromU8(188.0f, 36.0f, 36.0f);
     static const u16 kLayoutNoticeBg = RGB565FromU8(255.0f, 255.0f, 255.0f);
     const char *line1 = "reopen book to";
-    const char *line2 = "apply layout changes";
+    const char *line2 = "apply changes";
     ts->SetScreen(ts->screenleft);
     ts->SetPixelSize(11);
     const int line1w = ts->GetStringAdvance(line1);
@@ -251,10 +270,14 @@ void App::PrefsHandleTouch() {
       } else if (i == PREFS_BUTTON_ORIENTATION) {
         PrefsFlipOrientation();
       } else if (i == PREFS_BUTTON_TIME24H) {
-        prefs->time24h = !prefs->time24h;
-        PrefsRefreshButton(PREFS_BUTTON_TIME24H);
-        prefs->Write();
-        prefs_view_dirty = true;
+        if (CurrentBookUsesLineWrapFixSlot(this)) {
+          ToggleCurrentBookMobiLineWrapFix();
+        } else {
+          prefs->time24h = !prefs->time24h;
+          PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+          prefs->Write();
+          prefs_view_dirty = true;
+        }
       } else if (i == PREFS_BUTTON_COLORMODE) {
         int mode = ts->GetColorMode();
         ts->SetColorMode((mode + 1) % 3);
@@ -339,8 +362,19 @@ void App::PrefsRefreshButton(int index) {
         orientation ? std::string("Turned Right") : std::string("Turned Left"));
     break;
   case PREFS_BUTTON_TIME24H:
-    prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
-        prefs->time24h ? std::string("24h Format") : std::string("12h Format"));
+    if (CurrentBookUsesLineWrapFixSlot(this)) {
+      // Reuse this slot in per-book MOBI settings so we avoid adding a ninth
+      // row to an already full settings screen.
+      prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("line wrap fix"));
+      prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
+          bookcurrent->GetMobiLineWrapFix() ? std::string("on")
+                                            : std::string("off"));
+    } else {
+      prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("clock format"));
+      prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
+          prefs->time24h ? std::string("24h Format")
+                         : std::string("12h Format"));
+    }
     break;
   case PREFS_BUTTON_COLORMODE: {
     int mode = ts->GetColorMode();
@@ -381,10 +415,14 @@ void App::PrefsHandlePress() {
   }
 
   if (prefsSelected == PREFS_BUTTON_TIME24H) {
-    prefs->time24h = !prefs->time24h;
-    PrefsRefreshButton(PREFS_BUTTON_TIME24H);
-    prefs->Write();
-    prefs_view_dirty = true;
+    if (CurrentBookUsesLineWrapFixSlot(this)) {
+      ToggleCurrentBookMobiLineWrapFix();
+    } else {
+      prefs->time24h = !prefs->time24h;
+      PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+      prefs->Write();
+      prefs_view_dirty = true;
+    }
     return;
   }
 

@@ -108,6 +108,10 @@ public:
   bool metadataIndexed;
   bool tocResolveTried;
   bool tocResolved;
+  //! Per-book opt-in for collapsing visually hard-wrapped MOBI prose.
+  bool mobi_line_wrap_fix;
+  //! Remembers which wrap-fix state produced the currently cached pages.
+  bool parsed_with_mobi_line_wrap_fix;
 
   Book(App *app);
   ~Book();
@@ -188,6 +192,11 @@ public:
   bool HasDeferredMobiParse() const;
   bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
   void CancelDeferredMobiParse();
+  bool IsMobiFile() const;
+  bool GetMobiLineWrapFix() const;
+  void SetMobiLineWrapFix(bool enabled);
+  void MarkMobiRenderSettingsApplied(bool enabled);
+  bool NeedsMobiRenderRefresh() const;
   unsigned int GetLayoutRevision() const;
   void SetLayoutRevision(unsigned int revision);
 };

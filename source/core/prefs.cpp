@@ -93,11 +93,14 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     strcpy(filename, "");
     current = false;
     position = 0;
+    bool mobi_line_wrap_fix = false;
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "file"))
         strcpy(filename, attr[i + 1]);
       if (!strcmp(attr[i], "page"))
         position = atoi(attr[i + 1]);
+      if (!strcmp(attr[i], "mobiLineWrapFix"))
+        mobi_line_wrap_fix = atoi(attr[i + 1]) != 0;
       if (!strcmp(attr[i], "current")) {
         // Should warn if multiple books are current...
         // the last current book will win.
@@ -114,6 +117,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       if (!strcmp(bookname, filename)) {
         // bookmark tags will refer to this.
         p->book = *it;
+        // Per-book render fixes live alongside progress/bookmarks in prefs.
+        (*it)->SetMobiLineWrapFix(mobi_line_wrap_fix);
 
         if (current) {
           // Set this book as current.
@@ -276,6 +281,9 @@ int Prefs::Write() {
     Book *book = app->books[i];
     fprintf(fp, "\t\t<book file=\"%s\" page=\"%d\"", book->GetFileName(),
             book->GetPosition() + 1);
+    // Only persist the override when enabled so old prefs stay readable.
+    if (book->GetMobiLineWrapFix())
+      fprintf(fp, " mobiLineWrapFix=\"1\"");
     if (app->bookcurrent == app->books[i])
       fprintf(fp, " current=\"1\"");
     fprintf(fp, ">\n");

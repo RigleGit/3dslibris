@@ -11,11 +11,12 @@
 #include "book.h"
 
 #include "book_error.h"
-#include "file_read_utils.h"
-#include "epub.h"
-#include "main.h"
-#include "parse.h"
 #include "debug_log.h"
+#include "epub.h"
+#include "file_read_utils.h"
+#include "main.h"
+#include "mobi_text_cleanup.h"
+#include "parse.h"
 #include "string_utils.h"
 #include "unzip.h"
 #include <algorithm>
@@ -36,7 +37,9 @@ static const size_t kMobiMaxBytes = 64 * 1024 * 1024;
 static const char *kMobiCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
 static const char *kMobiCacheDir = "sdmc:/3ds/3dslibris/cache/mobi";
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-static const u16 kMobiPageCacheVersion = 1;
+// Bump when serialized MOBI pages become semantically incompatible with the
+// current text cleanup or TOC mapping logic.
+static const u16 kMobiPageCacheVersion = 3;
 
 struct MobiPageCacheHeader {
   u32 magic;
@@ -61,7 +64,8 @@ static void EnsureMobiCacheDirs() {
   initialized = true;
 }
 
-static std::string BuildMobiPageCachePath(const char *book_path, App *app) {
+static std::string BuildMobiPageCachePath(const char *book_path, App *app,
+                                          bool line_wrap_fix_enabled) {
   if (!book_path || !app || !app->ts)
     return std::string();
   struct stat st;
@@ -98,6 +102,8 @@ static std::string BuildMobiPageCachePath(const char *book_path, App *app) {
   key += std::to_string((int)ts->margin.bottom);
   key.push_back('|');
   key += ts->GetFontFile(TEXT_STYLE_REGULAR);
+  key.push_back('|');
+  key += std::to_string(line_wrap_fix_enabled ? 1 : 0);
 
   uint64_t h = Fnv1a64(key);
   char out[192];
@@ -110,7 +116,8 @@ static bool TryLoadMobiPageCache(Book *book, const char *book_path, App *app) {
   if (!book || !book_path || !app)
     return false;
   EnsureMobiCacheDirs();
-  std::string cache_path = BuildMobiPageCachePath(book_path, app);
+  std::string cache_path =
+      BuildMobiPageCachePath(book_path, app, book->GetMobiLineWrapFix());
   if (cache_path.empty())
     return false;
 
@@ -198,14 +205,17 @@ static bool TryLoadMobiPageCache(Book *book, const char *book_path, App *app) {
     q = (TocQuality)hdr.toc_quality;
   book->SetTocConfidence(q, hdr.toc_direct, hdr.toc_heuristic,
                          hdr.toc_unresolved);
+  book->MarkMobiRenderSettingsApplied(book->GetMobiLineWrapFix());
   return true;
 }
 
-static void SaveMobiPageCache(Book *book, const char *book_path, App *app) {
+static void SaveMobiPageCache(Book *book, const char *book_path, App *app,
+                              bool line_wrap_fix_enabled) {
   if (!book || !book_path || !app || book->GetPageCount() == 0)
     return;
   EnsureMobiCacheDirs();
-  std::string cache_path = BuildMobiPageCachePath(book_path, app);
+  std::string cache_path =
+      BuildMobiPageCachePath(book_path, app, line_wrap_fix_enabled);
   if (cache_path.empty())
     return;
 
@@ -2188,6 +2198,7 @@ struct MobiDeferredState {
   bool structured_from_filepos;
   bool used_utf8_guess;
   bool used_legacy_guess;
+  bool line_wrap_fix_applied;
   bool finalized;
   u32 text_len_for_pos;
   u64 t_parse_begin;
@@ -3260,6 +3271,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
       DBG_LOG(app, tmsg);
       DBG_LOG(app, "MOBI: parse end");
     }
+    book->MarkMobiRenderSettingsApplied(book->GetMobiLineWrapFix());
     return 0;
   }
 
@@ -3397,6 +3409,14 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   std::vector<MobiHeadingHint> heading_hints;
   std::string text = ExtractMobiMarkupToText(utf8, &heading_hints);
   NormalizeNewlines(&text);
+  // Mixed-quality MOBIs can contain isolated UTF-8 mojibake fragments even
+  // when most of the book decodes correctly; repair those before layout.
+  text = mobi_text_cleanup::RepairCommonMojibake(text);
+  if (book->GetMobiLineWrapFix()) {
+    // Some converted MOBIs encode visual line wraps as block breaks; keep this
+    // repair opt-in per book so poetry/lists are not rewritten globally.
+    text = mobi_text_cleanup::FixBrokenParagraphWraps(text);
+  }
   const u64 t_after_markup = osGetTime();
 
   MobiDeferredState deferred;
@@ -3410,6 +3430,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   deferred.structured_from_filepos = false;
   deferred.used_utf8_guess = used_utf8_guess;
   deferred.used_legacy_guess = used_legacy_guess;
+  deferred.line_wrap_fix_applied = book->GetMobiLineWrapFix();
   deferred.finalized = false;
   deferred.text_len_for_pos = (text_len > 0) ? text_len : (u32)merged.size();
   deferred.t_parse_begin = t_parse_begin;
@@ -3424,6 +3445,9 @@ static u8 ParseMobiFile(Book *book, const char *path) {
                                 &deferred.stream)) {
     return 1;
   }
+  // The visible pages already reflect the current per-book cleanup setting,
+  // even if deferred pagination keeps running in the background.
+  book->MarkMobiRenderSettingsApplied(deferred.line_wrap_fix_applied);
 
   const bool pages_done_initial = ContinuePlainTextStreamState(
       &deferred.stream, deferred.text_utf8, 1200, 96, 1);
@@ -3499,7 +3523,8 @@ static u8 ParseMobiFile(Book *book, const char *path) {
     DBG_LOG(app, tmsg);
   }
 
-  SaveMobiPageCache(book, path, app);
+  SaveMobiPageCache(book, path, app, deferred.line_wrap_fix_applied);
+  book->MarkMobiRenderSettingsApplied(deferred.line_wrap_fix_applied);
   if (app)
     DBG_LOG(app, "MOBI: parse end");
   return 0;
@@ -3827,7 +3852,9 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
     DBG_LOG(app, dmsg);
   }
 
-  SaveMobiPageCache(book, state->source_path.c_str(), app);
+  SaveMobiPageCache(book, state->source_path.c_str(), app,
+                    state->line_wrap_fix_applied);
+  book->MarkMobiRenderSettingsApplied(state->line_wrap_fix_applied);
   return true;
 }
 
