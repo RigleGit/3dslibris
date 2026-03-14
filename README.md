@@ -10,6 +10,8 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
 
 `3dslibris` ports the original architecture to `libctru`, keeps the fast text-first reading model, and adds practical 3DS UX improvements (grid library, cover thumbs, indexed navigation, procedural UI skin, orientation-aware touch, etc.).
 
+The current `.cia` packaging flow is based on the same `makerom`/`bannertool` process used by [Universal-Updater](https://github.com/Universal-Team/Universal-Updater), adapted to this project's assets and release layout.
+
 <table>
   <tr>
     <td width="50%"><img src="assets/readme/screenshot1.jpeg" alt="Library view screenshot" /></td>
@@ -23,8 +25,7 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
-- Supported install path today: `.3dsx` plus `3dslibris-sdmc.zip`
-- A stable `.cia` build will come later once packaging is reliable across hardware
+- Supported install paths: `.3dsx` plus `3dslibris-sdmc.zip`, or `3dslibris.cia`
 
 ## Supported formats
 
@@ -58,10 +59,11 @@ docker run --rm \
   -e DEVKITPRO=/opt/devkitpro \
   -e DEVKITARM=/opt/devkitpro/devkitARM \
   devkitpro/devkitarm \
-  sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx'
+  sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx && make cia'
 ```
 
 Expected outputs:
+- `3dslibris.cia`
 - `3dslibris.3dsx`
 - `3dslibris-debug.3dsx`
 - `3dslibris.smdh`
@@ -75,16 +77,22 @@ Recommended install:
 3. Put your books in `sdmc:/3ds/3dslibris/book/`.
 4. Launch `sdmc:/3ds/3dslibris/3dslibris.3dsx` from Homebrew Launcher.
 
+Alternative install:
+1. Install `3dslibris.cia`.
+2. Keep the same runtime folders on SD, including `sdmc:/3ds/3dslibris/font/` and `sdmc:/3ds/3dslibris/resources/`.
+3. Put your books in `sdmc:/3ds/3dslibris/book/`.
+
 Important:
 - Keep the packaged `font/` and `resources/` folders exactly inside `sdmc:/3ds/3dslibris/`.
 - If those runtime files are missing, `3dslibris` now stops at boot and tells you to reinstall `3dslibris-sdmc.zip`.
 - `3dslibris-debug.3dsx` uses the same SD layout and writes verbose diagnostics to `sdmc:/3ds/3dslibris/3dslibris.log`.
-- `.cia` packaging is temporarily unavailable and will return later when it is stable on real hardware.
+- The `.cia` build uses the Universal-Updater-style packaging flow, but the runtime SD layout is the same as the `.3dsx` install.
 
 Generated install package targets:
 - `make package-sdmc` stages `dist/sdmc/...` with `3dslibris.3dsx` included
 - `make zip-sdmc` creates `dist/3dslibris-sdmc.zip`
-- GitHub Releases: pushing a tag like `v1.0.3` triggers `.github/workflows/release.yml` and attaches `3dslibris.3dsx`, `3dslibris-debug.3dsx`, and `dist/3dslibris-sdmc.zip` to the release
+- `make cia` creates `3dslibris.cia`
+- GitHub Releases: pushing a tag like `v1.0.3` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, and `dist/3dslibris-sdmc.zip` to the release
 
 Bundled runtime files:
 - `sdmc/3ds/3dslibris/resources/splash.jpg`

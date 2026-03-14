@@ -39,7 +39,10 @@ BUILD		?=	build
 SOURCES		:=	source source/core source/expat
 DATA		:=	data
 INCLUDES	:=	include
+GRAPHICS	:=
+ifneq ($(wildcard $(TOPDIR)/gfx),)
 GRAPHICS	:=	gfx
+endif
 GFXBUILD	:=	$(BUILD)
 DEFAULT_APP_TITLE	:=	3dslibris
 DEFAULT_APP_DESCRIPTION	:=	eBook reader for Nintendo 3DS
@@ -61,6 +64,34 @@ SDMC_TEMPLATE_APPDIR := $(SDMC_TEMPLATE)/3ds/$(TARGET)
 SDMC_ZIP	:=	$(DISTDIR)/$(TARGET)-sdmc.zip
 #ROMFS		:=	romfs
 #GFXBUILD	:=	$(ROMFS)/gfx
+
+#---------------------------------------------------------------------------------
+# CIA build settings
+#---------------------------------------------------------------------------------
+ifeq ($(OS),Windows_NT)
+MAKEROM		?= makerom.exe
+BANNERTOOL	?= bannertool.exe
+else
+MAKEROM		?= makerom
+BANNERTOOL	?= bannertool
+endif
+
+CIA_RSF		:=	assets/cia/build-cia.rsf
+CIA_BANNER_IMG	:=	assets/release/banner.png
+CIA_BANNER_WAV	:=	assets/cia/BannerAudio.wav
+CIA_LOGO	:=	assets/cia/logo.bcma.lz
+CIA_TMPDIR	:=	$(BUILD)/cia
+CIA_BANNER_BIN	:=	$(CIA_TMPDIR)/banner.bin
+CIA_ICON_BIN	:=	$(CIA_TMPDIR)/icon.icn
+ICON_FLAGS	:=	--flags visible,ratingrequired --cero 153 --esrb 153 --usk 153 --pegigen 153 --pegiptr 153 --pegibbfc 153 --cob 153 --grb 153 --cgsrr 153
+VERSION_STR	:=	$(strip $(shell grep '^#define VERSION ' "$(TOPDIR)/include/version.h" | cut -d '"' -f2))
+VERSION_MAJOR	:=	$(word 1,$(subst ., ,$(VERSION_STR)))
+VERSION_MINOR	:=	$(word 2,$(subst ., ,$(VERSION_STR)))
+VERSION_MICRO	:=	$(word 3,$(subst ., ,$(VERSION_STR)))
+CIA_MAKEROM_EXTRA	:=
+ifdef ROMFS
+CIA_MAKEROM_EXTRA	+=	-DAPP_ROMFS="$(TOPDIR)/$(ROMFS)"
+endif
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -188,7 +219,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean package-sdmc zip-sdmc debug-3dsx
+.PHONY: all clean package-sdmc zip-sdmc debug-3dsx cia
 
 #---------------------------------------------------------------------------------
 all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -213,6 +244,7 @@ clean:
 	@rm -fr $(BUILD) $(DEBUG_BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
 		$(GFXBUILD) $(DISTDIR) \
 		$(BASE_TARGET).3dsx $(BASE_TARGET).smdh $(BASE_TARGET).elf \
+		$(BASE_TARGET).cia $(BASE_TARGET)-debug.cia \
 		$(DEBUG_TARGET).3dsx $(DEBUG_TARGET).smdh $(DEBUG_TARGET).elf
 
 #---------------------------------------------------------------------------------
@@ -247,6 +279,11 @@ zip-sdmc: package-sdmc
 	@echo built ... $(SDMC_ZIP)
 
 #---------------------------------------------------------------------------------
+cia: all
+#---------------------------------------------------------------------------------
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile cia
+
+#---------------------------------------------------------------------------------
 $(GFXBUILD)/%.t3x	$(BUILD)/%.h	:	%.t3s
 #---------------------------------------------------------------------------------
 	@echo $(notdir $<)
@@ -263,6 +300,32 @@ $(OUTPUT).3dsx	:	$(OUTPUT).elf $(_3DSXDEPS)
 $(OFILES_SOURCES) : $(HFILES)
 
 $(OUTPUT).elf	:	$(OFILES)
+
+#---------------------------------------------------------------------------------
+# CIA target (inner build)
+#---------------------------------------------------------------------------------
+cia: $(OUTPUT).cia
+
+$(OUTPUT).cia	:	$(OUTPUT).elf $(OUTPUT).smdh $(TOPDIR)/$(CIA_RSF) $(TOPDIR)/$(CIA_BANNER_IMG) $(TOPDIR)/$(CIA_BANNER_WAV) $(TOPDIR)/$(CIA_LOGO) $(TOPDIR)/$(ICON)
+	@echo building CIA ...
+	@mkdir -p "$(TOPDIR)/$(CIA_TMPDIR)"
+	@[ -f "$(TOPDIR)/$(CIA_BANNER_IMG)" ] || (echo "Missing $(CIA_BANNER_IMG)"; exit 1)
+	@[ -f "$(TOPDIR)/$(CIA_BANNER_WAV)" ] || (echo "Missing $(CIA_BANNER_WAV)"; exit 1)
+	@[ -f "$(TOPDIR)/$(CIA_LOGO)" ] || (echo "Missing $(CIA_LOGO)"; exit 1)
+	@[ -f "$(TOPDIR)/$(ICON)" ] || (echo "Missing $(ICON)"; exit 1)
+	@[ -f "$(TOPDIR)/$(CIA_RSF)" ] || (echo "Missing $(CIA_RSF)"; exit 1)
+	@command -v $(BANNERTOOL) >/dev/null 2>&1 || (echo "Missing bannertool in PATH"; exit 1)
+	@command -v $(MAKEROM) >/dev/null 2>&1 || (echo "Missing makerom in PATH"; exit 1)
+	@$(BANNERTOOL) makebanner -i "$(TOPDIR)/$(CIA_BANNER_IMG)" -a "$(TOPDIR)/$(CIA_BANNER_WAV)" -o "$(TOPDIR)/$(CIA_BANNER_BIN)"
+	@$(BANNERTOOL) makesmdh -i "$(TOPDIR)/$(ICON)" \
+		-s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" -p "$(APP_AUTHOR)" \
+		-o "$(TOPDIR)/$(CIA_ICON_BIN)" $(ICON_FLAGS)
+	@$(MAKEROM) -f cia -target t -exefslogo -o "$(OUTPUT).cia" -elf "$(OUTPUT).elf" \
+		-rsf "$(TOPDIR)/$(CIA_RSF)" -banner "$(TOPDIR)/$(CIA_BANNER_BIN)" \
+		-icon "$(TOPDIR)/$(CIA_ICON_BIN)" -logo "$(TOPDIR)/$(CIA_LOGO)" \
+		$(CIA_MAKEROM_EXTRA) -major $(VERSION_MAJOR) -minor $(VERSION_MINOR) \
+		-micro $(VERSION_MICRO) -DAPP_VERSION_MAJOR="$(VERSION_MAJOR)"
+	@echo built ... $(OUTPUT).cia
 
 #---------------------------------------------------------------------------------
 # you need a rule like this for each extension you use as binary data
