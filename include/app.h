@@ -167,6 +167,7 @@ public:
   void HandleEventInBook();
   u8 OpenBook();
   void ToggleBookmark();
+  void MarkBookLayoutDirty();
 
   void PrefsRefreshButton(int index);
   void PrefsRefreshButtonFont();
@@ -182,12 +183,14 @@ private:
   bool browser_wait_input_release;
   bool prefs_view_dirty;
   bool prefs_book_context;
+  bool prefs_layout_notice_pending;
   int status_last_minute;
   int status_last_percent_tenths;
   Book *status_progress_lock_book;
   int status_progress_pagecount_lock;
   bool status_force_redraw;
   std::deque<app_job_t> job_queue;
+  unsigned int layout_revision;
 
   int FindBooks();
   void InitScreens();
@@ -221,4 +224,5 @@ private:
   void PrefsDecreaseParaspacing();
   void PrefsFlipOrientation();
   u8 PrefsVisibleButtonCount() const;
+  bool BookNeedsRelayout(Book *book) const;
 };

@@ -26,11 +26,32 @@
 #include "book.h"
 #include "button.h"
 #include "debug_log.h"
+#include "layout_reflow.h"
 #include "main.h"
 #include "parse.h"
 #include "text.h"
 
 //! Book-related methods for App class.
+
+namespace {
+
+std::list<int> CopyBookmarksAsInts(const std::list<u16> &bookmarks) {
+  std::list<int> out;
+  for (u16 bookmark : bookmarks)
+    out.push_back((int)bookmark);
+  return out;
+}
+
+void ApplyRemappedBookmarks(Book *book, const std::list<int> &bookmarks) {
+  if (!book)
+    return;
+  std::list<u16> *dst = book->GetBookmarks();
+  dst->clear();
+  for (int bookmark : bookmarks)
+    dst->push_back((u16)bookmark);
+}
+
+} // namespace
 
 void App::HandleEventInBook() {
   u16 pagecurrent = bookcurrent->GetPosition();
@@ -226,8 +247,10 @@ u8 App::OpenBook(void) {
   if (bookselected->GetTitle())
     DBG_LOG(this, bookselected->GetTitle());
 
+  const bool needs_relayout = BookNeedsRelayout(bookselected);
+
   // Fast path: selected book is already parsed and resident.
-  if (bookselected->GetPageCount() > 0) {
+  if (bookselected->GetPageCount() > 0 && !needs_relayout) {
     bookcurrent = bookselected;
     if (mode == APP_MODE_BROWSER) {
       if (orientation) {
@@ -240,8 +263,19 @@ u8 App::OpenBook(void) {
       bookcurrent->SetPosition(0);
     bookcurrent->GetPage()->Draw(ts);
     RequestStatusRedraw();
+    prefs_layout_notice_pending = false;
     prefs->Write();
     return 0;
+  }
+
+  int old_page_count = 0;
+  int old_position = 0;
+  std::list<int> old_bookmarks;
+  if (needs_relayout) {
+    old_page_count = bookselected->GetPageCount();
+    old_position = bookselected->GetPosition();
+    old_bookmarks = CopyBookmarksAsInts(*bookselected->GetBookmarks());
+    bookselected->Close();
   }
 
   auto drawOpeningSplash = [&]() {
@@ -290,6 +324,7 @@ u8 App::OpenBook(void) {
     return err;
   }
   bookcurrent = bookselected;
+  bookcurrent->SetLayoutRevision(layout_revision);
 
   int pageCount = bookcurrent->GetPageCount();
   DBG_LOGF(this, "Generated %d pages", pageCount);
@@ -301,6 +336,15 @@ u8 App::OpenBook(void) {
     mode = APP_MODE_BROWSER;
     browser_view_dirty = true;
     return 253;
+  }
+
+  if (needs_relayout) {
+    bookcurrent->SetPosition(layout_reflow::RemapPageIndexApprox(
+        old_position, old_page_count, pageCount));
+    ApplyRemappedBookmarks(
+        bookcurrent,
+        layout_reflow::RemapBookmarksApprox(old_bookmarks, old_page_count,
+                                           pageCount));
   }
 
   if (mode == APP_MODE_BROWSER) {
@@ -315,6 +359,7 @@ u8 App::OpenBook(void) {
     bookcurrent->SetPosition(0);
   bookcurrent->GetPage()->Draw(ts);
   RequestStatusRedraw();
+  prefs_layout_notice_pending = false;
   prefs->Write();
   return 0;
 }

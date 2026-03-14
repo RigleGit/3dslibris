@@ -474,7 +474,10 @@ void FontMenu::handleButtonPress() {
   }
 
   const u8 style = StyleFromTarget(targetSelected);
+  const std::string previous = app->ts->GetFontFile(style);
   app->ts->SetFontFile(filename, style);
+  if (style != TEXT_STYLE_BROWSER && previous != filename)
+    app->MarkBookLayoutDirty();
   app->PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
   app->prefs->Write();
   refreshTargetButtons();

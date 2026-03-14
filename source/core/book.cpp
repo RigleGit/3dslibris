@@ -907,6 +907,7 @@ Book::Book(App *a) {
   fb2_inline_images_bytes = 0;
   inline_image_cache_bytes = 0;
   ClearTocConfidence();
+  layout_revision = 0;
 }
 
 Book::~Book() {
@@ -1230,4 +1231,10 @@ void Book::Close() {
   ClearChapterDocStartPages();
   ClearInlineImages();
   ClearTocConfidence();
+}
+
+unsigned int Book::GetLayoutRevision() const { return layout_revision; }
+
+void Book::SetLayoutRevision(unsigned int revision) {
+  layout_revision = revision;
 }

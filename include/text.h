@@ -90,6 +90,8 @@ public:
     u8 g;
     u8 b;
   } bgcolor;
+  u16 fgcolor;
+  bool usefgcolor;
   bool usebgcolor;
   //! Pointers to screens and which one is current.
   u16 *screen, *screenleft, *screenright;
@@ -140,6 +142,8 @@ public:
   bool GetOrientation() const;
   void SetPen(u16 x, u16 y);
   void SetPixelSize(u8 size);
+  void SetTextColorOverride(u16 color);
+  void ClearTextColorOverride();
   inline void SetFace(u8 astyle) { style = astyle; };
   void SetFontFile(const char *path, u8 style);
   void SetScreen(u16 *s);
