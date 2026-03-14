@@ -52,6 +52,14 @@ jobs:
             echo "- \`3dslibris-sdmc.zip\`"
           } > release-notes.md
 
+      - name: Build CIA toolchain image
+        run: |
+          set -euo pipefail
+          docker build \
+            -f docker/Dockerfile.cia \
+            -t 3dslibris/devkitarm-cia:ci \
+            .
+
       - name: Build 3DSX, CIA, and SD package
         run: |
           set -euo pipefail
@@ -62,8 +70,8 @@ jobs:
             -v "$PWD:/project" -w /project \
             -e DEVKITPRO="$DEVKITPRO" \
             -e DEVKITARM="$DEVKITARM" \
-            devkitpro/devkitarm \
-            sh -lc 'tools/install-cia-tools.sh /usr/local/bin && make clean && make -j2 && make zip-sdmc && make debug-3dsx && make cia'
+            3dslibris/devkitarm-cia:ci \
+            sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx && make cia'
 
       - name: Verify release outputs
         run: |
