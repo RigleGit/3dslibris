@@ -46,12 +46,13 @@ jobs:
             fi
             echo
             echo "### Included assets"
+            echo "- \`3dslibris.cia\`"
             echo "- \`3dslibris.3dsx\`"
             echo "- \`3dslibris-debug.3dsx\`"
             echo "- \`3dslibris-sdmc.zip\`"
           } > release-notes.md
 
-      - name: Build 3DSX and SD package
+      - name: Build 3DSX, CIA, and SD package
         run: |
           set -euo pipefail
           uid="$(id -u)"
@@ -62,11 +63,12 @@ jobs:
             -e DEVKITPRO="$DEVKITPRO" \
             -e DEVKITARM="$DEVKITARM" \
             devkitpro/devkitarm \
-            sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx'
+            sh -lc 'tools/install-cia-tools.sh /usr/local/bin && make clean && make -j2 && make zip-sdmc && make debug-3dsx && make cia'
 
       - name: Verify release outputs
         run: |
           set -euo pipefail
+          test -f 3dslibris.cia
           test -f 3dslibris.3dsx
           test -f 3dslibris.smdh
           test -f 3dslibris.elf
@@ -84,6 +86,7 @@ jobs:
               --title "$tag" \
               --notes-file release-notes.md
             gh release upload "$tag" \
+              3dslibris.cia#3dslibris.cia \
               3dslibris.3dsx#3dslibris.3dsx \
               3dslibris-debug.3dsx#3dslibris-debug.3dsx \
               3dslibris.smdh#3dslibris.smdh \
@@ -92,6 +95,7 @@ jobs:
               --clobber
           else
             gh release create "$tag" \
+              3dslibris.cia#3dslibris.cia \
               3dslibris.3dsx#3dslibris.3dsx \
               3dslibris-debug.3dsx#3dslibris-debug.3dsx \
               3dslibris.smdh#3dslibris.smdh \

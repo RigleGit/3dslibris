@@ -19,6 +19,7 @@
 *.3dsx
 *.smdh
 *.cia
+!docker/Dockerfile.cia
 /3dslibris.3dsx
 /3dslibris.elf
 /3dslibris.smdh
