@@ -10,6 +10,8 @@
 #include "mobi.h"
 
 #include "app.h"
+#include "book_error.h"
+#include "file_read_utils.h"
 #include "stb_image.h"
 
 #include <algorithm>
@@ -42,39 +44,6 @@ static u16 ReadBE16(const u8 *p) {
 
 static u32 ReadBE32(const u8 *p) {
   return (u32)((u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | (u32)p[3]);
-}
-
-static bool ReadFileToStringLimited(const std::string &path, std::string *out,
-                                    size_t max_bytes) {
-  if (!out || path.empty())
-    return false;
-  out->clear();
-
-  FILE *fp = fopen(path.c_str(), "rb");
-  if (!fp)
-    return false;
-
-  char buf[4096];
-  while (true) {
-    size_t n = fread(buf, 1, sizeof(buf), fp);
-    if (n > 0) {
-      if (out->size() + n > max_bytes) {
-        fclose(fp);
-        return false;
-      }
-      out->append(buf, n);
-    }
-    if (n < sizeof(buf)) {
-      if (ferror(fp)) {
-        fclose(fp);
-        return false;
-      }
-      break;
-    }
-  }
-
-  fclose(fp);
-  return true;
 }
 
 static bool ParseMobiOffsets(const std::string &raw, std::vector<u32> *offsets) {
@@ -448,12 +417,17 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
     app->PrintStatus("MOBI: cover scan begin");
 
   std::string raw;
-  if (!ReadFileToStringLimited(mobipath, &raw, kMobiCoverFileMaxBytes))
+  // Cover extraction reads the same MOBI while the library is busy, so reuse
+  // the short-read-safe helper instead of stopping on the first partial chunk.
+  if (!file_read_utils::ReadPathToStringLimited(mobipath, &raw,
+                                                kMobiCoverFileMaxBytes))
     return 2;
+  if (raw.empty())
+    return BOOK_ERR_CORRUPT;
 
   std::vector<u32> offsets;
   if (!ParseMobiOffsets(raw, &offsets) || offsets.size() < 3)
-    return 3;
+    return BOOK_ERR_CORRUPT;
 
   const u32 rec_count = (u32)offsets.size() - 1;
   const u8 *data = (const u8 *)raw.data();
