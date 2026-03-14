@@ -10,6 +10,8 @@
 
 #include "book.h"
 
+#include "book_error.h"
+#include "file_read_utils.h"
 #include "epub.h"
 #include "main.h"
 #include "parse.h"
@@ -1141,39 +1143,6 @@ static void SetNonEpubTocConfidence(Book *book, bool strong) {
     book->SetTocConfidence(TOC_QUALITY_HEURISTIC, 0, count, 0);
 }
 
-static bool ReadFileToStringLimited(const char *path, std::string *out,
-                                    size_t max_bytes) {
-  if (!path || !out)
-    return false;
-  out->clear();
-
-  FILE *fp = fopen(path, "rb");
-  if (!fp)
-    return false;
-
-  char buf[4096];
-  while (true) {
-    size_t n = fread(buf, 1, sizeof(buf), fp);
-    if (n > 0) {
-      if (out->size() + n > max_bytes) {
-        fclose(fp);
-        return false;
-      }
-      out->append(buf, n);
-    }
-    if (n < sizeof(buf)) {
-      if (ferror(fp)) {
-        fclose(fp);
-        return false;
-      }
-      break;
-    }
-  }
-
-  fclose(fp);
-  return true;
-}
-
 static void FinalizePlainPage(parsedata_t *p) {
   if (!p || !p->book)
     return;
@@ -1594,8 +1563,10 @@ static std::string DecodeRtfToUtf8(const std::string &rtf) {
 
 static u8 ParseTxtFile(Book *book, const char *path) {
   std::string raw;
-  if (!ReadFileToStringLimited(path, &raw, kPlainTextMaxBytes))
+  if (!file_read_utils::ReadPathToStringLimited(path, &raw, kPlainTextMaxBytes))
     return 252;
+  if (raw.empty())
+    return BOOK_ERR_CORRUPT;
   NormalizeNewlines(&raw);
   std::string text = NormalizeTextUtf8(raw);
   return ParsePlainTextBuffer(book, text);
@@ -1603,8 +1574,10 @@ static u8 ParseTxtFile(Book *book, const char *path) {
 
 static u8 ParseRtfFile(Book *book, const char *path) {
   std::string raw;
-  if (!ReadFileToStringLimited(path, &raw, kPlainTextMaxBytes))
+  if (!file_read_utils::ReadPathToStringLimited(path, &raw, kPlainTextMaxBytes))
     return 252;
+  if (raw.empty())
+    return BOOK_ERR_CORRUPT;
   std::string text = DecodeRtfToUtf8(raw);
   NormalizeNewlines(&text);
   if (!LooksLikeValidUtf8Bytes(text))
@@ -2975,6 +2948,131 @@ static bool ParseMobiInlineFileposToc(const std::string &markup_utf8,
   return true;
 }
 
+static bool PrepareMobiStructuredToc(const std::string &raw,
+                                     const std::vector<u32> &offsets,
+                                     u32 ncx_index, u32 encoding,
+                                     const std::string *markup_utf8,
+                                     u32 text_len,
+                                     std::vector<MobiStructuredTocEntry> *out,
+                                     bool *structured_from_filepos,
+                                     App *app) {
+  if (!out)
+    return false;
+  out->clear();
+  if (structured_from_filepos)
+    *structured_from_filepos = false;
+
+  // Prefer real NCX/INDX TOC data, but keep the inline filepos fallback for
+  // MOBIs that only embed chapter anchors in the markup itself.
+  if (ParseMobiStructuredToc(raw, offsets, ncx_index, encoding, out, app))
+    return true;
+
+  if (markup_utf8 &&
+      ParseMobiInlineFileposToc(*markup_utf8, text_len, out, app)) {
+    if (structured_from_filepos)
+      *structured_from_filepos = true;
+    return true;
+  }
+
+  return false;
+}
+
+static bool LoadDeferredMobiStructuredToc(
+    const MobiDeferredState &state, std::vector<MobiStructuredTocEntry> *out,
+    bool *structured_from_filepos, App *app) {
+  if (!out)
+    return false;
+  out->clear();
+  if (structured_from_filepos)
+    *structured_from_filepos = false;
+  if (state.source_path.empty())
+    return false;
+
+  // Re-open the source only after deferred pagination finishes so TOC
+  // extraction does not hold the initial "opening book" path hostage.
+  std::string raw;
+  if (!file_read_utils::ReadPathToStringLimited(state.source_path.c_str(), &raw,
+                                                kMobiMaxBytes))
+    return false;
+
+  std::vector<u32> offsets;
+  if (!ParseMobiOffsets(raw, &offsets) || offsets.size() < 3)
+    return false;
+
+  const u8 *data = (const u8 *)raw.data();
+  const u32 rec0_start = offsets[0];
+  const u32 rec0_end = offsets[1];
+  if (rec0_end <= rec0_start || rec0_end - rec0_start < 16)
+    return false;
+  const u8 *rec0 = data + rec0_start;
+  const size_t rec0_len = (size_t)(rec0_end - rec0_start);
+
+  const u16 compression = ReadBE16(rec0 + 0);
+  if (compression != 1 && compression != 2)
+    return false;
+
+  const u32 text_len = ReadBE32(rec0 + 4);
+  u32 text_rec_count = ReadBE16(rec0 + 8);
+  u32 encoding = 1252;
+  u32 first_non_book_index = 0;
+  u32 ncx_index = kMobiNullIndex;
+  if (rec0_len >= 24 && memcmp(rec0 + 16, "MOBI", 4) == 0) {
+    const u8 *mobi = rec0 + 16;
+    const u32 mobi_len = ReadBE32(mobi + 4);
+    if (mobi_len >= 0x20 && rec0_len >= 16 + (size_t)0x20)
+      encoding = ReadBE32(mobi + 0x1C);
+    if (mobi_len >= 0x84 && rec0_len >= 16 + (size_t)0x84)
+      first_non_book_index = ReadBE32(mobi + 0x80);
+    if (mobi_len >= 0xF8 && rec0_len >= 16 + (size_t)0xF8)
+      ncx_index = ReadBE32(mobi + 0xF4);
+  }
+
+  u32 max_text_records = (u32)offsets.size() - 2;
+  if (text_rec_count == 0 || text_rec_count > max_text_records)
+    text_rec_count = max_text_records;
+  if (first_non_book_index > 1) {
+    u32 boundary = first_non_book_index - 1;
+    if (boundary > 0 && boundary < text_rec_count)
+      text_rec_count = boundary;
+  }
+
+  if (ParseMobiStructuredToc(raw, offsets, ncx_index, encoding, out, app))
+    return true;
+
+  std::string merged;
+  merged.reserve(text_len > 0 ? (size_t)text_len : 1024 * 1024);
+  for (u32 rec = 1; rec <= text_rec_count; rec++) {
+    u32 start = offsets[(size_t)rec];
+    u32 end = offsets[(size_t)rec + 1];
+    if (end <= start || end > raw.size())
+      continue;
+    const u8 *chunk = data + start;
+    size_t chunk_len = (size_t)(end - start);
+
+    if (compression == 1) {
+      merged.append((const char *)chunk, chunk_len);
+    } else {
+      std::string decomp;
+      if (DecompressPalmDocRecord(chunk, chunk_len, &decomp))
+        merged += decomp;
+    }
+  }
+  if (text_len > 0 && merged.size() > text_len)
+    merged.resize((size_t)text_len);
+
+  std::string utf8 = DecodeMobiBytesToUtf8(merged, encoding, NULL, NULL);
+  if (ParseMobiInlineFileposToc(utf8,
+                                (text_len > 0) ? text_len : (u32)merged.size(),
+                                out, app)) {
+    if (structured_from_filepos)
+      *structured_from_filepos = true;
+    return true;
+  }
+
+  out->clear();
+  return false;
+}
+
 static std::string
 ExtractMobiMarkupToText(const std::string &in,
                         std::vector<MobiHeadingHint> *heading_hints) {
@@ -3166,13 +3264,19 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   }
 
   std::string raw;
-  if (!ReadFileToStringLimited(path, &raw, kMobiMaxBytes))
+  // Large MOBIs can hit short SD reads under debug/background I/O, so keep the
+  // shared reader here instead of assuming fread() fills the whole buffer.
+  if (!file_read_utils::ReadPathToStringLimited(path, &raw, kMobiMaxBytes))
     return 252;
+  // Treat empty or malformed inputs as a broken book instead of exposing raw
+  // parser error codes to the reader.
+  if (raw.empty())
+    return BOOK_ERR_CORRUPT;
   const u64 t_after_read = osGetTime();
 
   std::vector<u32> offsets;
   if (!ParseMobiOffsets(raw, &offsets) || offsets.size() < 3)
-    return 253;
+    return BOOK_ERR_CORRUPT;
 
   const u8 *data = (const u8 *)raw.data();
   const u32 rec0_start = offsets[0];
@@ -3295,25 +3399,15 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   NormalizeNewlines(&text);
   const u64 t_after_markup = osGetTime();
 
-  std::vector<MobiStructuredTocEntry> structured_toc;
-  bool structured_from_filepos = false;
-  bool have_structured_toc = ParseMobiStructuredToc(
-      raw, offsets, ncx_index, encoding, &structured_toc, app);
-  if (!have_structured_toc &&
-      ParseMobiInlineFileposToc(utf8,
-                                (text_len > 0) ? text_len : (u32)merged.size(),
-                                &structured_toc, app)) {
-    have_structured_toc = true;
-    structured_from_filepos = true;
-  }
-
   MobiDeferredState deferred;
   deferred.source_path = path;
   deferred.text_utf8.swap(text);
   deferred.heading_hints.swap(heading_hints);
-  deferred.structured_toc.swap(structured_toc);
-  deferred.have_structured_toc = have_structured_toc;
-  deferred.structured_from_filepos = structured_from_filepos;
+  // Resolve MOBI TOC after the first pages are visible so large inline/filepos
+  // TOCs do not block the initial open path.
+  deferred.structured_toc.clear();
+  deferred.have_structured_toc = false;
+  deferred.structured_from_filepos = false;
   deferred.used_utf8_guess = used_utf8_guess;
   deferred.used_legacy_guess = used_legacy_guess;
   deferred.finalized = false;
@@ -3362,6 +3456,9 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   }
 
   MobiTocFinalizeResult toc_result;
+  deferred.have_structured_toc = PrepareMobiStructuredToc(
+      raw, offsets, ncx_index, encoding, &utf8, deferred.text_len_for_pos,
+      &deferred.structured_toc, &deferred.structured_from_filepos, app);
   FinalizeMobiPreparedToc(
       book, app, deferred.structured_toc, deferred.have_structured_toc,
       deferred.structured_from_filepos, deferred.heading_hints,
@@ -3680,6 +3777,10 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
     return false;
 
   App *app = book->GetApp();
+  // Deferred TOC resolution runs only once we already have the full page map,
+  // which keeps initial open responsive even for large MOBIs.
+  state->have_structured_toc = LoadDeferredMobiStructuredToc(
+      *state, &state->structured_toc, &state->structured_from_filepos, app);
   MobiTocFinalizeResult toc_result;
   FinalizeMobiPreparedToc(book, app, state->structured_toc,
                           state->have_structured_toc,

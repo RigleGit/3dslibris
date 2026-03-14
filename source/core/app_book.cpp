@@ -24,6 +24,7 @@
 #include <3ds.h>
 
 #include "book.h"
+#include "book_error.h"
 #include "button.h"
 #include "debug_log.h"
 #include "layout_reflow.h"
@@ -319,9 +320,13 @@ u8 App::OpenBook(void) {
   if (bookcurrent && bookcurrent != bookselected)
     bookcurrent->Close();
   if (int err = bookselected->Open()) {
-    char msg[64];
-    sprintf(msg, "error (%d)", err);
-    PrintStatus(msg);
+    if (const char *desc = DescribeBookOpenError(err)) {
+      PrintStatus(desc);
+    } else {
+      char msg[64];
+      sprintf(msg, "error (%d)", err);
+      PrintStatus(msg);
+    }
     return err;
   }
   bookcurrent = bookselected;

@@ -27,6 +27,7 @@
 #include <3ds.h>
 
 #include "book.h"
+#include "book_error.h"
 #include "button.h"
 #include "chapter_menu.h"
 #include "debug_log.h"
@@ -50,6 +51,7 @@ namespace {
 
 static const char *kCoverCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
 static const char *kCoverCacheDir = "sdmc:/3ds/3dslibris/cache/covers";
+static const char *kCoverCacheMagic = "CVR2";
 static const size_t kCoverCacheMaxFiles = 256;
 static const size_t kCoverCacheMaxBytes = 6 * 1024 * 1024;
 static const int kCoverThumbMaxW = 85;
@@ -208,7 +210,9 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
 
   u8 header[8];
   bool ok = fread(header, 1, sizeof(header), fp) == sizeof(header);
-  if (!ok || memcmp(header, "CVR1", 4) != 0) {
+  // Ignore thumbnails written by older extractors once the cache format/magic
+  // changes, so stale covers do not survive heuristic fixes.
+  if (!ok || memcmp(header, kCoverCacheMagic, 4) != 0) {
     fclose(fp);
     return false;
   }
@@ -256,7 +260,9 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
     return false;
 
   u8 header[8];
-  memcpy(header, "CVR1", 4);
+  // Bump the cache magic when extractor heuristics change so stale MOBI
+  // thumbnails do not mask newer cover fixes.
+  memcpy(header, kCoverCacheMagic, 4);
   header[4] = (u8)(book->coverWidth & 0xFF);
   header[5] = (u8)((book->coverWidth >> 8) & 0xFF);
   header[6] = (u8)(book->coverHeight & 0xFF);
@@ -919,9 +925,15 @@ void App::ProcessJobs(u32 budget_ms) {
 
     u64 elapsed = osGetTime() - t0;
     char msg[256];
-    snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%d ms=%llums book=%s",
-             job_name(job.type), rc, (unsigned long long)elapsed,
-             book->GetFileName() ? book->GetFileName() : "(null)");
+    if (const char *tag = BookOpenErrorTag(rc)) {
+      snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%s ms=%llums book=%s",
+               job_name(job.type), tag, (unsigned long long)elapsed,
+               book->GetFileName() ? book->GetFileName() : "(null)");
+    } else {
+      snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%d ms=%llums book=%s",
+               job_name(job.type), rc, (unsigned long long)elapsed,
+               book->GetFileName() ? book->GetFileName() : "(null)");
+    }
     DBG_LOG(this, msg);
 
     if (osGetTime() - start_ms >= budget_ms)
