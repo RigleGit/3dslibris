@@ -24,6 +24,7 @@
 
 #include "book.h"
 #include "button.h"
+#include "color_utils.h"
 #include "main.h"
 #include "parse.h"
 #include "text.h"
@@ -112,6 +113,45 @@ void App::PrefsDraw() {
   buttonprefs.Draw(ts->screenright);
 
   ts->PrintSplash(ts->screenleft);
+  if (prefs_book_context && prefs_layout_notice_pending && bookcurrent &&
+      BookNeedsRelayout(bookcurrent)) {
+    const u8 savedPixelSize = ts->GetPixelSize();
+    static const u16 kLayoutNoticeColor =
+        RGB565FromU8(188.0f, 36.0f, 36.0f);
+    static const u16 kLayoutNoticeBg = RGB565FromU8(255.0f, 255.0f, 255.0f);
+    const char *line1 = "reopen book to";
+    const char *line2 = "apply layout changes";
+    ts->SetScreen(ts->screenleft);
+    ts->SetPixelSize(11);
+    const int line1w = ts->GetStringAdvance(line1);
+    const int line2w = ts->GetStringAdvance(line2);
+    const int line_h = ts->GetHeight();
+    const int text_w = MAX(line1w, line2w);
+    const int pad_x = 8;
+    const int pad_y = 5;
+    const int line_gap = 3;
+    const int box_w = text_w + pad_x * 2;
+    const int box_h = line_h * 2 + line_gap + pad_y * 2;
+    const int box_x = (240 - box_w) / 2;
+    const int box_y = 90;
+    const int line1x = box_x + (box_w - line1w) / 2;
+    const int line2x = box_x + (box_w - line2w) / 2;
+    const int content_h = line_h * 2 + line_gap;
+    const int content_top = box_y + (box_h - content_h) / 2;
+    const int line1y = content_top + line_h;
+    const int line2y = line1y + line_h + line_gap;
+    ts->FillRect((u16)box_x, (u16)box_y, (u16)(box_x + box_w),
+                 (u16)(box_y + box_h), kLayoutNoticeBg);
+    ts->DrawRect((u16)box_x, (u16)box_y, (u16)(box_x + box_w),
+                 (u16)(box_y + box_h), kLayoutNoticeColor);
+    ts->SetTextColorOverride(kLayoutNoticeColor);
+    ts->SetPen((u16)line1x, (u16)line1y);
+    ts->PrintString(line1);
+    ts->SetPen((u16)line2x, (u16)line2y);
+    ts->PrintString(line2);
+    ts->ClearTextColorOverride();
+    ts->SetPixelSize(savedPixelSize);
+  }
 
   // restore state
   ts->SetStyle(style);
@@ -234,6 +274,7 @@ void App::PrefsHandleTouch() {
 void App::PrefsIncreasePixelSize() {
   if (ts->pixelsize < 18) {
     ts->SetPixelSize(ts->pixelsize + 1);
+    MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
     prefs->Write();
   }
@@ -242,6 +283,7 @@ void App::PrefsIncreasePixelSize() {
 void App::PrefsDecreasePixelSize() {
   if (ts->pixelsize > 6) {
     ts->SetPixelSize(ts->pixelsize - 1);
+    MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
     prefs->Write();
   }
@@ -250,6 +292,7 @@ void App::PrefsDecreasePixelSize() {
 void App::PrefsIncreaseParaspacing() {
   if (paraspacing < 2) {
     paraspacing++;
+    MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
     prefs->Write();
   }
@@ -258,6 +301,7 @@ void App::PrefsIncreaseParaspacing() {
 void App::PrefsDecreaseParaspacing() {
   if (paraspacing > 0) {
     paraspacing--;
+    MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
     prefs->Write();
   }
@@ -265,6 +309,7 @@ void App::PrefsDecreaseParaspacing() {
 
 void App::PrefsFlipOrientation() {
   SetOrientation(!orientation);
+  MarkBookLayoutDirty();
   PrefsRefreshButton(PREFS_BUTTON_ORIENTATION);
   prefs->Write();
   // Keep settings view synchronized immediately after rotation toggle.

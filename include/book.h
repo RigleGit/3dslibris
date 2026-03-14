@@ -93,6 +93,7 @@ class Book {
   u16 toc_unresolved_count;
   std::vector<class Page *> pages;
   App *app; //! pointer to the App instance.
+  unsigned int layout_revision;
 
   void ClearInlineImageCache();
 
@@ -187,4 +188,6 @@ public:
   bool HasDeferredMobiParse() const;
   bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
   void CancelDeferredMobiParse();
+  unsigned int GetLayoutRevision() const;
+  void SetLayoutRevision(unsigned int revision);
 };

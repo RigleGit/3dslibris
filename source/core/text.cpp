@@ -177,6 +177,8 @@ Text::Text() {
   bgcolor.r = 15;
   bgcolor.g = 15;
   bgcolor.b = 15;
+  fgcolor = 0;
+  usefgcolor = false;
   usebgcolor = false;
   colorMode = 0;
   turned_right = false;
@@ -471,6 +473,8 @@ void Text::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
 }
 
 u16 Text::GetFgColor() {
+  if (usefgcolor)
+    return fgcolor;
   if (colorMode == 0)
     return 0x0000;
   if (colorMode == 1)
@@ -684,6 +688,13 @@ void Text::SetPixelSize(u8 size) {
     }
   }
 }
+
+void Text::SetTextColorOverride(u16 color) {
+  fgcolor = color;
+  usefgcolor = true;
+}
+
+void Text::ClearTextColorOverride() { usefgcolor = false; }
 
 void Text::SetScreen(u16 *inscreen) { screen = inscreen; }
 

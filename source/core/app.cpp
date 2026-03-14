@@ -158,11 +158,13 @@ App::App() {
   prefsSelected = -1;
   prefs_view_dirty = false;
   prefs_book_context = false;
+  prefs_layout_notice_pending = false;
   status_last_minute = -1;
   status_last_percent_tenths = -1;
   status_progress_lock_book = NULL;
   status_progress_pagecount_lock = 0;
   status_force_redraw = true;
+  layout_revision = 0;
 
   ts = new Text();
   ts->app = this;
@@ -821,10 +823,13 @@ void App::ShowLibraryView() {
   ts->SetScreen(ts->screenright);
   browser_wait_input_release = true;
   browser_view_dirty = true;
+  prefs_layout_notice_pending = false;
 }
 
 void App::ShowSettingsView(bool from_book) {
   prefs_book_context = from_book;
+  prefs_layout_notice_pending =
+      from_book && bookcurrent && BookNeedsRelayout(bookcurrent);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
   u8 visible_count = PrefsVisibleButtonCount();
@@ -836,6 +841,21 @@ void App::ShowSettingsView(bool from_book) {
   buttonprefs.Label("library");
   ts->SetScreen(ts->screenright);
   prefs_view_dirty = true;
+}
+
+void App::MarkBookLayoutDirty() {
+  layout_revision++;
+  if (layout_revision == 0)
+    layout_revision = 1;
+  prefs_view_dirty = true;
+  if (prefs_book_context && bookcurrent && bookcurrent->GetPageCount() > 0)
+    prefs_layout_notice_pending = true;
+}
+
+bool App::BookNeedsRelayout(Book *book) const {
+  if (!book || book->GetPageCount() == 0)
+    return false;
+  return book->GetLayoutRevision() != layout_revision;
 }
 
 void App::ShowBookmarksView() {
