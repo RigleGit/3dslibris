@@ -46,6 +46,8 @@ Nintendo 3DS homebrew ebook reader based on the original Nintendo DS project `ds
 ## Known limitations
 - Some EPUB files have malformed anchors; index jumps can be approximate when source metadata is broken.
 - MOBI TOC extraction depends on file structure and may omit or merge entries in some books.
+- After changing font size, paragraph spacing, orientation, or reading fonts, reopen the current book to apply the new layout.
+- Existing bookmarks are remapped approximately after that reopen and can shift a few pages from their original position.
 - No DRM support.
 
 ## Build (Docker, recommended)
