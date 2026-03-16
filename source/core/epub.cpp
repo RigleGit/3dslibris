@@ -2679,6 +2679,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
   std::map<std::string, u16> page_start_by_href;
   int chapter_num = 1;
   size_t spine_doc_index = 0;
+  unzFile inline_probe_uf = unzOpen(name.c_str());
+  book->SetInlineImageProbeZip(inline_probe_uf);
   std::vector<std::string *>::iterator it;
   for (it = href.begin(); it != href.end(); it++) {
     spine_doc_index++;
@@ -2735,6 +2737,9 @@ int epub(Book *book, std::string name, bool metadataonly) {
     }
     delete *it;
   }
+  book->SetInlineImageProbeZip(NULL);
+  if (inline_probe_uf)
+    unzClose(inline_probe_uf);
 #ifdef DSLIBRIS_DEBUG
   t_after_content = osGetTime();
 #endif

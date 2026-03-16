@@ -14,7 +14,6 @@
 #include "book.h"
 
 #include "app.h"
-#include "inline_image_flow.h"
 #include "main.h"
 #include "parse.h"
 #include <algorithm>
@@ -347,14 +346,6 @@ bool blankline(parsedata_t *p) {
   return (p->buf[p->buflen - 1] == '\n') && (p->buf[p->buflen - 2] == '\n');
 }
 
-static bool ParsedAtScreenStart(parsedata_t *p) {
-  if (!p || !p->app || !p->app->ts)
-    return false;
-  Text *ts = p->app->ts;
-  return !p->linebegan && p->pen.x == ts->margin.left &&
-         p->pen.y == (ts->margin.top + ts->GetHeight());
-}
-
 static void AdvanceParsedScreen(parsedata_t *p) {
   if (!p || !p->app || !p->app->ts || !p->book)
     return;
@@ -379,6 +370,10 @@ static void AdvanceParsedScreen(parsedata_t *p) {
 }
 
 void instruction(void *data, const char *target, const char *pidata) {}
+
+static bool IsUnicodeSpaceCode(u32 code) {
+  return code == 0x00A0 || code == 0x2007 || code == 0x202F;
+}
 
 void start(void *data, const char *el, const char **attr) {
   //! Expat callback, when starting an element.
@@ -462,6 +457,8 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_OL);
   else if (!strcmp(el, "p")) {
     parse_push(p, TAG_P);
+    p->in_paragraph = true;
+    p->paragraph_has_content = false;
     if (!blankline(p)) {
       for (int i = 0; i < p->app->paraspacing; i++) {
         linefeed(p);
@@ -527,29 +524,62 @@ void start(void *data, const char *el, const char **attr) {
 
     if (!resolved.empty() && p->book) {
       u16 image_id = p->book->RegisterInlineImage(resolved);
-      InlineImageFlowPlan image_flow =
-          PlanInlineImageFlow(p->screen, ParsedAtScreenStart(p));
+      InlineImageLayoutPlan image_plan{};
+      const bool leading_paragraph_image =
+          p->in_paragraph && !p->paragraph_has_content;
+      p->book->PlanInlineImageLayout(app->ts, image_id, p->screen, p->pen.x,
+                                     p->pen.y, p->linebegan,
+                                     leading_paragraph_image, &image_plan);
 
-      // Mirror the renderer: if the cursor is mid-screen, move the image to
-      // the next logical screen before reserving its full-screen slot.
-      if (image_flow.advance_before)
+      // Mirror the renderer so pagination and draw agree on where the image
+      // starts and how much space it consumes.
+      if (image_plan.advance_before)
         AdvanceParsedScreen(p);
+      if (image_plan.line_break_before && p->linebegan)
+        linefeed(p);
 
-      // Inline image as one-screen block: token + id.
-      if (p->buflen + 4 < PAGEBUFSIZE) {
-        if (!blankline(p))
-          linefeed(p);
+      // The token stays format-agnostic; parser and renderer now derive the
+      // concrete inline/band/page behavior from the same layout planner.
+      if (p->buflen + 3 < PAGEBUFSIZE) {
+        if (leading_paragraph_image)
+          p->buf[p->buflen++] = TEXT_IMAGE_LEADING_PARAGRAPH;
         p->buf[p->buflen++] = TEXT_IMAGE;
         p->buf[p->buflen++] = (u8)((image_id >> 8) & 0xFF);
         p->buf[p->buflen++] = (u8)(image_id & 0xFF);
-        p->buf[p->buflen++] = '\n';
       }
 
-      // Reserve a full screen slot for this image.
-      int maxHeight = (p->screen == 1) ? 320 : 400;
-      p->pen.x = app->ts->margin.left;
-      p->pen.y = maxHeight - 1;
-      p->linebegan = false;
+      switch (image_plan.mode) {
+      case INLINE_IMAGE_LAYOUT_INLINE:
+        if (p->in_paragraph)
+          p->paragraph_has_content = true;
+        p->pen.x += image_plan.draw_width + app->ts->GetAdvance(' ');
+        p->linebegan = true;
+        break;
+
+      case INLINE_IMAGE_LAYOUT_BAND:
+        if (p->in_paragraph)
+          p->paragraph_has_content = true;
+        // Band images are block-level: following text resumes below, while
+        // consecutive images may stack only if there is no text between them.
+        p->pen.x = app->ts->margin.left;
+        p->pen.y += image_plan.vertical_space_after_draw;
+        p->linebegan = false;
+        break;
+
+      case INLINE_IMAGE_LAYOUT_PAGE:
+      default:
+        if (p->in_paragraph)
+          p->paragraph_has_content = true;
+        if (p->screen == 1) {
+          AdvanceParsedScreen(p);
+        } else {
+          p->screen = 1;
+          p->pen.x = app->ts->margin.left;
+          p->pen.y = app->ts->margin.top + app->ts->GetHeight();
+          p->linebegan = false;
+        }
+        break;
+      }
     } else {
       // Keep a lightweight fallback marker when src cannot be resolved.
       const char *fallback = "[illustration]";
@@ -641,6 +671,20 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
       continue;
     }
 
+    if (!parse_in(p, TAG_PRE) && ((unsigned char)txt[i] & 0x80)) {
+      u32 code = 0;
+      int bytes = ts->GetCharCode((char *)&(txt[i]), &code);
+      if (bytes > 0 && IsUnicodeSpaceCode(code)) {
+        if (p->linebegan && p->buflen &&
+            !iswhitespace(p->buf[p->buflen - 1])) {
+          p->buf[p->buflen++] = ' ';
+          p->pen.x += spaceadvance;
+        }
+        i += bytes;
+        continue;
+      }
+    }
+
     if (iswhitespace(txt[i])) {
       if (parse_in(p, TAG_PRE)) {
         p->buf[p->buflen++] = txt[i];
@@ -657,6 +701,8 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
       }
       i++;
     } else {
+      if (p->in_paragraph)
+        p->paragraph_has_content = true;
       p->linebegan = true;
       advance = 0;
       u8 bytes = 1;
@@ -817,8 +863,12 @@ void end(void *data, const char *el) {
       linefeed(p);
     }
   } else if (!strcmp(el, "p")) {
-    linefeed(p);
-    linefeed(p);
+    if (p->paragraph_has_content) {
+      linefeed(p);
+      linefeed(p);
+    }
+    p->in_paragraph = false;
+    p->paragraph_has_content = false;
   } else if (!strcmp(el, "div")) {
   } else if (!strcmp(el, "strong") || !strcmp(el, "b")) {
     p->buf[p->buflen] = TEXT_BOLD_OFF;
@@ -966,6 +1016,8 @@ Book::Book(App *a) {
   tocResolved = false;
   mobi_line_wrap_fix = false;
   parsed_with_mobi_line_wrap_fix = false;
+  inline_image_probe_uf = NULL;
+  inline_image_zip_index_built = false;
   fb2_inline_images_bytes = 0;
   inline_image_cache_bytes = 0;
   ClearTocConfidence();

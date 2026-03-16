@@ -15,6 +15,7 @@
 #pragma once
 
 #include "app.h"
+#include "inline_image_layout.h"
 #include "page.h"
 #include <3ds.h>
 #include <list>
@@ -60,11 +61,23 @@ enum TocQuality {
 //! App maintains a vector of Book to represent the available library.
 
 class Book {
+  struct InlineImageEntry {
+    std::string path;
+    bool metadata_probed;
+    bool metadata_ok;
+    int source_width;
+    int source_height;
+
+    InlineImageEntry()
+        : metadata_probed(false), metadata_ok(false), source_width(0),
+          source_height(0) {}
+  };
+
   struct InlineImageCacheEntry {
     u16 image_id;
     u16 screen_h;
     u16 bg565;
-    u16 start_x;
+    u8 layout_mode;
     u16 start_y;
     u16 width;
     u16 height;
@@ -80,10 +93,13 @@ class Book {
   int position;             //! as page index.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
-  std::vector<std::string> inline_images;
+  std::vector<InlineImageEntry> inline_images;
   std::unordered_map<std::string, u16> chapter_anchor_pages;
   std::unordered_map<std::string, u16> chapter_doc_start_pages;
   std::unordered_map<std::string, std::vector<u8>> fb2_inline_images;
+  void *inline_image_probe_uf;
+  bool inline_image_zip_index_built;
+  std::unordered_map<std::string, unsigned long> inline_image_zip_offsets;
   size_t fb2_inline_images_bytes;
   std::list<InlineImageCacheEntry> inline_image_cache;
   size_t inline_image_cache_bytes;
@@ -96,6 +112,9 @@ class Book {
   unsigned int layout_revision;
 
   void ClearInlineImageCache();
+  bool LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
+                             std::string *resolved_path = NULL);
+  bool EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out);
 
 public:
   //! Cover thumbnail for library grid (RGB565, scaled to fit)
@@ -162,10 +181,17 @@ public:
   const std::unordered_map<std::string, u16> &GetChapterDocStartPages() const;
   void ClearChapterDocStartPages();
   const std::string *GetInlineImagePath(u16 id) const;
+  bool GetInlineImageMetadata(u16 id, InlineImageMetadata *out);
   void ClearInlineImages();
+  void SetInlineImageProbeZip(void *uf);
   bool StoreFb2InlineImage(const std::string &id,
                            const std::string &base64_data);
-  bool DrawInlineImage(Text *ts, u16 image_id);
+  bool PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
+                             int pen_x, int pen_y, bool line_began,
+                             bool leading_paragraph_image,
+                             InlineImageLayoutPlan *out);
+  bool DrawInlineImage(Text *ts, u16 image_id,
+                       const InlineImageLayoutPlan *plan = NULL);
   void AddChapter(u16 page, const std::string &title, u8 level = 0);
   void ClearChapters();
   const char *GetFileName(void);

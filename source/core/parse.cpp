@@ -52,6 +52,8 @@ void parse_init(parsedata_t *data) {
   data->pen.x = 0;
   data->pen.y = 0;
   data->linebegan = false;
+  data->in_paragraph = false;
+  data->paragraph_has_content = false;
   data->bold = false;
   data->italic = false;
   data->docpath.clear();

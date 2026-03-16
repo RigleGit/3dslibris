@@ -99,11 +99,13 @@ void Page::Draw(Text *ts) {
   ts->SetScreen(ts->screenleft);
 
   u16 i = 0;
+  bool next_image_leading_paragraph = false;
   while (i < length) {
     u32 c = buf[i];
     if (c == '\n') {
       // line break, page breaking if necessary
       i++;
+      next_image_leading_paragraph = false;
 
       int maxHeight = (ts->GetScreen() == ts->screenleft) ? 400 : 320;
       int currentBottomMargin =
@@ -142,40 +144,68 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_ITALIC_OFF) {
       i++;
       ts->italic = false;
+    } else if (c == TEXT_IMAGE_LEADING_PARAGRAPH) {
+      i++;
+      next_image_leading_paragraph = true;
     } else if (c == TEXT_IMAGE) {
       if (i + 2 < length) {
         u16 image_id = ((u16)buf[i + 1] << 8) | (u16)buf[i + 2];
         i += 3;
 
-        // Inline image is a full-screen block. Ensure it starts on a fresh
-        // screen to avoid overlapping text and then consume that whole screen.
-        bool at_screen_start =
-            (!ts->linebegan && ts->GetPenX() == ts->margin.left &&
-             ts->GetPenY() == (u16)(ts->margin.top + ts->GetHeight()));
-        if (!at_screen_start) {
+        InlineImageLayoutPlan image_plan{};
+        int current_screen = (ts->GetScreen() == ts->screenleft) ? 0 : 1;
+        book->PlanInlineImageLayout(ts, image_id, current_screen, ts->GetPenX(),
+                                    ts->GetPenY(), ts->linebegan,
+                                    next_image_leading_paragraph,
+                                    &image_plan);
+        next_image_leading_paragraph = false;
+
+        if (image_plan.advance_before) {
           if (!advance_to_next_screen())
             break;
         }
-        ts->ClearScreen();
-        ts->InitPen();
-        ts->linebegan = false;
-        book->DrawInlineImage(ts, image_id);
+        if (image_plan.line_break_before && ts->linebegan) {
+          if (!ts->PrintNewLine())
+            break;
+          ts->linebegan = false;
+        }
 
-        // Consume delimiter newline inserted by parser for image token.
-        if (i < length && buf[i] == '\n')
-          i++;
+        book->DrawInlineImage(ts, image_id, &image_plan);
 
-        // After the image, continue on the next screen/page.
-        if (!advance_to_next_screen())
+        bool stop_page_draw = false;
+        switch (image_plan.mode) {
+        case INLINE_IMAGE_LAYOUT_INLINE:
+          ts->SetPen(ts->GetPenX() + image_plan.draw_width + ts->GetAdvance(' '),
+                     ts->GetPenY());
+          ts->linebegan = true;
+          break;
+
+        case INLINE_IMAGE_LAYOUT_BAND:
+          // Band images occupy a vertical block; normal text continues below.
+          ts->SetPen(ts->margin.left,
+                     ts->GetPenY() + image_plan.vertical_space_after_draw);
+          ts->linebegan = false;
+          break;
+
+        case INLINE_IMAGE_LAYOUT_PAGE:
+        default:
+          if (!advance_to_next_screen())
+            stop_page_draw = true;
+          ts->linebegan = false;
+          break;
+        }
+        if (stop_page_draw)
           break;
       } else {
         i++;
+        next_image_leading_paragraph = false;
       }
     } else {
       if (c > 127)
         i += ts->GetCharCode((char *)&(buf[i]), &c);
       else
         i++;
+      next_image_leading_paragraph = false;
 
       ts->margin.bottom = (ts->GetScreen() == ts->screenleft)
                               ? leftBottomMargin

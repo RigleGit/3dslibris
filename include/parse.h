@@ -54,6 +54,8 @@ typedef struct {
 	//! Our total parse position in terms of cooked text.
 	int pos;
 	bool linebegan;
+	bool in_paragraph;
+	bool paragraph_has_content;
 	bool bold;
 	bool italic;
 	std::string docpath; //! Current XHTML document path inside EPUB.
