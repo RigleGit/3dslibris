@@ -456,8 +456,14 @@ bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
     return true;
 
   TocQuality q = app->bookcurrent->GetTocQuality();
-  if (q != TOC_QUALITY_HEURISTIC)
+  if (q == TOC_QUALITY_UNKNOWN)
     return true;
+
+  // For heuristic TOCs the original page hint is a rough guess and we allow
+  // larger jumps.  For structured (strong/mixed) TOCs the hint is usually
+  // close but can still be off by a few pages because of the linear
+  // byte-to-page estimation used by MOBI; allow a tighter correction.
+  const int max_delta = (q == TOC_QUALITY_HEURISTIC) ? 32 : 8;
 
   if (approx_page_cache[index] >= 0) {
     *page_out = (u16)approx_page_cache[index];
@@ -474,8 +480,8 @@ bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
     const int to = (int)resolved;
     const int delta = (to > from) ? (to - from) : (from - to);
 
-    // Trust rule 1: reject big jumps from the original TOC page.
-    if (delta > 32)
+    // Trust rule 1: reject jumps beyond the quality-dependent threshold.
+    if (delta > max_delta)
       accept = false;
 
     // Trust rule 2: preserve chapter order against direct neighbors.
@@ -494,8 +500,8 @@ bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
       approx_page_cache[index] = to;
       if (app) {
         char msg[192];
-        snprintf(msg, sizeof(msg), "INDEX approx remap sel=%u from=%u to=%u",
-                 (unsigned)index, (unsigned)from, (unsigned)to);
+        snprintf(msg, sizeof(msg), "INDEX remap sel=%u from=%u to=%u delta=%d",
+                 (unsigned)index, (unsigned)from, (unsigned)to, delta);
         DBG_LOG(app, msg);
       }
       *page_out = resolved;
@@ -504,8 +510,9 @@ bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
       if (app) {
         char msg[224];
         snprintf(msg, sizeof(msg),
-                 "INDEX approx remap rejected sel=%u from=%u to=%u",
-                 (unsigned)index, (unsigned)from, (unsigned)to);
+                 "INDEX remap rejected sel=%u from=%u to=%u delta=%d max=%d",
+                 (unsigned)index, (unsigned)from, (unsigned)to, delta,
+                 max_delta);
         DBG_LOG(app, msg);
       }
     }
