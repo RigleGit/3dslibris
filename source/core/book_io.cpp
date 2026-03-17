@@ -42,7 +42,7 @@ static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // v3→v4: added precise html→text→page mapping tables for TOC chapter
 //         positioning; old caches used an inaccurate linear ratio that placed
 //         chapters dozens of pages away from their actual location.
-static const u16 kMobiPageCacheVersion = 4;
+static const u16 kMobiPageCacheVersion = 5;
 
 struct MobiPageCacheHeader {
   u32 magic;
@@ -2250,15 +2250,23 @@ static int MobiHeadingTagLevel(const std::string &name) {
 }
 
 static std::string NormalizeHeadingNeedle(const std::string &s) {
-  return CollapseAsciiWhitespace(FoldLatinForMatch(TrimAsciiWhitespace(s)));
+  std::string trimmed = TrimAsciiWhitespace(s);
+  for (size_t i = 0; i < trimmed.size(); i++) {
+    if (trimmed[i] == '|')
+      trimmed[i] = ' ';
+  }
+  return CollapseAsciiWhitespace(FoldLatinForMatch(trimmed));
 }
 
 static bool PageHasHeadingNeedle(const std::vector<std::string> &lines,
                                  const std::string &needle) {
   if (needle.empty())
     return false;
-  const size_t cap = std::min((size_t)18, lines.size());
-  for (size_t i = 0; i < cap; i++) {
+  // Search all lines on the page.  Pages are short (3DS screen ≈ 30-40 lines)
+  // and decorative whitespace (pagebreaks, <br>) generates many blank entries
+  // that previously exhausted the old cap of 18 before reaching real content.
+  const size_t n = lines.size();
+  for (size_t i = 0; i < n; i++) {
     std::string norm = NormalizeHeadingNeedle(lines[i]);
     if (norm.empty())
       continue;
@@ -2266,6 +2274,24 @@ static bool PageHasHeadingNeedle(const std::vector<std::string> &lines,
       return true;
     if (norm.size() > needle.size() && norm.find(needle) != std::string::npos)
       return true;
+  }
+  // Multi-line headings: try concatenating consecutive non-empty lines.
+  for (size_t i = 0; i + 1 < n; i++) {
+    std::string a = NormalizeHeadingNeedle(lines[i]);
+    if (a.empty())
+      continue;
+    std::string concat = a;
+    for (size_t j = i + 1; j < n && concat.size() < needle.size() + 32; j++) {
+      std::string b = NormalizeHeadingNeedle(lines[j]);
+      if (b.empty())
+        continue;
+      concat += " " + b;
+      if (concat == needle)
+        return true;
+      if (concat.size() > needle.size() &&
+          concat.find(needle) != std::string::npos)
+        return true;
+    }
   }
   return false;
 }
@@ -2350,7 +2376,10 @@ FindMobiHeadingNearPage(const std::vector<std::vector<std::string>> &page_lines,
 static int MobiHtmlPosToPage(
     u32 html_pos,
     const std::vector<std::pair<u32, u32>> &html_to_text_map,
-    const std::vector<u32> &text_cursor_per_page) {
+    const std::vector<u32> &text_cursor_per_page,
+    u32 *text_pos_out = nullptr) {
+  if (text_pos_out)
+    *text_pos_out = 0;
   if (html_to_text_map.size() < 2 || text_cursor_per_page.empty())
     return -1;
 
@@ -2380,6 +2409,9 @@ static int MobiHtmlPosToPage(
     text_pos = t0 + (u32)(frac * (double)(t1 - t0));
   }
 
+  if (text_pos_out)
+    *text_pos_out = text_pos;
+
   // text_pos → page via binary search on text_cursor_per_page.
   // text_cursor_per_page[i] = text byte offset at the start of page i.
   // We want the last page whose start offset <= text_pos.
@@ -2399,7 +2431,8 @@ static size_t BuildMobiChaptersFromStructuredToc(
     Book *book, const std::vector<MobiStructuredTocEntry> &entries,
     u32 text_len, size_t *direct_out, bool refine_with_heading_search,
     const std::vector<std::pair<u32, u32>> &html_to_text_map,
-    const std::vector<u32> &text_cursor_per_page) {
+    const std::vector<u32> &text_cursor_per_page,
+    App *app) {
   if (direct_out)
     *direct_out = 0;
   if (!book || entries.empty() || book->GetPageCount() == 0)
@@ -2414,7 +2447,35 @@ static size_t BuildMobiChaptersFromStructuredToc(
   // so we fall through to the linear ratio and rely on the wider heading
   // search or runtime remap in ResolveTargetPage (chapter_menu.cpp).
 
+  if (app) {
+    u32 map_last_html = 0, map_last_text = 0;
+    if (!html_to_text_map.empty()) {
+      map_last_html = html_to_text_map.back().first;
+      map_last_text = html_to_text_map.back().second;
+    }
+    u32 pages_last_cursor = 0;
+    if (!text_cursor_per_page.empty())
+      pages_last_cursor = text_cursor_per_page.back();
+    char dbg[320];
+    snprintf(dbg, sizeof(dbg),
+             "TOC-MAP: precise=%d entries=%u html_map=%u text_pages=%u "
+             "pages=%u text_len=%u map_end=(%u,%u) pages_end=%u",
+             have_precise_map ? 1 : 0, (unsigned)entries.size(),
+             (unsigned)html_to_text_map.size(),
+             (unsigned)text_cursor_per_page.size(),
+             (unsigned)page_count, (unsigned)text_len,
+             (unsigned)map_last_html, (unsigned)map_last_text,
+             (unsigned)pages_last_cursor);
+    DBG_LOG(app, dbg);
+  }
+
   bool needs_heading_search = refine_with_heading_search;
+  // When the precise dual-lookup map is available, always do heading search:
+  // the filepos byte offset lands at the section boundary (before decorative
+  // whitespace), while the heading text may render 1-3 pages later.  The ±4
+  // radius in FindMobiHeadingNearPage catches this safely.
+  if (!needs_heading_search && have_precise_map)
+    needs_heading_search = true;
   if (!needs_heading_search) {
     for (size_t i = 0; i < entries.size(); i++) {
       if (entries[i].pos == kMobiNullIndex) {
@@ -2452,10 +2513,25 @@ static size_t BuildMobiChaptersFromStructuredToc(
       // (fresh parse).  Fall back to the linear ratio for page-cache loads
       // where the tables were never built.
       if (have_precise_map) {
+        u32 text_pos = 0;
         int precise = MobiHtmlPosToPage(entries[i].pos, html_to_text_map,
-                                        text_cursor_per_page);
+                                        text_cursor_per_page, &text_pos);
         if (precise >= 0 && precise < page_count)
           best_page = precise;
+        if (app) {
+          int linear_page = -1;
+          {
+            double r = (double)entries[i].pos / (double)denom;
+            if (r > 1.0) r = 1.0;
+            linear_page = (int)((u16)(r * (double)(page_count - 1)));
+          }
+          char dbg[256];
+          snprintf(dbg, sizeof(dbg),
+                   "TOC[%u] pos=%u tpos=%u precise=%d linear=%d title=%.40s",
+                   (unsigned)i, (unsigned)entries[i].pos, (unsigned)text_pos,
+                   precise, linear_page, clean.c_str());
+          DBG_LOG(app, dbg);
+        }
       }
       if (best_page < 0) {
         double ratio = (double)entries[i].pos / (double)denom;
@@ -2472,8 +2548,18 @@ static size_t BuildMobiChaptersFromStructuredToc(
         // wrong heading further away.
         int refined = FindMobiHeadingNearPage(page_lines, needle,
                                               (u16)best_page, 4);
-        if (refined >= 0)
+        if (refined >= 0 && refined != best_page) {
+          if (app) {
+            char rdbg[192];
+            snprintf(rdbg, sizeof(rdbg),
+                     "TOC[%u] heading refine %d -> %d",
+                     (unsigned)i, best_page, refined);
+            DBG_LOG(app, rdbg);
+          }
           best_page = refined;
+        } else if (refined >= 0) {
+          best_page = refined;
+        }
       }
     } else {
       if (!needs_heading_search)
@@ -2549,7 +2635,8 @@ static void FinalizeMobiPreparedToc(
     book->ClearChapters();
     mapped_structured = BuildMobiChaptersFromStructuredToc(
         book, structured_toc, text_len_for_pos, &structured_direct,
-        !structured_from_filepos, html_to_text_map, text_cursor_per_page);
+        !structured_from_filepos, html_to_text_map, text_cursor_per_page,
+        app);
     if (mapped_structured >= 2) {
       structured_used = true;
       PruneMobiFrontMatterTocCluster(book, app);
@@ -3215,8 +3302,7 @@ static std::string ExtractMobiMarkupToText(
   std::string heading_text;
 
   // Build a sampling table mapping HTML byte offsets to output text offsets.
-  // Record a sample every ~4KB of HTML input for reasonable resolution.
-  const size_t kSampleInterval = 4096;
+  const size_t kSampleInterval = 256;
   size_t next_sample = 0;
   if (html_to_text_map) {
     html_to_text_map->clear();
@@ -3547,14 +3633,70 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   std::vector<std::pair<u32, u32>> html_to_text_map;
   std::string text = ExtractMobiMarkupToText(utf8, &heading_hints,
                                              &html_to_text_map);
+  const size_t text_pre_cleanup = text.size();
+
+  std::string text_before_cleanup;
+  const bool have_map = !html_to_text_map.empty();
+  if (have_map)
+    text_before_cleanup = text;
+
   NormalizeNewlines(&text);
+  const size_t text_post_normalize = text.size();
   // Mixed-quality MOBIs can contain isolated UTF-8 mojibake fragments even
   // when most of the book decodes correctly; repair those before layout.
   text = mobi_text_cleanup::RepairCommonMojibake(text);
+  const size_t text_post_mojibake = text.size();
   if (book->GetMobiLineWrapFix()) {
     // Some converted MOBIs encode visual line wraps as block breaks; keep this
     // repair opt-in per book so poetry/lists are not rewritten globally.
     text = mobi_text_cleanup::FixBrokenParagraphWraps(text);
+  }
+  const size_t text_post_cleanup = text.size();
+
+  // Remap html_to_text_map offsets from pre-cleanup to post-cleanup
+  // coordinates.  Cleanup can shrink the text (\r\n→\n, mojibake repair),
+  // causing MobiHtmlPosToPage to underestimate text_pos by an amount that
+  // grows with book length (observed: 1-3 pages over 1336 pages).
+  if (have_map && text_post_cleanup != text_pre_cleanup) {
+    const size_t pre_len = text_before_cleanup.size();
+    const size_t post_len = text_post_cleanup;
+    size_t pi = 0, qi = 0, entry = 0;
+    const size_t n_entries = html_to_text_map.size();
+    while (entry < n_entries && pi <= pre_len && qi <= post_len) {
+      const u32 target = html_to_text_map[entry].second;
+      if ((size_t)target <= pi) {
+        html_to_text_map[entry].second = (u32)(qi - (pi - (size_t)target));
+        entry++;
+        continue;
+      }
+      while (pi < (size_t)target && pi < pre_len && qi < post_len) {
+        if (text_before_cleanup[pi] == text[qi]) {
+          pi++;
+          qi++;
+        } else {
+          pi++;
+        }
+      }
+    }
+    while (entry < n_entries) {
+      html_to_text_map[entry].second = (u32)post_len;
+      entry++;
+    }
+    text_before_cleanup.clear();
+    text_before_cleanup.shrink_to_fit();
+  } else if (have_map) {
+    text_before_cleanup.clear();
+    text_before_cleanup.shrink_to_fit();
+  }
+
+  if (app) {
+    char dbg[256];
+    snprintf(dbg, sizeof(dbg),
+             "MOBI: text_cleanup pre=%u norm=%u moji=%u post=%u delta=%d",
+             (unsigned)text_pre_cleanup, (unsigned)text_post_normalize,
+             (unsigned)text_post_mojibake, (unsigned)text_post_cleanup,
+             (int)((long long)text_post_cleanup - (long long)text_pre_cleanup));
+    DBG_LOG(app, dbg);
   }
   const u64 t_after_markup = osGetTime();
 
