@@ -170,6 +170,10 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 3072) {
   int i = 0;
   while (i < len) {
     unsigned char c = (unsigned char)buf[i];
+    if (c == TEXT_IMAGE_LEADING_PARAGRAPH) {
+      i++;
+      continue;
+    }
     if (c == TEXT_IMAGE) {
       i += (i + 2 < len) ? 3 : 1;
       if (!prev_space) {
@@ -244,6 +248,9 @@ static std::vector<std::string> BuildPageHeadingLines(Page *page,
 
   for (int i = 0; i < len; i++) {
     unsigned char c = (unsigned char)buf[i];
+    if (c == TEXT_IMAGE_LEADING_PARAGRAPH) {
+      continue;
+    }
     if (c == TEXT_IMAGE) {
       i += (i + 2 < len) ? 2 : 0;
       if (!cur.empty() && cur.back() != ' ')

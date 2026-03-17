@@ -100,6 +100,9 @@ class Book {
   void *inline_image_probe_uf;
   bool inline_image_zip_index_built;
   std::unordered_map<std::string, unsigned long> inline_image_zip_offsets;
+  bool mobi_inline_index_ready;
+  u32 mobi_first_image_index;
+  std::vector<u32> mobi_record_offsets;
   size_t fb2_inline_images_bytes;
   std::list<InlineImageCacheEntry> inline_image_cache;
   size_t inline_image_cache_bytes;

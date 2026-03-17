@@ -15,6 +15,7 @@
 #include "epub.h"
 #include "file_read_utils.h"
 #include "main.h"
+#include "mobi.h"
 #include "mobi_text_cleanup.h"
 #include "parse.h"
 #include "string_utils.h"
@@ -42,7 +43,10 @@ static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // v3→v4: added precise html→text→page mapping tables for TOC chapter
 //         positioning; old caches used an inaccurate linear ratio that placed
 //         chapters dozens of pages away from their actual location.
-static const u16 kMobiPageCacheVersion = 5;
+// v6→v7: recindex parsing now accepts zero-padded MOBI image references, so
+//         old cached page streams must be invalidated to repaginate with the
+//         recovered TEXT_IMAGE markers.
+static const u16 kMobiPageCacheVersion = 7;
 
 struct MobiPageCacheHeader {
   u32 magic;
@@ -50,6 +54,7 @@ struct MobiPageCacheHeader {
   u16 title_len;
   u32 page_count;
   u32 chapter_count;
+  u32 image_count;
   u8 toc_quality;
   u8 reserved0;
   u16 reserved1;
@@ -137,6 +142,7 @@ static bool TryLoadMobiPageCache(Book *book, const char *book_path, App *app) {
   if (hdr.magic != kMobiPageCacheMagic ||
       hdr.version != kMobiPageCacheVersion || hdr.page_count == 0 ||
       hdr.page_count > 10000 || hdr.chapter_count > 4000 ||
+      hdr.image_count > 65535 ||
       hdr.title_len > 1000) {
     fclose(fp);
     remove(cache_path.c_str());
@@ -193,6 +199,24 @@ static bool TryLoadMobiPageCache(Book *book, const char *book_path, App *app) {
     }
   }
 
+  if (ok) {
+    for (u32 i = 0; i < hdr.image_count; i++) {
+      u16 path_len = 0;
+      if (fread(&path_len, 1, sizeof(path_len), fp) != sizeof(path_len) ||
+          path_len == 0 || path_len > 2048) {
+        ok = false;
+        break;
+      }
+      std::string imgpath;
+      imgpath.resize(path_len);
+      if (fread(&imgpath[0], 1, path_len, fp) != path_len) {
+        ok = false;
+        break;
+      }
+      book->RegisterInlineImage(imgpath);
+    }
+  }
+
   fclose(fp);
   if (!ok) {
     book->Close();
@@ -235,6 +259,7 @@ static void SaveMobiPageCache(Book *book, const char *book_path, App *app,
   hdr.title_len = (u16)title.size();
   hdr.page_count = book->GetPageCount();
   hdr.chapter_count = (u32)chapters.size();
+  hdr.image_count = book->GetInlineImageCount();
   hdr.toc_quality = (u8)book->GetTocQuality();
   hdr.toc_direct = book->GetTocDirectCount();
   hdr.toc_heuristic = book->GetTocHeuristicCount();
@@ -280,6 +305,26 @@ static void SaveMobiPageCache(Book *book, const char *book_path, App *app,
       }
       if (title_len > 0 &&
           fwrite(c.title.data(), 1, title_len, fp) != title_len) {
+        ok = false;
+        break;
+      }
+    }
+  }
+
+  if (ok) {
+    u32 img_count = book->GetInlineImageCount();
+    for (u32 i = 0; i < img_count; i++) {
+      const std::string *imgpath = book->GetInlineImagePath((u16)i);
+      if (!imgpath || imgpath->empty()) {
+        ok = false;
+        break;
+      }
+      u16 path_len = (u16)std::min<size_t>(imgpath->size(), 2048);
+      if (fwrite(&path_len, 1, sizeof(path_len), fp) != sizeof(path_len)) {
+        ok = false;
+        break;
+      }
+      if (fwrite(imgpath->data(), 1, path_len, fp) != path_len) {
         ok = false;
         break;
       }
@@ -1246,6 +1291,91 @@ static bool InitPlainTextStreamState(Book *book, const std::string &text_utf8,
   return true;
 }
 
+static void PlainAdvanceScreen(parsedata_t *p) {
+  if (!p || !p->app || !p->app->ts || !p->book)
+    return;
+
+  Text *ts = p->app->ts;
+  if (p->screen == 1) {
+    Page *page = p->book->AppendPage();
+    page->SetBuffer(p->buf, p->buflen);
+    p->buflen = 0;
+    if (p->italic)
+      p->buf[p->buflen++] = TEXT_ITALIC_ON;
+    if (p->bold)
+      p->buf[p->buflen++] = TEXT_BOLD_ON;
+    p->screen = 0;
+  } else {
+    p->screen = 1;
+  }
+
+  p->pen.x = ts->margin.left;
+  p->pen.y = ts->margin.top + ts->GetHeight();
+  p->linebegan = false;
+}
+
+static void PlainLinefeed(parsedata_t *p) {
+  if (!p || !p->app || !p->app->ts)
+    return;
+  if (p->buflen < PAGEBUFSIZE)
+    p->buf[p->buflen++] = '\n';
+  p->pen.x = p->app->ts->margin.left;
+  p->pen.y += p->app->ts->GetHeight() + p->app->ts->linespacing;
+  p->linebegan = false;
+}
+
+static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
+                                               bool leading_paragraph_image) {
+  if (!p || !p->app || !p->app->ts || !p->book)
+    return;
+
+  Text *ts = p->app->ts;
+  InlineImageLayoutPlan image_plan{};
+  p->book->PlanInlineImageLayout(ts, image_id, p->screen, p->pen.x, p->pen.y,
+                                 p->linebegan, leading_paragraph_image,
+                                 &image_plan);
+
+  if (image_plan.advance_before)
+    PlainAdvanceScreen(p);
+  if (image_plan.line_break_before && p->linebegan)
+    PlainLinefeed(p);
+
+  if (p->buflen + 4 >= PAGEBUFSIZE)
+    PlainAdvanceScreen(p);
+  if (leading_paragraph_image && p->buflen < PAGEBUFSIZE)
+    p->buf[p->buflen++] = TEXT_IMAGE_LEADING_PARAGRAPH;
+  if (p->buflen + 3 >= PAGEBUFSIZE)
+    PlainAdvanceScreen(p);
+  if (p->buflen + 3 < PAGEBUFSIZE) {
+    p->buf[p->buflen++] = TEXT_IMAGE;
+    p->buf[p->buflen++] = (u8)((image_id >> 8) & 0xFF);
+    p->buf[p->buflen++] = (u8)(image_id & 0xFF);
+  }
+
+  switch (image_plan.mode) {
+  case INLINE_IMAGE_LAYOUT_INLINE:
+    p->pen.x += image_plan.draw_width + ts->GetAdvance(' ');
+    p->linebegan = true;
+    break;
+  case INLINE_IMAGE_LAYOUT_BAND:
+    p->pen.x = ts->margin.left;
+    p->pen.y += image_plan.vertical_space_after_draw;
+    p->linebegan = false;
+    break;
+  case INLINE_IMAGE_LAYOUT_PAGE:
+  default:
+    if (p->screen == 1) {
+      PlainAdvanceScreen(p);
+    } else {
+      p->screen = 1;
+      p->pen.x = ts->margin.left;
+      p->pen.y = ts->margin.top + ts->GetHeight();
+      p->linebegan = false;
+    }
+    break;
+  }
+}
+
 // text_cursor_per_page: if non-null, receives one entry per page created
 // during this call — the text byte offset at the start of that page.
 // Together with html_to_text_map (built in ExtractMobiMarkupToText), this
@@ -1287,9 +1417,51 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
 
     const size_t bytes_before = state->text_bytes_fed;
     if (!state->curr.text.empty()) {
-      xml::book::chardata(&state->parsedata, state->curr.text.c_str(),
-                          (int)state->curr.text.size());
-      state->text_bytes_fed += state->curr.text.size();
+      size_t segment_start = 0;
+      size_t pos = 0;
+      while (pos < state->curr.text.size()) {
+        unsigned char c = (unsigned char)state->curr.text[pos];
+        const bool leading_marker = (c == TEXT_IMAGE_LEADING_PARAGRAPH);
+        const bool image_marker =
+            (c == TEXT_IMAGE) ||
+            (leading_marker && pos + 1 < state->curr.text.size() &&
+             (unsigned char)state->curr.text[pos + 1] == TEXT_IMAGE);
+        if (!image_marker) {
+          pos++;
+          continue;
+        }
+
+        if (pos > segment_start) {
+          const size_t len = pos - segment_start;
+          xml::book::chardata(&state->parsedata,
+                              state->curr.text.data() + segment_start, (int)len);
+          state->text_bytes_fed += len;
+        }
+
+        size_t image_pos = pos + (leading_marker ? 1 : 0);
+        if (image_pos + 2 >= state->curr.text.size()) {
+          state->text_bytes_fed += state->curr.text.size() - pos;
+          segment_start = state->curr.text.size();
+          break;
+        }
+
+        u16 image_id =
+            (u16)(((u8)state->curr.text[image_pos + 1] << 8) |
+                  (u8)state->curr.text[image_pos + 2]);
+        AppendInlineImageToPlainParsedData(&state->parsedata, image_id,
+                                           leading_marker);
+        size_t consumed = leading_marker ? 4 : 3;
+        state->text_bytes_fed += consumed;
+        pos += consumed;
+        segment_start = pos;
+      }
+
+      if (segment_start < state->curr.text.size()) {
+        const size_t len = state->curr.text.size() - segment_start;
+        xml::book::chardata(&state->parsedata,
+                            state->curr.text.data() + segment_start, (int)len);
+        state->text_bytes_fed += len;
+      }
     }
     if (state->curr.has_newline) {
       xml::book::chardata(&state->parsedata, "\n", 1);
@@ -1363,6 +1535,10 @@ static std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
     if (c == '\r' || c == '\n') {
       lines.push_back(line);
       line.clear();
+      i++;
+      continue;
+    }
+    if (c == TEXT_IMAGE_LEADING_PARAGRAPH) {
       i++;
       continue;
     }
@@ -3291,13 +3467,14 @@ static bool LoadDeferredMobiStructuredToc(
 // position.  The sampling table lets MobiHtmlPosToPage() do piecewise-linear
 // interpolation instead.
 static std::string ExtractMobiMarkupToText(
-    const std::string &in, std::vector<MobiHeadingHint> *heading_hints,
+    Book *book, const std::string &in, std::vector<MobiHeadingHint> *heading_hints,
     std::vector<std::pair<u32, u32>> *html_to_text_map) {
   std::string out;
   out.reserve(in.size());
   bool in_script = false;
   bool in_style = false;
   bool pending_space = false;
+  bool at_paragraph_start = true;
   int heading_level = -1;
   std::string heading_text;
 
@@ -3389,15 +3566,35 @@ static std::string ExtractMobiMarkupToText(
         pending_space = false;
         continue;
       }
+      if (lower == "img" && !closing) {
+        u16 recindex = 0;
+        if (book && mobi_extract_image_recindex(tag, &recindex)) {
+          if (pending_space) {
+            AppendSingleSpace(&out);
+            pending_space = false;
+          }
+          u16 image_id =
+              book->RegisterInlineImage(mobi_inline_image_path(recindex));
+          if (at_paragraph_start)
+            out.push_back((char)TEXT_IMAGE_LEADING_PARAGRAPH);
+          out.push_back((char)TEXT_IMAGE);
+          out.push_back((char)((image_id >> 8) & 0xFF));
+          out.push_back((char)(image_id & 0xFF));
+          at_paragraph_start = false;
+        }
+        continue;
+      }
       if (lower == "li" && !closing) {
         AppendParagraphBreak(&out);
         out.append("- ");
         pending_space = false;
+        at_paragraph_start = false;
         continue;
       }
       if (IsMobiBlockTag(lower)) {
         AppendParagraphBreak(&out);
         pending_space = false;
+        at_paragraph_start = true;
       }
       continue;
     }
@@ -3417,6 +3614,10 @@ static std::string ExtractMobiMarkupToText(
           if (heading_level >= 0)
             heading_text += decoded;
           pending_space = false;
+          if (!decoded.empty() &&
+              decoded.find_first_not_of(" \t\r\n") != std::string::npos) {
+            at_paragraph_start = false;
+          }
           i = semi + 1;
           continue;
         }
@@ -3439,12 +3640,14 @@ static std::string ExtractMobiMarkupToText(
           heading_text.back() != ' ')
         heading_text.push_back(' ');
       pending_space = false;
+      at_paragraph_start = false;
     }
 
     if (c < 0x80) {
       out.push_back((char)c);
       if (heading_level >= 0)
         heading_text.push_back((char)c);
+      at_paragraph_start = false;
       i++;
       continue;
     }
@@ -3461,6 +3664,7 @@ static std::string ExtractMobiMarkupToText(
     out.append(in, i, (size_t)step);
     if (heading_level >= 0)
       heading_text.append(in, i, (size_t)step);
+    at_paragraph_start = false;
     i += (size_t)step;
   }
 
@@ -3631,7 +3835,8 @@ static u8 ParseMobiFile(Book *book, const char *path) {
 
   std::vector<MobiHeadingHint> heading_hints;
   std::vector<std::pair<u32, u32>> html_to_text_map;
-  std::string text = ExtractMobiMarkupToText(utf8, &heading_hints,
+  book->ClearInlineImages();
+  std::string text = ExtractMobiMarkupToText(book, utf8, &heading_hints,
                                              &html_to_text_map);
   const size_t text_pre_cleanup = text.size();
 

@@ -1018,6 +1018,8 @@ Book::Book(App *a) {
   parsed_with_mobi_line_wrap_fix = false;
   inline_image_probe_uf = NULL;
   inline_image_zip_index_built = false;
+  mobi_inline_index_ready = false;
+  mobi_first_image_index = 0;
   fb2_inline_images_bytes = 0;
   inline_image_cache_bytes = 0;
   ClearTocConfidence();
