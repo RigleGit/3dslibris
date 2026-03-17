@@ -16,6 +16,7 @@
 #include <3ds.h>
 #include <map>
 #include <string>
+#include <unordered_map>
 
 #include "ft2build.h"
 #include FT_FREETYPE_H
@@ -188,6 +189,7 @@ private:
 
   // A: Homemade cache
   std::map<FT_Face, Cache *> textCache;
+  std::map<FT_Face, std::unordered_map<u32, u8>> advanceCache;
 
   // B: FreeType cache subsystem
   TextCache cache;

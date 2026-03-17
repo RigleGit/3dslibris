@@ -415,6 +415,7 @@ void Text::ClearCache() {
        iter != faces.end(); iter++) {
     ClearCache(iter->second);
   }
+  advanceCache.clear();
 }
 
 void Text::ClearCache(u8 style) { ClearCache(GetFace(style)); }
@@ -427,6 +428,7 @@ void Text::ClearCache(FT_Face face) {
     delete iter->second;
   }
   textCache[face]->cacheMap.clear();
+  advanceCache.erase(face);
 }
 
 void Text::ClearScreen() {
@@ -722,7 +724,17 @@ u8 Text::GetAdvance(u32 ucs, FT_Face face) {
     if (!error)
       return face->glyph->advance.x >> 6;
 #else
-    return GetGlyph(ucs, FT_LOAD_DEFAULT, face)->advance.x >> 6;
+    auto &faceAdvanceCache = advanceCache[face];
+    auto iter = faceAdvanceCache.find(ucs);
+    if (iter != faceAdvanceCache.end())
+      return iter->second;
+
+    error = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
+    if (!error) {
+      u8 advance = face->glyph->advance.x >> 6;
+      faceAdvanceCache.insert(std::make_pair(ucs, advance));
+      return advance;
+    }
 #endif
   }
   return 0;
