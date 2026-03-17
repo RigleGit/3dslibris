@@ -78,7 +78,6 @@ class Book {
     u16 screen_h;
     u16 bg565;
     u8 layout_mode;
-    u16 start_y;
     u16 width;
     u16 height;
     std::vector<u16> pixels;
@@ -94,6 +93,7 @@ class Book {
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
   std::vector<InlineImageEntry> inline_images;
+  std::unordered_map<std::string, u16> inline_image_path_index;
   std::unordered_map<std::string, u16> chapter_anchor_pages;
   std::unordered_map<std::string, u16> chapter_doc_start_pages;
   std::unordered_map<std::string, std::vector<u8>> fb2_inline_images;

@@ -225,10 +225,10 @@ static bool LooksLikeSvgWrapper(const std::string &path_hint,
 }
 
 static bool
-ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
+ResolveSvgWrapperImage(unzFile uf, const std::string &svg_path,
                        const std::vector<u8> &svg_buf, std::vector<u8> *out,
                        std::string *resolved_path = NULL, App *app = NULL) {
-  if (!out || svg_buf.empty() || svg_buf.size() > kSvgWrapperMaxBytes) {
+  if (!out || !uf || svg_buf.empty() || svg_buf.size() > kSvgWrapperMaxBytes) {
     if (app)
       DBG_LOG(app, "EPUB: inline SVG wrapper skip (size/empty)");
     return false;
@@ -238,9 +238,6 @@ ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
     resolved_path->clear();
 
   std::string xml((const char *)svg_buf.data(), svg_buf.size());
-  unzFile uf = unzOpen(epubpath.c_str());
-  if (!uf)
-    return false;
 
   int image_tags_seen = 0;
   int href_attempts = 0;
@@ -281,7 +278,6 @@ ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
       if (DecodeDataUriImage(href, out, app)) {
         if (resolved_path)
           *resolved_path = "data:image";
-        unzClose(uf);
         return true;
       }
       continue;
@@ -301,7 +297,6 @@ ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
                  resolved.c_str(), (unsigned)out->size());
         DBG_LOG(app, msg);
       }
-      unzClose(uf);
       return true;
     }
   }
@@ -313,7 +308,6 @@ ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
              image_tags_seen, href_attempts, svg_path.c_str());
     DBG_LOG(app, msg);
   }
-  unzClose(uf);
   out->clear();
   return false;
 }
@@ -322,16 +316,18 @@ ResolveSvgWrapperImage(const std::string &epubpath, const std::string &svg_path,
 u16 Book::RegisterInlineImage(const std::string &path) {
   if (path.empty())
     return 0;
-  for (u16 i = 0; i < inline_images.size(); i++) {
-    if (inline_images[i].path == path)
-      return i;
-  }
+  std::unordered_map<std::string, u16>::const_iterator it =
+      inline_image_path_index.find(path);
+  if (it != inline_image_path_index.end())
+    return it->second;
   if (inline_images.size() >= 65535)
     return 0;
   InlineImageEntry entry;
   entry.path = path;
   inline_images.push_back(entry);
-  return (u16)(inline_images.size() - 1);
+  u16 id = (u16)(inline_images.size() - 1);
+  inline_image_path_index[path] = id;
+  return id;
 }
 
 const std::string *Book::GetInlineImagePath(u16 id) const {
@@ -347,6 +343,7 @@ void Book::ClearInlineImageCache() {
 
 void Book::ClearInlineImages() {
   inline_images.clear();
+  inline_image_path_index.clear();
   inline_image_probe_uf = NULL;
   inline_image_zip_index_built = false;
   inline_image_zip_offsets.clear();
@@ -452,9 +449,9 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
   out->resize(fi.uncompressed_size);
   int bytes_read = unzReadCurrentFile(uf, out->data(), fi.uncompressed_size);
   unzCloseCurrentFile(uf);
-  if (close_uf)
-    unzClose(uf);
   if (bytes_read <= 0) {
+    if (close_uf)
+      unzClose(uf);
     out->clear();
     return false;
   }
@@ -466,6 +463,8 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
   int info_w = 0, info_h = 0, info_c = 0;
   if (stbi_info_from_memory(out->data(), (int)out->size(), &info_w, &info_h,
                             &info_c) != 0) {
+    if (close_uf)
+      unzClose(uf);
     return true;
   }
 
@@ -479,7 +478,7 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
     DBG_LOG(app, msg);
   }
   if (is_svg_wrapper &&
-      ResolveSvgWrapperImage(epubpath, image_path, *out, &resolved_svg_image,
+      ResolveSvgWrapperImage(uf, image_path, *out, &resolved_svg_image,
                              &resolved_svg_path, app)) {
     out->swap(resolved_svg_image);
     if (resolved_path && !resolved_svg_path.empty())
@@ -494,13 +493,21 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
                (unsigned)out->size());
       DBG_LOG(app, msg);
     }
+    if (close_uf)
+      unzClose(uf);
     return true;
   }
-  if (is_svg_wrapper && app) {
-    char msg[192];
-    snprintf(msg, sizeof(msg), "EPUB: inline SVG wrapper unresolved id=%u %s",
-             (unsigned)image_id, image_path.c_str());
-    DBG_LOG(app, msg);
+  if (close_uf)
+    unzClose(uf);
+  if (is_svg_wrapper) {
+    if (app) {
+      char msg[192];
+      snprintf(msg, sizeof(msg), "EPUB: inline SVG wrapper unresolved id=%u %s",
+               (unsigned)image_id, image_path.c_str());
+      DBG_LOG(app, msg);
+    }
+    out->clear();
+    return false;
   }
   return true;
 }
@@ -635,16 +642,6 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   }
   const InlineImageLayoutPlan &plan = *plan_ptr;
 
-  std::vector<u8> compressed;
-  if (!LoadInlineImageSource(image_id, &compressed, NULL) || compressed.empty())
-    return false;
-
-  int imgW = 0, imgH = 0, channels = 0;
-  unsigned char *pixels = stbi_load_from_memory(
-      compressed.data(), (int)compressed.size(), &imgW, &imgH, &channels, 4);
-  if (!pixels)
-    return false;
-
   const int screen_w = 240;
   const int screen_h = left_screen ? 400 : 320;
   const int text_w = screen_w - ts->margin.left - ts->margin.right;
@@ -657,30 +654,51 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   int start_x = 0;
   int start_y = 0;
 
-  if (plan.mode == INLINE_IMAGE_LAYOUT_PAGE || draw_w <= 0 || draw_h <= 0) {
-    const int pad = 2;
-    const int avail_w = screen_w - (pad * 2);
-    const int avail_h = screen_h - (pad * 2);
-    int sx = (avail_w * 1024) / std::max(1, imgW);
-    int sy = (avail_h * 1024) / std::max(1, imgH);
-    int scale = std::min(sx, sy);
-    if (scale > 1024)
-      scale = 1024;
-    draw_w = std::max(1, (imgW * scale + 512) / 1024);
-    draw_h = std::max(1, (imgH * scale + 512) / 1024);
-    start_x = pad + (avail_w - draw_w) / 2;
-    start_y = pad + (avail_h - draw_h) / 2;
-  } else if (plan.mode == INLINE_IMAGE_LAYOUT_INLINE) {
-    start_x = ts->GetPenX();
-    start_y = line_top;
-  } else {
-    start_x = ts->margin.left + (text_w - draw_w) / 2;
-    start_y = line_top;
+  // PAGE mode needs source dimensions to compute draw size before cache
+  // lookup. Use metadata (cheap) first; actual pixel decode only on miss.
+  int page_imgW = 0, page_imgH = 0;
+  bool need_page_recompute =
+      (plan.mode == INLINE_IMAGE_LAYOUT_PAGE || draw_w <= 0 || draw_h <= 0);
+
+  if (need_page_recompute) {
+    InlineImageMetadata meta{};
+    EnsureInlineImageMetadata(image_id, &meta);
+    page_imgW = meta.width;
+    page_imgH = meta.height;
+    if (page_imgW <= 0 || page_imgH <= 0) {
+      // Metadata unavailable; falls back after decode below.
+      page_imgW = 0;
+      page_imgH = 0;
+    } else {
+      const int pad = 2;
+      const int avail_w = screen_w - (pad * 2);
+      const int avail_h = screen_h - (pad * 2);
+      int sx = (avail_w * 1024) / std::max(1, page_imgW);
+      int sy = (avail_h * 1024) / std::max(1, page_imgH);
+      int scale = std::min(sx, sy);
+      if (scale > 1024)
+        scale = 1024;
+      draw_w = std::max(1, (page_imgW * scale + 512) / 1024);
+      draw_h = std::max(1, (page_imgH * scale + 512) / 1024);
+      start_x = pad + (avail_w - draw_w) / 2;
+      start_y = pad + (avail_h - draw_h) / 2;
+    }
+  }
+
+  if (!need_page_recompute) {
+    if (plan.mode == INLINE_IMAGE_LAYOUT_INLINE) {
+      start_x = ts->GetPenX();
+      start_y = line_top;
+    } else {
+      start_x = ts->margin.left + (text_w - draw_w) / 2;
+      start_y = line_top;
+    }
   }
 
   auto blit_pixels = [&](const InlineImageCacheEntry &entry, int dst_x,
-                         int dst_y) {
+                          int dst_y) {
     u16 *dst = ts->GetScreen();
+    // 3DS framebuffer is column-major: stride == display.height, not width.
     const int stride = ts->display.height;
     for (int y = 0; y < entry.height; y++) {
       int dy = dst_y + y;
@@ -706,17 +724,52 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     }
   };
 
-  for (std::list<InlineImageCacheEntry>::iterator it =
-           inline_image_cache.begin();
-       it != inline_image_cache.end(); ++it) {
-    if (it->image_id == image_id && it->screen_h == (u16)screen_h &&
-        it->bg565 == bg565 && it->layout_mode == (u8)plan.mode &&
-        it->width == draw_w && it->height == draw_h) {
-      inline_image_cache.splice(inline_image_cache.begin(), inline_image_cache,
-                                it);
-      blit_pixels(inline_image_cache.front(), start_x, start_y);
-      return true;
+  // LRU cache lookup before image decode; skip when dimensions unknown.
+  if (draw_w > 0 && draw_h > 0) {
+    for (std::list<InlineImageCacheEntry>::iterator it =
+             inline_image_cache.begin();
+         it != inline_image_cache.end(); ++it) {
+      if (it->image_id == image_id && it->screen_h == (u16)screen_h &&
+          it->bg565 == bg565 && it->layout_mode == (u8)plan.mode &&
+          it->width == draw_w && it->height == draw_h) {
+        inline_image_cache.splice(inline_image_cache.begin(),
+                                  inline_image_cache, it);
+        blit_pixels(inline_image_cache.front(), start_x, start_y);
+        return true;
+      }
     }
+  }
+
+  std::vector<u8> compressed;
+  if (!LoadInlineImageSource(image_id, &compressed, NULL) || compressed.empty())
+    return false;
+
+  int imgW = 0, imgH = 0, channels = 0;
+  unsigned char *pixels = stbi_load_from_memory(
+      compressed.data(), (int)compressed.size(), &imgW, &imgH, &channels, 4);
+  if (!pixels)
+    return false;
+
+  // PAGE fallback: metadata was unavailable, compute from decoded pixels.
+  if (need_page_recompute && page_imgW == 0 && page_imgH == 0) {
+    const int pad = 2;
+    const int avail_w = screen_w - (pad * 2);
+    const int avail_h = screen_h - (pad * 2);
+    int sx = (avail_w * 1024) / std::max(1, imgW);
+    int sy = (avail_h * 1024) / std::max(1, imgH);
+    int scale = std::min(sx, sy);
+    if (scale > 1024)
+      scale = 1024;
+    draw_w = std::max(1, (imgW * scale + 512) / 1024);
+    draw_h = std::max(1, (imgH * scale + 512) / 1024);
+    start_x = pad + (avail_w - draw_w) / 2;
+    start_y = pad + (avail_h - draw_h) / 2;
+  }
+
+  // Guard: cap draw buffer to 1.5M pixels (same as EnsureInlineImageMetadata).
+  if ((long long)draw_w * (long long)draw_h > 1500000LL) {
+    stbi_image_free(pixels);
+    return false;
   }
 
   InlineImageCacheEntry entry;
@@ -724,7 +777,6 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   entry.screen_h = (u16)screen_h;
   entry.bg565 = bg565;
   entry.layout_mode = (u8)plan.mode;
-  entry.start_y = 0;
   entry.width = (u16)draw_w;
   entry.height = (u16)draw_h;
   entry.pixels.resize((size_t)draw_w * (size_t)draw_h);

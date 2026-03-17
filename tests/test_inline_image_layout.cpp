@@ -240,5 +240,57 @@ int main() {
                INLINE_IMAGE_LAYOUT_PAGE);
   }
 
+  {
+    InlineImageLayoutRequest req = BaseRequest();
+    req.current_screen = 1;
+    req.screen_height = 320;
+    req.pen_x = 12;
+    req.pen_y = 26;
+    req.line_began = false;
+    InlineImageLayoutPlan plan =
+        PlanInlineImageLayout(req, Metadata(800, 1200));
+    ExpectMode("page image on right screen at start", plan,
+               INLINE_IMAGE_LAYOUT_PAGE);
+    ExpectFalse("page at screen start does not advance", plan.advance_before);
+    ExpectEq("page on right screen sends text to next page left",
+             plan.next_text_screen, 0);
+    ExpectEq("page on right screen increments page break",
+             plan.page_breaks, 1);
+  }
+
+  {
+    InlineImageLayoutRequest req = BaseRequest();
+    req.current_screen = 1;
+    req.screen_height = 320;
+    req.pen_x = 80;
+    req.pen_y = 150;
+    req.line_began = true;
+    InlineImageLayoutPlan plan =
+        PlanInlineImageLayout(req, Metadata(800, 1200));
+    ExpectMode("page image on right screen mid-page", plan,
+               INLINE_IMAGE_LAYOUT_PAGE);
+    ExpectTrue("page mid-right advances before", plan.advance_before);
+    ExpectEq("advance from right goes to left on next page",
+             plan.next_text_screen, 1);
+    ExpectEq("advance from right crosses one page boundary",
+             plan.page_breaks, 1);
+  }
+
+  {
+    InlineImageLayoutRequest req = BaseRequest();
+    req.current_screen = 1;
+    req.screen_height = 320;
+    req.pen_x = 12;
+    req.pen_y = 280;
+    req.line_began = true;
+    InlineImageLayoutPlan plan =
+        PlanInlineImageLayout(req, Metadata(1000, 100));
+    ExpectMode("band on right screen near bottom", plan,
+               INLINE_IMAGE_LAYOUT_BAND);
+    ExpectTrue("band near bottom of right screen advances", plan.advance_before);
+    ExpectEq("band advance from right crosses page", plan.page_breaks, 1);
+    ExpectEq("band after advance goes to left screen", plan.next_text_screen, 0);
+  }
+
   return 0;
 }
