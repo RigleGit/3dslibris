@@ -49,8 +49,23 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <set>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unordered_map>
 #include <vector>
+
+static const char *kEpubCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
+static const char *kEpubCacheDir = "sdmc:/3ds/3dslibris/cache/epub";
+static const u32 kEpubPageCacheMagic = 0x45504347U; // "EPCG"
+static const u16 kEpubPageCacheVersion = 1;
+
+struct EpubPageCacheHeader {
+  u32 magic;
+  u16 version;
+  u16 title_len;
+  u32 page_count;
+  u32 chapter_count;
+  u32 doc_start_count; // chapter_doc_start_pages entries
+};
 
 static const size_t EPUB_TOC_MAX_BYTES = 192 * 1024;
 static const size_t EPUB_TOC_MAX_ENTRIES = 2048;
@@ -73,6 +88,263 @@ struct ZipEntryIndex {
   bool built = false;
   std::unordered_map<std::string, uLong> offset_by_key;
 };
+
+static void EnsureEpubCacheDirs() {
+  static bool initialized = false;
+  if (initialized)
+    return;
+  mkdir(kEpubCacheBaseDir, 0777);
+  mkdir(kEpubCacheDir, 0777);
+  initialized = true;
+}
+
+static std::string BuildEpubPageCachePath(const char *book_path, App *app) {
+  if (!book_path || !app || !app->ts)
+    return std::string();
+  struct stat st;
+  long long fsize = 0;
+  long long fmtime = 0;
+  if (stat(book_path, &st) == 0) {
+    fsize = (long long)st.st_size;
+    fmtime = (long long)st.st_mtime;
+  }
+
+  Text *ts = app->ts;
+  std::string key(book_path);
+  key.push_back('|');
+  key += std::to_string(fsize);
+  key.push_back('|');
+  key += std::to_string(fmtime);
+  key.push_back('|');
+  key += std::to_string((int)ts->GetPixelSize());
+  key.push_back('|');
+  key += std::to_string((int)ts->linespacing);
+  key.push_back('|');
+  key += std::to_string((int)app->paraspacing);
+  key.push_back('|');
+  key += std::to_string((int)app->paraindent);
+  key.push_back('|');
+  key += std::to_string((int)app->orientation);
+  key.push_back('|');
+  key += std::to_string((int)ts->margin.left);
+  key.push_back('|');
+  key += std::to_string((int)ts->margin.right);
+  key.push_back('|');
+  key += std::to_string((int)ts->margin.top);
+  key.push_back('|');
+  key += std::to_string((int)ts->margin.bottom);
+  key.push_back('|');
+  key += ts->GetFontFile(TEXT_STYLE_REGULAR);
+
+  uint64_t h = Fnv1a64(key);
+  char out[192];
+  snprintf(out, sizeof(out), "%s/%016llx.epc", kEpubCacheDir,
+           (unsigned long long)h);
+  return std::string(out);
+}
+
+static bool TryLoadEpubPageCache(Book *book, const char *book_path, App *app) {
+  if (!book || !book_path || !app)
+    return false;
+  EnsureEpubCacheDirs();
+  std::string cache_path = BuildEpubPageCachePath(book_path, app);
+  if (cache_path.empty())
+    return false;
+
+  FILE *fp = fopen(cache_path.c_str(), "rb");
+  if (!fp)
+    return false;
+
+  EpubPageCacheHeader hdr;
+  if (fread(&hdr, 1, sizeof(hdr), fp) != sizeof(hdr)) {
+    fclose(fp);
+    remove(cache_path.c_str());
+    return false;
+  }
+  if (hdr.magic != kEpubPageCacheMagic ||
+      hdr.version != kEpubPageCacheVersion || hdr.page_count == 0 ||
+      hdr.page_count > 20000 || hdr.chapter_count > 4000 ||
+      hdr.title_len > 1000 || hdr.doc_start_count > 4000) {
+    fclose(fp);
+    remove(cache_path.c_str());
+    return false;
+  }
+
+  std::string title;
+  if (hdr.title_len > 0) {
+    title.resize(hdr.title_len);
+    if (fread(&title[0], 1, hdr.title_len, fp) != hdr.title_len) {
+      fclose(fp);
+      remove(cache_path.c_str());
+      return false;
+    }
+  }
+
+  bool ok = true;
+  for (u32 i = 0; i < hdr.page_count; i++) {
+    u16 len = 0;
+    if (fread(&len, 1, sizeof(len), fp) != sizeof(len) || len > 4096) {
+      ok = false;
+      break;
+    }
+    std::vector<u8> buf((size_t)len);
+    if (len > 0 && fread(buf.data(), 1, len, fp) != len) {
+      ok = false;
+      break;
+    }
+    Page *page = book->AppendPage();
+    static u8 dummy = 0;
+    page->SetBuffer(len ? buf.data() : &dummy, len);
+  }
+
+  if (ok) {
+    for (u32 i = 0; i < hdr.chapter_count; i++) {
+      u16 page = 0;
+      u8 level = 0;
+      u16 title_len = 0;
+      if (fread(&page, 1, sizeof(page), fp) != sizeof(page) ||
+          fread(&level, 1, sizeof(level), fp) != sizeof(level) ||
+          fread(&title_len, 1, sizeof(title_len), fp) != sizeof(title_len) ||
+          title_len > 2048) {
+        ok = false;
+        break;
+      }
+      std::string ctitle;
+      ctitle.resize(title_len);
+      if (title_len > 0 && fread(&ctitle[0], 1, title_len, fp) != title_len) {
+        ok = false;
+        break;
+      }
+      if (page < book->GetPageCount())
+        book->AddChapter(page, ctitle, level);
+    }
+  }
+
+  if (ok) {
+    for (u32 i = 0; i < hdr.doc_start_count; i++) {
+      u16 doc_page = 0;
+      u16 path_len = 0;
+      if (fread(&doc_page, 1, sizeof(doc_page), fp) != sizeof(doc_page) ||
+          fread(&path_len, 1, sizeof(path_len), fp) != sizeof(path_len) ||
+          path_len > 2048) {
+        ok = false;
+        break;
+      }
+      std::string docpath;
+      docpath.resize(path_len);
+      if (path_len > 0 && fread(&docpath[0], 1, path_len, fp) != path_len) {
+        ok = false;
+        break;
+      }
+      book->SetChapterDocStartPage(docpath, doc_page);
+    }
+  }
+
+  fclose(fp);
+  if (!ok) {
+    book->Close();
+    remove(cache_path.c_str());
+    return false;
+  }
+
+  if (!title.empty())
+    book->SetTitle(title.c_str());
+
+  return true;
+}
+
+static void SaveEpubPageCache(Book *book, const char *book_path, App *app) {
+  if (!book || !book_path || !app || book->GetPageCount() == 0)
+    return;
+  EnsureEpubCacheDirs();
+  std::string cache_path = BuildEpubPageCachePath(book_path, app);
+  if (cache_path.empty())
+    return;
+
+  const char *title_c = book->GetTitle();
+  std::string title = title_c ? title_c : "";
+  if (title.size() > 1000)
+    title.resize(1000);
+  const std::vector<ChapterEntry> &chapters = book->GetChapters();
+  const std::unordered_map<std::string, u16> &doc_starts =
+      book->GetChapterDocStartPages();
+
+  EpubPageCacheHeader hdr;
+  memset(&hdr, 0, sizeof(hdr));
+  hdr.magic = kEpubPageCacheMagic;
+  hdr.version = kEpubPageCacheVersion;
+  hdr.title_len = (u16)title.size();
+  hdr.page_count = book->GetPageCount();
+  hdr.chapter_count = (u32)chapters.size();
+  hdr.doc_start_count = (u32)doc_starts.size();
+
+  FILE *fp = fopen(cache_path.c_str(), "wb");
+  if (!fp)
+    return;
+
+  bool ok = fwrite(&hdr, 1, sizeof(hdr), fp) == sizeof(hdr);
+  if (ok && !title.empty())
+    ok = fwrite(title.data(), 1, title.size(), fp) == title.size();
+
+  if (ok) {
+    for (u32 i = 0; i < hdr.page_count; i++) {
+      Page *page = book->GetPage((int)i);
+      u16 len = page ? (u16)page->GetLength() : 0;
+      if (fwrite(&len, 1, sizeof(len), fp) != sizeof(len)) {
+        ok = false;
+        break;
+      }
+      if (len > 0) {
+        const u8 *buf = page->GetBuffer();
+        if (!buf || fwrite(buf, 1, len, fp) != len) {
+          ok = false;
+          break;
+        }
+      }
+    }
+  }
+
+  if (ok) {
+    for (size_t i = 0; i < chapters.size(); i++) {
+      const ChapterEntry &c = chapters[i];
+      u16 page = c.page;
+      u8 level = c.level;
+      u16 title_len = (u16)std::min<size_t>(c.title.size(), 2048);
+      if (fwrite(&page, 1, sizeof(page), fp) != sizeof(page) ||
+          fwrite(&level, 1, sizeof(level), fp) != sizeof(level) ||
+          fwrite(&title_len, 1, sizeof(title_len), fp) != sizeof(title_len)) {
+        ok = false;
+        break;
+      }
+      if (title_len > 0 &&
+          fwrite(c.title.data(), 1, title_len, fp) != title_len) {
+        ok = false;
+        break;
+      }
+    }
+  }
+
+  if (ok) {
+    for (auto &kv : doc_starts) {
+      u16 doc_page = kv.second;
+      u16 path_len = (u16)std::min<size_t>(kv.first.size(), 2048);
+      if (fwrite(&doc_page, 1, sizeof(doc_page), fp) != sizeof(doc_page) ||
+          fwrite(&path_len, 1, sizeof(path_len), fp) != sizeof(path_len)) {
+        ok = false;
+        break;
+      }
+      if (path_len > 0 &&
+          fwrite(kv.first.data(), 1, path_len, fp) != path_len) {
+        ok = false;
+        break;
+      }
+    }
+  }
+
+  fclose(fp);
+  if (!ok)
+    remove(cache_path.c_str());
+}
 
 static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
   std::string base = path;
@@ -1392,7 +1664,7 @@ void epub_rootfile_char(void *data, const XML_Char *txt, int len) {
 int epub_parse_currentfile(unzFile uf, epub_data_t *epd) {
   int rc = 0;
   parsedata_t pd;
-  char *filebuf = new char[BUFSIZE];
+  static char filebuf[BUFSIZE];
   XML_Parser p = XML_ParserCreate(NULL);
   if (epd->type == PARSE_CONTAINER) {
     XML_SetUserData(p, epd);
@@ -1435,7 +1707,6 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd) {
   } while (len);
 
   XML_ParserFree(p);
-  delete[] filebuf;
   if (epd->type == PARSE_CONTENT) {
     epd->parsed_doc_title = Trim(pd.doc_title);
     if (epd->parsed_doc_title.empty())
@@ -2647,6 +2918,23 @@ int epub(Book *book, std::string name, bool metadataonly) {
     return rc;
   }
 
+  App *app = book ? book->GetApp() : NULL;
+  if (TryLoadEpubPageCache(book, name.c_str(), app)) {
+    if (app) {
+      DBG_LOGF(app, "EPUB: page cache hit pages=%u chapters=%u",
+               (unsigned)book->GetPageCount(),
+               (unsigned)book->GetChapters().size());
+#ifdef DSLIBRIS_DEBUG
+      DBG_LOGF(app, "EPUB: timing cache_total=%llums",
+               (unsigned long long)(osGetTime() - t_parse_begin));
+#endif
+      DBG_LOG(app, "EPUB: parse end");
+    }
+    unzClose(uf);
+    epub_data_delete(&parsedata);
+    return 0;
+  }
+
   // Read the XHTML in the manifest, ordering by spine if needed.
   parsedata.ctx.clear();
   parsedata.book = book;
@@ -2656,18 +2944,16 @@ int epub(Book *book, std::string name, bool metadataonly) {
   book->ClearInlineImages();
   std::vector<std::string *> href;
   if (parsedata.spine.size()) {
-    // Use spine for reading order.
-    std::vector<epub_itemref *>::iterator itemref;
-    for (itemref = parsedata.spine.begin(); itemref != parsedata.spine.end();
-         itemref++) {
-      std::vector<epub_item *>::iterator item;
-      for (item = parsedata.manifest.begin(); item != parsedata.manifest.end();
-           item++) {
-        if ((*item)->id == (*itemref)->idref) {
-          std::string *h = new std::string((*item)->href);
-          href.push_back(h);
-        }
-      }
+    // Build id→href index for O(1) spine resolution instead of O(N*M).
+    std::unordered_map<std::string, std::string> manifest_href_by_id;
+    manifest_href_by_id.reserve(parsedata.manifest.size());
+    for (auto *item : parsedata.manifest)
+      manifest_href_by_id[item->id] = item->href;
+
+    for (auto *itemref : parsedata.spine) {
+      auto it = manifest_href_by_id.find(itemref->idref);
+      if (it != manifest_href_by_id.end())
+        href.push_back(new std::string(it->second));
     }
   } else {
     std::vector<epub_item *>::iterator item;
@@ -2920,6 +3206,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
   } else if (book && book->GetApp()) {
     DBG_LOG(book->GetApp(), "EPUB: TOC resolve skipped (safe mode)");
   }
+
+  SaveEpubPageCache(book, name.c_str(), app);
 
   unzClose(uf);
   epub_data_delete(&parsedata);
