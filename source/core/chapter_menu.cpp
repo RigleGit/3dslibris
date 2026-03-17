@@ -102,6 +102,7 @@ static std::string NormalizeSearchText(const std::string &raw) {
     return "";
 
   // Remove dotted leader tail and trailing page-like numbers.
+  // Example: "Chapter 1.....12" → "Chapter 1"
   size_t leader = std::string::npos;
   size_t run = 0;
   for (size_t i = 0; i < in.size(); i++) {
@@ -115,18 +116,21 @@ static std::string NormalizeSearchText(const std::string &raw) {
       run = 0;
     }
   }
-  if (leader != std::string::npos)
+  if (leader != std::string::npos) {
     in = TrimLabel(in.substr(0, leader));
-
-  size_t end = in.size();
-  while (end > 0 && isdigit((unsigned char)in[end - 1]))
-    end--;
-  if (end < in.size()) {
-    size_t ws = end;
-    while (ws > 0 && isspace((unsigned char)in[ws - 1]))
-      ws--;
-    if (ws >= 4)
-      in = in.substr(0, ws);
+    // Only strip trailing page-like numbers when a dotted leader was present;
+    // without a leader the trailing digits are part of the title itself
+    // (e.g. "CHAPTER 4") and must be preserved for accurate matching.
+    size_t end = in.size();
+    while (end > 0 && isdigit((unsigned char)in[end - 1]))
+      end--;
+    if (end < in.size()) {
+      size_t ws = end;
+      while (ws > 0 && isspace((unsigned char)in[ws - 1]))
+        ws--;
+      if (ws >= 4)
+        in = in.substr(0, ws);
+    }
   }
 
   std::string out;
