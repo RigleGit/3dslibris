@@ -99,13 +99,13 @@ void Page::Draw(Text *ts) {
   ts->SetScreen(ts->screenleft);
 
   u16 i = 0;
-  bool next_image_leading_paragraph = false;
+  InlineImageContext next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
   while (i < length) {
     u32 c = buf[i];
     if (c == '\n') {
       // line break, page breaking if necessary
       i++;
-      next_image_leading_paragraph = false;
+      next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
       int maxHeight = (ts->GetScreen() == ts->screenleft) ? 400 : 320;
       int currentBottomMargin =
@@ -144,9 +144,15 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_ITALIC_OFF) {
       i++;
       ts->italic = false;
+    } else if (c == TEXT_IMAGE_CONTEXT_DEFAULT) {
+      i++;
+      next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
     } else if (c == TEXT_IMAGE_LEADING_PARAGRAPH) {
       i++;
-      next_image_leading_paragraph = true;
+      next_image_context = INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH;
+    } else if (c == TEXT_IMAGE_FIGURE_WITH_CAPTION) {
+      i++;
+      next_image_context = INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION;
     } else if (c == TEXT_IMAGE) {
       if (i + 2 < length) {
         u16 image_id = ((u16)buf[i + 1] << 8) | (u16)buf[i + 2];
@@ -155,10 +161,9 @@ void Page::Draw(Text *ts) {
         InlineImageLayoutPlan image_plan{};
         int current_screen = (ts->GetScreen() == ts->screenleft) ? 0 : 1;
         book->PlanInlineImageLayout(ts, image_id, current_screen, ts->GetPenX(),
-                                    ts->GetPenY(), ts->linebegan,
-                                    next_image_leading_paragraph,
+                                    ts->GetPenY(), ts->linebegan, next_image_context,
                                     &image_plan);
-        next_image_leading_paragraph = false;
+        next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
         if (image_plan.advance_before) {
           if (!advance_to_next_screen())
@@ -198,14 +203,14 @@ void Page::Draw(Text *ts) {
           break;
       } else {
         i++;
-        next_image_leading_paragraph = false;
+        next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
       }
     } else {
       if (c > 127)
         i += ts->GetCharCode((char *)&(buf[i]), &c);
       else
         i++;
-      next_image_leading_paragraph = false;
+      next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
       ts->margin.bottom = (ts->GetScreen() == ts->screenleft)
                               ? leftBottomMargin

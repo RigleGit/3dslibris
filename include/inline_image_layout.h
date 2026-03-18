@@ -6,6 +6,12 @@ enum InlineImageLayoutMode {
   INLINE_IMAGE_LAYOUT_PAGE
 };
 
+enum InlineImageContext {
+  INLINE_IMAGE_CONTEXT_DEFAULT = 0,
+  INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH,
+  INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION
+};
+
 struct InlineImageMetadata {
   int width;
   int height;
@@ -24,8 +30,9 @@ struct InlineImageLayoutRequest {
   int pen_x;
   int pen_y;
   bool line_began;
-  bool leading_paragraph_image;
+  InlineImageContext image_context;
   int current_screen;
+  int follow_text_lines;
 };
 
 struct InlineImageLayoutPlan {

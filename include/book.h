@@ -67,10 +67,11 @@ class Book {
     bool metadata_ok;
     int source_width;
     int source_height;
+    u8 follow_text_lines;
 
     InlineImageEntry()
         : metadata_probed(false), metadata_ok(false), source_width(0),
-          source_height(0) {}
+          source_height(0), follow_text_lines(0) {}
   };
 
   struct InlineImageCacheEntry {
@@ -186,13 +187,15 @@ public:
   const std::string *GetInlineImagePath(u16 id) const;
   u32 GetInlineImageCount() const;
   bool GetInlineImageMetadata(u16 id, InlineImageMetadata *out);
+  void SetInlineImageFollowTextLines(u16 id, u8 lines);
+  u8 GetInlineImageFollowTextLines(u16 id) const;
   void ClearInlineImages();
   void SetInlineImageProbeZip(void *uf);
   bool StoreFb2InlineImage(const std::string &id,
                            const std::string &base64_data);
   bool PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
                              int pen_x, int pen_y, bool line_began,
-                             bool leading_paragraph_image,
+                             InlineImageContext image_context,
                              InlineImageLayoutPlan *out);
   bool DrawInlineImage(Text *ts, u16 image_id,
                        const InlineImageLayoutPlan *plan = NULL);

@@ -46,7 +46,7 @@ static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // v6→v7: recindex parsing now accepts zero-padded MOBI image references, so
 //         old cached page streams must be invalidated to repaginate with the
 //         recovered TEXT_IMAGE markers.
-static const u16 kMobiPageCacheVersion = 7;
+static const u16 kMobiPageCacheVersion = 12;
 
 struct MobiPageCacheHeader {
   u32 magic;
@@ -213,7 +213,14 @@ static bool TryLoadMobiPageCache(Book *book, const char *book_path, App *app) {
         ok = false;
         break;
       }
-      book->RegisterInlineImage(imgpath);
+      u8 follow_lines = 0;
+      if (fread(&follow_lines, 1, sizeof(follow_lines), fp) !=
+          sizeof(follow_lines)) {
+        ok = false;
+        break;
+      }
+      u16 image_id = book->RegisterInlineImage(imgpath);
+      book->SetInlineImageFollowTextLines(image_id, follow_lines);
     }
   }
 
@@ -325,6 +332,12 @@ static void SaveMobiPageCache(Book *book, const char *book_path, App *app,
         break;
       }
       if (fwrite(imgpath->data(), 1, path_len, fp) != path_len) {
+        ok = false;
+        break;
+      }
+      const u8 follow_lines = book->GetInlineImageFollowTextLines((u16)i);
+      if (fwrite(&follow_lines, 1, sizeof(follow_lines), fp) !=
+          sizeof(follow_lines)) {
         ok = false;
         break;
       }
@@ -693,6 +706,52 @@ static std::string CollapseAsciiWhitespace(const std::string &in) {
     out.push_back((char)c);
   }
   return out;
+}
+
+static size_t MobiInlineTokenLengthAt(const std::string &text, size_t pos,
+                                      u16 *image_id_out = NULL) {
+  if (image_id_out)
+    *image_id_out = 0;
+  if (pos >= text.size())
+    return 0;
+
+  size_t image_pos = pos;
+  const unsigned char c0 = (unsigned char)text[pos];
+  if (c0 == TEXT_IMAGE) {
+    if (pos + 2 >= text.size())
+      return 0;
+  } else if ((c0 == TEXT_IMAGE_CONTEXT_DEFAULT ||
+              c0 == TEXT_IMAGE_LEADING_PARAGRAPH ||
+              c0 == TEXT_IMAGE_FIGURE_WITH_CAPTION) &&
+             pos + 3 < text.size() &&
+             (unsigned char)text[pos + 1] == TEXT_IMAGE) {
+    image_pos = pos + 1;
+  } else {
+    return 0;
+  }
+
+  if (image_id_out) {
+    *image_id_out = (u16)(((u8)text[image_pos + 1] << 8) |
+                          (u8)text[image_pos + 2]);
+  }
+  return image_pos == pos ? 3u : 4u;
+}
+
+static void CollectMobiInlineImageTokenIds(const std::string &text,
+                                           std::vector<u16> *ids) {
+  if (!ids)
+    return;
+  ids->clear();
+  for (size_t i = 0; i < text.size();) {
+    u16 image_id = 0;
+    const size_t token_len = MobiInlineTokenLengthAt(text, i, &image_id);
+    if (token_len == 0) {
+      i++;
+      continue;
+    }
+    ids->push_back(image_id);
+    i += token_len;
+  }
 }
 
 static std::string FoldLatinForMatch(const std::string &in) {
@@ -1325,14 +1384,14 @@ static void PlainLinefeed(parsedata_t *p) {
 }
 
 static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
-                                               bool leading_paragraph_image) {
+                                               InlineImageContext image_context) {
   if (!p || !p->app || !p->app->ts || !p->book)
     return;
 
   Text *ts = p->app->ts;
   InlineImageLayoutPlan image_plan{};
   p->book->PlanInlineImageLayout(ts, image_id, p->screen, p->pen.x, p->pen.y,
-                                 p->linebegan, leading_paragraph_image,
+                                 p->linebegan, image_context,
                                  &image_plan);
 
   if (image_plan.advance_before)
@@ -1342,8 +1401,14 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
 
   if (p->buflen + 4 >= PAGEBUFSIZE)
     PlainAdvanceScreen(p);
-  if (leading_paragraph_image && p->buflen < PAGEBUFSIZE)
-    p->buf[p->buflen++] = TEXT_IMAGE_LEADING_PARAGRAPH;
+  if (p->buflen < PAGEBUFSIZE) {
+    if (image_context == INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH)
+      p->buf[p->buflen++] = TEXT_IMAGE_LEADING_PARAGRAPH;
+    else if (image_context == INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION)
+      p->buf[p->buflen++] = TEXT_IMAGE_FIGURE_WITH_CAPTION;
+    else
+      p->buf[p->buflen++] = TEXT_IMAGE_CONTEXT_DEFAULT;
+  }
   if (p->buflen + 3 >= PAGEBUFSIZE)
     PlainAdvanceScreen(p);
   if (p->buflen + 3 < PAGEBUFSIZE) {
@@ -1421,10 +1486,21 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
       size_t pos = 0;
       while (pos < state->curr.text.size()) {
         unsigned char c = (unsigned char)state->curr.text[pos];
-        const bool leading_marker = (c == TEXT_IMAGE_LEADING_PARAGRAPH);
+        const InlineImageContext image_context =
+            (c == TEXT_IMAGE_CONTEXT_DEFAULT)
+                ? INLINE_IMAGE_CONTEXT_DEFAULT
+            : (c == TEXT_IMAGE_LEADING_PARAGRAPH)
+                ? INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH
+            : (c == TEXT_IMAGE_FIGURE_WITH_CAPTION)
+                ? INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION
+            : INLINE_IMAGE_CONTEXT_DEFAULT;
+        const bool context_marker =
+            c == TEXT_IMAGE_CONTEXT_DEFAULT ||
+            (c == TEXT_IMAGE_LEADING_PARAGRAPH)
+                || c == TEXT_IMAGE_FIGURE_WITH_CAPTION;
         const bool image_marker =
             (c == TEXT_IMAGE) ||
-            (leading_marker && pos + 1 < state->curr.text.size() &&
+            (context_marker && pos + 1 < state->curr.text.size() &&
              (unsigned char)state->curr.text[pos + 1] == TEXT_IMAGE);
         if (!image_marker) {
           pos++;
@@ -1438,7 +1514,7 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
           state->text_bytes_fed += len;
         }
 
-        size_t image_pos = pos + (leading_marker ? 1 : 0);
+        size_t image_pos = pos + (context_marker ? 1 : 0);
         if (image_pos + 2 >= state->curr.text.size()) {
           state->text_bytes_fed += state->curr.text.size() - pos;
           segment_start = state->curr.text.size();
@@ -1449,8 +1525,8 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
             (u16)(((u8)state->curr.text[image_pos + 1] << 8) |
                   (u8)state->curr.text[image_pos + 2]);
         AppendInlineImageToPlainParsedData(&state->parsedata, image_id,
-                                           leading_marker);
-        size_t consumed = leading_marker ? 4 : 3;
+                                           image_context);
+        size_t consumed = context_marker ? 4 : 3;
         state->text_bytes_fed += consumed;
         pos += consumed;
         segment_start = pos;
@@ -1538,7 +1614,9 @@ static std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
       i++;
       continue;
     }
-    if (c == TEXT_IMAGE_LEADING_PARAGRAPH) {
+    if (c == TEXT_IMAGE_CONTEXT_DEFAULT ||
+        c == TEXT_IMAGE_LEADING_PARAGRAPH ||
+        c == TEXT_IMAGE_FIGURE_WITH_CAPTION) {
       i++;
       continue;
     }
@@ -2377,8 +2455,9 @@ static bool IsMobiBlockTag(const std::string &name) {
   static const char *kTags[] = {
       "p",      "div",   "section", "article",      "h1",  "h2",
       "h3",     "h4",    "h5",      "h6",           "tr",  "table",
-      "li",     "ul",    "ol",      "blockquote",   "pre", "header",
-      "footer", "aside", "title",   "mbp:pagebreak"};
+      "td",     "th",    "li",      "ul",           "ol",  "blockquote",
+      "pre",    "header","footer",  "aside",        "title",
+      "mbp:pagebreak"};
   for (size_t i = 0; i < sizeof(kTags) / sizeof(kTags[0]); i++) {
     if (name == kTags[i])
       return true;
@@ -3466,11 +3545,393 @@ static bool LoadDeferredMobiStructuredToc(
 // ratio (html_pos / html_len) is a poor proxy for the corresponding text
 // position.  The sampling table lets MobiHtmlPosToPage() do piecewise-linear
 // interpolation instead.
+enum MobiMarkupBlockItemType {
+  MOBI_MARKUP_BLOCK_TEXT = 0,
+  MOBI_MARKUP_BLOCK_HARD_BREAK,
+  MOBI_MARKUP_BLOCK_IMAGE
+};
+
+struct MobiMarkupBlockItem {
+  MobiMarkupBlockItemType type;
+  std::string text;
+  u16 image_id;
+  size_t marker_offset;
+};
+
+struct MobiMarkupBlock {
+  std::vector<MobiMarkupBlockItem> items;
+};
+
+static void AppendTextToMobiMarkupBlock(MobiMarkupBlock *block,
+                                        const std::string &text) {
+  if (!block || text.empty())
+    return;
+  if (!block->items.empty() &&
+      block->items.back().type == MOBI_MARKUP_BLOCK_TEXT) {
+    block->items.back().text += text;
+    return;
+  }
+  MobiMarkupBlockItem item;
+  item.type = MOBI_MARKUP_BLOCK_TEXT;
+  item.text = text;
+  item.image_id = 0;
+  item.marker_offset = SIZE_MAX;
+  block->items.push_back(item);
+}
+
+static void AppendHardBreakToMobiMarkupBlock(MobiMarkupBlock *block) {
+  if (!block)
+    return;
+  if (!block->items.empty() &&
+      block->items.back().type == MOBI_MARKUP_BLOCK_HARD_BREAK)
+    return;
+  MobiMarkupBlockItem item;
+  item.type = MOBI_MARKUP_BLOCK_HARD_BREAK;
+  item.image_id = 0;
+  item.marker_offset = SIZE_MAX;
+  block->items.push_back(item);
+}
+
+static void AppendImageToMobiMarkupBlock(MobiMarkupBlock *block, u16 image_id,
+                                         size_t marker_offset) {
+  if (!block)
+    return;
+  MobiMarkupBlockItem item;
+  item.type = MOBI_MARKUP_BLOCK_IMAGE;
+  item.image_id = image_id;
+  item.marker_offset = marker_offset;
+  block->items.push_back(item);
+}
+
+static bool MobiMarkupBlockItemHasMeaningfulText(const MobiMarkupBlockItem &item) {
+  return item.type == MOBI_MARKUP_BLOCK_TEXT &&
+         !TrimAsciiWhitespace(item.text).empty();
+}
+
+static bool MobiMarkupBlockItemIsMeaningful(const MobiMarkupBlockItem &item) {
+  return item.type == MOBI_MARKUP_BLOCK_IMAGE ||
+         MobiMarkupBlockItemHasMeaningfulText(item);
+}
+
+static bool MobiMarkupBlockHasMeaningfulContent(const MobiMarkupBlock &block) {
+  for (size_t i = 0; i < block.items.size(); i++) {
+    if (MobiMarkupBlockItemIsMeaningful(block.items[i]))
+      return true;
+  }
+  return false;
+}
+
+static void FinalizeMobiMarkupBlock(std::vector<MobiMarkupBlock> *blocks,
+                                    MobiMarkupBlock *current) {
+  if (!blocks || !current)
+    return;
+  if (!MobiMarkupBlockHasMeaningfulContent(*current)) {
+    current->items.clear();
+    return;
+  }
+  blocks->push_back(*current);
+  current->items.clear();
+}
+
+static int FindFirstMeaningfulMobiMarkupBlockItem(const MobiMarkupBlock &block) {
+  for (size_t i = 0; i < block.items.size(); i++) {
+    if (MobiMarkupBlockItemIsMeaningful(block.items[i]))
+      return (int)i;
+  }
+  return -1;
+}
+
+static bool MobiMarkupBlockHasMeaningfulTextAfter(
+    const MobiMarkupBlock &block, size_t start_index) {
+  if (start_index >= block.items.size())
+    return false;
+  for (size_t i = start_index + 1; i < block.items.size(); i++) {
+    if (MobiMarkupBlockItemHasMeaningfulText(block.items[i]))
+      return true;
+  }
+  return false;
+}
+
+static bool MobiMarkupBlockHasMeaningfulTextBefore(
+    const MobiMarkupBlock &block, size_t end_index) {
+  if (end_index >= block.items.size())
+    return false;
+  for (size_t i = 0; i < end_index; i++) {
+    if (MobiMarkupBlockItemHasMeaningfulText(block.items[i]))
+      return true;
+  }
+  return false;
+}
+
+static int FindLastMeaningfulMobiMarkupBlockItem(const MobiMarkupBlock &block) {
+  for (int i = (int)block.items.size() - 1; i >= 0; i--) {
+    if (MobiMarkupBlockItemIsMeaningful(block.items[(size_t)i]))
+      return i;
+  }
+  return -1;
+}
+
+static size_t CountMobiMarkupBlockImages(const MobiMarkupBlock &block) {
+  size_t count = 0;
+  for (size_t i = 0; i < block.items.size(); i++) {
+    if (block.items[i].type == MOBI_MARKUP_BLOCK_IMAGE)
+      count++;
+  }
+  return count;
+}
+
+static bool MobiMarkupBlockHasOnlyImage(const MobiMarkupBlock &block,
+                                        size_t image_index) {
+  if (image_index >= block.items.size())
+    return false;
+  int first = FindFirstMeaningfulMobiMarkupBlockItem(block);
+  int last = FindLastMeaningfulMobiMarkupBlockItem(block);
+  if (first < 0 || last < 0 || (size_t)first != image_index ||
+      (size_t)last != image_index)
+    return false;
+  if (block.items[image_index].type != MOBI_MARKUP_BLOCK_IMAGE)
+    return false;
+  return true;
+}
+
+static std::string CollectMobiMarkupBlockText(const MobiMarkupBlock &block) {
+  std::string text;
+  for (size_t i = 0; i < block.items.size(); i++) {
+    const MobiMarkupBlockItem &item = block.items[i];
+    if (item.type == MOBI_MARKUP_BLOCK_TEXT) {
+      text += item.text;
+    } else if (item.type == MOBI_MARKUP_BLOCK_HARD_BREAK) {
+      if (!text.empty() && text.back() != '\n')
+        text.push_back('\n');
+    }
+  }
+  return text;
+}
+
+static int EstimateWrappedLineCount(Text *ts, const std::string &text,
+                                    int width) {
+  if (text.empty())
+    return 0;
+  if (!ts || width <= 0)
+    return 1;
+
+  const int space_width = std::max(1, (int)ts->GetAdvance(' '));
+  int lines = 1;
+  int line_width = 0;
+  int word_width = 0;
+  bool have_word = false;
+  bool pending_space = false;
+  size_t i = 0;
+  while (i < text.size()) {
+    unsigned char c = (unsigned char)text[i];
+    if (c == '\r') {
+      i++;
+      continue;
+    }
+    if (c == '\n') {
+      if (have_word) {
+        if (line_width == 0 || !pending_space) {
+          line_width = (line_width == 0) ? word_width : (line_width + word_width);
+        } else if (line_width + space_width + word_width <= width) {
+          line_width += space_width + word_width;
+        } else {
+          lines++;
+          line_width = word_width;
+        }
+        word_width = 0;
+        have_word = false;
+      }
+      lines++;
+      line_width = 0;
+      pending_space = false;
+      i++;
+      continue;
+    }
+    if (isspace(c)) {
+      if (have_word) {
+        if (line_width == 0) {
+          line_width = word_width;
+        } else if (line_width + space_width + word_width <= width) {
+          line_width += space_width + word_width;
+        } else {
+          lines++;
+          line_width = word_width;
+        }
+        word_width = 0;
+        have_word = false;
+      }
+      pending_space = true;
+      i++;
+      continue;
+    }
+
+    u32 cp = 0;
+    size_t step = 1;
+    if (c >= 0x80)
+      step = (size_t)ts->GetCharCode(text.c_str() + i, &cp);
+    else
+      cp = c;
+    if (step == 0 || i + step > text.size()) {
+      step = 1;
+      cp = c;
+    }
+    word_width += std::max(1, (int)ts->GetAdvance(cp));
+    have_word = true;
+    i += step;
+  }
+
+  if (have_word) {
+    if (line_width == 0) {
+      line_width = word_width;
+    } else if (pending_space && line_width + space_width + word_width <= width) {
+      line_width += space_width + word_width;
+    } else if (!pending_space && line_width + word_width <= width) {
+      line_width += word_width;
+    } else {
+      lines++;
+    }
+  }
+
+  return std::max(1, lines);
+}
+
+static bool StartsLikeListOrTitle(const std::string &text) {
+  std::string compact = CollapseAsciiWhitespace(TrimAsciiWhitespace(text));
+  if (compact.empty())
+    return true;
+  unsigned char first = (unsigned char)compact[0];
+  if (first == '-' || first == '*' || first == 0xE2)
+    return true;
+  bool strong_signal = false;
+  return LooksLikePlainChapterHeading(compact, &strong_signal);
+}
+
+static bool IsMobiCaptionLikeBlock(const MobiMarkupBlock &block, Text *ts,
+                                   int text_width, int max_bytes,
+                                   int max_lines) {
+  if (!MobiMarkupBlockHasMeaningfulContent(block))
+    return false;
+  for (size_t i = 0; i < block.items.size(); i++) {
+    if (block.items[i].type == MOBI_MARKUP_BLOCK_IMAGE)
+      return false;
+  }
+  std::string raw = CollectMobiMarkupBlockText(block);
+  std::string collapsed = CollapseAsciiWhitespace(TrimAsciiWhitespace(raw));
+  if (collapsed.empty())
+    return false;
+  if ((int)collapsed.size() > max_bytes)
+    return false;
+  if (StartsLikeListOrTitle(collapsed))
+    return false;
+  return EstimateWrappedLineCount(ts, raw, text_width) <= max_lines;
+}
+
+static bool IsMobiFigureFollowerBlock(const MobiMarkupBlock &block) {
+  if (!MobiMarkupBlockHasMeaningfulContent(block))
+    return false;
+  for (size_t i = 0; i < block.items.size(); i++) {
+    if (block.items[i].type == MOBI_MARKUP_BLOCK_IMAGE)
+      return false;
+  }
+  std::string raw = CollectMobiMarkupBlockText(block);
+  std::string collapsed = CollapseAsciiWhitespace(TrimAsciiWhitespace(raw));
+  if (collapsed.empty())
+    return false;
+  return !StartsLikeListOrTitle(collapsed);
+}
+
+static u8 EstimateMobiImageFollowTextLines(const MobiMarkupBlock &block, Text *ts,
+                                           int text_width, size_t image_index) {
+  std::string follow_text;
+  for (size_t i = image_index + 1; i < block.items.size(); i++) {
+    const MobiMarkupBlockItem &item = block.items[i];
+    if (item.type == MOBI_MARKUP_BLOCK_TEXT) {
+      follow_text += item.text;
+    } else if (item.type == MOBI_MARKUP_BLOCK_HARD_BREAK) {
+      if (!follow_text.empty() && follow_text.back() != '\n')
+        follow_text.push_back('\n');
+    }
+  }
+  std::string collapsed = CollapseAsciiWhitespace(TrimAsciiWhitespace(follow_text));
+  if (collapsed.empty())
+    return 0;
+  int lines = EstimateWrappedLineCount(ts, follow_text, text_width);
+  lines = std::max(1, std::min(lines, 8));
+  return (u8)lines;
+}
+
+static void ApplyMobiImageContexts(Book *book,
+                                   std::vector<MobiMarkupBlock> *blocks,
+                                   std::string *out, Text *ts,
+                                   int text_width) {
+  if (!book || !blocks || !out)
+    return;
+
+  for (size_t bi = 0; bi < blocks->size(); bi++) {
+    MobiMarkupBlock &block = (*blocks)[bi];
+    const int first = FindFirstMeaningfulMobiMarkupBlockItem(block);
+    const int last = FindLastMeaningfulMobiMarkupBlockItem(block);
+    const size_t image_count = CountMobiMarkupBlockImages(block);
+    if (first < 0 || last < 0 || image_count == 0)
+      continue;
+
+    for (size_t ii = 0; ii < block.items.size(); ii++) {
+      MobiMarkupBlockItem &image = block.items[ii];
+      if (image.type != MOBI_MARKUP_BLOCK_IMAGE)
+        continue;
+
+      const bool has_text_before =
+          MobiMarkupBlockHasMeaningfulTextBefore(block, ii);
+      const bool has_text_after =
+          MobiMarkupBlockHasMeaningfulTextAfter(block, ii);
+      const bool boundary_image = ((int)ii == first || (int)ii == last);
+      bool figure_with_caption =
+          image_count == 1 && boundary_image &&
+          (has_text_before || has_text_after);
+      u8 follow_text_lines = 0;
+
+      if (figure_with_caption)
+        follow_text_lines =
+            EstimateMobiImageFollowTextLines(block, ts, text_width, ii);
+
+      if (!figure_with_caption && MobiMarkupBlockHasOnlyImage(block, ii)) {
+        for (size_t next = bi + 1; next < blocks->size(); next++) {
+          if (!MobiMarkupBlockHasMeaningfulContent((*blocks)[next]))
+            continue;
+          const bool caption_like =
+              IsMobiCaptionLikeBlock((*blocks)[next], ts, text_width, 220, 4);
+          const bool figure_follower = IsMobiFigureFollowerBlock((*blocks)[next]);
+          figure_with_caption = caption_like || figure_follower;
+          if (figure_with_caption) {
+            std::string raw = CollectMobiMarkupBlockText((*blocks)[next]);
+            follow_text_lines =
+                (u8)std::max(1, std::min(EstimateWrappedLineCount(ts, raw, text_width), 8));
+          }
+          break;
+        }
+      }
+
+      if (!figure_with_caption)
+        continue;
+      // Rewrite the serialized marker in-place so deferred pagination and
+      // rendering see the richer figure/caption context without changing the
+      // html->text byte mapping used by TOC position interpolation.
+      if (image.marker_offset != SIZE_MAX && image.marker_offset < out->size())
+        (*out)[image.marker_offset] = (char)TEXT_IMAGE_FIGURE_WITH_CAPTION;
+      if (follow_text_lines > 0)
+        book->SetInlineImageFollowTextLines(image.image_id, follow_text_lines);
+    }
+  }
+}
+
 static std::string ExtractMobiMarkupToText(
     Book *book, const std::string &in, std::vector<MobiHeadingHint> *heading_hints,
     std::vector<std::pair<u32, u32>> *html_to_text_map) {
   std::string out;
   out.reserve(in.size());
+  std::vector<MobiMarkupBlock> blocks;
+  MobiMarkupBlock current_block;
+  std::string block_pending_text;
   bool in_script = false;
   bool in_style = false;
   bool pending_space = false;
@@ -3486,6 +3947,18 @@ static std::string ExtractMobiMarkupToText(
     html_to_text_map->reserve(in.size() / kSampleInterval + 2);
     html_to_text_map->push_back({0, 0});
   }
+
+  auto flush_block_text = [&]() {
+    if (block_pending_text.empty())
+      return;
+    AppendTextToMobiMarkupBlock(&current_block, block_pending_text);
+    block_pending_text.clear();
+  };
+
+  auto finalize_block = [&]() {
+    flush_block_text();
+    FinalizeMobiMarkupBlock(&blocks, &current_block);
+  };
 
   for (size_t i = 0; i < in.size();) {
     if (html_to_text_map && i >= next_sample) {
@@ -3559,6 +4032,8 @@ static std::string ExtractMobiMarkupToText(
       }
 
       if (lower == "br") {
+        flush_block_text();
+        AppendHardBreakToMobiMarkupBlock(&current_block);
         out.push_back('\n');
         if (heading_level >= 0 && !heading_text.empty() &&
             heading_text.back() != ' ')
@@ -3571,27 +4046,36 @@ static std::string ExtractMobiMarkupToText(
         if (book && mobi_extract_image_recindex(tag, &recindex)) {
           if (pending_space) {
             AppendSingleSpace(&out);
+            if (!out.empty() && out.back() == ' ')
+              block_pending_text.push_back(' ');
             pending_space = false;
           }
+          flush_block_text();
           u16 image_id =
               book->RegisterInlineImage(mobi_inline_image_path(recindex));
-          if (at_paragraph_start)
-            out.push_back((char)TEXT_IMAGE_LEADING_PARAGRAPH);
+          size_t marker_offset = out.size();
+          out.push_back((char)(at_paragraph_start
+                                   ? TEXT_IMAGE_LEADING_PARAGRAPH
+                                   : TEXT_IMAGE_CONTEXT_DEFAULT));
           out.push_back((char)TEXT_IMAGE);
           out.push_back((char)((image_id >> 8) & 0xFF));
           out.push_back((char)(image_id & 0xFF));
+          AppendImageToMobiMarkupBlock(&current_block, image_id, marker_offset);
           at_paragraph_start = false;
         }
         continue;
       }
       if (lower == "li" && !closing) {
+        finalize_block();
         AppendParagraphBreak(&out);
         out.append("- ");
+        block_pending_text += "- ";
         pending_space = false;
         at_paragraph_start = false;
         continue;
       }
       if (IsMobiBlockTag(lower)) {
+        finalize_block();
         AppendParagraphBreak(&out);
         pending_space = false;
         at_paragraph_start = true;
@@ -3611,6 +4095,7 @@ static std::string ExtractMobiMarkupToText(
         std::string decoded;
         if (DecodeHtmlEntity(entity, &decoded)) {
           out += decoded;
+          block_pending_text += decoded;
           if (heading_level >= 0)
             heading_text += decoded;
           pending_space = false;
@@ -3636,6 +4121,8 @@ static std::string ExtractMobiMarkupToText(
 
     if (pending_space) {
       AppendSingleSpace(&out);
+      if (!out.empty() && out.back() == ' ')
+        block_pending_text.push_back(' ');
       if (heading_level >= 0 && !heading_text.empty() &&
           heading_text.back() != ' ')
         heading_text.push_back(' ');
@@ -3645,6 +4132,7 @@ static std::string ExtractMobiMarkupToText(
 
     if (c < 0x80) {
       out.push_back((char)c);
+      block_pending_text.push_back((char)c);
       if (heading_level >= 0)
         heading_text.push_back((char)c);
       at_paragraph_start = false;
@@ -3662,10 +4150,19 @@ static std::string ExtractMobiMarkupToText(
     if (i + (size_t)step > in.size())
       step = 1;
     out.append(in, i, (size_t)step);
+    block_pending_text.append(in, i, (size_t)step);
     if (heading_level >= 0)
       heading_text.append(in, i, (size_t)step);
     at_paragraph_start = false;
     i += (size_t)step;
+  }
+
+  finalize_block();
+
+  if (book && book->GetApp() && book->GetApp()->ts) {
+    Text *ts = book->GetApp()->ts;
+    const int text_width = 240 - ts->margin.left - ts->margin.right;
+    ApplyMobiImageContexts(book, &blocks, &out, ts, text_width);
   }
 
   if (html_to_text_map)
@@ -3846,17 +4343,26 @@ static u8 ParseMobiFile(Book *book, const char *path) {
     text_before_cleanup = text;
 
   NormalizeNewlines(&text);
-  const size_t text_post_normalize = text.size();
+  const std::string text_before_mobi_cleanup = text;
+  std::vector<u16> image_ids_before_cleanup;
+  CollectMobiInlineImageTokenIds(text, &image_ids_before_cleanup);
   // Mixed-quality MOBIs can contain isolated UTF-8 mojibake fragments even
   // when most of the book decodes correctly; repair those before layout.
-  text = mobi_text_cleanup::RepairCommonMojibake(text);
-  const size_t text_post_mojibake = text.size();
+  text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(text);
   if (book->GetMobiLineWrapFix()) {
     // Some converted MOBIs encode visual line wraps as block breaks; keep this
     // repair opt-in per book so poetry/lists are not rewritten globally.
-    text = mobi_text_cleanup::FixBrokenParagraphWraps(text);
+    text = mobi_text_cleanup::FixBrokenParagraphWrapsPreservingMobiImageTokens(
+        text);
   }
-  const size_t text_post_cleanup = text.size();
+  size_t text_post_cleanup = text.size();
+  std::vector<u16> image_ids_after_cleanup;
+  CollectMobiInlineImageTokenIds(text, &image_ids_after_cleanup);
+  if (image_ids_before_cleanup != image_ids_after_cleanup) {
+    text = text_before_mobi_cleanup;
+    text_post_cleanup = text.size();
+    image_ids_after_cleanup = image_ids_before_cleanup;
+  }
 
   // Remap html_to_text_map offsets from pre-cleanup to post-cleanup
   // coordinates.  Cleanup can shrink the text (\r\n→\n, mojibake repair),
@@ -3894,15 +4400,6 @@ static u8 ParseMobiFile(Book *book, const char *path) {
     text_before_cleanup.shrink_to_fit();
   }
 
-  if (app) {
-    char dbg[256];
-    snprintf(dbg, sizeof(dbg),
-             "MOBI: text_cleanup pre=%u norm=%u moji=%u post=%u delta=%d",
-             (unsigned)text_pre_cleanup, (unsigned)text_post_normalize,
-             (unsigned)text_post_mojibake, (unsigned)text_post_cleanup,
-             (int)((long long)text_post_cleanup - (long long)text_pre_cleanup));
-    DBG_LOG(app, dbg);
-  }
   const u64 t_after_markup = osGetTime();
 
   MobiDeferredState deferred;
@@ -3944,13 +4441,6 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   if (!pages_done_initial) {
     g_mobi_deferred_states[book] = std::move(deferred);
     if (app) {
-      char msg[224];
-      snprintf(msg, sizeof(msg),
-               "MOBI: deferred pagination pending pages=%u text_bytes=%u",
-               (unsigned)book->GetPageCount(),
-               (unsigned)g_mobi_deferred_states[book].text_utf8.size());
-      DBG_LOG(app, msg);
-
       char tmsg[320];
       snprintf(tmsg, sizeof(tmsg),
                "MOBI: timing read=%llums decomp=%llums decode=%llums "
@@ -4334,12 +4824,6 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
         (unsigned long long)(state->t_after_toc - state->t_parse_begin));
     DBG_LOG(app, tmsg);
 
-    char dmsg[160];
-    snprintf(dmsg, sizeof(dmsg),
-             "MOBI: deferred pagination complete pages=%u chapters=%u",
-             (unsigned)book->GetPageCount(),
-             (unsigned)book->GetChapters().size());
-    DBG_LOG(app, dmsg);
   }
 
   SaveMobiPageCache(book, state->source_path.c_str(), app,

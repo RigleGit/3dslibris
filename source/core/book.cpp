@@ -527,9 +527,12 @@ void start(void *data, const char *el, const char **attr) {
       InlineImageLayoutPlan image_plan{};
       const bool leading_paragraph_image =
           p->in_paragraph && !p->paragraph_has_content;
+      const InlineImageContext image_context =
+          leading_paragraph_image ? INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH
+                                  : INLINE_IMAGE_CONTEXT_DEFAULT;
       p->book->PlanInlineImageLayout(app->ts, image_id, p->screen, p->pen.x,
                                      p->pen.y, p->linebegan,
-                                     leading_paragraph_image, &image_plan);
+                                     image_context, &image_plan);
 
       // Mirror the renderer so pagination and draw agree on where the image
       // starts and how much space it consumes.

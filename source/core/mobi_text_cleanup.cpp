@@ -8,6 +8,107 @@ namespace mobi_text_cleanup {
 
 namespace {
 
+// Keep these values in sync with include/text.h without pulling 3DS-specific
+// headers into the host-side unit tests for this module.
+static const unsigned char kTextImage = 6;
+static const unsigned char kTextImageLeadingParagraph = 7;
+static const unsigned char kTextImageFigureWithCaption = 8;
+static const unsigned char kTextImageContextDefault = 14;
+
+struct MobiTokenizedPiece {
+  bool is_image_token;
+  std::string bytes;
+};
+
+static bool IsMobiImageContextByte(unsigned char c) {
+  return c == kTextImageLeadingParagraph ||
+         c == kTextImageFigureWithCaption ||
+         c == kTextImageContextDefault;
+}
+
+static size_t MobiImageTokenLengthAt(const std::string &text, size_t pos) {
+  if (pos >= text.size())
+    return 0;
+
+  const unsigned char c0 = (unsigned char)text[pos];
+  if (c0 == kTextImage) {
+    return (pos + 2 < text.size()) ? 3u : 0u;
+  }
+  if (IsMobiImageContextByte(c0) && pos + 3 < text.size() &&
+      (unsigned char)text[pos + 1] == kTextImage) {
+    return 4u;
+  }
+  return 0;
+}
+
+static std::vector<MobiTokenizedPiece>
+TokenizePreservingMobiImageTokens(const std::string &text) {
+  std::vector<MobiTokenizedPiece> pieces;
+  std::string current_text;
+  current_text.reserve(text.size());
+
+  for (size_t i = 0; i < text.size();) {
+    const size_t token_len = MobiImageTokenLengthAt(text, i);
+    if (token_len == 0) {
+      current_text.push_back(text[i]);
+      i++;
+      continue;
+    }
+
+    if (!current_text.empty()) {
+      MobiTokenizedPiece text_piece;
+      text_piece.is_image_token = false;
+      text_piece.bytes.swap(current_text);
+      pieces.push_back(text_piece);
+    }
+
+    MobiTokenizedPiece token_piece;
+    token_piece.is_image_token = true;
+    token_piece.bytes = text.substr(i, token_len);
+    pieces.push_back(token_piece);
+    i += token_len;
+  }
+
+  if (!current_text.empty()) {
+    MobiTokenizedPiece text_piece;
+    text_piece.is_image_token = false;
+    text_piece.bytes.swap(current_text);
+    pieces.push_back(text_piece);
+  }
+
+  return pieces;
+}
+
+template <typename CleanupFn>
+static std::string ApplyCleanupPreservingMobiImageTokens(
+    const std::string &text, CleanupFn cleanup) {
+  const std::vector<MobiTokenizedPiece> pieces =
+      TokenizePreservingMobiImageTokens(text);
+  std::string out;
+  out.reserve(text.size());
+  for (size_t i = 0; i < pieces.size(); i++) {
+    if (pieces[i].is_image_token) {
+      out += pieces[i].bytes;
+    } else {
+      const std::string &piece = pieces[i].bytes;
+      size_t lead = 0;
+      while (lead < piece.size() &&
+             std::isspace((unsigned char)piece[lead]) != 0) {
+        lead++;
+      }
+      size_t tail = piece.size();
+      while (tail > lead &&
+             std::isspace((unsigned char)piece[tail - 1]) != 0) {
+        tail--;
+      }
+      out.append(piece, 0, lead);
+      out += cleanup(piece.substr(lead, tail - lead));
+      out.append(piece, tail, piece.size() - tail);
+    }
+  }
+  return out;
+}
+
 static void AppendUtf8Codepoint(std::string *out, unsigned int cp) {
   if (!out)
     return;
@@ -218,6 +319,14 @@ std::string RepairCommonMojibake(const std::string &text) {
   return out;
 }
 
+std::string RepairCommonMojibakePreservingMobiImageTokens(
+    const std::string &text) {
+  return ApplyCleanupPreservingMobiImageTokens(
+      text, [](const std::string &piece) {
+        return RepairCommonMojibake(piece);
+      });
+}
+
 std::string FixBrokenParagraphWraps(const std::string &text) {
   // Work on already-decoded plain text so the repair can clean either <br>
   // wraps or block-tag-per-line conversions with the same heuristic.
@@ -271,6 +380,14 @@ std::string FixBrokenParagraphWraps(const std::string &text) {
   }
 
   return out;
+}
+
+std::string FixBrokenParagraphWrapsPreservingMobiImageTokens(
+    const std::string &text) {
+  return ApplyCleanupPreservingMobiImageTokens(
+      text, [](const std::string &piece) {
+        return FixBrokenParagraphWraps(piece);
+      });
 }
 
 } // namespace mobi_text_cleanup

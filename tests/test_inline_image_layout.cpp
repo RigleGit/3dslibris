@@ -40,7 +40,7 @@ InlineImageLayoutRequest BaseRequest() {
   req.pen_x = 12;
   req.pen_y = 26;
   req.line_began = true;
-  req.leading_paragraph_image = false;
+  req.image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
   req.current_screen = 0;
   return req;
 }
@@ -93,7 +93,7 @@ int main() {
 
   {
     InlineImageLayoutRequest req = BaseRequest();
-    req.leading_paragraph_image = true;
+    req.image_context = INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH;
     req.line_began = false;
     InlineImageLayoutPlan plan =
         PlanInlineImageLayout(req, Metadata(90, 78));
@@ -193,7 +193,7 @@ int main() {
   {
     InlineImageLayoutRequest req = BaseRequest();
     req.line_began = false;
-    req.leading_paragraph_image = true;
+    req.image_context = INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH;
     req.pen_x = req.margin_left;
     req.pen_y = 270;
     InlineImageLayoutPlan plan =
@@ -207,7 +207,7 @@ int main() {
   {
     InlineImageLayoutRequest req = BaseRequest();
     req.line_began = false;
-    req.leading_paragraph_image = false;
+    req.image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
     req.pen_x = req.margin_left;
     req.pen_y = req.margin_top + req.line_height;
     InlineImageLayoutPlan plan =

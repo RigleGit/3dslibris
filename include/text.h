@@ -35,6 +35,8 @@
 #define TEXT_ITALIC_OFF 5
 #define TEXT_IMAGE 6
 #define TEXT_IMAGE_LEADING_PARAGRAPH 7
+#define TEXT_IMAGE_FIGURE_WITH_CAPTION 8
+#define TEXT_IMAGE_CONTEXT_DEFAULT 14
 
 // Indices for filename and face vectors
 #define TEXT_STYLE_REGULAR (u8)0

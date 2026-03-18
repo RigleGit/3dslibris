@@ -17,7 +17,7 @@
 #include <string>
 #include "text.h"
 
-#define PAGEBUFSIZE 2048
+#define PAGEBUFSIZE 4096
 
 //! Symbols for known XHTML tags.
 

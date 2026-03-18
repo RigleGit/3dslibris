@@ -43,8 +43,8 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
   - First open can be slow on large books (decompress + parse + pagination)
   - Subsequent opens are accelerated by persistent page cache
   - TOC quality is heuristic for many files (can be approximate)
-  - Inline MOBI images now reuse the same smart `inline / band / page` layout pipeline used by EPUB/FB2
-  - Includes an optional per-book `line wrap fix` for badly converted files that hard-wrap prose line by line
+  - Inline MOBI images now reuse the same smart `inline / band / page` layout pipeline used by EPUB/FB2, with better caption flow on mixed photo spreads
+  - Includes an optional per-book `line wrap fix` for badly converted files that hard-wrap prose line by line, while preserving embedded image markers during cleanup
   - Empty or corrupt books are reported with a readable error instead of a raw numeric code
 
 ## Known limitations
@@ -59,13 +59,18 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 ## Build (Docker, recommended)
 
 ```bash
+docker build -f docker/Dockerfile.cia -t 3dslibris-build .
+
 docker run --rm \
   -v "$(pwd):/project" -w /project \
   -e DEVKITPRO=/opt/devkitpro \
   -e DEVKITARM=/opt/devkitpro/devkitARM \
-  devkitpro/devkitarm \
+  3dslibris-build \
   sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx && make cia'
 ```
+
+The Dockerfile in [`docker/Dockerfile.cia`](docker/Dockerfile.cia) matches the
+release packaging flow used by the project, including the `.cia` toolchain.
 
 Expected outputs:
 - `3dslibris.cia`

@@ -367,6 +367,18 @@ u32 Book::GetInlineImageCount() const {
   return (u32)inline_images.size();
 }
 
+void Book::SetInlineImageFollowTextLines(u16 id, u8 lines) {
+  if (id >= inline_images.size())
+    return;
+  inline_images[id].follow_text_lines = lines;
+}
+
+u8 Book::GetInlineImageFollowTextLines(u16 id) const {
+  if (id >= inline_images.size())
+    return 0;
+  return inline_images[id].follow_text_lines;
+}
+
 void Book::ClearInlineImageCache() {
   inline_image_cache.clear();
   inline_image_cache_bytes = 0;
@@ -670,7 +682,7 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
     bool already_loaded_full = false;
 
     if (image_path.compare(0, 4, "fb2:") == 0 ||
-        image_path.compare(0, 13, "mobi:recindex:") == 0) {
+        image_path.compare(0, 14, "mobi:recindex:") == 0) {
       if (LoadInlineImageSource(image_id, &compressed, &resolved_path) &&
           !compressed.empty()) {
         already_loaded_full = true;
@@ -705,9 +717,25 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
 
     if (!compressed.empty()) {
       int info_w = 0, info_h = 0, info_c = 0;
-      if (stbi_info_from_memory(compressed.data(), (int)compressed.size(),
-                                &info_w, &info_h, &info_c) != 0 &&
-          info_w > 0 && info_h > 0 &&
+      bool have_info =
+          stbi_info_from_memory(compressed.data(), (int)compressed.size(),
+                                &info_w, &info_h, &info_c) != 0;
+      if ((!have_info || info_w <= 0 || info_h <= 0) &&
+          image_path.compare(0, 14, "mobi:recindex:") == 0) {
+        // Some MOBI photo records decode fine but fail the lightweight probe.
+        // Fall back to a full decode once so pagination still gets dimensions.
+        int load_w = 0, load_h = 0, load_c = 0;
+        unsigned char *pixels = stbi_load_from_memory(
+            compressed.data(), (int)compressed.size(), &load_w, &load_h, &load_c,
+            0);
+        if (pixels) {
+          stbi_image_free(pixels);
+          info_w = load_w;
+          info_h = load_h;
+          have_info = true;
+        }
+      }
+      if (have_info && info_w > 0 && info_h > 0 &&
           ((long long)info_w * (long long)info_h <= 1500000LL)) {
         entry.metadata_ok = true;
         entry.source_width = info_w;
@@ -734,7 +762,7 @@ bool Book::GetInlineImageMetadata(u16 id, InlineImageMetadata *out) {
 
 bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
                                  int pen_x, int pen_y, bool line_began,
-                                 bool leading_paragraph_image,
+                                 InlineImageContext image_context,
                                  InlineImageLayoutPlan *out) {
   if (!ts || !out)
     return false;
@@ -755,8 +783,9 @@ bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
   req.pen_x = pen_x;
   req.pen_y = pen_y;
   req.line_began = line_began;
-  req.leading_paragraph_image = leading_paragraph_image;
+  req.image_context = image_context;
   req.current_screen = current_screen;
+  req.follow_text_lines = GetInlineImageFollowTextLines(image_id);
 
   *out = ::PlanInlineImageLayout(req, meta);
   return true;
@@ -772,7 +801,8 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   const int current_screen = left_screen ? 0 : 1;
   if (!plan_ptr) {
     if (!PlanInlineImageLayout(ts, image_id, current_screen, ts->GetPenX(),
-                               ts->GetPenY(), ts->linebegan, false,
+                               ts->GetPenY(), ts->linebegan,
+                               INLINE_IMAGE_CONTEXT_DEFAULT,
                                &local_plan))
       return false;
     plan_ptr = &local_plan;

@@ -56,6 +56,5 @@ int main() {
               FixBrokenParagraphWraps("Primera idea completa.\n\n"
                                       "Segunda idea independiente."),
               "Primera idea completa.\n\nSegunda idea independiente.");
-
   return 0;
 }
