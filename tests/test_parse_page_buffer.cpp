@@ -16,6 +16,13 @@ const XML_LChar *XMLCALL XML_ErrorString(enum XML_Error) { return ""; }
 
 namespace {
 
+bool MockFlushPage(parsedata_t *p, void *ctx) {
+  if (ctx)
+    (*(int *)ctx)++;
+  parse_reset_page_buffer(p);
+  return true;
+}
+
 [[noreturn]] void Fail(const std::string &message) {
   fprintf(stderr, "%s\n", message.c_str());
   std::exit(1);
@@ -91,11 +98,49 @@ void TestResetClearsOverflow() {
   ExpectFalse("overflow flag reset", parse_page_buffer_overflowed(&p));
 }
 
+void TestSoftBreakForSmallPendingWrite() {
+  parsedata_t p{};
+  parse_init(&p);
+
+  for (int i = 0; i < PAGEBUFSIZE; i++)
+    ExpectTrue("fill full page", parse_append_page_byte(&p, 'x'));
+
+  int flush_count = 0;
+  const char *tail = "YZ";
+  ExpectEq("soft append writes full tail",
+           parse_append_page_bytes_soft(&p, tail, 2, MockFlushPage,
+                                        &flush_count),
+           (size_t)2);
+  ExpectEq("flush called once", flush_count, 1);
+  ExpectEq("buflen after soft break", p.buflen, 2);
+  ExpectTrue("tail copied after flush", std::memcmp(p.buf, "YZ", 2) == 0);
+  ExpectFalse("overflow cleared on soft break", parse_page_buffer_overflowed(&p));
+}
+
+void TestSoftBreakDoesNotSplitOversizedWrite() {
+  parsedata_t p{};
+  parse_init(&p);
+
+  for (int i = 0; i < PAGEBUFSIZE; i++)
+    ExpectTrue("fill full page oversized", parse_append_page_byte(&p, 'x'));
+
+  int flush_count = 0;
+  std::string huge(PAGEBUFSIZE + 1, 'z');
+  ExpectEq("oversized write remains capped",
+           parse_append_page_bytes_soft(&p, huge.data(), huge.size(),
+                                        MockFlushPage, &flush_count),
+           (size_t)0);
+  ExpectEq("no flush for oversized write", flush_count, 0);
+  ExpectTrue("overflow set for oversized write", parse_page_buffer_overflowed(&p));
+}
+
 } // namespace
 
 int main() {
   TestAppendByteAndBytes();
   TestOverflowTracking();
   TestResetClearsOverflow();
+  TestSoftBreakForSmallPendingWrite();
+  TestSoftBreakDoesNotSplitOversizedWrite();
   return 0;
 }

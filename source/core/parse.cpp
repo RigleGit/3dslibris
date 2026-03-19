@@ -70,6 +70,19 @@ bool parse_append_page_byte(parsedata_t *data, u8 c) {
   return true;
 }
 
+bool parse_append_page_byte_soft(parsedata_t *data, u8 c,
+                                 parse_page_flush_fn flush_page, void *ctx) {
+  if (!data)
+    return false;
+  if (parse_append_page_byte(data, c))
+    return true;
+  if (!flush_page || data->buflen <= 0)
+    return false;
+  if (!flush_page(data, ctx))
+    return false;
+  return parse_append_page_byte(data, c);
+}
+
 size_t parse_append_page_bytes(parsedata_t *data, const void *src, size_t len) {
   if (!data || !src || len == 0)
     return 0;
@@ -85,6 +98,27 @@ size_t parse_append_page_bytes(parsedata_t *data, const void *src, size_t len) {
   if (written < len)
     parse_note_page_buffer_overflow(data, len - written);
   return written;
+}
+
+size_t parse_append_page_bytes_soft(parsedata_t *data, const void *src,
+                                    size_t len,
+                                    parse_page_flush_fn flush_page, void *ctx) {
+  if (!data || !src || len == 0)
+    return 0;
+
+  const size_t available = (data->buflen >= PAGEBUFSIZE)
+                               ? 0
+                               : (size_t)PAGEBUFSIZE - (size_t)data->buflen;
+  if (len <= available)
+    return parse_append_page_bytes(data, src, len);
+
+  if (!flush_page || data->buflen <= 0 || len > PAGEBUFSIZE)
+    return parse_append_page_bytes(data, src, len);
+
+  if (!flush_page(data, ctx))
+    return parse_append_page_bytes(data, src, len);
+
+  return parse_append_page_bytes(data, src, len);
 }
 
 bool parse_page_buffer_overflowed(const parsedata_t *data) {

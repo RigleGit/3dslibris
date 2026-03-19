@@ -44,7 +44,10 @@ typedef struct {
 	int y;
 } parse_pen_t;
 
-typedef struct {
+typedef struct parsedata_t parsedata_t;
+typedef bool (*parse_page_flush_fn)(parsedata_t *data, void *ctx);
+
+struct parsedata_t {
 	context_t stack[32];
 	u8 stacksize;
 	class App *app;
@@ -81,14 +84,19 @@ typedef struct {
 	int status;
 	int totalbytes;
 	int pagecount;
-} parsedata_t;
+};
 
 bool iswhitespace(u8 c);
 
 void parse_error(XML_ParserStruct *ps);
 void parse_init(parsedata_t *data);
 bool parse_append_page_byte(parsedata_t *data, u8 c);
+bool parse_append_page_byte_soft(parsedata_t *data, u8 c,
+                                 parse_page_flush_fn flush_page, void *ctx);
 size_t parse_append_page_bytes(parsedata_t *data, const void *src, size_t len);
+size_t parse_append_page_bytes_soft(parsedata_t *data, const void *src,
+                                    size_t len,
+                                    parse_page_flush_fn flush_page, void *ctx);
 bool parse_in(parsedata_t *data, context_t context);
 context_t parse_pop(parsedata_t *data);
 bool parse_page_buffer_overflowed(const parsedata_t *data);

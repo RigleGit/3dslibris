@@ -1313,6 +1313,26 @@ static void PlainAdvanceScreen(parsedata_t *p) {
   p->linebegan = false;
 }
 
+static bool PlainForceAdvancePageForBufferLimit(parsedata_t *p, void *ctx) {
+  (void)ctx;
+  if (!p || !p->ts || !p->book)
+    return false;
+
+  Text *ts = p->ts;
+  Page *page = p->book->AppendPage();
+  page->SetBuffer(p->buf, p->buflen);
+  parse_reset_page_buffer(p);
+  if (p->italic)
+    parse_append_page_byte(p, TEXT_ITALIC_ON);
+  if (p->bold)
+    parse_append_page_byte(p, TEXT_BOLD_ON);
+  p->screen = 0;
+  p->pen.x = ts->margin.left;
+  p->pen.y = ts->margin.top + ts->GetHeight();
+  p->linebegan = false;
+  return true;
+}
+
 static void PlainLinefeed(parsedata_t *p) {
   if (!p || !p->ts)
     return;
@@ -1360,14 +1380,20 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
     PlainLinefeed(p);
 
   if (image_context == INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH)
-    parse_append_page_byte(p, TEXT_IMAGE_LEADING_PARAGRAPH);
+    parse_append_page_byte_soft(p, TEXT_IMAGE_LEADING_PARAGRAPH,
+                                PlainForceAdvancePageForBufferLimit, NULL);
   else if (image_context == INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION)
-    parse_append_page_byte(p, TEXT_IMAGE_FIGURE_WITH_CAPTION);
+    parse_append_page_byte_soft(p, TEXT_IMAGE_FIGURE_WITH_CAPTION,
+                                PlainForceAdvancePageForBufferLimit, NULL);
   else
-    parse_append_page_byte(p, TEXT_IMAGE_CONTEXT_DEFAULT);
-  parse_append_page_byte(p, TEXT_IMAGE);
-  parse_append_page_byte(p, (u8)((image_id >> 8) & 0xFF));
-  parse_append_page_byte(p, (u8)(image_id & 0xFF));
+    parse_append_page_byte_soft(p, TEXT_IMAGE_CONTEXT_DEFAULT,
+                                PlainForceAdvancePageForBufferLimit, NULL);
+  parse_append_page_byte_soft(p, TEXT_IMAGE, PlainForceAdvancePageForBufferLimit,
+                              NULL);
+  parse_append_page_byte_soft(p, (u8)((image_id >> 8) & 0xFF),
+                              PlainForceAdvancePageForBufferLimit, NULL);
+  parse_append_page_byte_soft(p, (u8)(image_id & 0xFF),
+                              PlainForceAdvancePageForBufferLimit, NULL);
 
   switch (image_plan.mode) {
   case INLINE_IMAGE_LAYOUT_INLINE:
