@@ -7,7 +7,7 @@ mkdir -p "$OUTDIR"
 
 c++ -std=c++11 \
   "$ROOT/tests/test_mobi_cover_meta_cache.cpp" \
-  "$ROOT/source/core/mobi_cover_meta_cache.cpp" \
+  "$ROOT/source/formats/mobi/mobi_cover_meta_cache.cpp" \
   -I"$ROOT/include" \
   -o "$OUTDIR/test_mobi_cover_meta_cache"
 

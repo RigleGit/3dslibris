@@ -1,4 +1,4 @@
-#include "mobi_text_cleanup.h"
+#include "formats/mobi/mobi_text_cleanup.h"
 
 #include <cstdlib>
 #include <string>

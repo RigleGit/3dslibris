@@ -15,7 +15,7 @@
 #include <expat.h>
 #include <3ds.h>
 #include <string>
-#include "text.h"
+#include "ui/text.h"
 
 #define PAGEBUFSIZE 4096
 

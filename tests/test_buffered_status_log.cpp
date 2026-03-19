@@ -1,4 +1,4 @@
-#include "buffered_status_log.h"
+#include "formats/common/buffered_status_log.h"
 
 #include <cstdlib>
 #include <string>

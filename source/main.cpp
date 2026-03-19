@@ -26,7 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "app.h"
+#include "app/app.h"
 #include "version.h"
 
 App *app;

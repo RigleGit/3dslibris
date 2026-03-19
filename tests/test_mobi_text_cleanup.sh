@@ -7,9 +7,9 @@ mkdir -p "$OUTDIR"
 
 c++ -std=c++11 \
   "$ROOT/tests/test_mobi_text_cleanup.cpp" \
-  "$ROOT/source/core/mobi_text_cleanup.cpp" \
+  "$ROOT/source/formats/mobi/mobi_text_cleanup.cpp" \
   -I"$ROOT/include" \
-  -I"$ROOT/source/core" \
+  -I"$ROOT/source/formats/mobi" \
   -o "$OUTDIR/test_mobi_text_cleanup"
 
 "$OUTDIR/test_mobi_text_cleanup"

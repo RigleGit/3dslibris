@@ -36,7 +36,10 @@ DEBUG_TARGET	:=	$(BASE_TARGET)-debug
 DEBUG_BUILD	:=	build-debug
 TARGET		?=	$(BASE_TARGET)
 BUILD		?=	build
-SOURCES		:=	source source/core source/expat
+SOURCES		:=	source source/core source/app source/shared source/ui source/menus \
+			source/library source/reader source/settings source/book \
+			source/formats/common source/formats/epub source/formats/fb2 \
+			source/formats/mobi source/expat
 DATA		:=	data
 INCLUDES	:=	include
 GRAPHICS	:=

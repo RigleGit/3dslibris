@@ -1,4 +1,4 @@
-#include "inline_image_layout.h"
+#include "book/inline_image_layout.h"
 
 #include <cstdlib>
 #include <string>

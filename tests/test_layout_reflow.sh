@@ -7,9 +7,9 @@ mkdir -p "$OUTDIR"
 
 c++ -std=c++11 \
   "$ROOT/tests/test_layout_reflow.cpp" \
-  "$ROOT/source/core/layout_reflow.cpp" \
+  "$ROOT/source/book/layout_reflow.cpp" \
   -I"$ROOT/include" \
-  -I"$ROOT/source/core" \
+  -I"$ROOT/source/book" \
   -o "$OUTDIR/test_layout_reflow"
 
 "$OUTDIR/test_layout_reflow"

@@ -1,4 +1,4 @@
-#include "epub_image_utils.h"
+#include "formats/common/epub_image_utils.h"
 
 #include <cstdlib>
 #include <string>

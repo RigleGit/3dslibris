@@ -1,4 +1,4 @@
-#include "mobi_cover_meta_cache.h"
+#include "formats/mobi/mobi_cover_meta_cache.h"
 
 #include <cstdio>
 #include <cstdlib>

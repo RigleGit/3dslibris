@@ -7,7 +7,7 @@ mkdir -p "$OUTDIR"
 
 c++ -std=c++11 \
   "$ROOT/tests/test_epub_image_utils.cpp" \
-  "$ROOT/source/core/epub_image_utils.cpp" \
+  "$ROOT/source/formats/common/epub_image_utils.cpp" \
   "$ROOT/source/core/ioapi.c" \
   "$ROOT/source/core/unzip.c" \
   -I"$ROOT/include" \

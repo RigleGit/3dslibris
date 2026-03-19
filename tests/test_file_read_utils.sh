@@ -7,7 +7,7 @@ mkdir -p "$OUTDIR"
 
 c++ -std=c++11 \
   "$ROOT/tests/test_file_read_utils.cpp" \
-  "$ROOT/source/core/file_read_utils.cpp" \
+  "$ROOT/source/formats/common/file_read_utils.cpp" \
   -I"$ROOT/include" \
   -o "$OUTDIR/test_file_read_utils"
 

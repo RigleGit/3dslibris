@@ -7,7 +7,7 @@ mkdir -p "$OUTDIR"
 
 c++ -std=c++11 \
   "$ROOT/tests/test_buffered_status_log.cpp" \
-  "$ROOT/source/core/buffered_status_log.cpp" \
+  "$ROOT/source/formats/common/buffered_status_log.cpp" \
   -I"$ROOT/include" \
   -o "$OUTDIR/test_buffered_status_log"
 

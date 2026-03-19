@@ -29,7 +29,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "parse.h"
 
-#include "app.h"
+#include "app/app.h"
 #include <stdio.h>
 
 bool iswhitespace(u8 c) {
@@ -77,9 +77,9 @@ void parse_init(parsedata_t *data) {
 }
 
 void parse_error(XML_Parser p, char *msg) {
-  sprintf(msg, "%d:%d: %s\n", (int)XML_GetCurrentLineNumber(p),
-          (int)XML_GetCurrentColumnNumber(p),
-          XML_ErrorString(XML_GetErrorCode(p)));
+  snprintf(msg, 128, "%d:%d: %s\n", (int)XML_GetCurrentLineNumber(p),
+           (int)XML_GetCurrentColumnNumber(p),
+           XML_ErrorString(XML_GetErrorCode(p)));
 }
 
 void parse_push(parsedata_t *data, context_t context) {

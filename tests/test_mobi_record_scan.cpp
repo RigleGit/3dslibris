@@ -1,4 +1,4 @@
-#include "mobi_record_scan.h"
+#include "formats/mobi/mobi_record_scan.h"
 
 #include <cstdlib>
 #include <string>
