@@ -58,7 +58,7 @@ static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // v12→v13: MOBI keep-with-next now follows only heading markers emitted during
 //          markup extraction; old caches may still contain broader heuristic
 //          pagination decisions.
-static const u16 kMobiPageCacheVersion = 13;
+static const u16 kMobiPageCacheVersion = 14;
 static const u16 kPageCacheTitleMaxBytes = 1000;
 static const u16 kPageCachePageMaxBytes = 4096;
 static const u16 kPageCacheChapterTitleMaxBytes = 2048;
