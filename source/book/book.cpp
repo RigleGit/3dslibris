@@ -798,17 +798,64 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
 
   if (parse_in(p, TAG_PRE)) {
     if (!p->preformatted_wrap_enabled) {
-      for (int i = 0; i < txtlen; i++) {
-        if (txt[i] == '\r')
+      int i = 0;
+      while (i < txtlen) {
+        if (txt[i] == '\r') {
+          i++;
           continue;
-        AppendParsedByte(p, txt[i]);
-        if (txt[i] == '\n') {
+        }
+
+        if (iswhitespace((u8)txt[i])) {
+          if (txt[i] == '\n') {
+            AppendParsedByte(p, '\n');
+            p->pen.x = ts->margin.left;
+            p->pen.y += (lineheight + linespacing);
+            p->linebegan = false;
+            AdvanceParsedPageOnOverflow(p, lineheight);
+          } else if (p->linebegan && p->buflen &&
+                     !iswhitespace((u8)p->buf[p->buflen - 1])) {
+            AppendParsedByte(p, ' ');
+            p->pen.x += spaceadvance;
+          }
+          i++;
+          continue;
+        }
+
+        int j = i;
+        int advance = 0;
+        u8 bytes = 1;
+        for (j = i; (j < txtlen) && (!iswhitespace((u8)txt[j])); j += bytes) {
+          u32 code = (u8)txt[j];
+          bytes = 1;
+          if (code >> 7)
+            bytes = ts->GetCharCode((char *)&(txt[j]), &code);
+
+          advance += ts->GetAdvance(code);
+          if (advance >
+              ts->display.width - ts->margin.right - ts->margin.left) {
+            break;
+          }
+        }
+
+        if ((p->pen.x + advance) > (ts->display.width - ts->margin.right)) {
+          AppendParsedByte(p, '\n');
           p->pen.x = ts->margin.left;
           p->pen.y += (lineheight + linespacing);
-        } else {
-          p->pen.x += spaceadvance;
+          p->linebegan = false;
         }
+
         AdvanceParsedPageOnOverflow(p, lineheight);
+
+        for (; i < j; i++) {
+          if (iswhitespace((u8)txt[i])) {
+            if (p->linebegan)
+              AppendParsedByte(p, ' ');
+          } else {
+            p->linebegan = true;
+            AppendParsedByte(p, txt[i]);
+          }
+        }
+        p->pen.x += advance;
       }
       return;
     }
