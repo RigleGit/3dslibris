@@ -10,6 +10,7 @@
 
 #include "book.h"
 
+#include "buffered_status_log.h"
 #include "book_error.h"
 #include "debug_log.h"
 #include "epub.h"
@@ -47,6 +48,15 @@ static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 //         old cached page streams must be invalidated to repaginate with the
 //         recovered TEXT_IMAGE markers.
 static const u16 kMobiPageCacheVersion = 12;
+
+#ifdef DSLIBRIS_DEBUG
+static void FlushBufferedStatusLog(
+    App *app, buffered_status_log::BufferedStatusLog *log) {
+  if (!app || !log)
+    return;
+  log->Flush([&](const std::string &chunk) { app->PrintStatus(chunk.c_str()); });
+}
+#endif
 
 struct MobiPageCacheHeader {
   u32 magic;
@@ -4176,8 +4186,22 @@ static u8 ParseMobiFile(Book *book, const char *path) {
     return 251;
   App *app = book->GetApp();
   const u64 t_parse_begin = osGetTime();
+#ifdef DSLIBRIS_DEBUG
+  buffered_status_log::BufferedStatusLog debug_log(768);
+  struct DebugLogGuard {
+    App *app;
+    buffered_status_log::BufferedStatusLog *log;
+    ~DebugLogGuard() { FlushBufferedStatusLog(app, log); }
+  } debug_log_guard = {app, &debug_log};
+  auto append_debug_log = [&](const std::string &line) {
+    if (app)
+      debug_log.Append(line);
+  };
+#else
+  auto append_debug_log = [&](const std::string &) {};
+#endif
   if (app)
-    DBG_LOG(app, "MOBI: parse begin");
+    append_debug_log("MOBI: parse begin");
 
   g_mobi_deferred_states.erase(book);
 
@@ -4187,13 +4211,13 @@ static u8 ParseMobiFile(Book *book, const char *path) {
       snprintf(msg, sizeof(msg), "MOBI: page cache hit pages=%u chapters=%u",
                (unsigned)book->GetPageCount(),
                (unsigned)book->GetChapters().size());
-      DBG_LOG(app, msg);
+      append_debug_log(msg);
 
       char tmsg[160];
       snprintf(tmsg, sizeof(tmsg), "MOBI: timing cache_total=%llums",
                (unsigned long long)(osGetTime() - t_parse_begin));
-      DBG_LOG(app, tmsg);
-      DBG_LOG(app, "MOBI: parse end");
+      append_debug_log(tmsg);
+      append_debug_log("MOBI: parse end");
     }
     book->MarkMobiRenderSettingsApplied(book->GetMobiLineWrapFix());
     return 0;
@@ -4254,7 +4278,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
              (unsigned)compression, (unsigned)encoding, (unsigned)text_len,
              (unsigned)text_rec_count, (unsigned)first_non_book_index,
              (unsigned)ncx_index);
-    DBG_LOG(app, msg);
+    append_debug_log(msg);
   }
 
   if (compression != 1 && compression != 2) {
@@ -4451,8 +4475,8 @@ static u8 ParseMobiFile(Book *book, const char *path) {
                (unsigned long long)(t_after_markup - t_after_decode),
                (unsigned long long)(deferred.t_after_pages - t_after_markup),
                (unsigned long long)(deferred.t_after_pages - t_parse_begin));
-      DBG_LOG(app, tmsg);
-      DBG_LOG(app, "MOBI: parse end");
+      append_debug_log(tmsg);
+      append_debug_log("MOBI: parse end");
     }
     return 0;
   }
@@ -4483,7 +4507,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
         deferred.used_utf8_guess ? 1u : 0u,
         deferred.used_legacy_guess ? 1u : 0u,
         toc_result.structured_from_filepos ? 1u : 0u);
-    DBG_LOG(app, msg);
+    append_debug_log(msg);
 
     char tmsg[320];
     snprintf(
@@ -4499,13 +4523,13 @@ static u8 ParseMobiFile(Book *book, const char *path) {
         (unsigned long long)(deferred.t_after_pages - deferred.t_after_markup),
         (unsigned long long)(deferred.t_after_toc - deferred.t_after_pages),
         (unsigned long long)(deferred.t_after_toc - deferred.t_parse_begin));
-    DBG_LOG(app, tmsg);
+    append_debug_log(tmsg);
   }
 
   SaveMobiPageCache(book, path, app, deferred.line_wrap_fix_applied);
   book->MarkMobiRenderSettingsApplied(deferred.line_wrap_fix_applied);
   if (app)
-    DBG_LOG(app, "MOBI: parse end");
+    append_debug_log("MOBI: parse end");
   return 0;
 }
 

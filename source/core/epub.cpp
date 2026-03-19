@@ -30,8 +30,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "epub.h"
 
 #include "base64_utils.h"
-#include "debug_log.h"
 #include "book.h"
+#include "debug_log.h"
+#include "epub_image_utils.h"
 #include "expat.h"
 #include "main.h"
 #include "parse.h"
@@ -1186,112 +1187,9 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path,
   return n >= 0;
 }
 
-static bool ReadZipEntryBinary(unzFile uf, const std::string &path,
-                               std::vector<u8> *out, size_t max_bytes,
-                               App *app = NULL, const char *tag = NULL,
-                               ZipEntryIndex *index = NULL) {
-  if (!out)
-    return false;
-  out->clear();
-  if (!uf || path.empty() || max_bytes == 0)
-    return false;
-
-  const char *t = (tag && *tag) ? tag : "ZIP-BIN";
-  if (!LocateZipEntrySafe(uf, path, app, t, index))
-    return false;
-
-  unz_file_info fi;
-  if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) == UNZ_OK) {
-    if (fi.uncompressed_size == 0 || fi.uncompressed_size > max_bytes ||
-        fi.uncompressed_size > (uLong)INT_MAX) {
-      return false;
-    }
-    out->reserve((size_t)fi.uncompressed_size);
-  }
-
-  if (unzOpenCurrentFile(uf) != UNZ_OK)
-    return false;
-
-  unsigned char buf[8 * 1024];
-  int n = 0;
-  size_t total = 0;
-  while ((n = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0) {
-    if (total + (size_t)n > max_bytes) {
-      unzCloseCurrentFile(uf);
-      out->clear();
-      return false;
-    }
-    out->insert(out->end(), buf, buf + n);
-    total += (size_t)n;
-  }
-
-  unzCloseCurrentFile(uf);
-  if (n < 0 || out->empty()) {
-    out->clear();
-    return false;
-  }
-  return true;
-}
-
-static bool StartsWithNoCase(const std::string &s, const char *prefix) {
-  if (!prefix)
-    return false;
-  size_t len = strlen(prefix);
-  if (s.size() < len)
-    return false;
-  for (size_t i = 0; i < len; i++) {
-    unsigned char a = (unsigned char)s[i];
-    unsigned char b = (unsigned char)prefix[i];
-    if (a >= 'A' && a <= 'Z')
-      a = (unsigned char)(a - 'A' + 'a');
-    if (b >= 'A' && b <= 'Z')
-      b = (unsigned char)(b - 'A' + 'a');
-    if (a != b)
-      return false;
-  }
-  return true;
-}
-
 static bool LooksLikeSvgWrapper(const std::string &path_hint,
                                 const std::vector<u8> &buf) {
-  if (buf.empty())
-    return false;
-
-  std::string lower_path = ToLowerAscii(path_hint);
-  if (lower_path.size() >= 4 &&
-      lower_path.rfind(".svg") == lower_path.size() - 4) {
-    return true;
-  }
-
-  size_t sample = std::min((size_t)512, buf.size());
-  std::string head((const char *)buf.data(), sample);
-  std::string lower_head = ToLowerAscii(head);
-  return lower_head.find("<svg") != std::string::npos;
-}
-
-static bool DecodeDataUriImage(const std::string &href, std::vector<u8> *out,
-                               App *app = NULL) {
-  if (!out || !StartsWithNoCase(href, "data:"))
-    return false;
-  size_t comma = href.find(',');
-  if (comma == std::string::npos || comma <= 5 || comma + 1 >= href.size())
-    return false;
-
-  std::string meta = ToLowerAscii(href.substr(5, comma - 5));
-  if (meta.find("image/") == std::string::npos ||
-      meta.find(";base64") == std::string::npos) {
-    return false;
-  }
-
-  std::string payload = href.substr(comma + 1);
-  bool ok = DecodeBase64Bytes(payload, out, EPUB_COVER_MAX_ENTRY_BYTES);
-  if (app) {
-    char msg[128];
-    snprintf(msg, sizeof(msg), "EPUB: SVG data-uri decode %s bytes=%u",
-             ok ? "ok" : "fail", (unsigned)out->size());
-    DBG_LOG(app, msg);
-  }
-  return ok;
+  return epub_image_utils::LooksLikeSvgWrapper(path_hint, buf);
 }
 
 static bool ResolveSvgImageWrapperPayload(
@@ -1302,84 +1200,15 @@ static bool ResolveSvgImageWrapperPayload(
       DBG_LOG(app, "EPUB: SVG wrapper skip (size/empty)");
     return false;
   }
-  out->clear();
-  if (resolved_path)
-    resolved_path->clear();
-
-  std::string xml((const char *)svg_buf.data(), svg_buf.size());
-  int image_tags_seen = 0;
-  int href_attempts = 0;
-  size_t pos = 0;
-  while (pos < xml.size()) {
-    size_t lt = xml.find('<', pos);
-    if (lt == std::string::npos)
-      break;
-    size_t gt = xml.find('>', lt + 1);
-    if (gt == std::string::npos)
-      break;
-    pos = gt + 1;
-
-    std::string tag = Trim(xml.substr(lt + 1, gt - lt - 1));
-    if (tag.empty() || tag[0] == '/' || tag[0] == '!' || tag[0] == '?')
-      continue;
-
-    size_t name_end = 0;
-    while (name_end < tag.size() &&
-           IsHtmlNameChar((unsigned char)tag[name_end]))
-      name_end++;
-    std::string name = ToLowerAscii(tag.substr(0, name_end));
-    if (name != "image" && name != "img")
-      continue;
-    image_tags_seen++;
-
-    std::string href = ExtractHtmlAttrValue(tag, "href");
-    if (href.empty())
-      href = ExtractHtmlAttrValue(tag, "xlink:href");
-    if (href.empty())
-      href = ExtractHtmlAttrValue(tag, "src");
-    href = Trim(href);
-    if (href.empty())
-      continue;
-    href_attempts++;
-
-    if (StartsWithNoCase(href, "data:")) {
-      if (DecodeDataUriImage(href, out, app)) {
-        if (resolved_path)
-          *resolved_path = "data:image";
-        return true;
-      }
-      continue;
-    }
-
-    std::string resolved =
-        StripFragmentAndQuery(ResolveRelativePath(svg_path, href));
-    if (resolved.empty())
-      continue;
-    if (resolved == svg_path)
-      continue;
-    if (ReadZipEntryBinary(uf, resolved, out, EPUB_COVER_MAX_ENTRY_BYTES)) {
-      if (resolved_path)
-        *resolved_path = resolved;
-      if (app) {
-        char msg[192];
-        snprintf(msg, sizeof(msg),
-                 "EPUB: SVG wrapper href resolved %s bytes=%u",
-                 resolved.c_str(), (unsigned)out->size());
-        DBG_LOG(app, msg);
-      }
-      return true;
-    }
-  }
-
-  if (app) {
+  bool ok = epub_image_utils::ResolveSvgWrapperImage(
+      uf, svg_path, svg_buf, out, EPUB_COVER_MAX_ENTRY_BYTES, resolved_path);
+  if (!ok && app) {
     char msg[192];
-    snprintf(msg, sizeof(msg),
-             "EPUB: SVG wrapper unresolved tags=%d hrefs=%d path=%s",
-             image_tags_seen, href_attempts, svg_path.c_str());
+    snprintf(msg, sizeof(msg), "EPUB: SVG wrapper unresolved path=%s",
+             svg_path.c_str());
     DBG_LOG(app, msg);
   }
-  out->clear();
-  return false;
+  return ok;
 }
 
 static bool

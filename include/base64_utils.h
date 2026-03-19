@@ -11,7 +11,11 @@
 #include <string>
 #include <vector>
 
-#include "3ds.h" // for u8
+#if __has_include(<3ds.h>)
+#include <3ds.h> // for u8 on 3DS builds
+#else
+typedef unsigned char u8;
+#endif
 
 inline int Base64Value(unsigned char c) {
   if (c >= 'A' && c <= 'Z')

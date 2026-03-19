@@ -12,6 +12,7 @@
 #include "app.h"
 #include "book_error.h"
 #include "file_read_utils.h"
+#include "mobi_cover_meta_cache.h"
 #include "stb_image.h"
 #include "string_utils.h"
 
@@ -21,6 +22,7 @@
 #include <set>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unordered_map>
 #include <vector>
 
@@ -29,6 +31,8 @@ namespace {
 static const size_t kMobiCoverFileMaxBytes = 64 * 1024 * 1024;
 static const size_t kMobiCoverRecordMaxBytes = 8 * 1024 * 1024;
 static const int kMobiCoverMaxDimension = 2048;
+static const char *kMobiCoverMetaCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
+static const char *kMobiCoverMetaCacheDir = "sdmc:/3ds/3dslibris/cache/mobi-cover";
 
 struct MobiCoverCandidate {
   u32 record_idx;
@@ -38,6 +42,106 @@ struct MobiCoverCandidate {
   int height;
   float score;
 };
+
+static bool DecodeAndScaleToCover(Book *book, const u8 *data, size_t size);
+
+static void EnsureMobiCoverMetaCacheDirs() {
+  static bool initialized = false;
+  if (initialized)
+    return;
+  mkdir(kMobiCoverMetaCacheBaseDir, 0777);
+  mkdir(kMobiCoverMetaCacheDir, 0777);
+  initialized = true;
+}
+
+static bool BuildMobiCoverMetaCachePath(const std::string &mobipath,
+                                        std::string *out) {
+  if (!out || mobipath.empty())
+    return false;
+  struct stat st;
+  if (stat(mobipath.c_str(), &st) != 0)
+    return false;
+  EnsureMobiCoverMetaCacheDirs();
+  *out = mobi_cover_meta_cache::BuildPath(
+      mobipath, (long long)st.st_size, (long long)st.st_mtime);
+  return !out->empty();
+}
+
+static bool ReadFileSlice(const std::string &path, u32 start, u32 end,
+                          std::vector<u8> *out) {
+  if (!out || path.empty() || end <= start)
+    return false;
+  out->clear();
+  size_t len = (size_t)(end - start);
+  if (len == 0 || len > kMobiCoverRecordMaxBytes)
+    return false;
+
+  FILE *fp = fopen(path.c_str(), "rb");
+  if (!fp)
+    return false;
+  bool ok = false;
+  if (fseek(fp, (long)start, SEEK_SET) == 0) {
+    out->resize(len);
+    ok = fread(out->data(), 1, len, fp) == len;
+  }
+  fclose(fp);
+  if (!ok)
+    out->clear();
+  return ok;
+}
+
+static bool TryDecodeCachedCoverMeta(Book *book, const std::string &mobipath,
+                                     const mobi_cover_meta_cache::CoverMeta &meta,
+                                     App *app) {
+  if (!book || meta.kind != mobi_cover_meta_cache::kCandidate ||
+      meta.record_end <= meta.record_start)
+    return false;
+
+  std::vector<u8> record;
+  if (!ReadFileSlice(mobipath, meta.record_start, meta.record_end, &record))
+    return false;
+  if (meta.image_offset >= record.size())
+    return false;
+
+  const u8 *image = record.data() + meta.image_offset;
+  size_t image_len = record.size() - (size_t)meta.image_offset;
+  if (!DecodeAndScaleToCover(book, image, image_len))
+    return false;
+
+  if (app) {
+    char msg[224];
+    snprintf(msg, sizeof(msg),
+             "MOBI: cover meta cache hit rec=%u off=%u dim=%ux%u",
+             (unsigned)meta.record_index, (unsigned)meta.image_offset,
+             (unsigned)meta.width, (unsigned)meta.height);
+    app->PrintStatus(msg);
+  }
+  return true;
+}
+
+static void SaveMobiCoverMetaCandidate(
+    const std::string &cache_path, const std::vector<u32> &offsets,
+    const MobiCoverCandidate &cand) {
+  if (cache_path.empty() || cand.record_idx + 1 >= offsets.size())
+    return;
+  mobi_cover_meta_cache::CoverMeta meta;
+  meta.kind = mobi_cover_meta_cache::kCandidate;
+  meta.record_index = cand.record_idx;
+  meta.record_start = offsets[(size_t)cand.record_idx];
+  meta.record_end = offsets[(size_t)cand.record_idx + 1];
+  meta.image_offset = (u32)cand.image_off;
+  meta.width = (u32)cand.width;
+  meta.height = (u32)cand.height;
+  mobi_cover_meta_cache::Save(cache_path, meta);
+}
+
+static void SaveMobiCoverMetaMiss(const std::string &cache_path) {
+  if (cache_path.empty())
+    return;
+  mobi_cover_meta_cache::CoverMeta meta;
+  meta.kind = mobi_cover_meta_cache::kNoCover;
+  mobi_cover_meta_cache::Save(cache_path, meta);
+}
 
 static u16 ReadBE16(const u8 *p) {
   return (u16)((u16)p[0] << 8 | (u16)p[1]);
@@ -417,6 +521,21 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   if (app)
     app->PrintStatus("MOBI: cover scan begin");
 
+  std::string meta_cache_path;
+  if (BuildMobiCoverMetaCachePath(mobipath, &meta_cache_path)) {
+    mobi_cover_meta_cache::CoverMeta cached_meta;
+    if (mobi_cover_meta_cache::Load(meta_cache_path, &cached_meta)) {
+      if (cached_meta.kind == mobi_cover_meta_cache::kNoCover) {
+        if (app)
+          app->PrintStatus("MOBI: cover meta cache none");
+        return 5;
+      }
+      if (TryDecodeCachedCoverMeta(book, mobipath, cached_meta, app))
+        return 0;
+      remove(meta_cache_path.c_str());
+    }
+  }
+
   std::string raw;
   // Cover extraction reads the same MOBI while the library is busy, so reuse
   // the short-read-safe helper instead of stopping on the first partial chunk.
@@ -667,8 +786,10 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
       }
     }
     for (size_t i = 0; i < meta_ranked.size(); i++) {
-      if (TryDecodeCoverCandidate(book, raw, offsets, meta_ranked[i], app))
+      if (TryDecodeCoverCandidate(book, raw, offsets, meta_ranked[i], app)) {
+        SaveMobiCoverMetaCandidate(meta_cache_path, offsets, meta_ranked[i]);
         return 0;
+      }
     }
   }
 
@@ -704,11 +825,14 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
                 return a.score > b.score;
               });
     for (size_t i = 0; i < ranked.size(); i++) {
-      if (TryDecodeCoverCandidate(book, raw, offsets, ranked[i], app))
+      if (TryDecodeCoverCandidate(book, raw, offsets, ranked[i], app)) {
+        SaveMobiCoverMetaCandidate(meta_cache_path, offsets, ranked[i]);
         return 0;
+      }
     }
   }
 
+  SaveMobiCoverMetaMiss(meta_cache_path);
   if (app)
     app->PrintStatus("MOBI: cover scan none");
   return 5;
