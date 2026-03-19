@@ -39,9 +39,10 @@ BUILD		?=	build
 SOURCES		:=	source source/core source/app source/shared source/ui source/menus \
 			source/library source/reader source/settings source/book \
 			source/formats/common source/formats/epub source/formats/fb2 \
-			source/formats/mobi source/expat
+			source/formats/mobi source/expat third_party/utf8proc \
+			third_party/libunibreak/src
 DATA		:=	data
-INCLUDES	:=	include third_party/stb
+INCLUDES	:=	include third_party/stb third_party/utf8proc third_party/libunibreak/src
 GRAPHICS	:=
 ifneq ($(wildcard $(TOPDIR)/gfx),)
 GRAPHICS	:=	gfx

@@ -19,6 +19,7 @@
 #include "main.h"
 #include "book/page.h"
 #include "parse.h"
+#include "shared/text_unicode_utils.h"
 #include <algorithm>
 #include <stdio.h>
 #include <string.h>
@@ -208,6 +209,62 @@ static std::string NormalizeDocStartPathKey(const std::string &raw_path,
   return NormalizePathForAnchor(decoded);
 }
 
+static bool ParsedBufferEndsWithWhitespace(const parsedata_t *p) {
+  if (!p || p->buflen == 0)
+    return false;
+  const char c = p->buf[p->buflen - 1];
+  return c == ' ' || c == '\n' || c == '\t';
+}
+
+static void AppendParsedByte(parsedata_t *p, char c) {
+  if (!p || p->buflen >= PAGEBUFSIZE)
+    return;
+  p->buf[p->buflen++] = c;
+}
+
+static void AppendParsedBytes(parsedata_t *p, const char *data, size_t len) {
+  if (!p || !data || len == 0 || p->buflen >= PAGEBUFSIZE)
+    return;
+  size_t available = PAGEBUFSIZE - p->buflen;
+  if (len > available)
+    len = available;
+  memcpy(p->buf + p->buflen, data, len);
+  p->buflen += len;
+}
+
+static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
+  if (!p || !p->book || !p->ts)
+    return;
+
+  Text *ts = p->ts;
+  int maxHeight = (p->screen == 1) ? 320 : 400;
+  int bottomMargin =
+      (p->screen == 1) ? MIN(ts->margin.bottom, 16) : ts->margin.bottom;
+  if ((p->pen.y + lineheight) <= (maxHeight - bottomMargin))
+    return;
+
+  if (p->screen == 1) {
+    Page *page = p->book->AppendPage();
+    page->SetBuffer(p->buf, p->buflen);
+    page->start = p->pos;
+    p->pos += p->buflen;
+    page->end = p->pos;
+    p->pagecount++;
+
+    p->buflen = 0;
+    if (p->italic)
+      p->buf[p->buflen++] = TEXT_ITALIC_ON;
+    if (p->bold)
+      p->buf[p->buflen++] = TEXT_BOLD_ON;
+    p->screen = 0;
+  } else {
+    p->screen = 1;
+  }
+
+  p->pen.x = ts->margin.left;
+  p->pen.y = ts->margin.top + lineheight;
+}
+
 } // namespace
 
 namespace xml::book::metadata {
@@ -392,10 +449,6 @@ static void AdvanceParsedScreen(parsedata_t *p) {
 
 void instruction(void *data, const char *target, const char *pidata) {}
 
-static bool IsUnicodeSpaceCode(u32 code) {
-  return code == 0x00A0 || code == 0x2007 || code == 0x202F;
-}
-
 void start(void *data, const char *el, const char **attr) {
   //! Expat callback, when starting an element.
 
@@ -521,6 +574,18 @@ void start(void *data, const char *el, const char **attr) {
     }
   } else if (!strcmp(el, "pre"))
     parse_push(p, TAG_PRE);
+  else if (!strcmp(el, "li")) {
+    parse_push(p, TAG_UNKNOWN);
+    if (parse_in(p, TAG_UL) && !parse_in(p, TAG_OL)) {
+      if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
+        linefeed(p);
+      static const char kBulletUtf8[] = "\xE2\x80\xA2 ";
+      AppendParsedBytes(p, kBulletUtf8, sizeof(kBulletUtf8) - 1);
+      p->pen.x += app->ts->GetAdvance(0x2022) + app->ts->GetAdvance(' ');
+      p->linebegan = true;
+      p->strip_leading_list_marker = true;
+    }
+  }
   else if (!strcmp(el, "script"))
     parse_push(p, TAG_SCRIPT);
   else if (!strcmp(el, "style"))
@@ -706,6 +771,23 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     p->doc_heading.append((const char *)txt, txtlen);
   }
 
+  if (p->strip_leading_list_marker) {
+    bool all_whitespace_only = false;
+    size_t strip = text_unicode_utils::StripLeadingListMarkerUtf8(
+        txt, (size_t)txtlen, &all_whitespace_only);
+    if (strip > 0) {
+      txt += strip;
+      txtlen -= (int)strip;
+      p->strip_leading_list_marker = false;
+      if (txtlen <= 0)
+        return;
+    } else if (all_whitespace_only) {
+      return;
+    } else {
+      p->strip_leading_list_marker = false;
+    }
+  }
+
   int lineheight = ts->GetHeight();
   int linespacing = ts->linespacing;
   int spaceadvance = ts->GetAdvance((u16)' ');
@@ -717,122 +799,101 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     p->linebegan = false;
   }
 
-  u8 advance = 0;
-  int i = 0, j = 0;
-  while (i < txtlen) {
-    if (txt[i] == '\r') {
-      i++;
+  if (parse_in(p, TAG_PRE)) {
+    for (int i = 0; i < txtlen; i++) {
+      if (txt[i] == '\r')
+        continue;
+      AppendParsedByte(p, txt[i]);
+      if (txt[i] == '\n') {
+        p->pen.x = ts->margin.left;
+        p->pen.y += (lineheight + linespacing);
+      } else {
+        p->pen.x += spaceadvance;
+      }
+      AdvanceParsedPageOnOverflow(p, lineheight);
+    }
+    return;
+  }
+
+  std::vector<text_unicode_utils::TextCodepoint> run;
+  if (!text_unicode_utils::BuildTextRunUtf8(txt, (size_t)txtlen, NULL, &run))
+    return;
+
+  const int maxLineWidth = ts->display.width - ts->margin.right - ts->margin.left;
+  size_t unit_index = 0;
+  while (unit_index < run.size()) {
+    const text_unicode_utils::TextCodepoint &unit = run[unit_index];
+    if (unit.codepoint == '\r') {
+      unit_index++;
       continue;
     }
 
-    if (!parse_in(p, TAG_PRE) && ((unsigned char)txt[i] & 0x80)) {
-      u32 code = 0;
-      int bytes = ts->GetCharCode((char *)&(txt[i]), &code);
-      if (bytes > 0 && IsUnicodeSpaceCode(code)) {
-        if (p->linebegan && p->buflen &&
-            !iswhitespace(p->buf[p->buflen - 1])) {
-          p->buf[p->buflen++] = ' ';
-          p->pen.x += spaceadvance;
-        }
-        i += bytes;
-        continue;
-      }
-    }
-
-    if (iswhitespace(txt[i])) {
-      if (parse_in(p, TAG_PRE)) {
-        p->buf[p->buflen++] = txt[i];
-        if (txt[i] == '\n') {
+    if (unit.whitespace) {
+      if (unit.breakable_space && p->linebegan &&
+          !ParsedBufferEndsWithWhitespace(p)) {
+        AppendParsedByte(p, ' ');
+        p->pen.x += spaceadvance;
+      } else if (!unit.breakable_space) {
+        u16 unit_advance = ts->GetAdvance(unit.codepoint);
+        if ((p->pen.x + unit_advance) > (ts->display.width - ts->margin.right)) {
+          AppendParsedByte(p, '\n');
           p->pen.x = ts->margin.left;
           p->pen.y += (lineheight + linespacing);
-        } else {
-          p->pen.x += spaceadvance;
+          p->linebegan = false;
         }
-      } else if (p->linebegan && p->buflen &&
-                 !iswhitespace(p->buf[p->buflen - 1])) {
-        p->buf[p->buflen++] = ' ';
-        p->pen.x += spaceadvance;
+        AdvanceParsedPageOnOverflow(p, lineheight);
+        AppendParsedBytes(p, txt + unit.byte_offset, unit.byte_length);
+        p->pen.x += unit_advance;
+        p->linebegan = true;
       }
-      i++;
-    } else {
-      if (p->in_paragraph)
-        p->paragraph_has_content = true;
-      p->linebegan = true;
-      advance = 0;
-      u8 bytes = 1;
-      for (j = i; (j < txtlen) && (!iswhitespace(txt[j])); j += bytes) {
-        /** set type until the end of the next word.
-            account for UTF-8 characters when advancing. **/
-        u32 code = txt[j];
-        bytes = 1;
-        if (code >> 7) {
-          // FIXME the performance bottleneck
-          bytes = ts->GetCharCode((char *)&(txt[j]), &code);
-        }
+      unit_index++;
+      continue;
+    }
 
-        advance += ts->GetAdvance(code);
-        if (advance > ts->display.width - ts->margin.right - ts->margin.left) {
-          // here's a line-long word, need to break it now.
-          break;
-        }
+    if (p->in_paragraph)
+      p->paragraph_has_content = true;
+
+    u16 advance = 0;
+    size_t segment_start = unit.byte_offset;
+    size_t segment_end = segment_start;
+    size_t segment_end_index = unit_index;
+    while (segment_end_index < run.size()) {
+      const text_unicode_utils::TextCodepoint &segment_unit = run[segment_end_index];
+      if (segment_unit.codepoint == '\r') {
+        segment_end_index++;
+        continue;
+      }
+      if (segment_unit.whitespace)
+        break;
+
+      advance = (u16)(advance + ts->GetAdvance(segment_unit.codepoint));
+      segment_end = segment_unit.byte_offset + segment_unit.byte_length;
+      segment_end_index++;
+
+      if (advance > maxLineWidth)
+        break;
+
+      if (segment_unit.must_break_after)
+        break;
+
+      if (segment_unit.allow_break_after &&
+          segment_end_index < run.size() && !run[segment_end_index].whitespace) {
+        break;
       }
     }
 
     if ((p->pen.x + advance) > (ts->display.width - ts->margin.right)) {
-      // we overran the margin, insert a break.
-      p->buf[p->buflen++] = '\n';
+      AppendParsedByte(p, '\n');
       p->pen.x = ts->margin.left;
       p->pen.y += (lineheight + linespacing);
       p->linebegan = false;
     }
 
-    int maxHeight = (p->screen == 1) ? 320 : 400;
-    int bottomMargin =
-        (p->screen == 1) ? MIN(ts->margin.bottom, 16) : ts->margin.bottom;
-    if ((p->pen.y + lineheight) > (maxHeight - bottomMargin)) {
-      // reached bottom of screen.
-      if (p->screen == 1) {
-        // page full.
-        // put chars into current page.
-        Page *page = p->book->AppendPage();
-        page->SetBuffer(p->buf, p->buflen);
-        page->start = p->pos;
-        p->pos += p->buflen;
-        page->end = p->pos;
-        p->pagecount++;
-
-        // make a new page.
-        p->buflen = 0;
-        if (p->italic)
-          p->buf[p->buflen++] = TEXT_ITALIC_ON;
-        if (p->bold)
-          p->buf[p->buflen++] = TEXT_BOLD_ON;
-        p->screen = 0;
-      } else
-        // move to right screen.
-        p->screen = 1;
-
-      p->pen.x = ts->margin.left;
-      p->pen.y = ts->margin.top + lineheight;
-    }
-
-    /** append this word to the page.
-            chars stay UTF-8 until they are rendered. **/
-
-    for (; i < j; i++) {
-      if (iswhitespace(txt[i])) {
-        if (p->linebegan) {
-          p->buf[p->buflen] = ' ';
-          p->buflen++;
-        }
-      } else {
-        p->linebegan = true;
-        p->buf[p->buflen] = txt[i];
-        p->buflen++;
-      }
-    }
+    AdvanceParsedPageOnOverflow(p, lineheight);
+    AppendParsedBytes(p, txt + segment_start, segment_end - segment_start);
+    p->linebegan = true;
     p->pen.x += advance;
-    advance = 0;
+    unit_index = segment_end_index;
   }
 }
 
@@ -958,6 +1019,8 @@ void end(void *data, const char *el) {
     linefeed(p);
     linefeed(p);
   } else if (!strcmp(el, "li") || !strcmp(el, "ul") || !strcmp(el, "ol")) {
+    if (!strcmp(el, "li"))
+      p->strip_leading_list_marker = false;
     linefeed(p);
   }
 
