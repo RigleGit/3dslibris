@@ -15,8 +15,10 @@
 #include "debug_log.h"
 #include "epub.h"
 #include "file_read_utils.h"
+#include "heading_layout.h"
 #include "main.h"
 #include "mobi.h"
+#include "mobi_heading_markers.h"
 #include "mobi_text_cleanup.h"
 #include "parse.h"
 #include "string_utils.h"
@@ -47,7 +49,10 @@ static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // v6→v7: recindex parsing now accepts zero-padded MOBI image references, so
 //         old cached page streams must be invalidated to repaginate with the
 //         recovered TEXT_IMAGE markers.
-static const u16 kMobiPageCacheVersion = 12;
+// v12→v13: MOBI keep-with-next now follows only heading markers emitted during
+//          markup extraction; old caches may still contain broader heuristic
+//          pagination decisions.
+static const u16 kMobiPageCacheVersion = 13;
 
 #ifdef DSLIBRIS_DEBUG
 static void FlushBufferedStatusLog(
@@ -1393,6 +1398,28 @@ static void PlainLinefeed(parsedata_t *p) {
   p->linebegan = false;
 }
 
+static bool ApplyPlainHeadingKeepWithNext(parsedata_t *p, int heading_level) {
+  if (!p || !p->app || !p->app->ts)
+    return false;
+  if (heading_level < 1 || heading_level > 3)
+    return false;
+
+  heading_layout::KeepWithNextRequest req{};
+  req.pen_y = p->pen.y;
+  req.screen_height = (p->screen == 1) ? 320 : 400;
+  req.bottom_margin =
+      (p->screen == 1) ? MIN(p->app->ts->margin.bottom, 16)
+                       : p->app->ts->margin.bottom;
+  req.line_height = p->app->ts->GetHeight();
+  req.linespacing = p->app->ts->linespacing;
+  req.heading_level = heading_level;
+  if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req)) {
+    PlainAdvanceScreen(p);
+    return true;
+  }
+  return false;
+}
+
 static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
                                                InlineImageContext image_context) {
   if (!p || !p->app || !p->app->ts || !p->book)
@@ -1473,20 +1500,19 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
     bool next_blank = !state->next.valid || IsBlankLine(state->next.text);
 
     bool curr_strong = false;
-    bool curr_candidate = false;
+    bool curr_candidate = LooksLikePlainChapterHeading(state->curr.text,
+                                                       &curr_strong);
     bool next_strong = false;
-    bool next_candidate = false;
-    if (state->detect_heuristic_headings) {
-      curr_candidate =
-          LooksLikePlainChapterHeading(state->curr.text, &curr_strong);
-      next_candidate = state->next.valid && LooksLikePlainChapterHeading(
-                                                state->next.text, &next_strong);
-    }
-
-    if (state->detect_heuristic_headings && curr_candidate &&
+    bool next_candidate =
+        state->next.valid &&
+        LooksLikePlainChapterHeading(state->next.text, &next_strong);
+    const bool curr_keep_with_next =
+        curr_candidate &&
         ShouldAcceptHeuristicHeading(state->curr.text, state->prev_blank,
                                      next_blank, state->prev_candidate,
-                                     next_candidate, curr_strong)) {
+                                     next_candidate, curr_strong);
+
+    if (state->detect_heuristic_headings && curr_keep_with_next) {
       AddChapterIfUnique(state->parsedata.book, state->curr.text, 0);
     }
 
@@ -1508,10 +1534,26 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
             c == TEXT_IMAGE_CONTEXT_DEFAULT ||
             (c == TEXT_IMAGE_LEADING_PARAGRAPH)
                 || c == TEXT_IMAGE_FIGURE_WITH_CAPTION;
+        const int heading_level =
+            mobi_heading_markers::HeadingLevelFromMarker(c);
         const bool image_marker =
             (c == TEXT_IMAGE) ||
             (context_marker && pos + 1 < state->curr.text.size() &&
              (unsigned char)state->curr.text[pos + 1] == TEXT_IMAGE);
+        if (heading_level > 0) {
+          if (pos > segment_start) {
+            const size_t len = pos - segment_start;
+            xml::book::chardata(&state->parsedata,
+                                state->curr.text.data() + segment_start,
+                                (int)len);
+            state->text_bytes_fed += len;
+          }
+          ApplyPlainHeadingKeepWithNext(&state->parsedata, heading_level);
+          state->text_bytes_fed += 1;
+          pos++;
+          segment_start = pos;
+          continue;
+        }
         if (!image_marker) {
           pos++;
           continue;
@@ -1632,6 +1674,10 @@ static std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
     }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
         c == TEXT_ITALIC_OFF) {
+      i++;
+      continue;
+    }
+    if (mobi_heading_markers::HeadingLevelFromMarker(c) > 0) {
       i++;
       continue;
     }
@@ -4089,6 +4135,12 @@ static std::string ExtractMobiMarkupToText(
         AppendParagraphBreak(&out);
         pending_space = false;
         at_paragraph_start = true;
+        if (!closing && tag_heading_level >= 0) {
+          const unsigned char marker =
+              mobi_heading_markers::MarkerForHeadingLevel(tag_heading_level);
+          if (marker != 0)
+            out.push_back((char)marker);
+        }
       }
       continue;
     }

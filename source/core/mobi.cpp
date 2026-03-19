@@ -13,6 +13,7 @@
 #include "book_error.h"
 #include "file_read_utils.h"
 #include "mobi_cover_meta_cache.h"
+#include "mobi_record_scan.h"
 #include "stb_image.h"
 #include "string_utils.h"
 
@@ -581,9 +582,14 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   // First actual image record after text records. Many real-world MOBIs
   // require this to interpret EXTH cover/thumb offsets correctly.
   u32 detected_first_image_index = 0;
-  if (text_rec_count + 1 < rec_count)
+  if (text_rec_count + 1 < rec_count) {
+    const u32 start_idx = text_rec_count + 1;
+    const u32 first_image_probe_budget =
+        mobi_record_scan::FirstImageProbeLimit(rec_count - start_idx);
     detected_first_image_index =
-        FindFirstImageRecordIndex(raw, offsets, text_rec_count + 1, 512);
+        FindFirstImageRecordIndex(raw, offsets, start_idx,
+                                  first_image_probe_budget);
+  }
   if (first_image_index == 0 && detected_first_image_index > 0)
     inferred_image_base = detected_first_image_index;
 
@@ -807,7 +813,10 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   }
 
   // Last resort: scan remaining non-text records.
-  for (u32 i = start; i < rec_count; i++) {
+  const u32 last_resort_end =
+      std::min<u32>(rec_count, start + mobi_record_scan::CoverLastResortProbeLimit(
+                                           rec_count - start));
+  for (u32 i = start; i < last_resort_end; i++) {
     if (seen.find(i) != seen.end())
       continue;
     MobiCoverCandidate c;

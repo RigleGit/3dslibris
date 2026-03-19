@@ -15,6 +15,7 @@
 #include "epub_image_utils.h"
 #include "file_read_utils.h"
 #include "mobi.h"
+#include "mobi_record_scan.h"
 #include "path_utils.h"
 #include "stb_image.h"
 #include "string_utils.h"
@@ -348,7 +349,11 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
           u32 detected_first_image_index = 0;
           const u32 probe_start = text_rec_count + 1;
           if (probe_start < rec_count) {
-            const u32 probe_end = std::min<u32>(rec_count, probe_start + 512);
+            const u32 remaining = rec_count - probe_start;
+            const u32 probe_end =
+                std::min<u32>(rec_count, probe_start +
+                                             mobi_record_scan::FirstImageProbeLimit(
+                                                 remaining));
             for (u32 rec = probe_start; rec < probe_end; rec++) {
               const u32 start = mobi_record_offsets[(size_t)rec];
               const u32 end = mobi_record_offsets[(size_t)rec + 1];

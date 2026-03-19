@@ -14,6 +14,7 @@
 #include "book.h"
 
 #include "app.h"
+#include "heading_layout.h"
 #include "main.h"
 #include "parse.h"
 #include <algorithm>
@@ -419,6 +420,16 @@ void start(void *data, const char *el, const char **attr) {
   else if (!strcmp(el, "dt"))
     parse_push(p, TAG_DT);
   else if (!strcmp(el, "h1")) {
+    heading_layout::KeepWithNextRequest req{};
+    req.pen_y = p->pen.y;
+    req.screen_height = (p->screen == 1) ? 320 : 400;
+    req.bottom_margin =
+        (p->screen == 1) ? MIN(app->ts->margin.bottom, 16) : app->ts->margin.bottom;
+    req.line_height = app->ts->GetHeight();
+    req.linespacing = app->ts->linespacing;
+    req.heading_level = 1;
+    if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req))
+      AdvanceParsedScreen(p);
     parse_push(p, TAG_H1);
     bool lf = !blankline(p);
     p->buf[p->buflen] = TEXT_BOLD_ON;
@@ -428,6 +439,16 @@ void start(void *data, const char *el, const char **attr) {
     if (lf)
       linefeed(p);
   } else if (!strcmp(el, "h2")) {
+    heading_layout::KeepWithNextRequest req{};
+    req.pen_y = p->pen.y;
+    req.screen_height = (p->screen == 1) ? 320 : 400;
+    req.bottom_margin =
+        (p->screen == 1) ? MIN(app->ts->margin.bottom, 16) : app->ts->margin.bottom;
+    req.line_height = app->ts->GetHeight();
+    req.linespacing = app->ts->linespacing;
+    req.heading_level = 2;
+    if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req))
+      AdvanceParsedScreen(p);
     parse_push(p, TAG_H2);
     bool lf = !blankline(p);
     p->buf[p->buflen] = TEXT_BOLD_ON;
@@ -437,6 +458,16 @@ void start(void *data, const char *el, const char **attr) {
     if (lf)
       linefeed(p);
   } else if (!strcmp(el, "h3")) {
+    heading_layout::KeepWithNextRequest req{};
+    req.pen_y = p->pen.y;
+    req.screen_height = (p->screen == 1) ? 320 : 400;
+    req.bottom_margin =
+        (p->screen == 1) ? MIN(app->ts->margin.bottom, 16) : app->ts->margin.bottom;
+    req.line_height = app->ts->GetHeight();
+    req.linespacing = app->ts->linespacing;
+    req.heading_level = 3;
+    if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req))
+      AdvanceParsedScreen(p);
     parse_push(p, TAG_H3);
     linefeed(p);
   } else if (!strcmp(el, "h4")) {
