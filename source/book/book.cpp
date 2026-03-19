@@ -19,6 +19,7 @@
 #include "main.h"
 #include "book/page.h"
 #include "parse.h"
+#include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
 #include <algorithm>
 #include <stdio.h>
@@ -263,6 +264,11 @@ static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
 
   p->pen.x = ts->margin.left;
   p->pen.y = ts->margin.top + lineheight;
+}
+
+static int MeasureParsedTextAdvance(uint32_t codepoint, void *ctx) {
+  Text *ts = (Text *)ctx;
+  return ts ? ts->GetAdvance(codepoint) : 0;
 }
 
 } // namespace
@@ -815,26 +821,27 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     return;
   }
 
-  std::vector<text_unicode_utils::TextCodepoint> run;
-  if (!text_unicode_utils::BuildTextRunUtf8(txt, (size_t)txtlen, NULL, &run))
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  if (!text_layout_utils::ShapeTextRunUtf8(txt, (size_t)txtlen, NULL,
+                                           MeasureParsedTextAdvance, ts, &run))
     return;
 
   const int maxLineWidth = ts->display.width - ts->margin.right - ts->margin.left;
   size_t unit_index = 0;
   while (unit_index < run.size()) {
-    const text_unicode_utils::TextCodepoint &unit = run[unit_index];
-    if (unit.codepoint == '\r') {
+    const text_layout_utils::ShapedGlyph &unit = run[unit_index];
+    if (unit.text.codepoint == '\r') {
       unit_index++;
       continue;
     }
 
-    if (unit.whitespace) {
-      if (unit.breakable_space && p->linebegan &&
+    if (unit.text.whitespace) {
+      if (unit.text.breakable_space && p->linebegan &&
           !ParsedBufferEndsWithWhitespace(p)) {
         AppendParsedByte(p, ' ');
         p->pen.x += spaceadvance;
-      } else if (!unit.breakable_space) {
-        u16 unit_advance = ts->GetAdvance(unit.codepoint);
+      } else if (!unit.text.breakable_space) {
+        u16 unit_advance = (u16)unit.advance;
         if ((p->pen.x + unit_advance) > (ts->display.width - ts->margin.right)) {
           AppendParsedByte(p, '\n');
           p->pen.x = ts->margin.left;
@@ -842,7 +849,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
           p->linebegan = false;
         }
         AdvanceParsedPageOnOverflow(p, lineheight);
-        AppendParsedBytes(p, txt + unit.byte_offset, unit.byte_length);
+        AppendParsedBytes(p, txt + unit.text.byte_offset, unit.text.byte_length);
         p->pen.x += unit_advance;
         p->linebegan = true;
       }
@@ -853,34 +860,15 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     if (p->in_paragraph)
       p->paragraph_has_content = true;
 
-    u16 advance = 0;
-    size_t segment_start = unit.byte_offset;
-    size_t segment_end = segment_start;
-    size_t segment_end_index = unit_index;
-    while (segment_end_index < run.size()) {
-      const text_unicode_utils::TextCodepoint &segment_unit = run[segment_end_index];
-      if (segment_unit.codepoint == '\r') {
-        segment_end_index++;
-        continue;
-      }
-      if (segment_unit.whitespace)
-        break;
-
-      advance = (u16)(advance + ts->GetAdvance(segment_unit.codepoint));
-      segment_end = segment_unit.byte_offset + segment_unit.byte_length;
-      segment_end_index++;
-
-      if (advance > maxLineWidth)
-        break;
-
-      if (segment_unit.must_break_after)
-        break;
-
-      if (segment_unit.allow_break_after &&
-          segment_end_index < run.size() && !run[segment_end_index].whitespace) {
-        break;
-      }
-    }
+    size_t segment_start = unit.text.byte_offset;
+    size_t segment_end_index =
+        text_layout_utils::FindLineBreak(run, unit_index, maxLineWidth);
+    if (segment_end_index <= unit_index)
+      segment_end_index = unit_index + 1;
+    u16 advance =
+        (u16)text_layout_utils::MeasureTextRun(run, unit_index, segment_end_index);
+    size_t segment_end = run[segment_end_index - 1].text.byte_offset +
+                         run[segment_end_index - 1].text.byte_length;
 
     if ((p->pen.x + advance) > (ts->display.width - ts->margin.right)) {
       AppendParsedByte(p, '\n');

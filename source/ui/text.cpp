@@ -42,6 +42,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app/app.h"
 #include "main.h"
+#include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
 #include "stb_image.h"
 #include "ui/text_limits.h"
@@ -51,6 +52,18 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "color_utils.h"
 
 namespace {
+
+struct TextAdvanceContext {
+  Text *text;
+  u8 style;
+};
+
+static int MeasureTextAdvance(uint32_t codepoint, void *ctx) {
+  TextAdvanceContext *measure = (TextAdvanceContext *)ctx;
+  if (!measure || !measure->text)
+    return 0;
+  return measure->text->GetAdvance(codepoint, measure->style);
+}
 
 static inline void RGB565ToU8(u16 c, int *r, int *g, int *b) {
   const int r5 = (c >> 11) & 0x1F;
@@ -555,8 +568,11 @@ u8 Text::GetCharCountInsideWidth(const char *txt, u8 style, u8 pixels) {
   if (!txt || !*txt)
     return 0;
 
-  std::vector<text_unicode_utils::TextCodepoint> run;
-  if (!text_unicode_utils::BuildTextRunUtf8(txt, strlen(txt), NULL, &run))
+  TextAdvanceContext measure{this, style};
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  if (!text_layout_utils::ShapeTextRunUtf8(txt, strlen(txt), NULL,
+                                           MeasureTextAdvance, &measure,
+                                           &run))
     return 0;
 
   u8 count = 0;
@@ -564,7 +580,7 @@ u8 Text::GetCharCountInsideWidth(const char *txt, u8 style, u8 pixels) {
   u16 cluster_width = 0;
   bool have_cluster = false;
   for (size_t i = 0; i < run.size(); i++) {
-    if (run[i].grapheme_start) {
+    if (run[i].text.grapheme_start) {
       if (have_cluster) {
         if ((u16)(width + cluster_width) > pixels)
           return count;
@@ -574,8 +590,7 @@ u8 Text::GetCharCountInsideWidth(const char *txt, u8 style, u8 pixels) {
       cluster_width = 0;
       have_cluster = true;
     }
-    cluster_width =
-        (u16)(cluster_width + GetAdvance(run[i].codepoint, faces[style]));
+    cluster_width = (u16)(cluster_width + run[i].advance);
   }
 
   if (have_cluster && (u16)(width + cluster_width) <= pixels)
