@@ -15,7 +15,6 @@
 #include <expat.h>
 #include <3ds.h>
 #include <string>
-#include "ui/text.h"
 
 #define PAGEBUFSIZE 4096
 
@@ -41,6 +40,11 @@ typedef enum {
 //! This data structure is made available
 //! to all expat callbacks via (void*)data.
 typedef struct {
+	int x;
+	int y;
+} parse_pen_t;
+
+typedef struct {
 	context_t stack[32];
 	u8 stacksize;
 	class App *app;
@@ -48,9 +52,11 @@ typedef struct {
 	class Book *book;
 	class Prefs *prefs;
 	int screen;
-	FT_Vector pen;
+	parse_pen_t pen;
 	u8 buf[PAGEBUFSIZE];
 	int buflen;
+	bool pagebuf_overflowed;
+	size_t pagebuf_overflow_bytes;
 	//! Our total parse position in terms of cooked text.
 	int pos;
 	bool linebegan;
@@ -81,7 +87,11 @@ bool iswhitespace(u8 c);
 
 void parse_error(XML_ParserStruct *ps);
 void parse_init(parsedata_t *data);
+bool parse_append_page_byte(parsedata_t *data, u8 c);
+size_t parse_append_page_bytes(parsedata_t *data, const void *src, size_t len);
 bool parse_in(parsedata_t *data, context_t context);
 context_t parse_pop(parsedata_t *data);
+bool parse_page_buffer_overflowed(const parsedata_t *data);
+void parse_reset_page_buffer(parsedata_t *data);
 void parse_printerror(XML_Parser p);
 void parse_push(parsedata_t *data, context_t context);

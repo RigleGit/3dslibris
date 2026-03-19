@@ -1298,11 +1298,11 @@ static void PlainAdvanceScreen(parsedata_t *p) {
   if (p->screen == 1) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
-    p->buflen = 0;
+    parse_reset_page_buffer(p);
     if (p->italic)
-      p->buf[p->buflen++] = TEXT_ITALIC_ON;
+      parse_append_page_byte(p, TEXT_ITALIC_ON);
     if (p->bold)
-      p->buf[p->buflen++] = TEXT_BOLD_ON;
+      parse_append_page_byte(p, TEXT_BOLD_ON);
     p->screen = 0;
   } else {
     p->screen = 1;
@@ -1316,8 +1316,7 @@ static void PlainAdvanceScreen(parsedata_t *p) {
 static void PlainLinefeed(parsedata_t *p) {
   if (!p || !p->ts)
     return;
-  if (p->buflen < PAGEBUFSIZE)
-    p->buf[p->buflen++] = '\n';
+  parse_append_page_byte(p, '\n');
   p->pen.x = p->ts->margin.left;
   p->pen.y += p->ts->GetHeight() + p->ts->linespacing;
   p->linebegan = false;
@@ -1360,23 +1359,15 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
   if (image_plan.line_break_before && p->linebegan)
     PlainLinefeed(p);
 
-  if (p->buflen + 4 >= PAGEBUFSIZE)
-    PlainAdvanceScreen(p);
-  if (p->buflen < PAGEBUFSIZE) {
-    if (image_context == INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH)
-      p->buf[p->buflen++] = TEXT_IMAGE_LEADING_PARAGRAPH;
-    else if (image_context == INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION)
-      p->buf[p->buflen++] = TEXT_IMAGE_FIGURE_WITH_CAPTION;
-    else
-      p->buf[p->buflen++] = TEXT_IMAGE_CONTEXT_DEFAULT;
-  }
-  if (p->buflen + 3 >= PAGEBUFSIZE)
-    PlainAdvanceScreen(p);
-  if (p->buflen + 3 < PAGEBUFSIZE) {
-    p->buf[p->buflen++] = TEXT_IMAGE;
-    p->buf[p->buflen++] = (u8)((image_id >> 8) & 0xFF);
-    p->buf[p->buflen++] = (u8)(image_id & 0xFF);
-  }
+  if (image_context == INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH)
+    parse_append_page_byte(p, TEXT_IMAGE_LEADING_PARAGRAPH);
+  else if (image_context == INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION)
+    parse_append_page_byte(p, TEXT_IMAGE_FIGURE_WITH_CAPTION);
+  else
+    parse_append_page_byte(p, TEXT_IMAGE_CONTEXT_DEFAULT);
+  parse_append_page_byte(p, TEXT_IMAGE);
+  parse_append_page_byte(p, (u8)((image_id >> 8) & 0xFF));
+  parse_append_page_byte(p, (u8)(image_id & 0xFF));
 
   switch (image_plan.mode) {
   case INLINE_IMAGE_LAYOUT_INLINE:

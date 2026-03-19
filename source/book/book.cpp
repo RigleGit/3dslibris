@@ -218,19 +218,20 @@ static bool ParsedBufferEndsWithWhitespace(const parsedata_t *p) {
 }
 
 static void AppendParsedByte(parsedata_t *p, char c) {
-  if (!p || p->buflen >= PAGEBUFSIZE)
-    return;
-  p->buf[p->buflen++] = c;
+  parse_append_page_byte(p, (u8)c);
 }
 
 static void AppendParsedBytes(parsedata_t *p, const char *data, size_t len) {
-  if (!p || !data || len == 0 || p->buflen >= PAGEBUFSIZE)
+  parse_append_page_bytes(p, data, len);
+}
+
+static void RestoreParsedStyleMarkers(parsedata_t *p) {
+  if (!p)
     return;
-  size_t available = PAGEBUFSIZE - p->buflen;
-  if (len > available)
-    len = available;
-  memcpy(p->buf + p->buflen, data, len);
-  p->buflen += len;
+  if (p->italic)
+    AppendParsedByte(p, TEXT_ITALIC_ON);
+  if (p->bold)
+    AppendParsedByte(p, TEXT_BOLD_ON);
 }
 
 static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
@@ -252,11 +253,8 @@ static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
     page->end = p->pos;
     p->pagecount++;
 
-    p->buflen = 0;
-    if (p->italic)
-      p->buf[p->buflen++] = TEXT_ITALIC_ON;
-    if (p->bold)
-      p->buf[p->buflen++] = TEXT_BOLD_ON;
+    parse_reset_page_buffer(p);
+    RestoreParsedStyleMarkers(p);
     p->screen = 0;
   } else {
     p->screen = 1;
@@ -417,7 +415,7 @@ static std::string NormalizeFb2ChapterTitle(const std::string &in) {
 }
 
 void linefeed(parsedata_t *p) {
-  p->buf[p->buflen++] = '\n';
+  AppendParsedByte(p, '\n');
   p->pen.x = MARGINLEFT;
   p->pen.y += p->app->ts->GetHeight() + p->app->ts->linespacing;
   p->linebegan = false;
@@ -438,11 +436,8 @@ static void AdvanceParsedScreen(parsedata_t *p) {
   if (p->screen == 1) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
-    p->buflen = 0;
-    if (p->italic)
-      p->buf[p->buflen++] = TEXT_ITALIC_ON;
-    if (p->bold)
-      p->buf[p->buflen++] = TEXT_BOLD_ON;
+    parse_reset_page_buffer(p);
+    RestoreParsedStyleMarkers(p);
     p->screen = 0;
   } else {
     p->screen = 1;
@@ -511,8 +506,7 @@ void start(void *data, const char *el, const char **attr) {
       AdvanceParsedScreen(p);
     parse_push(p, TAG_H1);
     bool lf = !blankline(p);
-    p->buf[p->buflen] = TEXT_BOLD_ON;
-    p->buflen++;
+    AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     if (lf)
@@ -530,8 +524,7 @@ void start(void *data, const char *el, const char **attr) {
       AdvanceParsedScreen(p);
     parse_push(p, TAG_H2);
     bool lf = !blankline(p);
-    p->buf[p->buflen] = TEXT_BOLD_ON;
-    p->buflen++;
+    AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     if (lf)
@@ -574,7 +567,7 @@ void start(void *data, const char *el, const char **attr) {
         linefeed(p);
       }
       for (int i = 0; i < p->app->paraindent; i++) {
-        p->buf[p->buflen++] = ' ';
+        AppendParsedByte(p, ' ');
         p->pen.x += p->app->ts->GetAdvance(' ');
       }
     }
@@ -604,8 +597,7 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_UL);
   else if (!strcmp(el, "strong") || !strcmp(el, "b")) {
     parse_push(p, TAG_STRONG);
-    p->buf[p->buflen] = TEXT_BOLD_ON;
-    p->buflen++;
+    AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     if (p->italic) {
@@ -615,8 +607,7 @@ void start(void *data, const char *el, const char **attr) {
     }
   } else if (!strcmp(el, "em") || !strcmp(el, "i")) {
     parse_push(p, TAG_EM);
-    p->buf[p->buflen] = TEXT_ITALIC_ON;
-    p->buflen++;
+    AppendParsedByte(p, TEXT_ITALIC_ON);
     p->italic = true;
     if (p->bold) {
       app->ts->SetStyle(TEXT_STYLE_BOLDITALIC);
@@ -665,13 +656,11 @@ void start(void *data, const char *el, const char **attr) {
 
       // The token stays format-agnostic; parser and renderer now derive the
       // concrete inline/band/page behavior from the same layout planner.
-      if (p->buflen + 3 < PAGEBUFSIZE) {
-        if (leading_paragraph_image)
-          p->buf[p->buflen++] = TEXT_IMAGE_LEADING_PARAGRAPH;
-        p->buf[p->buflen++] = TEXT_IMAGE;
-        p->buf[p->buflen++] = (u8)((image_id >> 8) & 0xFF);
-        p->buf[p->buflen++] = (u8)(image_id & 0xFF);
-      }
+      if (leading_paragraph_image)
+        AppendParsedByte(p, TEXT_IMAGE_LEADING_PARAGRAPH);
+      AppendParsedByte(p, TEXT_IMAGE);
+      AppendParsedByte(p, (u8)((image_id >> 8) & 0xFF));
+      AppendParsedByte(p, (u8)(image_id & 0xFF));
 
       switch (image_plan.mode) {
       case INLINE_IMAGE_LAYOUT_INLINE:
@@ -946,12 +935,9 @@ void end(void *data, const char *el) {
     // Save off our last page.
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
-    p->buflen = 0;
+    parse_reset_page_buffer(p);
     // Retain styles across the page.
-    if (p->italic)
-      p->buf[p->buflen++] = TEXT_ITALIC_ON;
-    if (p->bold)
-      p->buf[p->buflen++] = TEXT_BOLD_ON;
+    RestoreParsedStyleMarkers(p);
     parse_pop(p);
     return;
   }
@@ -974,8 +960,7 @@ void end(void *data, const char *el) {
     p->paragraph_has_content = false;
   } else if (!strcmp(el, "div")) {
   } else if (!strcmp(el, "strong") || !strcmp(el, "b")) {
-    p->buf[p->buflen] = TEXT_BOLD_OFF;
-    p->buflen++;
+    AppendParsedByte(p, TEXT_BOLD_OFF);
     p->bold = false;
     if (p->italic) {
       ts->SetStyle(TEXT_STYLE_ITALIC);
@@ -983,8 +968,7 @@ void end(void *data, const char *el) {
       ts->SetStyle(TEXT_STYLE_REGULAR);
     }
   } else if (!strcmp(el, "em") || !strcmp(el, "i")) {
-    p->buf[p->buflen] = TEXT_ITALIC_OFF;
-    p->buflen++;
+    AppendParsedByte(p, TEXT_ITALIC_OFF);
     p->italic = false;
     if (p->bold) {
       ts->SetStyle(TEXT_STYLE_BOLD);
@@ -992,14 +976,12 @@ void end(void *data, const char *el) {
       ts->SetStyle(TEXT_STYLE_REGULAR);
     }
   } else if (!strcmp(el, "h1")) {
-    p->buf[p->buflen] = TEXT_BOLD_OFF;
-    p->buflen++;
+    AppendParsedByte(p, TEXT_BOLD_OFF);
     p->bold = false;
     linefeed(p);
     linefeed(p);
   } else if (!strcmp(el, "h2")) {
-    p->buf[p->buflen] = TEXT_BOLD_OFF;
-    p->buflen++;
+    AppendParsedByte(p, TEXT_BOLD_OFF);
     p->bold = false;
     linefeed(p);
   } else if (!strcmp(el, "h3") || !strcmp(el, "h4") || !strcmp(el, "h5") ||
@@ -1024,11 +1006,8 @@ void end(void *data, const char *el) {
       // Copy in buffered char data into a new page.
       Page *page = p->book->AppendPage();
       page->SetBuffer(p->buf, p->buflen);
-      p->buflen = 0;
-      if (p->italic)
-        p->buf[p->buflen++] = TEXT_ITALIC_ON;
-      if (p->bold)
-        p->buf[p->buflen++] = TEXT_BOLD_ON;
+      parse_reset_page_buffer(p);
+      RestoreParsedStyleMarkers(p);
       p->screen = 0;
     } else
       // End of left screen; same page, next screen.
@@ -1055,12 +1034,12 @@ void fallback(void *data, const XML_Char *s, int len) {
     sscanf(s, "&#%d;", &code);
     if (code) {
       if (code >= 128 && code <= 2047) {
-        p->buf[p->buflen++] = 192 + (code / 64);
-        p->buf[p->buflen++] = 128 + (code % 64);
+        AppendParsedByte(p, 192 + (code / 64));
+        AppendParsedByte(p, 128 + (code % 64));
       } else if (code >= 2048 && code <= 65535) {
-        p->buf[p->buflen++] = 224 + (code / 4096);
-        p->buf[p->buflen++] = 128 + ((code / 64) % 64);
-        p->buf[p->buflen++] = 128 + (code % 64);
+        AppendParsedByte(p, 224 + (code / 4096));
+        AppendParsedByte(p, 128 + ((code / 64) % 64));
+        AppendParsedByte(p, 128 + (code % 64));
       }
       // TODO - support 4-byte codes
 
@@ -1070,27 +1049,27 @@ void fallback(void *data, const XML_Char *s, int len) {
 
     /** otherwise, handle only common HTML named entities. */
     if (!strncmp(s, "&nbsp;", 5)) {
-      p->buf[p->buflen++] = ' ';
+      AppendParsedByte(p, ' ');
       p->pen.x += advancespace;
       return;
     }
     if (!strcmp(s, "&quot;")) {
-      p->buf[p->buflen++] = '"';
+      AppendParsedByte(p, '"');
       p->pen.x += advancespace;
       return;
     }
     if (!strcmp(s, "&amp;")) {
-      p->buf[p->buflen++] = '&';
+      AppendParsedByte(p, '&');
       p->pen.x += advancespace;
       return;
     }
     if (!strcmp(s, "&lt;")) {
-      p->buf[p->buflen++] = '<';
+      AppendParsedByte(p, '<');
       p->pen.x += advancespace;
       return;
     }
     if (!strcmp(s, "&gt;")) {
-      p->buf[p->buflen++] = '>';
+      AppendParsedByte(p, '>');
       p->pen.x += advancespace;
       return;
     }

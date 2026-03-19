@@ -29,8 +29,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "parse.h"
 
-#include "app/app.h"
 #include <stdio.h>
+#include <string.h>
 
 bool iswhitespace(u8 c) {
   switch (c) {
@@ -41,6 +41,54 @@ bool iswhitespace(u8 c) {
   default:
     return false;
   }
+}
+
+void parse_reset_page_buffer(parsedata_t *data) {
+  if (!data)
+    return;
+  memset(data->buf, 0, sizeof(data->buf));
+  data->buflen = 0;
+  data->pagebuf_overflowed = false;
+  data->pagebuf_overflow_bytes = 0;
+}
+
+static void parse_note_page_buffer_overflow(parsedata_t *data, size_t bytes) {
+  if (!data || bytes == 0)
+    return;
+  data->pagebuf_overflowed = true;
+  data->pagebuf_overflow_bytes += bytes;
+}
+
+bool parse_append_page_byte(parsedata_t *data, u8 c) {
+  if (!data)
+    return false;
+  if (data->buflen >= PAGEBUFSIZE) {
+    parse_note_page_buffer_overflow(data, 1);
+    return false;
+  }
+  data->buf[data->buflen++] = c;
+  return true;
+}
+
+size_t parse_append_page_bytes(parsedata_t *data, const void *src, size_t len) {
+  if (!data || !src || len == 0)
+    return 0;
+  if (data->buflen >= PAGEBUFSIZE) {
+    parse_note_page_buffer_overflow(data, len);
+    return 0;
+  }
+
+  const size_t available = (size_t)PAGEBUFSIZE - (size_t)data->buflen;
+  const size_t written = (len < available) ? len : available;
+  memcpy(data->buf + data->buflen, src, written);
+  data->buflen += (int)written;
+  if (written < len)
+    parse_note_page_buffer_overflow(data, len - written);
+  return written;
+}
+
+bool parse_page_buffer_overflowed(const parsedata_t *data) {
+  return data && data->pagebuf_overflowed;
 }
 
 void parse_init(parsedata_t *data) {
@@ -71,8 +119,7 @@ void parse_init(parsedata_t *data) {
   for (int i = 0; i < 32; i++)
     data->fb2_section_has_chapter[i] = false;
   data->fb2_title_text.clear();
-  strcpy((char *)data->buf, "");
-  data->buflen = 0;
+  parse_reset_page_buffer(data);
   data->status = 0;
   data->pagecount = 0;
 }
