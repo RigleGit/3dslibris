@@ -21,6 +21,7 @@
 #include "main.h"
 #include "sys/stat.h"
 #include "sys/time.h"
+#include "ui/text_limits.h"
 #include <stdio.h>
 #include <sys/param.h>
 #include <vector>
@@ -64,7 +65,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
   } else if (!strcmp(name, "font")) {
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "size"))
-        app->ts->SetPixelSize(atoi(attr[i + 1]));
+        app->ts->SetPixelSize((u8)ClampTextPixelSize(atoi(attr[i + 1])));
       else if (!strcmp(attr[i], "normal"))
         app->ts->SetFontFile((char *)attr[i + 1], TEXT_STYLE_REGULAR);
       else if (!strcmp(attr[i], "bold"))

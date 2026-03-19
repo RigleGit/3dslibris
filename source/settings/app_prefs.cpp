@@ -30,6 +30,7 @@
 #include "parse.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
+#include "ui/text_limits.h"
 
 static const int PREFS_LIBRARY_BTN_X = 130;
 static const int PREFS_LIBRARY_BTN_Y = 286;
@@ -307,7 +308,7 @@ void App::PrefsHandleTouch() {
 }
 
 void App::PrefsIncreasePixelSize() {
-  if (ts->pixelsize < 18) {
+  if (ts->pixelsize < kTextPixelSizeMax) {
     ts->SetPixelSize(ts->pixelsize + 1);
     MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
@@ -316,7 +317,7 @@ void App::PrefsIncreasePixelSize() {
 }
 
 void App::PrefsDecreasePixelSize() {
-  if (ts->pixelsize > 6) {
+  if (ts->pixelsize > kTextPixelSizeMin) {
     ts->SetPixelSize(ts->pixelsize - 1);
     MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);

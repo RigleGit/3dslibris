@@ -43,6 +43,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "app/app.h"
 #include "main.h"
 #include "stb_image.h"
+#include "ui/text_limits.h"
 #include "version.h"
 
 #define PIXELSIZE 12
@@ -674,6 +675,7 @@ u8 Text::GetPixelSize() { return pixelsize; }
 u16 *Text::GetScreen() { return screen; }
 
 void Text::SetPixelSize(u8 size) {
+  size = (u8)ClampTextPixelSize((int)size);
   if (size == pixelsize)
     return;
   pixelsize = size;
