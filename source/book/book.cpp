@@ -217,18 +217,12 @@ static bool ParsedBufferEndsWithWhitespace(const parsedata_t *p) {
   return c == ' ' || c == '\n' || c == '\t';
 }
 
-static bool SoftAdvanceParsedPageForBufferLimit(parsedata_t *p, void *ctx);
-
 static void AppendParsedByte(parsedata_t *p, char c) {
-  parse_append_page_byte_soft(p, (u8)c,
-                              (c == '\n') ? NULL
-                                          : SoftAdvanceParsedPageForBufferLimit,
-                              NULL);
+  parse_append_page_byte(p, (u8)c);
 }
 
 static void AppendParsedBytes(parsedata_t *p, const char *data, size_t len) {
-  parse_append_page_bytes_soft(p, data, len, SoftAdvanceParsedPageForBufferLimit,
-                               NULL);
+  parse_append_page_bytes(p, data, len);
 }
 
 static void RestoreParsedStyleMarkers(parsedata_t *p) {
@@ -238,28 +232,6 @@ static void RestoreParsedStyleMarkers(parsedata_t *p) {
     AppendParsedByte(p, TEXT_ITALIC_ON);
   if (p->bold)
     AppendParsedByte(p, TEXT_BOLD_ON);
-}
-
-static bool SoftAdvanceParsedPageForBufferLimit(parsedata_t *p, void *ctx) {
-  (void)ctx;
-  if (!p || !p->book || !p->ts)
-    return false;
-
-  Text *ts = p->ts;
-  Page *page = p->book->AppendPage();
-  page->SetBuffer(p->buf, p->buflen);
-  page->start = p->pos;
-  p->pos += p->buflen;
-  page->end = p->pos;
-  p->pagecount++;
-
-  parse_reset_page_buffer(p);
-  p->screen = 0;
-  p->pen.x = ts->margin.left;
-  p->pen.y = ts->margin.top + ts->GetHeight();
-  p->linebegan = false;
-  RestoreParsedStyleMarkers(p);
-  return true;
 }
 
 static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {

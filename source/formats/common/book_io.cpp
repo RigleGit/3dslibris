@@ -1368,6 +1368,10 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
   if (!p || !p->ts || !p->book)
     return;
 
+  const size_t token_len = 4;
+  if (p->buflen > 0 && ((size_t)p->buflen + token_len) > PAGEBUFSIZE)
+    PlainForceAdvancePageForBufferLimit(p, NULL);
+
   Text *ts = p->ts;
   InlineImageLayoutPlan image_plan{};
   p->book->PlanInlineImageLayout(ts, image_id, p->screen, p->pen.x, p->pen.y,
@@ -1380,20 +1384,14 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
     PlainLinefeed(p);
 
   if (image_context == INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH)
-    parse_append_page_byte_soft(p, TEXT_IMAGE_LEADING_PARAGRAPH,
-                                PlainForceAdvancePageForBufferLimit, NULL);
+    parse_append_page_byte(p, TEXT_IMAGE_LEADING_PARAGRAPH);
   else if (image_context == INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION)
-    parse_append_page_byte_soft(p, TEXT_IMAGE_FIGURE_WITH_CAPTION,
-                                PlainForceAdvancePageForBufferLimit, NULL);
+    parse_append_page_byte(p, TEXT_IMAGE_FIGURE_WITH_CAPTION);
   else
-    parse_append_page_byte_soft(p, TEXT_IMAGE_CONTEXT_DEFAULT,
-                                PlainForceAdvancePageForBufferLimit, NULL);
-  parse_append_page_byte_soft(p, TEXT_IMAGE, PlainForceAdvancePageForBufferLimit,
-                              NULL);
-  parse_append_page_byte_soft(p, (u8)((image_id >> 8) & 0xFF),
-                              PlainForceAdvancePageForBufferLimit, NULL);
-  parse_append_page_byte_soft(p, (u8)(image_id & 0xFF),
-                              PlainForceAdvancePageForBufferLimit, NULL);
+    parse_append_page_byte(p, TEXT_IMAGE_CONTEXT_DEFAULT);
+  parse_append_page_byte(p, TEXT_IMAGE);
+  parse_append_page_byte(p, (u8)((image_id >> 8) & 0xFF));
+  parse_append_page_byte(p, (u8)(image_id & 0xFF));
 
   switch (image_plan.mode) {
   case INLINE_IMAGE_LAYOUT_INLINE:
