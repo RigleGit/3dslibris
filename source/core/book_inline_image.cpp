@@ -750,8 +750,16 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     return false;
 
   int imgW = 0, imgH = 0, channels = 0;
+  int loaded_channels = 4;
   unsigned char *pixels = stbi_load_from_memory(
       compressed.data(), (int)compressed.size(), &imgW, &imgH, &channels, 4);
+  if (!pixels) {
+    // Some valid JPEGs fail the 4-channel expansion path on-device. Retry with
+    // RGB data and treat the image as fully opaque during the scale/blit pass.
+    loaded_channels = 3;
+    pixels = stbi_load_from_memory(compressed.data(), (int)compressed.size(),
+                                   &imgW, &imgH, &channels, 3);
+  }
   if (!pixels)
     return false;
 
@@ -801,12 +809,13 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
       int src_x = (x * imgW) / std::max(1, draw_w);
       if (src_x >= imgW)
         src_x = imgW - 1;
-      unsigned char *px = &pixels[(src_y * imgW + src_x) * 4];
+      unsigned char *px =
+          &pixels[(src_y * imgW + src_x) * loaded_channels];
 
       u8 r8 = px[0];
       u8 g8 = px[1];
       u8 b8 = px[2];
-      u8 a8 = px[3];
+      u8 a8 = (loaded_channels >= 4) ? px[3] : 255;
       if (a8 < 255) {
         r8 = (u8)((r8 * a8 + bg_r8 * (255 - a8) + 127) / 255);
         g8 = (u8)((g8 * a8 + bg_g8 * (255 - a8) + 127) / 255);
