@@ -54,6 +54,7 @@ typedef struct {
 	//! Our total parse position in terms of cooked text.
 	int pos;
 	bool linebegan;
+	bool strip_leading_list_marker;
 	bool in_paragraph;
 	bool paragraph_has_content;
 	bool bold;

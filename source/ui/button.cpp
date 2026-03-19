@@ -18,23 +18,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "shared/text_unicode_utils.h"
+
 namespace {
 
 static size_t Utf8BytesForCharCount(Text *ts, const char *s, u8 count) {
+  (void)ts;
   if (!s || !*s || count == 0)
     return 0;
-
-  size_t bytes = 0;
-  u8 chars = 0;
-  while (s[bytes] && chars < count) {
-    u32 ucs = 0;
-    u8 step = ts ? ts->GetCharCode(s + bytes, &ucs) : 0;
-    if (!step)
-      step = 1;
-    bytes += step;
-    chars++;
-  }
-  return bytes;
+  return text_unicode_utils::Utf8BytesForDisplayChars(s, count);
 }
 
 } // namespace

@@ -42,6 +42,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "app/app.h"
 #include "main.h"
+#include "shared/text_unicode_utils.h"
 #include "stb_image.h"
 #include "ui/text_limits.h"
 #include "version.h"
@@ -551,89 +552,42 @@ u8 Text::GetStringWidth(const char *txt, FT_Face face) {
 }
 
 u8 Text::GetCharCountInsideWidth(const char *txt, u8 style, u8 pixels) {
-  u8 n = 0;
-  u32 ucs = 0;
-  u8 width = 0;
-  for (const char *c = txt; *c != 0 && n <= strlen(txt);) {
-    u8 bytes = GetCharCode(c, &ucs);
-    if (!bytes) {
-      bytes = 1;
-      ucs = '?';
+  if (!txt || !*txt)
+    return 0;
+
+  std::vector<text_unicode_utils::TextCodepoint> run;
+  if (!text_unicode_utils::BuildTextRunUtf8(txt, strlen(txt), NULL, &run))
+    return 0;
+
+  u8 count = 0;
+  u16 width = 0;
+  u16 cluster_width = 0;
+  bool have_cluster = false;
+  for (size_t i = 0; i < run.size(); i++) {
+    if (run[i].grapheme_start) {
+      if (have_cluster) {
+        if ((u16)(width + cluster_width) > pixels)
+          return count;
+        width = (u16)(width + cluster_width);
+        count++;
+      }
+      cluster_width = 0;
+      have_cluster = true;
     }
-    c += bytes;
-    width += GetAdvance(ucs, faces[style]);
-    if (width > pixels)
-      return n;
-    n++;
+    cluster_width =
+        (u16)(cluster_width + GetAdvance(run[i].codepoint, faces[style]));
   }
-  return n;
+
+  if (have_cluster && (u16)(width + cluster_width) <= pixels)
+    count++;
+  return count;
 }
 
 u8 Text::GetCharCode(const char *utf8, u32 *ucs) {
-  //! Given a UTF-8 encoding, fill in the Unicode/UCS code point.
-  //! Return the bytelength of the encoding, for advancing
-  //! to the next character; 0 if encoding could not be translated.
   if (!utf8 || !ucs || !utf8[0])
     return 0;
-
-  auto cp1252ToUcs = [](unsigned char b) -> u32 {
-    static const u16 cp1252_map[32] = {
-        0x20AC, 0x0000, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
-        0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x0000, 0x017D, 0x0000,
-        0x0000, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
-        0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x0000, 0x017E, 0x0178,
-    };
-    if (b >= 0x80 && b <= 0x9F) {
-      u16 mapped = cp1252_map[b - 0x80];
-      return mapped ? mapped : (u32)'?';
-    }
-    return (u32)b; // Latin-1 range (0xA0..0xFF) or ASCII.
-  };
-
-  const unsigned char c0 = (unsigned char)utf8[0];
-  if (c0 < 0x80) { // ASCII
-    *ucs = c0;
-    return 1;
-  }
-
-  if (c0 >= 0xC2 && c0 <= 0xDF) { // 2-byte UTF-8
-    const unsigned char c1 = (unsigned char)utf8[1];
-    if (!utf8[1] || (c1 & 0xC0) != 0x80) {
-      *ucs = cp1252ToUcs(c0);
-      return 1;
-    }
-    *ucs = ((u32)(c0 & 0x1F) << 6) | (u32)(c1 & 0x3F);
-    return 2;
-  }
-
-  if (c0 >= 0xE0 && c0 <= 0xEF) { // 3-byte UTF-8
-    const unsigned char c1 = (unsigned char)utf8[1];
-    const unsigned char c2 = (unsigned char)utf8[2];
-    if (!utf8[1] || !utf8[2] || (c1 & 0xC0) != 0x80 || (c2 & 0xC0) != 0x80) {
-      *ucs = cp1252ToUcs(c0);
-      return 1;
-    }
-    *ucs =
-        ((u32)(c0 & 0x0F) << 12) | ((u32)(c1 & 0x3F) << 6) | (u32)(c2 & 0x3F);
-    return 3;
-  }
-
-  if (c0 >= 0xF0 && c0 <= 0xF4) { // 4-byte UTF-8
-    const unsigned char c1 = (unsigned char)utf8[1];
-    const unsigned char c2 = (unsigned char)utf8[2];
-    const unsigned char c3 = (unsigned char)utf8[3];
-    if (!utf8[1] || !utf8[2] || !utf8[3] || (c1 & 0xC0) != 0x80 ||
-        (c2 & 0xC0) != 0x80 || (c3 & 0xC0) != 0x80) {
-      *ucs = cp1252ToUcs(c0);
-      return 1;
-    }
-    *ucs = ((u32)(c0 & 0x07) << 18) | ((u32)(c1 & 0x3F) << 12) |
-           ((u32)(c2 & 0x3F) << 6) | (u32)(c3 & 0x3F);
-    return 4;
-  }
-
-  *ucs = cp1252ToUcs(c0);
-  return 1;
+  return (u8)text_unicode_utils::DecodeNextDisplayCodepoint(utf8, strlen(utf8),
+                                                            ucs);
 }
 
 std::string Text::GetFontName(u8 style) {
@@ -743,9 +697,19 @@ u8 Text::GetAdvance(u32 ucs, FT_Face face) {
 }
 
 int Text::GetStringAdvance(const char *s) {
+  if (!s)
+    return 0;
+
   int advance = 0;
-  for (unsigned int i = 0; i < strlen(s); i++) {
-    advance += GetAdvance(s[i]);
+  for (const char *c = s; *c;) {
+    u32 ucs = 0;
+    u8 bytes = GetCharCode(c, &ucs);
+    if (!bytes) {
+      bytes = 1;
+      ucs = '?';
+    }
+    advance += GetAdvance(ucs);
+    c += bytes;
   }
   return advance;
 }
