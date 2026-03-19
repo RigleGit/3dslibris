@@ -8,11 +8,12 @@ mkdir -p "$OUTDIR"
 c++ -std=c++11 \
   "$ROOT/tests/test_epub_image_utils.cpp" \
   "$ROOT/source/formats/common/epub_image_utils.cpp" \
-  "$ROOT/source/core/ioapi.c" \
-  "$ROOT/source/core/unzip.c" \
+  "$ROOT/third_party/minizip/source/ioapi.c" \
+  "$ROOT/third_party/minizip/source/unzip.c" \
   -I"$ROOT/include" \
-  -I"$ROOT/include/minizip" \
-  -I"$ROOT/source/core" \
+  -I"$ROOT/third_party/minizip" \
+  -I"$ROOT/third_party/minizip/include" \
+  -I"$ROOT/third_party/minizip/source" \
   -lz \
   -o "$OUTDIR/test_epub_image_utils"
 

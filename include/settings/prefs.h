@@ -12,8 +12,6 @@
 
 #pragma once
 
-#include "expat.h"
-
 class App;
 
 class Prefs {

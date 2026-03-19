@@ -14,7 +14,6 @@
 
 #pragma once
 
-#include "expat.h"
 #include "book/inline_image_layout.h"
 #include <3ds.h>
 #include <list>
@@ -28,22 +27,6 @@ typedef enum { FORMAT_UNDEF, FORMAT_XHTML, FORMAT_EPUB } format_t;
 class App;
 class Page;
 class Text;
-
-namespace xml::book {
-void start(void *data, const char *el, const char **attr);
-void chardata(void *data, const char *txt, int txtlen);
-void end(void *data, const char *el);
-void instruction(void *data, const char *target, const char *pidata);
-int unknown(void *encodingHandlerData, const XML_Char *name,
-            XML_Encoding *info);
-void fallback(void *data, const XML_Char *s, int len);
-} // namespace xml::book
-
-namespace xml::book::metadata {
-void start(void *userdata, const char *el, const char **attr);
-void chardata(void *userdata, const char *txt, int txtlen);
-void end(void *userdata, const char *el);
-} // namespace xml::book::metadata
 
 struct ChapterEntry {
   u16 page; // page index where chapter starts

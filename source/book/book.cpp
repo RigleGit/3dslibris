@@ -14,6 +14,7 @@
 #include "book/book.h"
 
 #include "app/app.h"
+#include "book/book_xml.h"
 #include "book/heading_layout.h"
 #include "main.h"
 #include "book/page.h"

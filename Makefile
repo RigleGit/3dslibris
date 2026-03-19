@@ -41,7 +41,7 @@ SOURCES		:=	source source/core source/app source/shared source/ui source/menus \
 			source/formats/common source/formats/epub source/formats/fb2 \
 			source/formats/mobi source/expat
 DATA		:=	data
-INCLUDES	:=	include
+INCLUDES	:=	include third_party/stb
 GRAPHICS	:=
 ifneq ($(wildcard $(TOPDIR)/gfx),)
 GRAPHICS	:=	gfx
@@ -58,6 +58,9 @@ APP_DESCRIPTION	:=	$(if $(APP_DESCRIPTION_OVERRIDE),$(APP_DESCRIPTION_OVERRIDE),
 APP_AUTHOR	:=	$(if $(APP_AUTHOR_OVERRIDE),$(APP_AUTHOR_OVERRIDE),$(DEFAULT_APP_AUTHOR))
 ICON		:=	assets/release/icon.png
 DEBUG_LOGGING	?=	0
+EXPAT_ENABLE_DTD ?= 0
+EXPAT_ENABLE_NS ?= 0
+EXPAT_CONTEXT_BYTES ?= 0
 
 SDMC_TEMPLATE	:=	sdmc
 DISTDIR		:=	dist
@@ -107,9 +110,12 @@ CFLAGS	:=	-g -Wall -O2 -mword-relocations \
 			-ffunction-sections \
 			$(ARCH)
 
-CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include -I$(PORTLIBS)/include/minizip \
+CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include \
 			-I$(CURDIR)/source/expat \
-			-D__3DS__ -DXML_STATIC -DHAVE_MEMMOVE -DXML_POOR_ENTROPY
+			-D__3DS__ -DXML_STATIC -DHAVE_MEMMOVE -DXML_POOR_ENTROPY \
+			-DDSLIBRIS_EXPAT_ENABLE_DTD=$(EXPAT_ENABLE_DTD) \
+			-DDSLIBRIS_EXPAT_ENABLE_NS=$(EXPAT_ENABLE_NS) \
+			-DDSLIBRIS_EXPAT_CONTEXT_BYTES=$(EXPAT_CONTEXT_BYTES)
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
 
@@ -121,7 +127,7 @@ endif
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=3dsx.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lfreetype -lpng -lbz2 -lz -lm -lctru
+LIBS	:= -lfreetype -lpng -lbz2 -lminizip -lz -lm -lctru
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing

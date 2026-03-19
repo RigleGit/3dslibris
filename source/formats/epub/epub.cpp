@@ -32,9 +32,10 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "base64_utils.h"
 #include "app/app.h"
 #include "book/book.h"
+#include "book/book_xml.h"
 #include "debug_log.h"
 #include "formats/common/epub_image_utils.h"
-#include "expat.h"
+#include "formats/common/xml_parse_utils.h"
 #include "main.h"
 #include "book/page.h"
 #include "formats/common/page_cache_utils.h"
@@ -42,7 +43,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "path_utils.h"
 #include "stb_image.h"
 #include "string_utils.h"
-#include "unzip.h"
+#include "minizip/unzip.h"
 #include "zlib.h"
 #include <3ds.h>
 #include <algorithm>
@@ -101,10 +102,6 @@ static const int EPUB_COVER_MAX_DIMENSION = 4096;
 static const bool kEpubEnableRealTocResolve = false;
 static std::string NormalizeAsciiSearchText(const std::string &raw,
                                             size_t max_out);
-static bool ParseXmlBuffer(const std::string &xml,
-                           XML_StartElementHandler start,
-                           XML_EndElementHandler end,
-                           XML_CharacterDataHandler chardata, void *userdata);
 
 struct ZipEntryIndex {
   bool built = false;
@@ -920,7 +917,12 @@ static bool ParseNcxWithExpat(const std::string &xml,
   d.base_path = base_path;
   d.depth = 0;
   d.stack.clear();
-  bool ok = ParseXmlBuffer(xml, ncx_start, ncx_end, ncx_char, &d);
+  xml_parse_utils::XmlParserOptions options;
+  options.start_element = ncx_start;
+  options.end_element = ncx_end;
+  options.character_data = ncx_char;
+  options.user_data = &d;
+  bool ok = xml_parse_utils::ParseXmlString(xml, options).ok;
 
   if (app) {
     char msg[96];
@@ -1027,23 +1029,6 @@ static bool ParseNcxLightweight(const std::string &xml,
     EpubDiag(app, msg);
   }
   return any;
-}
-
-static bool ParseXmlBuffer(const std::string &xml,
-                           XML_StartElementHandler start,
-                           XML_EndElementHandler end,
-                           XML_CharacterDataHandler chardata, void *userdata) {
-  if (xml.size() > EPUB_TOC_MAX_BYTES)
-    return false;
-  XML_Parser p = XML_ParserCreate(NULL);
-  if (!p)
-    return false;
-  XML_SetUserData(p, userdata);
-  XML_SetElementHandler(p, start, end);
-  XML_SetCharacterDataHandler(p, chardata);
-  bool ok = XML_Parse(p, xml.c_str(), (int)xml.size(), 1) != XML_STATUS_ERROR;
-  XML_ParserFree(p);
-  return ok;
 }
 
 static void EpubDiag(App *app, const char *fmt, const char *arg) {
@@ -1277,7 +1262,11 @@ BuildTocFragmentProxyMap(unzFile uf, const std::string &doc_path,
   data.id_stack.clear();
   data.pushed_stack.clear();
 
-  if (!ParseXmlBuffer(xml, toc_proxy_start, toc_proxy_end, NULL, &data))
+  xml_parse_utils::XmlParserOptions options;
+  options.start_element = toc_proxy_start;
+  options.end_element = toc_proxy_end;
+  options.user_data = &data;
+  if (!xml_parse_utils::ParseXmlString(xml, options).ok)
     return false;
 
   if (proxy_map->size() < 4) {
@@ -1582,45 +1571,32 @@ void epub_rootfile_char(void *data, const XML_Char *txt, int len) {
 int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
   int rc = 0;
   parsedata_t pd;
-  static char filebuf[BUFSIZE];
-  XML_Parser p = XML_ParserCreate(NULL);
+  xml_parse_utils::XmlParserOptions options;
   if (epd->type == PARSE_CONTAINER) {
-    XML_SetUserData(p, epd);
-    XML_SetElementHandler(p, epub_container_start, NULL);
+    options.user_data = epd;
+    options.start_element = epub_container_start;
   } else if (epd->type == PARSE_ROOTFILE) {
-    XML_SetUserData(p, epd);
-    XML_SetElementHandler(p, epub_rootfile_start, epub_rootfile_end);
-    XML_SetCharacterDataHandler(p, epub_rootfile_char);
+    options.user_data = epd;
+    options.start_element = epub_rootfile_start;
+    options.end_element = epub_rootfile_end;
+    options.character_data = epub_rootfile_char;
   } else if (epd->type == PARSE_CONTENT) {
     epd->parsed_doc_title.clear();
     InitParsedataWithEpubDeps(&pd, epd->book, deps);
     pd.docpath = epd->docpath;
-    XML_SetUserData(p, &pd);
-    XML_SetElementHandler(p, xml::book::start, xml::book::end);
-    XML_SetCharacterDataHandler(p, xml::book::chardata);
-    XML_SetDefaultHandler(p, xml::book::fallback);
-    XML_SetProcessingInstructionHandler(p, xml::book::instruction);
+    options.user_data = &pd;
+    options.start_element = xml::book::start;
+    options.end_element = xml::book::end;
+    options.character_data = xml::book::chardata;
+    options.default_handler = xml::book::fallback;
+    options.processing_instruction = xml::book::instruction;
   } else
     return 0;
 
-  int len = 0;
-  size_t len_total = 0;
-  enum XML_Status status;
-  do {
-    len = unzReadCurrentFile(uf, filebuf, BUFSIZE);
-    if (len < 0) {
-      rc = len;
-      break;
-    }
-    status = XML_Parse(p, filebuf, len, len == 0);
-    if (status == XML_STATUS_ERROR) {
-      rc = status;
-      break;
-    }
-    len_total += (size_t)len;
-  } while (len);
-
-  XML_ParserFree(p);
+  xml_parse_utils::XmlParseResult parse_result =
+      xml_parse_utils::ParseXmlZipEntry(uf, options, BUFSIZE);
+  if (!parse_result.ok)
+    rc = (int)parse_result.error_code;
   if (epd->type == PARSE_CONTENT) {
     epd->parsed_doc_title = Trim(pd.doc_title);
     if (epd->parsed_doc_title.empty())
@@ -1848,8 +1824,13 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
       navdata.anchor_depth = 0;
       navdata.nav_level = 0;
       navdata.current_level = 0;
+      xml_parse_utils::XmlParserOptions nav_options;
+      nav_options.start_element = nav_start;
+      nav_options.end_element = nav_end;
+      nav_options.character_data = nav_char;
+      nav_options.user_data = &navdata;
       bool parsed_nav =
-          ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata);
+          xml_parse_utils::ParseXmlString(toc_xml, nav_options).ok;
       if (parsed_nav && app)
         LogTocEntrySamples(app, "NAV parsed", nav_entries, 4);
       if (parsed_nav && looks_reasonable_toc(nav_entries)) {
@@ -1923,8 +1904,13 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
           navdata.anchor_depth = 0;
           navdata.nav_level = 0;
           navdata.current_level = 0;
+          xml_parse_utils::XmlParserOptions nav_options;
+          nav_options.start_element = nav_start;
+          nav_options.end_element = nav_end;
+          nav_options.character_data = nav_char;
+          nav_options.user_data = &navdata;
           bool parsed_nav =
-              ParseXmlBuffer(toc_xml, nav_start, nav_end, nav_char, &navdata);
+              xml_parse_utils::ParseXmlString(toc_xml, nav_options).ok;
           if (parsed_nav && app)
             LogTocEntrySamples(app, "NAV fallback parsed", nav_entries, 4);
           if (parsed_nav && looks_reasonable_toc(nav_entries)) {

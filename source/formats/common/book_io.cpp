@@ -11,6 +11,7 @@
 #include "book/book.h"
 
 #include "app/app.h"
+#include "book/book_xml.h"
 #include "formats/common/buffered_status_log.h"
 #include "formats/common/book_error.h"
 #include "debug_log.h"
@@ -23,9 +24,10 @@
 #include "formats/mobi/mobi_text_cleanup.h"
 #include "book/page.h"
 #include "formats/common/page_cache_utils.h"
+#include "formats/common/xml_parse_utils.h"
 #include "parse.h"
 #include "string_utils.h"
-#include "unzip.h"
+#include "minizip/unzip.h"
 #include "shared/utf8_utils.h"
 #include <algorithm>
 #include <ctype.h>
@@ -4869,12 +4871,6 @@ static u8 ParseOdtFile(Book *book, const char *path) {
   book->ClearChapters();
   book->ClearTocConfidence();
 
-  XML_Parser p = XML_ParserCreate(NULL);
-  if (!p) {
-    parse_pop(&parsedata);
-    return 254;
-  }
-
   OdtParseState odt_state;
   odt_state.parsedata = &parsedata;
   odt_state.book = book;
@@ -4885,17 +4881,17 @@ static u8 ParseOdtFile(Book *book, const char *path) {
   odt_state.heading_text.clear();
   odt_state.pending_space = false;
 
-  XML_SetUserData(p, &odt_state);
-  XML_SetElementHandler(p, odt_start, odt_end);
-  XML_SetCharacterDataHandler(p, odt_chardata);
-
-  bool ok = XML_Parse(p, content_xml.c_str(), (int)content_xml.size(), 1) !=
-            XML_STATUS_ERROR;
-  if (!ok && parsedata.app) {
-    parsedata.app->parse_error(p);
-  }
-
-  XML_ParserFree(p);
+  xml_parse_utils::XmlParserOptions options;
+  options.start_element = odt_start;
+  options.end_element = odt_end;
+  options.character_data = odt_chardata;
+  options.user_data = &odt_state;
+  xml_parse_utils::XmlParseResult parse_result =
+      xml_parse_utils::ParseXmlString(content_xml, options);
+  bool ok = parse_result.ok;
+  if (!ok && parsedata.app)
+    parsedata.app->PrintStatus(
+        xml_parse_utils::FormatXmlParseError(parse_result).c_str());
   parse_pop(&parsedata);
 
   if (!ok)
@@ -5055,15 +5051,8 @@ u8 Book::Parse(bool fulltext) {
   if (fulltext && HasExtCI(GetFileName(), ".mobi"))
     return ParseMobiFile(this, path);
 
-  char *filebuf = new char[BUFSIZE];
-  if (!filebuf) {
-    rc = 1;
-    return (rc);
-  }
-
   FILE *fp = fopen(path, "r");
   if (!fp) {
-    delete[] filebuf;
     rc = 255;
     return (rc);
   }
@@ -5073,43 +5062,32 @@ u8 Book::Parse(bool fulltext) {
   InitParsedataWithBookIoDeps(&parsedata, this, deps);
   parsedata.fb2_mode = fulltext && HasExtCI(GetFileName(), ".fb2");
 
-  XML_Parser p = XML_ParserCreate(NULL);
-  if (!p) {
-    delete[] filebuf;
-    fclose(fp);
-    rc = 253;
-    return rc;
-  }
-  XML_ParserReset(p, NULL);
-  XML_SetUserData(p, &parsedata);
-  XML_SetDefaultHandler(p, xml::book::fallback);
-  XML_SetProcessingInstructionHandler(p, xml::book::instruction);
-  XML_SetElementHandler(p, xml::book::start, xml::book::end);
-  XML_SetCharacterDataHandler(p, xml::book::chardata);
+  xml_parse_utils::XmlParserOptions options;
+  options.user_data = &parsedata;
+  options.default_handler = xml::book::fallback;
+  options.processing_instruction = xml::book::instruction;
+  options.start_element = xml::book::start;
+  options.end_element = xml::book::end;
+  options.character_data = xml::book::chardata;
   if (!fulltext) {
-    XML_SetElementHandler(p, xml::book::metadata::start,
-                          xml::book::metadata::end);
-    XML_SetCharacterDataHandler(p, xml::book::metadata::chardata);
+    options.start_element = xml::book::metadata::start;
+    options.end_element = xml::book::metadata::end;
+    options.character_data = xml::book::metadata::chardata;
   }
-
-  enum XML_Status status;
-  while (true) {
-    int bytes_read = fread(filebuf, 1, BUFSIZE, fp);
-    status = XML_Parse(p, filebuf, bytes_read, (bytes_read == 0));
-    if (status == XML_STATUS_ERROR) {
-      app->parse_error(p);
-      rc = 254;
-      break;
-    }
-    if (parsedata.status)
-      break; // non-fulltext parsing signals it is done.
-    if (bytes_read == 0)
-      break; // assume our buffer ran out.
-  }
-
-  XML_ParserFree(p);
+  xml_parse_utils::XmlParseResult parse_result =
+      xml_parse_utils::ParseXmlFileStream(
+          fp, options, BUFSIZE,
+          [](void *user_data) {
+            parsedata_t *parsedata = static_cast<parsedata_t *>(user_data);
+            return parsedata && parsedata->status;
+          });
   fclose(fp);
-  delete[] filebuf;
+  if (!parse_result.ok) {
+    if (app)
+      app->PrintStatus(
+          xml_parse_utils::FormatXmlParseError(parse_result).c_str());
+    rc = 254;
+  }
 
   if (rc == 0 && fulltext && parsedata.fb2_mode) {
     bool has_structured_toc = !chapters.empty();

@@ -1,5 +1,7 @@
-/* expat_config.h.  Generated from expat_config.h.in by configure.  */
-/* expat_config.h.in.  Generated from configure.ac by autoheader.  */
+/* expat_config.h tuned for vendored Expat on 3DS builds. */
+
+#ifndef EXPAT_CONFIG_H
+#define EXPAT_CONFIG_H 1
 
 /* 1234 = LIL_ENDIAN, 4321 = BIGENDIAN */
 #define BYTEORDER 1234
@@ -9,9 +11,6 @@
 
 /* Define to 1 if you have the `arc4random_buf' function. */
 /* #undef HAVE_ARC4RANDOM_BUF */
-
-/* Define to 1 if you have the `bcopy' function. */
-#define HAVE_BCOPY 1
 
 /* Define to 1 if you have the <dlfcn.h> header file. */
 /* #undef HAVE_DLFCN_H */
@@ -27,12 +26,6 @@
 
 /* Define to 1 if you have the <inttypes.h> header file. */
 #define HAVE_INTTYPES_H 1
-
-/* Define to 1 if you have the `bsd' library (-lbsd). */
-/* #undef HAVE_LIBBSD */
-
-/* Define to 1 if you have the `memmove' function. */
-#define HAVE_MEMMOVE 1
 
 /* Define to 1 if you have the <memory.h> header file. */
 #define HAVE_MEMORY_H 1
@@ -55,9 +48,6 @@
 /* Define to 1 if you have `syscall' and `SYS_getrandom'. */
 /* #undef HAVE_SYSCALL_GETRANDOM */
 
-/* Define to 1 if you have the <sys/param.h> header file. */
-#define HAVE_SYS_PARAM_H 1
-
 /* Define to 1 if you have the <sys/stat.h> header file. */
 #define HAVE_SYS_STAT_H 1
 
@@ -66,9 +56,6 @@
 
 /* Define to 1 if you have the <unistd.h> header file. */
 #define HAVE_UNISTD_H 1
-
-/* Define to the sub-directory where libtool stores uninstalled libraries. */
-#define LT_OBJDIR ".libs/"
 
 /* Name of package */
 #define PACKAGE "expat"
@@ -80,7 +67,7 @@
 #define PACKAGE_NAME "expat"
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "expat 2.2.5"
+#define PACKAGE_STRING "expat 2.7.5"
 
 /* Define to the one symbol short name of this package. */
 #define PACKAGE_TARNAME "expat"
@@ -89,35 +76,58 @@
 #define PACKAGE_URL ""
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "2.2.5"
+#define PACKAGE_VERSION "2.7.5"
 
 /* Define to 1 if you have the ANSI C header files. */
+#ifndef STDC_HEADERS
 #define STDC_HEADERS 1
+#endif
 
 /* Version number of package */
-#define VERSION "2.2.5"
+#define VERSION "2.7.5"
 
 /* whether byteorder is bigendian */
 /* #undef WORDS_BIGENDIAN */
 
+/* Define to allow retrieving the byte offsets for attribute names and values. */
+/* #undef XML_ATTR_INFO */
+
+/* Internal build override for context retention. */
+#ifndef DSLIBRIS_EXPAT_CONTEXT_BYTES
+#define DSLIBRIS_EXPAT_CONTEXT_BYTES 1024
+#endif
+
 /* Define to specify how much context to retain around the current parse
-   point. */
-#define XML_CONTEXT_BYTES 1024
+   point, 0 to disable. */
+#define XML_CONTEXT_BYTES DSLIBRIS_EXPAT_CONTEXT_BYTES
 
 /* Define to include code reading entropy from `/dev/urandom'. */
 #define XML_DEV_URANDOM 1
 
+/* Internal build override for DTD support. */
+#ifndef DSLIBRIS_EXPAT_ENABLE_DTD
+#define DSLIBRIS_EXPAT_ENABLE_DTD 1
+#endif
+
 /* Define to make parameter entity parsing functionality available. */
+#if DSLIBRIS_EXPAT_ENABLE_DTD
 #define XML_DTD 1
+#endif
+
+/* Define as 1/0 to enable/disable support for general entities. */
+#define XML_GE 1
+
+/* Internal build override for namespace support. */
+#ifndef DSLIBRIS_EXPAT_ENABLE_NS
+#define DSLIBRIS_EXPAT_ENABLE_NS 1
+#endif
 
 /* Define to make XML Namespaces functionality available. */
+#if DSLIBRIS_EXPAT_ENABLE_NS
 #define XML_NS 1
+#endif
 
-/* Define to empty if `const' does not conform to ANSI C. */
-/* #undef const */
-
-/* Define to `long int' if <sys/types.h> does not define. */
+/* Define to `long' if <sys/types.h> does not define. */
 /* #undef off_t */
 
-/* Define to `unsigned int' if <sys/types.h> does not define. */
-/* #undef size_t */
+#endif /* EXPAT_CONFIG_H */

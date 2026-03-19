@@ -16,6 +16,8 @@
 #include "3ds.h"
 #include "app/app.h"
 #include "book/book.h"
+#include "book/book_xml.h"
+#include "formats/common/xml_parse_utils.h"
 #include "main.h"
 #include "sys/stat.h"
 #include "sys/time.h"
@@ -198,34 +200,16 @@ int Prefs::Read() {
   pdata.app = app;
   pdata.ts = app->ts;
 
-  XML_Parser p = XML_ParserCreate(NULL);
-  if (!p) {
-    fclose(fp);
-    err = 254;
-    return err;
-  }
-  XML_SetUnknownEncodingHandler(p, xml::book::unknown, NULL);
-  XML_SetStartElementHandler(p, xml::prefs::start);
-  XML_SetEndElementHandler(p, xml::prefs::end);
-  XML_SetUserData(p, (void *)&pdata);
-  // Stream parse to avoid loading the whole XML into memory.
-  while (true) {
-    void *buff = XML_GetBuffer(p, PARSEBUFSIZE);
-    int bytes_read = fread(buff, sizeof(char), PARSEBUFSIZE, fp);
-    if (bytes_read < 0) {
-      err = 254;
-      break;
-    }
-    enum XML_Status status = XML_ParseBuffer(p, bytes_read, bytes_read == 0);
-    if (status == XML_STATUS_ERROR) {
-      err = XML_GetErrorCode(p);
-      break;
-    }
-    if (bytes_read == 0)
-      break;
-  }
-  XML_ParserFree(p);
+  xml_parse_utils::XmlParserOptions options;
+  options.start_element = xml::prefs::start;
+  options.end_element = xml::prefs::end;
+  options.unknown_encoding = xml::book::unknown;
+  options.user_data = &pdata;
+  xml_parse_utils::XmlParseResult result =
+      xml_parse_utils::ParseXmlFileStream(fp, options, PARSEBUFSIZE);
   fclose(fp);
+  if (!result.ok)
+    err = (int)result.error_code;
   return err;
 }
 

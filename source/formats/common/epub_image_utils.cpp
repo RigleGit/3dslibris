@@ -3,7 +3,7 @@
 #include "base64_utils.h"
 #include "path_utils.h"
 #include "string_utils.h"
-#include "unzip.h"
+#include "minizip/unzip.h"
 
 #include <algorithm>
 #include <limits.h>

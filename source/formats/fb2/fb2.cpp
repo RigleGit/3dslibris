@@ -11,9 +11,9 @@
 #include "formats/fb2/fb2.h"
 
 #include "base64_utils.h"
+#include "formats/common/xml_parse_utils.h"
 #include "stb_image.h"
 #include <ctype.h>
-#include <expat.h>
 #include <stdio.h>
 #include <string.h>
 #include <vector>
@@ -159,32 +159,15 @@ static bool ParsePass(const std::string &path, void *userData,
   if (!fp)
     return false;
 
-  XML_Parser p = XML_ParserCreate(NULL);
-  if (!p) {
-    fclose(fp);
-    return false;
-  }
-  XML_SetUserData(p, userData);
-  XML_SetElementHandler(p, start, end);
-  XML_SetCharacterDataHandler(p, chardata);
-
-  char buf[8192];
-  bool ok = true;
-  while (true) {
-    int n = (int)fread(buf, 1, sizeof(buf), fp);
-    if (XML_Parse(p, buf, n, n == 0) == XML_STATUS_ERROR) {
-      ok = false;
-      break;
-    }
-    if (done_check && done_check(userData))
-      break;
-    if (n == 0)
-      break;
-  }
-
-  XML_ParserFree(p);
+  xml_parse_utils::XmlParserOptions options;
+  options.start_element = start;
+  options.end_element = end;
+  options.character_data = chardata;
+  options.user_data = userData;
+  xml_parse_utils::XmlParseResult result =
+      xml_parse_utils::ParseXmlFileStream(fp, options, 8192, done_check);
   fclose(fp);
-  return ok;
+  return result.ok;
 }
 
 static bool binary_done_check(void *userData) {
