@@ -21,6 +21,7 @@
 #include "main.h"
 #include "formats/mobi/mobi.h"
 #include "formats/mobi/mobi_heading_markers.h"
+#include "formats/mobi/mobi_record_decode.h"
 #include "formats/mobi/mobi_text_cleanup.h"
 #include "book/page.h"
 #include "formats/common/page_cache_utils.h"
@@ -58,7 +59,10 @@ static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // v12→v13: MOBI keep-with-next now follows only heading markers emitted during
 //          markup extraction; old caches may still contain broader heuristic
 //          pagination decisions.
-static const u16 kMobiPageCacheVersion = 14;
+// v14→v15: corrected MOBI record-header offsets, added trailingFlags stripping,
+//          and changed record decompression paths; old caches may reflect broken
+//          header parsing or undecoded trailing data.
+static const u16 kMobiPageCacheVersion = 15;
 static const u16 kPageCacheTitleMaxBytes = 1000;
 static const u16 kPageCachePageMaxBytes = 4096;
 static const u16 kPageCacheChapterTitleMaxBytes = 2048;
@@ -2374,50 +2378,6 @@ static std::string DecodeUtf16ToUtf8(const std::string &in) {
   return out;
 }
 
-static bool DecompressPalmDocRecord(const u8 *src, size_t src_len,
-                                    std::string *out) {
-  if (!src || !out)
-    return false;
-  out->clear();
-  out->reserve(src_len * 2);
-
-  size_t i = 0;
-  while (i < src_len) {
-    u8 c = src[i++];
-    if (c == 0 || (c >= 0x09 && c <= 0x7F)) {
-      out->push_back((char)c);
-      continue;
-    }
-    if (c >= 0x01 && c <= 0x08) {
-      size_t n = (size_t)c;
-      if (i + n > src_len)
-        n = src_len - i;
-      out->append((const char *)(src + i), n);
-      i += n;
-      continue;
-    }
-    if (c >= 0xC0) {
-      out->push_back(' ');
-      out->push_back((char)(c ^ 0x80));
-      continue;
-    }
-    if (i >= src_len)
-      break;
-
-    u8 c2 = src[i++];
-    u16 pair = (u16)(((u16)c << 8) | (u16)c2);
-    int distance = (pair >> 3) & 0x07FF;
-    int length = (pair & 0x0007) + 3;
-    if (distance <= 0 || (size_t)distance > out->size())
-      continue;
-    for (int j = 0; j < length; j++) {
-      size_t idx = out->size() - (size_t)distance;
-      out->push_back((*out)[idx]);
-    }
-  }
-  return true;
-}
-
 static void AppendParagraphBreak(std::string *out) {
   if (!out)
     return;
@@ -3469,62 +3429,36 @@ static bool LoadDeferredMobiStructuredToc(
   const u8 *rec0 = data + rec0_start;
   const size_t rec0_len = (size_t)(rec0_end - rec0_start);
 
-  const u16 compression = ReadBE16(rec0 + 0);
-  if (compression != 1 && compression != 2)
+  mobi_record_decode::MobiRecord0Header rec0_header;
+  if (!mobi_record_decode::ParseRecord0Header(rec0, rec0_len, &rec0_header))
+    return false;
+  if (rec0_header.compression != 1 && rec0_header.compression != 2 &&
+      rec0_header.compression != 17480)
     return false;
 
-  const u32 text_len = ReadBE32(rec0 + 4);
-  u32 text_rec_count = ReadBE16(rec0 + 8);
-  u32 encoding = 1252;
-  u32 first_non_book_index = 0;
-  u32 ncx_index = kMobiNullIndex;
-  if (rec0_len >= 24 && memcmp(rec0 + 16, "MOBI", 4) == 0) {
-    const u8 *mobi = rec0 + 16;
-    const u32 mobi_len = ReadBE32(mobi + 4);
-    if (mobi_len >= 0x20 && rec0_len >= 16 + (size_t)0x20)
-      encoding = ReadBE32(mobi + 0x1C);
-    if (mobi_len >= 0x84 && rec0_len >= 16 + (size_t)0x84)
-      first_non_book_index = ReadBE32(mobi + 0x80);
-    if (mobi_len >= 0xF8 && rec0_len >= 16 + (size_t)0xF8)
-      ncx_index = ReadBE32(mobi + 0xF4);
-  }
-
   u32 max_text_records = (u32)offsets.size() - 2;
-  if (text_rec_count == 0 || text_rec_count > max_text_records)
-    text_rec_count = max_text_records;
-  if (first_non_book_index > 1) {
-    u32 boundary = first_non_book_index - 1;
-    if (boundary > 0 && boundary < text_rec_count)
-      text_rec_count = boundary;
+  if (rec0_header.text_rec_count == 0 || rec0_header.text_rec_count > max_text_records)
+    rec0_header.text_rec_count = max_text_records;
+  if (rec0_header.resource_start > 1) {
+    u32 boundary = rec0_header.resource_start - 1;
+    if (boundary > 0 && boundary < rec0_header.text_rec_count)
+      rec0_header.text_rec_count = boundary;
   }
 
-  if (ParseMobiStructuredToc(raw, offsets, ncx_index, encoding, out, app))
+  if (ParseMobiStructuredToc(raw, offsets, rec0_header.indx_index,
+                             rec0_header.encoding, out, app))
     return true;
 
   std::string merged;
-  merged.reserve(text_len > 0 ? (size_t)text_len : 1024 * 1024);
-  for (u32 rec = 1; rec <= text_rec_count; rec++) {
-    u32 start = offsets[(size_t)rec];
-    u32 end = offsets[(size_t)rec + 1];
-    if (end <= start || end > raw.size())
-      continue;
-    const u8 *chunk = data + start;
-    size_t chunk_len = (size_t)(end - start);
+  if (!mobi_record_decode::BuildMergedText(raw, offsets, rec0_header, &merged))
+    return false;
 
-    if (compression == 1) {
-      merged.append((const char *)chunk, chunk_len);
-    } else {
-      std::string decomp;
-      if (DecompressPalmDocRecord(chunk, chunk_len, &decomp))
-        merged += decomp;
-    }
-  }
-  if (text_len > 0 && merged.size() > text_len)
-    merged.resize((size_t)text_len);
-
-  std::string utf8 = DecodeMobiBytesToUtf8(merged, encoding, NULL, NULL);
+  std::string utf8 =
+      DecodeMobiBytesToUtf8(merged, rec0_header.encoding, NULL, NULL);
   if (ParseMobiInlineFileposToc(utf8,
-                                (text_len > 0) ? text_len : (u32)merged.size(),
+                                (rec0_header.text_len > 0)
+                                    ? rec0_header.text_len
+                                    : (u32)merged.size(),
                                 out, app)) {
     if (structured_from_filepos)
       *structured_from_filepos = true;
@@ -4183,12 +4117,17 @@ struct MobiHeaderInfo {
   u32 first_non_book_index;
   u32 mobi_full_name_off;
   u32 mobi_full_name_len;
+  u32 huffcdic_record_index;
+  u32 num_huffcdic_records;
+  u32 trailing_flags;
   u32 ncx_index;
 
   MobiHeaderInfo()
       : compression(0), text_len(0), text_rec_count(0), encoding(1252),
         first_non_book_index(0), mobi_full_name_off(0),
-        mobi_full_name_len(0), ncx_index(kMobiNullIndex) {}
+        mobi_full_name_len(0), huffcdic_record_index(0),
+        num_huffcdic_records(0), trailing_flags(0),
+        ncx_index(kMobiNullIndex) {}
 };
 
 struct MobiDecodedText {
@@ -4232,29 +4171,20 @@ static u8 ParseMobiHeader(const std::string &raw, MobiHeaderInfo *header) {
 
   const u8 *rec0 = data + rec0_start;
   const size_t rec0_len = (size_t)(rec0_end - rec0_start);
-  header->compression = ReadBE16(rec0 + 0);
-  header->text_len = ReadBE32(rec0 + 4);
-  header->text_rec_count = ReadBE16(rec0 + 8);
-  header->encoding = 1252;
-  header->first_non_book_index = 0;
-  header->mobi_full_name_off = 0;
-  header->mobi_full_name_len = 0;
-  header->ncx_index = kMobiNullIndex;
-
-  if (rec0_len >= 24 && memcmp(rec0 + 16, "MOBI", 4) == 0) {
-    const u8 *mobi = rec0 + 16;
-    const u32 mobi_len = ReadBE32(mobi + 4);
-    if (mobi_len >= 0x20 && rec0_len >= 16 + (size_t)0x20)
-      header->encoding = ReadBE32(mobi + 0x1C);
-    if (mobi_len >= 0x84 && rec0_len >= 16 + (size_t)0x84)
-      header->first_non_book_index = ReadBE32(mobi + 0x80);
-    if (mobi_len >= 0x5C && rec0_len >= 16 + (size_t)0x5C) {
-      header->mobi_full_name_off = ReadBE32(mobi + 0x54);
-      header->mobi_full_name_len = ReadBE32(mobi + 0x58);
-    }
-    if (mobi_len >= 0xF8 && rec0_len >= 16 + (size_t)0xF8)
-      header->ncx_index = ReadBE32(mobi + 0xF4);
-  }
+  mobi_record_decode::MobiRecord0Header rec0_header;
+  if (!mobi_record_decode::ParseRecord0Header(rec0, rec0_len, &rec0_header))
+    return 254;
+  header->compression = rec0_header.compression;
+  header->text_len = rec0_header.text_len;
+  header->text_rec_count = rec0_header.text_rec_count;
+  header->encoding = rec0_header.encoding;
+  header->first_non_book_index = rec0_header.resource_start;
+  header->mobi_full_name_off = rec0_header.title_offset;
+  header->mobi_full_name_len = rec0_header.title_length;
+  header->huffcdic_record_index = rec0_header.huffcdic_record_index;
+  header->num_huffcdic_records = rec0_header.num_huffcdic_records;
+  header->trailing_flags = rec0_header.trailing_flags;
+  header->ncx_index = rec0_header.indx_index;
 
   u32 max_text_records = (u32)header->offsets.size() - 2;
   if (header->text_rec_count == 0 || header->text_rec_count > max_text_records)
@@ -4307,32 +4237,24 @@ static void ApplyMobiEmbeddedTitle(Book *book, const std::string &raw,
     book->SetTitle(title_utf8.c_str());
 }
 
-static std::string BuildMobiMergedText(const std::string &raw,
-                                       const MobiHeaderInfo &header) {
-  std::string merged;
-  merged.reserve(header.text_len > 0 ? (size_t)header.text_len : 1024 * 1024);
-
-  const u8 *data = (const u8 *)raw.data();
-  for (u32 rec = 1; rec <= header.text_rec_count; rec++) {
-    u32 start = header.offsets[(size_t)rec];
-    u32 end = header.offsets[(size_t)rec + 1];
-    if (end <= start || end > raw.size())
-      continue;
-    const u8 *chunk = data + start;
-    size_t chunk_len = (size_t)(end - start);
-
-    if (header.compression == 1) {
-      merged.append((const char *)chunk, chunk_len);
-    } else {
-      std::string decomp;
-      if (DecompressPalmDocRecord(chunk, chunk_len, &decomp))
-        merged += decomp;
-    }
-  }
-
-  if (header.text_len > 0 && merged.size() > header.text_len)
-    merged.resize((size_t)header.text_len);
-  return merged;
+static bool BuildMobiMergedText(const std::string &raw,
+                                const MobiHeaderInfo &header,
+                                std::string *merged) {
+  if (!merged)
+    return false;
+  mobi_record_decode::MobiRecord0Header rec0;
+  rec0.compression = header.compression;
+  rec0.text_len = header.text_len;
+  rec0.text_rec_count = header.text_rec_count;
+  rec0.encoding = header.encoding;
+  rec0.resource_start = header.first_non_book_index;
+  rec0.title_offset = header.mobi_full_name_off;
+  rec0.title_length = header.mobi_full_name_len;
+  rec0.huffcdic_record_index = header.huffcdic_record_index;
+  rec0.num_huffcdic_records = header.num_huffcdic_records;
+  rec0.trailing_flags = header.trailing_flags;
+  rec0.indx_index = header.ncx_index;
+  return mobi_record_decode::BuildMergedText(raw, header.offsets, rec0, merged);
 }
 
 static void DecodeAndCleanupMobiText(Book *book, const BookIoDeps &deps,
@@ -4549,6 +4471,7 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   rc = ParseMobiHeader(raw, &header);
   if (rc != 0) {
     if (rc == 255 && header.compression != 1 && header.compression != 2 &&
+        header.compression != 17480 &&
         app) {
       if (header.compression == 17480)
         app->PrintStatus("MOBI: unsupported compression (HUFF/CDIC)");
@@ -4570,7 +4493,8 @@ static u8 ParseMobiFile(Book *book, const char *path) {
     append_debug_log(msg);
   }
 
-  if (header.compression != 1 && header.compression != 2) {
+  if (header.compression != 1 && header.compression != 2 &&
+      header.compression != 17480) {
     if (app) {
       if (header.compression == 17480)
         app->PrintStatus("MOBI: unsupported compression (HUFF/CDIC)");
@@ -4582,7 +4506,12 @@ static u8 ParseMobiFile(Book *book, const char *path) {
 
   ApplyMobiEmbeddedTitle(book, raw, header);
 
-  std::string merged = BuildMobiMergedText(raw, header);
+  std::string merged;
+  if (!BuildMobiMergedText(raw, header, &merged)) {
+    if (app)
+      app->PrintStatus("MOBI: failed to decode text records");
+    return 255;
+  }
   const u64 t_after_decompress = osGetTime();
 
   MobiDecodedText decoded;
