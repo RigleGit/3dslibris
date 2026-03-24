@@ -69,7 +69,8 @@ SDMC_DISTROOT	:=	$(DISTDIR)/sdmc
 SDMC_APPDIR	:=	$(SDMC_DISTROOT)/3ds/$(TARGET)
 SDMC_TEMPLATE_APPDIR := $(SDMC_TEMPLATE)/3ds/$(TARGET)
 SDMC_ZIP	:=	$(DISTDIR)/$(TARGET)-sdmc.zip
-#ROMFS		:=	romfs
+ROMFS		:=	$(DISTDIR)/romfs
+ROMFS_RUNTIME_APPDIR := $(ROMFS)/3ds/$(BASE_TARGET)
 #GFXBUILD	:=	$(ROMFS)/gfx
 
 #---------------------------------------------------------------------------------
@@ -229,10 +230,10 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean package-sdmc zip-sdmc debug-3dsx cia
+.PHONY: all clean package-sdmc zip-sdmc debug-3dsx cia stage-romfs
 
 #---------------------------------------------------------------------------------
-all: $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
+all: stage-romfs $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 $(BUILD):
@@ -247,6 +248,14 @@ ifneq ($(DEPSDIR),$(BUILD))
 $(DEPSDIR):
 	@mkdir -p $@
 endif
+
+stage-romfs:
+	@echo staging romfs runtime ...
+	@[ -d "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/font" ] || (echo "Missing $(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/font"; exit 1)
+	@[ -d "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/resources" ] || (echo "Missing $(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/resources"; exit 1)
+	@mkdir -p "$(ROMFS_RUNTIME_APPDIR)"
+	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/font/" "$(ROMFS_RUNTIME_APPDIR)/font/"
+	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/resources/" "$(ROMFS_RUNTIME_APPDIR)/resources/"
 
 #---------------------------------------------------------------------------------
 clean:

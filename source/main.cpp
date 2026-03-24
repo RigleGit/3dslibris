@@ -80,6 +80,8 @@ int main(int argc, char **argv) {
   gfxSwapBuffers();
   gspWaitForVBlank();
 
+  bool romfs_ready = (romfsInit() == 0);
+
   // Create book directory if it doesn't exist
   mkdir("sdmc:/3ds", 0777);
   mkdir("sdmc:/3ds/3dslibris", 0777);
@@ -93,6 +95,9 @@ int main(int argc, char **argv) {
   int result = app->Run();
 
   delete app;
+
+  if (romfs_ready)
+    romfsExit();
 
   // If Run() returned early (error), wait for user
   if (result != 0) {

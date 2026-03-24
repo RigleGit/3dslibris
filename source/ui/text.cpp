@@ -947,6 +947,8 @@ bool Text::EnsureSplashLoaded() {
   static const char *kSplashCandidates[] = {
       "sdmc:/3ds/3dslibris/resources/splash.jpg",
       "sdmc:/3ds/3dslibris/resources/splash.jpeg",
+      "romfs:/3ds/3dslibris/resources/splash.jpg",
+      "romfs:/3ds/3dslibris/resources/splash.jpeg",
       "sdmc:/3ds/3dslibris/splash.jpg",
       "sdmc:/3ds/3dslibris/splash.jpeg",
       nullptr,
