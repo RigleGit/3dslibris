@@ -89,14 +89,14 @@ Recommended install:
 
 Alternative install:
 1. Install `3dslibris.cia`.
-2. Keep the same runtime folders on SD, including `sdmc:/3ds/3dslibris/font/` and `sdmc:/3ds/3dslibris/resources/`.
-3. Put your books in `sdmc:/3ds/3dslibris/book/`.
+2. Put your books in `sdmc:/3ds/3dslibris/book/`.
+3. Launch the installed title.
 
 Important:
-- Keep the packaged `font/` and `resources/` folders exactly inside `sdmc:/3ds/3dslibris/`.
-- If those runtime files are missing, `3dslibris` now stops at boot and tells you to reinstall `3dslibris-sdmc.zip`.
+- The `.cia` now bundles the default `font/` and `resources/` runtime assets inside the application, so a plain CIA install can boot without manually extracting `3dslibris-sdmc.zip`.
+- `3dslibris-sdmc.zip` is still the recommended install for `.3dsx`, and it remains useful if you want the same runtime files laid out explicitly on SD.
 - `3dslibris-debug.3dsx` uses the same SD layout and writes verbose diagnostics to `sdmc:/3ds/3dslibris/3dslibris.log`.
-- The `.cia` build uses the Universal-Updater-style packaging flow, but the runtime SD layout is the same as the `.3dsx` install.
+- The `.cia` build uses the Universal-Updater-style packaging flow and now also bundles the default runtime assets through `romfs`.
 
 Generated install package targets:
 - `make package-sdmc` stages `dist/sdmc/...` with `3dslibris.3dsx` included

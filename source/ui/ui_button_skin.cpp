@@ -173,6 +173,8 @@ static void try_load_icons_once() {
   const char *dirs[] = {
       "sdmc:/3ds/3dslibris/resources/ui/icons/png",
       "sdmc:/3ds/3dslibris/resources/ui/icons",
+      "romfs:/3ds/3dslibris/resources/ui/icons/png",
+      "romfs:/3ds/3dslibris/resources/ui/icons",
       "resources/ui/icons/png",
       "resources/ui/icons",
       "sdmc:/3ds/3dslibris/resources",

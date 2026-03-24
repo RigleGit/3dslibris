@@ -81,6 +81,35 @@ static bool PathExistsAndType(const char *path, bool want_dir) {
   return S_ISREG(st.st_mode);
 }
 
+static bool RuntimePathExistsEither(const char *sdmc_path,
+                                    const char *romfs_path, bool want_dir) {
+  return PathExistsAndType(sdmc_path, want_dir) ||
+         PathExistsAndType(romfs_path, want_dir);
+}
+
+static std::string ResolveDefaultFontDir() {
+  static const char *kSdmcFontDir = "sdmc:/3ds/3dslibris/font";
+  static const char *kRomfsFontDir = "romfs:/3ds/3dslibris/font";
+  static const char *kProbeFont = "LiberationSerif-Regular.ttf";
+
+  std::string sdmc_probe = std::string(kSdmcFontDir) + "/" + kProbeFont;
+  if (PathExistsAndType(sdmc_probe.c_str(), false))
+    return std::string(kSdmcFontDir);
+
+  std::string romfs_probe = std::string(kRomfsFontDir) + "/" + kProbeFont;
+  if (PathExistsAndType(romfs_probe.c_str(), false))
+    return std::string(kRomfsFontDir);
+
+  return std::string(kSdmcFontDir);
+}
+
+static void NormalizeRuntimeAssetPaths(App *app) {
+  if (!app)
+    return;
+  if (!PathExistsAndType(app->fontdir.c_str(), true))
+    app->fontdir = ResolveDefaultFontDir();
+}
+
 static void CollectMissingRuntimeFiles(std::vector<std::string> *missing) {
   if (!missing)
     return;
@@ -88,7 +117,6 @@ static void CollectMissingRuntimeFiles(std::vector<std::string> *missing) {
 
   static const RuntimeFileCheck kRequired[] = {
       {"sdmc:/3ds/3dslibris/book", true, "book/"},
-      {"sdmc:/3ds/3dslibris/font", true, "font/"},
       {"sdmc:/3ds/3dslibris/font/LiberationSerif-Regular.ttf", false,
        "font/LiberationSerif-Regular.ttf"},
       {"sdmc:/3ds/3dslibris/font/LiberationSerif-Bold.ttf", false,
@@ -101,9 +129,36 @@ static void CollectMissingRuntimeFiles(std::vector<std::string> *missing) {
        "font/LiberationSans-Regular.ttf"},
   };
 
-  for (size_t i = 0; i < sizeof(kRequired) / sizeof(kRequired[0]); i++) {
-    if (!PathExistsAndType(kRequired[i].path, kRequired[i].directory))
-      missing->push_back(kRequired[i].label);
+  if (!PathExistsAndType(kRequired[0].path, kRequired[0].directory))
+    missing->push_back(kRequired[0].label);
+
+  struct RuntimeFallbackFile {
+    const char *sdmc_path;
+    const char *romfs_path;
+    const char *label;
+  };
+  static const RuntimeFallbackFile kBundled[] = {
+      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Regular.ttf",
+       "romfs:/3ds/3dslibris/font/LiberationSerif-Regular.ttf",
+       "font/LiberationSerif-Regular.ttf"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Bold.ttf",
+       "romfs:/3ds/3dslibris/font/LiberationSerif-Bold.ttf",
+       "font/LiberationSerif-Bold.ttf"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Italic.ttf",
+       "romfs:/3ds/3dslibris/font/LiberationSerif-Italic.ttf",
+       "font/LiberationSerif-Italic.ttf"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf",
+       "romfs:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf",
+       "font/LiberationSerif-BoldItalic.ttf"},
+      {"sdmc:/3ds/3dslibris/font/LiberationSans-Regular.ttf",
+       "romfs:/3ds/3dslibris/font/LiberationSans-Regular.ttf",
+       "font/LiberationSans-Regular.ttf"},
+  };
+
+  for (size_t i = 0; i < sizeof(kBundled) / sizeof(kBundled[0]); i++) {
+    if (!RuntimePathExistsEither(kBundled[i].sdmc_path, kBundled[i].romfs_path,
+                                 false))
+      missing->push_back(kBundled[i].label);
   }
 }
 
@@ -138,7 +193,7 @@ static int g_orientation_touch_diag_budget = 0;
 App::App() {
   melonds = false;
 
-  fontdir = std::string("sdmc:/3ds/3dslibris/font");
+  fontdir = ResolveDefaultFontDir();
   bookdir = std::string("sdmc:/3ds/3dslibris/book");
   bookcurrent_ = NULL;
   reopen = true;
@@ -450,6 +505,7 @@ int App::Run(void) {
   std::sort(books.begin(), books.end(), &book_title_lessthan);
 
   prefs->Read();
+  NormalizeRuntimeAssetPaths(this);
   drawBootStatus("Booting", {"Preparing library..."}, false);
   // Apply key mapping/orientation loaded from prefs.
   SetOrientation(orientation);
