@@ -70,6 +70,7 @@ SDMC_DISTROOT	:=	$(DISTDIR)/sdmc
 SDMC_APPDIR	:=	$(SDMC_DISTROOT)/3ds/$(TARGET)
 SDMC_TEMPLATE_APPDIR := $(SDMC_TEMPLATE)/3ds/$(TARGET)
 SDMC_ZIP	:=	$(DISTDIR)/$(TARGET)-sdmc.zip
+SOURCE_ZIP	:=	$(DISTDIR)/$(BASE_TARGET)-source.tar.gz
 ROMFS		:=	$(DISTDIR)/romfs
 ROMFS_RUNTIME_APPDIR := $(ROMFS)/3ds/$(BASE_TARGET)
 MUPDF_ROOT	:=	third_party/mupdf
@@ -236,7 +237,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean package-sdmc zip-sdmc debug-3dsx cia stage-romfs mupdf-minimal
+.PHONY: all clean package-sdmc zip-sdmc source-release debug-3dsx cia stage-romfs mupdf-minimal
 
 #---------------------------------------------------------------------------------
 all: stage-romfs mupdf-minimal $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -262,6 +263,12 @@ stage-romfs:
 	@mkdir -p "$(ROMFS_RUNTIME_APPDIR)"
 	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/font/" "$(ROMFS_RUNTIME_APPDIR)/font/"
 	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/resources/" "$(ROMFS_RUNTIME_APPDIR)/resources/"
+	@mkdir -p "$(ROMFS_RUNTIME_APPDIR)/licenses"
+	@cp LICENSE "$(ROMFS_RUNTIME_APPDIR)/licenses/LICENSE.txt"
+	@cp THIRD_PARTY_NOTICES.md "$(ROMFS_RUNTIME_APPDIR)/licenses/THIRD_PARTY_NOTICES.md"
+	@cp docs/PDF_SOURCE_RELEASE.md "$(ROMFS_RUNTIME_APPDIR)/licenses/PDF_SOURCE_RELEASE.md"
+	@cp LICENSES/GPL-2.0-or-later.txt "$(ROMFS_RUNTIME_APPDIR)/licenses/GPL-2.0-or-later.txt"
+	@cp LICENSES/AGPL-3.0-or-later.txt "$(ROMFS_RUNTIME_APPDIR)/licenses/AGPL-3.0-or-later.txt"
 mupdf-minimal: $(MUPDF_LIB_A) $(MUPDF_LIB_THIRD_A)
 
 $(MUPDF_LIB_A) $(MUPDF_LIB_THIRD_A): $(CURDIR)/scripts/build_mupdf_minimal.sh
@@ -297,6 +304,12 @@ package-sdmc: all
 	@rsync -a --delete $(SDMC_TEMPLATE)/ $(SDMC_DISTROOT)/
 	@rm -f $(SDMC_APPDIR)/$(TARGET).3dsx
 	@cp $(OUTPUT).3dsx $(SDMC_APPDIR)/$(TARGET).3dsx
+	@mkdir -p $(SDMC_APPDIR)/licenses
+	@cp LICENSE $(SDMC_APPDIR)/licenses/LICENSE.txt
+	@cp THIRD_PARTY_NOTICES.md $(SDMC_APPDIR)/licenses/THIRD_PARTY_NOTICES.md
+	@cp docs/PDF_SOURCE_RELEASE.md $(SDMC_APPDIR)/licenses/PDF_SOURCE_RELEASE.md
+	@cp LICENSES/GPL-2.0-or-later.txt $(SDMC_APPDIR)/licenses/GPL-2.0-or-later.txt
+	@cp LICENSES/AGPL-3.0-or-later.txt $(SDMC_APPDIR)/licenses/AGPL-3.0-or-later.txt
 	@echo staged ... $(SDMC_APPDIR)
 
 #---------------------------------------------------------------------------------
@@ -307,6 +320,31 @@ zip-sdmc: package-sdmc
 	@rm -f $(SDMC_ZIP)
 	@cd $(DISTDIR) && zip -qr $(TARGET)-sdmc.zip sdmc
 	@echo built ... $(SDMC_ZIP)
+
+#---------------------------------------------------------------------------------
+source-release:
+#---------------------------------------------------------------------------------
+	@echo building source release ...
+	@mkdir -p $(DISTDIR)
+	@rm -f $(SOURCE_ZIP)
+	@tmpdir="$$(mktemp -d)"; \
+	prefix="$(BASE_TARGET)-source"; \
+	mkdir -p "$$tmpdir/$$prefix"; \
+	rsync -a \
+		--exclude '.git' \
+		--exclude 'build' \
+		--exclude 'build-debug' \
+		--exclude 'build-tests' \
+		--exclude 'dist' \
+		--exclude 'third_party/mupdf/build' \
+		--exclude '*.cia' \
+		--exclude '*.3dsx' \
+		--exclude '*.elf' \
+		--exclude '*.smdh' \
+		"$(CURDIR)/" "$$tmpdir/$$prefix/"; \
+	tar -C "$$tmpdir" -czf "$(SOURCE_ZIP)" "$$prefix"; \
+	rm -rf "$$tmpdir"
+	@echo built ... $(SOURCE_ZIP)
 
 #---------------------------------------------------------------------------------
 cia: all

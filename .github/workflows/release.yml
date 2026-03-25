@@ -50,6 +50,7 @@ jobs:
             echo "- \`3dslibris.3dsx\`"
             echo "- \`3dslibris-debug.3dsx\`"
             echo "- \`3dslibris-sdmc.zip\`"
+            echo "- \`3dslibris-source.tar.gz\`"
           } > release-notes.md
 
       - name: Build CIA toolchain image
@@ -71,7 +72,7 @@ jobs:
             -e DEVKITPRO="$DEVKITPRO" \
             -e DEVKITARM="$DEVKITARM" \
             3dslibris/devkitarm-cia:ci \
-            sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx && make cia'
+            sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx && make cia && make source-release'
 
       - name: Verify release outputs
         run: |
@@ -82,6 +83,7 @@ jobs:
           test -f 3dslibris.elf
           test -f 3dslibris-debug.3dsx
           test -f dist/3dslibris-sdmc.zip
+          test -f dist/3dslibris-source.tar.gz
 
       - name: Publish release assets
         env:
@@ -100,6 +102,7 @@ jobs:
               3dslibris.smdh#3dslibris.smdh \
               3dslibris.elf#3dslibris.elf \
               dist/3dslibris-sdmc.zip#3dslibris-sdmc.zip \
+              dist/3dslibris-source.tar.gz#3dslibris-source.tar.gz \
               --clobber
           else
             gh release create "$tag" \
@@ -109,6 +112,7 @@ jobs:
               3dslibris.smdh#3dslibris.smdh \
               3dslibris.elf#3dslibris.elf \
               dist/3dslibris-sdmc.zip#3dslibris-sdmc.zip \
+              dist/3dslibris-source.tar.gz#3dslibris-source.tar.gz \
               --title "$tag" \
               --notes-file release-notes.md
           fi
