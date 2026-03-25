@@ -9,6 +9,7 @@ enum class BookFileFormat {
   Unsupported = 0,
   XhtmlLike = 1,
   Epub = 2,
+  Pdf = 3,
 };
 
 enum class BookmarkJumpDirection {
@@ -53,6 +54,7 @@ struct StatusSnapshot {
 
 BookFileFormat DetectBookFormat(const char *filename);
 bool ShouldIndexBookFilename(const char *filename);
+bool SupportsMetadataIndexing(BookFileFormat format);
 std::string SdmcToArchiveRelPath(const std::string &path);
 bool NeedsBookRelayout(int page_count, unsigned int book_layout_revision,
                        unsigned int app_layout_revision,

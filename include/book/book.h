@@ -17,16 +17,20 @@
 #include "book/inline_image_layout.h"
 #include <3ds.h>
 #include <list>
+#include <memory>
 #include <stddef.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-typedef enum { FORMAT_UNDEF, FORMAT_XHTML, FORMAT_EPUB } format_t;
+typedef enum { FORMAT_UNDEF, FORMAT_XHTML, FORMAT_EPUB, FORMAT_PDF } format_t;
 
 class App;
 class Page;
 class Text;
+struct fz_context;
+struct fz_outline;
+struct pdf_document;
 
 struct ChapterEntry {
   u16 page; // page index where chapter starts
@@ -47,6 +51,38 @@ enum TocQuality {
 //! App maintains a vector of Book to represent the available library.
 
 class Book {
+  struct PdfState {
+    fz_context *ctx;
+    pdf_document *doc;
+    fz_outline *outline;
+    u16 page_count;
+    float page_width;
+    float page_height;
+    int zoom_index;
+    float viewport_center_x;
+    float viewport_center_y;
+    int cached_preview_page;
+    int cached_preview_width;
+    int cached_preview_height;
+    std::vector<u16> cached_preview_pixels;
+    int cached_tile_page;
+    int cached_tile_zoom_index;
+    float cached_tile_center_x;
+    float cached_tile_center_y;
+    int cached_tile_width;
+    int cached_tile_height;
+    std::vector<u16> cached_tile_pixels;
+
+    PdfState()
+        : ctx(NULL), doc(NULL), outline(NULL), page_count(0),
+          page_width(612.0f), page_height(792.0f), zoom_index(2),
+          viewport_center_x(0.5f), viewport_center_y(0.5f),
+          cached_preview_page(-1), cached_preview_width(0),
+          cached_preview_height(0), cached_tile_page(-1),
+          cached_tile_zoom_index(-1), cached_tile_center_x(-1.0f),
+          cached_tile_center_y(-1.0f), cached_tile_width(0),
+          cached_tile_height(0) {}
+  };
   struct InlineImageEntry {
     std::string path;
     bool metadata_probed;
@@ -98,6 +134,7 @@ class Book {
   u16 toc_heuristic_count;
   u16 toc_unresolved_count;
   std::vector<Page *> pages;
+  PdfState *pdf_state;
   App *app; //! pointer to the App instance.
   unsigned int layout_revision;
 
@@ -105,6 +142,7 @@ class Book {
   bool LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
                              std::string *resolved_path = NULL);
   bool EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out);
+  void ResetPdfState();
 
 public:
   //! Cover thumbnail for library grid (RGB565, scaled to fit)
@@ -187,6 +225,9 @@ public:
                        const InlineImageLayoutPlan *plan = NULL);
   void AddChapter(u16 page, const std::string &title, u8 level = 0);
   void ClearChapters();
+  bool IsPdf() const;
+  bool UsesTextLayoutSettings() const;
+  bool SupportsBookmarks() const;
   const char *GetFileName(void);
   const char *GetFolderName(void);
   Page *GetPage();
@@ -202,6 +243,12 @@ public:
   void SetPosition(int pos);
   void SetTitle(const char *title);
   Page *AppendPage();
+  void DrawCurrentView(Text *ts);
+  void InitPdfView(u16 page_count, fz_context *ctx, pdf_document *doc,
+                   fz_outline *outline);
+  bool ChangePdfZoom(int delta);
+  bool MovePdfViewportToPreview(int touch_x, int touch_y);
+  bool JumpPdfChapter(int delta);
   void Close();
   u8 Index();
   void IndexHTML();

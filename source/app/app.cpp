@@ -62,6 +62,8 @@ static format_t ToBookFormat(app_flow_utils::BookFileFormat format) {
   switch (format) {
   case app_flow_utils::BookFileFormat::Epub:
     return FORMAT_EPUB;
+  case app_flow_utils::BookFileFormat::Pdf:
+    return FORMAT_PDF;
   case app_flow_utils::BookFileFormat::XhtmlLike:
     return FORMAT_XHTML;
   case app_flow_utils::BookFileFormat::Unsupported:
@@ -824,6 +826,8 @@ void App::MarkBookLayoutDirty() {
 }
 
 bool App::BookNeedsRelayout(Book *book) const {
+  if (!book || !book->UsesTextLayoutSettings())
+    return false;
   return book && app_flow_utils::NeedsBookRelayout(
                      book->GetPageCount(), book->GetLayoutRevision(),
                      layout_revision, book->NeedsMobiRenderRefresh());
@@ -843,7 +847,9 @@ void App::ShowChaptersView() {
   if (book) {
     format = (book->format == FORMAT_EPUB)
                  ? app_flow_utils::BookFileFormat::Epub
-                 : app_flow_utils::BookFileFormat::XhtmlLike;
+                 : (book->format == FORMAT_PDF)
+                       ? app_flow_utils::BookFileFormat::Pdf
+                       : app_flow_utils::BookFileFormat::XhtmlLike;
     toc_quality_known = book->GetTocQuality() != TOC_QUALITY_UNKNOWN;
   }
   app_flow_utils::ChaptersViewDecision decision =

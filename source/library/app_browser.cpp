@@ -38,6 +38,7 @@
 #include "main.h"
 #include "formats/mobi/mobi.h"
 #include "parse.h"
+#include "shared/app_flow_utils.h"
 #include "string_utils.h"
 #include "ui/text.h"
 #include "shared/utf8_utils.h"
@@ -534,10 +535,18 @@ void App::QueueBookWarmup(Book *book) {
   if (!book || book->coverPixels || book->coverTried)
     return;
 
+  const app_flow_utils::BookFileFormat format =
+      app_flow_utils::DetectBookFormat(book->GetFileName());
+
   if (book->format == FORMAT_EPUB) {
-    if (!book->metadataIndexTried)
+    if (!book->metadataIndexTried &&
+        app_flow_utils::SupportsMetadataIndexing(format))
       EnqueueJob(APP_JOB_INDEX_METADATA, book);
     EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+  } else if (book->format == FORMAT_PDF) {
+    if (!book->metadataIndexTried &&
+        app_flow_utils::SupportsMetadataIndexing(format))
+      EnqueueJob(APP_JOB_INDEX_METADATA, book);
   } else if (book->format == FORMAT_XHTML) {
     if (HasExtCI(book->GetFileName(), ".fb2") ||
         HasExtCI(book->GetFileName(), ".mobi")) {
@@ -581,7 +590,9 @@ void App::ProcessJobs(u32 budget_ms) {
     u64 t0 = osGetTime();
 
     if (job.type == APP_JOB_INDEX_METADATA) {
-      if (book->format == FORMAT_EPUB && !book->metadataIndexTried) {
+      if (!book->metadataIndexTried &&
+          app_flow_utils::SupportsMetadataIndexing(
+              app_flow_utils::DetectBookFormat(book->GetFileName()))) {
         rc = book->Index();
         if (rc != 0)
           book->coverTried = true;

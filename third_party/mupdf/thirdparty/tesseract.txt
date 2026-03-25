@@ -1,0 +1,19 @@
+If you want to build with Tesseract functionality, you need to run make
+with a "tesseract=yes" argument.
+
+You will also need a suitable set of traineddata for the languages you
+wish to run. Only the LSTM engine (the latest and most accurate engine)
+is built into Tesseract, so the traineddata contained within the
+repository itself is no good.
+
+Suitable data can be retrieved from either:
+
+  https://github.com/tesseract-ocr/tessdata_best
+
+or
+
+  https://github.com/tesseract-ocr/tessdata_fast
+
+e.g.
+
+  wget https://github.com/tesseract-ocr/tessdata_fast/raw/master/eng.traineddata

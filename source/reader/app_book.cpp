@@ -65,7 +65,7 @@ struct OpenBookRelayoutState {
 void DrawBookPage(Book *book, Text *ts) {
   if (!book || !ts || book->GetPageCount() == 0)
     return;
-  book->GetPage()->Draw(ts);
+  book->DrawCurrentView(ts);
 }
 
 bool SetBookPage(Book *book, Text *ts, u16 page) {
@@ -252,6 +252,64 @@ void App::HandleEventInBook() {
   // Use 3DS edge-triggered key state to avoid carry-over/repeat from the key
   // press used to open the book.
   u32 keys = hidKeysDown();
+  u32 held = hidKeysHeld();
+
+  if (bookcurrent_ && bookcurrent_->IsPdf()) {
+    if (keys & KEY_A) {
+      if (bookcurrent_->ChangePdfZoom(1)) {
+        DrawBookPage(bookcurrent_, ts);
+        status_dirty = true;
+      }
+    } else if (keys & KEY_B) {
+      if (bookcurrent_->ChangePdfZoom(-1)) {
+        DrawBookPage(bookcurrent_, ts);
+        status_dirty = true;
+      }
+    } else if (keys & (key.right | KEY_RIGHT)) {
+      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1))
+        status_dirty = true;
+    } else if (keys & (key.left | KEY_LEFT)) {
+      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
+        status_dirty = true;
+    } else if (keys & (key.down | KEY_DOWN)) {
+      if (!bookcurrent_->GetChapters().empty()) {
+        if (bookcurrent_->JumpPdfChapter(1)) {
+          DrawBookPage(bookcurrent_, ts);
+          status_dirty = true;
+        }
+      } else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1)) {
+        status_dirty = true;
+      }
+    } else if (keys & (key.up | KEY_UP)) {
+      if (!bookcurrent_->GetChapters().empty()) {
+        if (bookcurrent_->JumpPdfChapter(-1)) {
+          DrawBookPage(bookcurrent_, ts);
+          status_dirty = true;
+        }
+      } else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1)) {
+        status_dirty = true;
+      }
+    } else if ((keys & KEY_TOUCH) || (held & KEY_TOUCH)) {
+      touchPosition mapped = TouchRead();
+      if (bookcurrent_->MovePdfViewportToPreview((int)mapped.px,
+                                                 (int)mapped.py)) {
+        DrawBookPage(bookcurrent_, ts);
+        status_dirty = true;
+      }
+    } else if (keys & KEY_START) {
+      ts->SetStyle(TEXT_STYLE_BROWSER);
+      ts->PrintSplash(ts->screenleft);
+      ShowLibraryView();
+      prefs->Write();
+    } else if (keys & KEY_SELECT) {
+      ShowSettingsView(true);
+      prefs->Write();
+    }
+
+    if (status_dirty)
+      RequestStatusRedraw();
+    return;
+  }
 
   if (keys & (KEY_A | key.r | key.down)) {
     // page forward.
@@ -315,6 +373,8 @@ void App::HandleEventInBook() {
 }
 
 void App::ToggleBookmark() {
+  if (!bookcurrent_ || !bookcurrent_->SupportsBookmarks())
+    return;
   // Toggle bookmark for the current page.
   std::list<u16> *bookmarks = bookcurrent_->GetBookmarks();
   u16 pagecurrent = bookcurrent_->GetPosition();

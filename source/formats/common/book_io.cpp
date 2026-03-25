@@ -23,6 +23,7 @@
 #include "formats/mobi/mobi_heading_markers.h"
 #include "formats/mobi/mobi_record_decode.h"
 #include "formats/mobi/mobi_text_cleanup.h"
+#include "formats/pdf/pdf.h"
 #include "book/page.h"
 #include "formats/common/page_cache_utils.h"
 #include "formats/common/xml_parse_utils.h"
@@ -4966,6 +4967,12 @@ u8 Book::Index() {
     path.append("/");
     path.append(GetFileName());
     err = epub(this, path, true);
+  } else if (format == FORMAT_PDF) {
+    std::string path;
+    path.append(GetFolderName());
+    path.append("/");
+    path.append(GetFileName());
+    err = IndexPdfMetadata(this, path.c_str());
   } else {
     // Non-EPUB files currently use filename labels in browser; defer full parse
     // until open to keep startup responsive.
@@ -4994,6 +5001,8 @@ u8 Book::Parse(bool fulltext) {
     return ParseOdtFile(this, path);
   if (fulltext && HasExtCI(GetFileName(), ".mobi"))
     return ParseMobiFile(this, path);
+  if (fulltext && HasExtCI(GetFileName(), ".pdf"))
+    return ParsePdfFile(this, path);
 
   FILE *fp = fopen(path, "r");
   if (!fp) {

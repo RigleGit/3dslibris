@@ -227,7 +227,7 @@ void PagedListMenu::ActivateSelected() {
   }
   book->SetPosition(target_page);
   app->ShowCurrentBookView();
-  book->GetPage()->Draw(app->ts);
+  book->DrawCurrentView(app->ts);
   app->RequestStatusRedraw();
 }
 
@@ -249,7 +249,7 @@ void PagedListMenu::Back() {
   Book *book = app ? app->GetCurrentBook() : NULL;
   app->ShowCurrentBookView();
   if (book) {
-    book->GetPage()->Draw(app->ts);
+    book->DrawCurrentView(app->ts);
   }
   app->RequestStatusRedraw();
 }

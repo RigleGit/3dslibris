@@ -22,6 +22,8 @@ BookFileFormat DetectBookFormat(const char *filename) {
     return BookFileFormat::Unsupported;
   if (EndsWithNoCase(filename, ".epub"))
     return BookFileFormat::Epub;
+  if (EndsWithNoCase(filename, ".pdf"))
+    return BookFileFormat::Pdf;
   if (EndsWithNoCase(filename, ".fb2") || EndsWithNoCase(filename, ".txt") ||
       EndsWithNoCase(filename, ".rtf") || EndsWithNoCase(filename, ".odt") ||
       EndsWithNoCase(filename, ".mobi")) {
@@ -36,6 +38,10 @@ bool ShouldIndexBookFilename(const char *filename) {
   if (filename[0] == '.')
     return false;
   return DetectBookFormat(filename) != BookFileFormat::Unsupported;
+}
+
+bool SupportsMetadataIndexing(BookFileFormat format) {
+  return format == BookFileFormat::Epub || format == BookFileFormat::Pdf;
 }
 
 std::string SdmcToArchiveRelPath(const std::string &path) {
