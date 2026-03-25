@@ -1203,6 +1203,7 @@ Book::Book(App *a) {
   browser_display_name_cache.clear();
   browser_display_name_cached = false;
   pages.clear();
+  pdf_state = NULL;
   position = 0;
   format = FORMAT_UNDEF;
   app = a;
@@ -1499,11 +1500,21 @@ void Book::AddChapter(u16 page, const std::string &title, u8 level) {
 
 void Book::ClearChapters() { chapters.clear(); }
 
+bool Book::IsPdf() const { return format == FORMAT_PDF; }
+
+bool Book::UsesTextLayoutSettings() const { return !IsPdf(); }
+
+bool Book::SupportsBookmarks() const { return !IsPdf(); }
+
 Page *Book::GetPage() { return pages[position]; }
 
 Page *Book::GetPage(int index) { return pages[index]; }
 
-u16 Book::GetPageCount() { return pages.size(); }
+u16 Book::GetPageCount() {
+  if (IsPdf() && pdf_state)
+    return pdf_state->page_count;
+  return pages.size();
+}
 
 const char *Book::GetTitle() { return title.c_str(); }
 
@@ -1537,6 +1548,7 @@ void Book::Close() {
   ClearChapterDocStartPages();
   ClearInlineImages();
   ClearTocConfidence();
+  ResetPdfState();
 }
 
 bool Book::IsMobiFile() const { return HasExtCaseInsensitive(filename, ".mobi"); }

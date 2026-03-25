@@ -92,6 +92,12 @@ static bool CurrentBookUsesLineWrapFixSlot(App *app) {
   return app && app->IsBookSettingsContext() && book && book->IsMobiFile();
 }
 
+static bool CurrentBookUsesTextLayoutSettings(App *app) {
+  Book *book = app ? app->GetCurrentBook() : NULL;
+  return app && app->IsBookSettingsContext() && book &&
+         book->UsesTextLayoutSettings();
+}
+
 void App::ToggleCurrentBookMobiLineWrapFix() {
   if (!CurrentBookUsesLineWrapFixSlot(this))
     return;
@@ -308,6 +314,8 @@ void App::PrefsHandleTouch() {
 }
 
 void App::PrefsIncreasePixelSize() {
+  if (prefs_view_.from_book && !CurrentBookUsesTextLayoutSettings(this))
+    return;
   if (ts->pixelsize < kTextPixelSizeMax) {
     ts->SetPixelSize(ts->pixelsize + 1);
     MarkBookLayoutDirty();
@@ -317,6 +325,8 @@ void App::PrefsIncreasePixelSize() {
 }
 
 void App::PrefsDecreasePixelSize() {
+  if (prefs_view_.from_book && !CurrentBookUsesTextLayoutSettings(this))
+    return;
   if (ts->pixelsize > kTextPixelSizeMin) {
     ts->SetPixelSize(ts->pixelsize - 1);
     MarkBookLayoutDirty();
@@ -326,6 +336,8 @@ void App::PrefsDecreasePixelSize() {
 }
 
 void App::PrefsIncreaseParaspacing() {
+  if (prefs_view_.from_book && !CurrentBookUsesTextLayoutSettings(this))
+    return;
   if (paraspacing < 2) {
     paraspacing++;
     MarkBookLayoutDirty();
@@ -335,6 +347,8 @@ void App::PrefsIncreaseParaspacing() {
 }
 
 void App::PrefsDecreaseParaspacing() {
+  if (prefs_view_.from_book && !CurrentBookUsesTextLayoutSettings(this))
+    return;
   if (paraspacing > 0) {
     paraspacing--;
     MarkBookLayoutDirty();
@@ -361,14 +375,24 @@ void App::PrefsRefreshButton(int index) {
         std::string("open menu >"));
     break;
   case PREFS_BUTTON_FONTSIZE:
-    snprintf(msg, sizeof(msg), "                        < %d >  ",
-             ts->GetPixelSize());
-    prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string(msg));
+    if (prefs_view_.from_book && bookcurrent_ &&
+        !bookcurrent_->UsesTextLayoutSettings()) {
+      prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string("(PDF fixed)"));
+    } else {
+      snprintf(msg, sizeof(msg), "                        < %d >  ",
+               ts->GetPixelSize());
+      prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string(msg));
+    }
     break;
   case PREFS_BUTTON_PARASPACING:
-    snprintf(msg, sizeof(msg), "                         < %d >  ",
-             paraspacing);
-    prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
+    if (prefs_view_.from_book && bookcurrent_ &&
+        !bookcurrent_->UsesTextLayoutSettings()) {
+      prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(
+          std::string("(PDF fixed)"));
+    } else {
+      snprintf(msg, sizeof(msg), "                         < %d >  ", paraspacing);
+      prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
+    }
     break;
   case PREFS_BUTTON_ORIENTATION:
     prefsButtons[PREFS_BUTTON_ORIENTATION].SetLabel2(
@@ -410,9 +434,15 @@ void App::PrefsRefreshButton(int index) {
     }
     break;
   case PREFS_BUTTON_BOOKMARKS:
-    prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
-        (prefs_view_.from_book && bookcurrent_) ? std::string(">")
-                                            : std::string("(open selected book)"));
+    if (prefs_view_.from_book && bookcurrent_ &&
+        !bookcurrent_->SupportsBookmarks()) {
+      prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
+          std::string("(PDF disabled)"));
+    } else {
+      prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
+          (prefs_view_.from_book && bookcurrent_) ? std::string(">")
+                                                  : std::string("(open selected book)"));
+    }
     break;
   }
   prefs_view_.view_dirty = true;
@@ -460,7 +490,10 @@ void App::PrefsHandlePress() {
   }
 
   if (prefs_view_.selected_index == PREFS_BUTTON_BOOKMARKS) {
-    if (prefs_view_.from_book && bookcurrent_) {
+    if (prefs_view_.from_book && bookcurrent_ &&
+        !bookcurrent_->SupportsBookmarks()) {
+      PrintStatus("Bookmarks unavailable for PDF");
+    } else if (prefs_view_.from_book && bookcurrent_) {
       ShowBookmarksView();
     } else if (!prefs_view_.from_book && browser_.selected_book) {
       OpenBook();

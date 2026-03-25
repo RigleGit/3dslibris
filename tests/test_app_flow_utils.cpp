@@ -40,8 +40,8 @@ void TestDetectBookFormat() {
            BookFileFormat::XhtmlLike);
   ExpectEq("mobi", app_flow_utils::DetectBookFormat("book.mobi"),
            BookFileFormat::XhtmlLike);
-  ExpectEq("unsupported", app_flow_utils::DetectBookFormat("book.pdf"),
-           BookFileFormat::Unsupported);
+  ExpectEq("pdf", app_flow_utils::DetectBookFormat("book.pdf"),
+           BookFileFormat::Pdf);
 }
 
 void TestShouldIndexBookFilename() {
@@ -49,9 +49,24 @@ void TestShouldIndexBookFilename() {
              app_flow_utils::ShouldIndexBookFilename("book.epub"));
   ExpectFalse("dotfile skipped",
               app_flow_utils::ShouldIndexBookFilename(".hidden.epub"));
-  ExpectFalse("unsupported skipped",
-              app_flow_utils::ShouldIndexBookFilename("notes.pdf"));
+  ExpectTrue("pdf indexed",
+             app_flow_utils::ShouldIndexBookFilename("notes.pdf"));
   ExpectFalse("empty skipped", app_flow_utils::ShouldIndexBookFilename(""));
+}
+
+void TestSupportsMetadataIndexing() {
+  using app_flow_utils::BookFileFormat;
+
+  ExpectTrue("epub metadata indexing",
+             app_flow_utils::SupportsMetadataIndexing(BookFileFormat::Epub));
+  ExpectTrue("pdf metadata indexing",
+             app_flow_utils::SupportsMetadataIndexing(BookFileFormat::Pdf));
+  ExpectFalse("xhtml-like no metadata indexing",
+              app_flow_utils::SupportsMetadataIndexing(
+                  BookFileFormat::XhtmlLike));
+  ExpectFalse("unsupported no metadata indexing",
+              app_flow_utils::SupportsMetadataIndexing(
+                  BookFileFormat::Unsupported));
 }
 
 void TestSdmcToArchiveRelPath() {
@@ -219,6 +234,7 @@ void TestComputeStatusSnapshot() {
 int main() {
   TestDetectBookFormat();
   TestShouldIndexBookFilename();
+  TestSupportsMetadataIndexing();
   TestSdmcToArchiveRelPath();
   TestNeedsBookRelayout();
   TestFindBookmarkJumpTarget();
