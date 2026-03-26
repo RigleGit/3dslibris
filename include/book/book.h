@@ -29,6 +29,7 @@ class App;
 class Page;
 class Text;
 struct fz_context;
+struct fz_display_list;
 struct fz_outline;
 struct pdf_document;
 
@@ -82,6 +83,26 @@ class Book {
     int cached_zoom_height;
     std::vector<u16> cached_zoom_pixels;
 
+    // Display list cache: captures page drawing ops once, replays cheaply.
+    // Avoids re-parsing the page content for each render (preview + zoom).
+    fz_display_list *cached_display_list;
+    int cached_display_list_page;
+
+    // Prefetch cache for adjacent page to make page turns instant.
+    int prefetch_page;
+    int prefetch_zoom_index;
+    int prefetch_width;
+    int prefetch_height;
+    float prefetch_content_left;
+    float prefetch_content_top;
+    float prefetch_content_width;
+    float prefetch_content_height;
+    std::vector<u16> prefetch_zoom_pixels;
+    int prefetch_preview_width;
+    int prefetch_preview_height;
+    std::vector<u16> prefetch_preview_pixels;
+    fz_display_list *prefetch_display_list;
+
     PdfState()
         : ctx(NULL), doc(NULL), outline(NULL), page_count(0),
           page_width(612.0f), page_height(792.0f), is_new_3ds(false),
@@ -92,7 +113,13 @@ class Book {
           cached_preview_content_top(0.0f), cached_preview_content_width(1.0f),
           cached_preview_content_height(1.0f), cached_zoom_page(-1),
           cached_zoom_index(-1), cached_zoom_width(0),
-          cached_zoom_height(0) {}
+          cached_zoom_height(0), cached_display_list(NULL),
+          cached_display_list_page(-1), prefetch_page(-1),
+          prefetch_zoom_index(-1), prefetch_width(0), prefetch_height(0),
+          prefetch_content_left(0.0f), prefetch_content_top(0.0f),
+          prefetch_content_width(1.0f), prefetch_content_height(1.0f),
+          prefetch_preview_width(0), prefetch_preview_height(0),
+          prefetch_display_list(NULL) {}
   };
   struct InlineImageEntry {
     std::string path;
@@ -260,6 +287,7 @@ public:
   bool ChangePdfZoom(int delta);
   bool MovePdfViewportToPreview(int touch_x, int touch_y);
   bool JumpPdfChapter(int delta);
+  void PrefetchAdjacentPdfPage();
   void Close();
   u8 Index();
   void IndexHTML();

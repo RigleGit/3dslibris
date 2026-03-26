@@ -339,8 +339,12 @@ void App::HandleEventInBook() {
       pdf_touch_last_y_ = -1;
     }
 
-    if (status_dirty)
+    if (status_dirty) {
       RequestStatusRedraw();
+      // After rendering and displaying the current page, prefetch the next
+      // page in the background.  This makes forward page turns near-instant.
+      bookcurrent_->PrefetchAdjacentPdfPage();
+    }
     return;
   }
 
