@@ -235,6 +235,9 @@ App::App() {
   status_.progress_pagecount_lock = 0;
   status_.force_redraw = true;
   layout_revision = 0;
+  pdf_touch_drag_active_ = false;
+  pdf_touch_last_x_ = -1;
+  pdf_touch_last_y_ = -1;
 
   ts = new Text();
   ts->app = this;

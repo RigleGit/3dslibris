@@ -11,6 +11,7 @@
 #include "ui/text.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -20,22 +21,35 @@ extern "C" {
 #include "mupdf/fitz/color.h"
 #include "mupdf/fitz/context.h"
 #include "mupdf/fitz/device.h"
+#include "mupdf/fitz/display-list.h"
 #include "mupdf/fitz/document.h"
 #include "mupdf/fitz/geometry.h"
 #include "mupdf/fitz/outline.h"
 #include "mupdf/fitz/pixmap.h"
+#include "mupdf/fitz/util.h"
 #include "mupdf/pdf/document.h"
 }
+
+extern App *app;
 
 namespace {
 
 static const int kPdfPreviewScreenWidth = 240;
 static const int kPdfPreviewScreenHeight = 320;
+static const int kPdfPreviewPadding = 4;
 static const int kPdfZoomScreenWidth = 240;
 static const int kPdfZoomScreenHeight = 400;
+static const int kPdfPreviewDetailZoomIndex = 3;
 static const u16 kPdfPaper = 0xFFFF;
 static const u16 kPdfFrame = 0x2104;
 static const u16 kPdfAccent = 0x0000;
+static const float kPdfReadingBaseZoom = 1.5f;
+
+static bool DetectNew3ds() {
+  bool is_new_3ds = false;
+  APT_CheckNew3DS(&is_new_3ds);
+  return is_new_3ds;
+}
 
 struct RenderedPdfBitmap {
   int width;
@@ -45,8 +59,45 @@ struct RenderedPdfBitmap {
   RenderedPdfBitmap() : width(0), height(0), pixels() {}
 };
 
+struct BitmapBoundsPx {
+  int left;
+  int top;
+  int width;
+  int height;
+
+  BitmapBoundsPx() : left(0), top(0), width(0), height(0) {}
+};
+
+struct PdfNavigationBounds {
+  float left;
+  float top;
+  float width;
+  float height;
+
+  PdfNavigationBounds() : left(0.0f), top(0.0f), width(1.0f), height(1.0f) {}
+};
+
 static u16 RGB565FromRgb8(unsigned char r, unsigned char g, unsigned char b) {
   return (u16)(((u16)(r >> 3) << 11) | ((u16)(g >> 2) << 5) | (u16)(b >> 3));
+}
+
+static void RGB565ToRgb8(u16 pixel, int *r, int *g, int *b) {
+  if (!r || !g || !b)
+    return;
+  const int r5 = (pixel >> 11) & 0x1F;
+  const int g6 = (pixel >> 5) & 0x3F;
+  const int b5 = pixel & 0x1F;
+  *r = (r5 << 3) | (r5 >> 2);
+  *g = (g6 << 2) | (g6 >> 4);
+  *b = (b5 << 3) | (b5 >> 2);
+}
+
+static bool IsMostlyWhite(u16 pixel) {
+  int r = 0;
+  int g = 0;
+  int b = 0;
+  RGB565ToRgb8(pixel, &r, &g, &b);
+  return (r >= 248 && g >= 248 && b >= 248);
 }
 
 static float ComputeFitScale(float page_width, float page_height,
@@ -61,6 +112,61 @@ static float ComputeFitScale(float page_width, float page_height,
   return (scale > 0.0f) ? scale : 1.0f;
 }
 
+static float ComputeEffectivePdfZoom(int zoom_index) {
+  return pdf_view_utils::ZoomForIndex(zoom_index) * kPdfReadingBaseZoom;
+}
+
+static PdfNavigationBounds GetPdfNavigationBounds(float content_left,
+                                                  float content_top,
+                                                  float content_width,
+                                                  float content_height) {
+  PdfNavigationBounds bounds;
+  const float margin = 0.03f;
+  const float left = std::max(0.0f, content_left - margin);
+  const float top = std::max(0.0f, content_top - margin);
+  const float right =
+      std::min(1.0f, content_left + content_width + margin);
+  const float bottom =
+      std::min(1.0f, content_top + content_height + margin);
+
+  if (right > left && bottom > top &&
+      content_width > 0.05f && content_height > 0.05f) {
+    bounds.left = left;
+    bounds.top = top;
+    bounds.width = right - left;
+    bounds.height = bottom - top;
+  }
+  return bounds;
+}
+
+static pdf_view_utils::NormalizedRect ComputePdfViewportRect(
+    float page_width, float page_height, int zoom_index, float center_x,
+    float center_y, float content_left, float content_top, float content_width,
+    float content_height) {
+  pdf_view_utils::NormalizedRect out = {0.0f, 0.0f, 1.0f, 1.0f};
+  const PdfNavigationBounds nav =
+      GetPdfNavigationBounds(content_left, content_top, content_width,
+                             content_height);
+  const float local_center_x =
+      std::max(0.0f, std::min(1.0f, (center_x - nav.left) /
+                                        std::max(0.0001f, nav.width)));
+  const float local_center_y =
+      std::max(0.0f, std::min(1.0f, (center_y - nav.top) /
+                                        std::max(0.0001f, nav.height)));
+  const pdf_view_utils::NormalizedRect local =
+      pdf_view_utils::ComputeViewportRect(
+          std::max(1.0f, page_width * nav.width),
+          std::max(1.0f, page_height * nav.height),
+          ComputeEffectivePdfZoom(zoom_index), (float)kPdfZoomScreenWidth,
+          (float)kPdfZoomScreenHeight, local_center_x, local_center_y);
+
+  out.left = nav.left + local.left * nav.width;
+  out.top = nav.top + local.top * nav.height;
+  out.width = local.width * nav.width;
+  out.height = local.height * nav.height;
+  return out;
+}
+
 static int ClampPdfPageIndex(int page_index, u16 page_count) {
   if (page_count == 0)
     return 0;
@@ -71,26 +177,103 @@ static int ClampPdfPageIndex(int page_index, u16 page_count) {
   return page_index;
 }
 
-static void BlitRgb565Bitmap(Text *ts, u16 *screen, int logical_height, int x,
-                             int y, const std::vector<u16> &pixels, int width,
-                             int height) {
-  if (!ts || !screen || pixels.empty() || width <= 0 || height <= 0)
+static void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
+                                       int x, int y, int draw_width,
+                                       int draw_height,
+                                       const std::vector<u16> &pixels,
+                                       int src_width, int src_height,
+                                       int crop_x, int crop_y, int crop_width,
+                                       int crop_height) {
+  if (!ts || !screen || pixels.empty() || draw_width <= 0 || draw_height <= 0 ||
+      src_width <= 0 || src_height <= 0 || crop_width <= 0 || crop_height <= 0) {
     return;
+  }
+  crop_x = std::max(0, std::min(src_width - 1, crop_x));
+  crop_y = std::max(0, std::min(src_height - 1, crop_y));
+  crop_width = std::max(1, std::min(src_width - crop_x, crop_width));
+  crop_height = std::max(1, std::min(src_height - crop_y, crop_height));
+
   const int stride = ts->display.height;
   const int logical_width = ts->display.width;
   ts->MarkScreenDirty(screen);
-  for (int row = 0; row < height; row++) {
+  for (int row = 0; row < draw_height; row++) {
     const int dy = y + row;
     if (dy < 0 || dy >= logical_height)
       continue;
-    const u16 *src = &pixels[(size_t)row * (size_t)width];
-    for (int col = 0; col < width; col++) {
+    const int src_y =
+        crop_y + std::min(crop_height - 1, (row * crop_height) / draw_height);
+    for (int col = 0; col < draw_width; col++) {
       const int dx = x + col;
       if (dx < 0 || dx >= logical_width)
         continue;
-      screen[(size_t)dy * (size_t)stride + (size_t)dx] = src[col];
+      const int src_x =
+          crop_x + std::min(crop_width - 1, (col * crop_width) / draw_width);
+      screen[(size_t)dy * (size_t)stride + (size_t)dx] =
+          pixels[(size_t)src_y * (size_t)src_width + (size_t)src_x];
     }
   }
+}
+
+static void ComputeBitmapContentBoundsPx(const RenderedPdfBitmap &bitmap,
+                                         BitmapBoundsPx *bounds) {
+  if (!bounds)
+    return;
+  bounds->left = 0;
+  bounds->top = 0;
+  bounds->width = std::max(0, bitmap.width);
+  bounds->height = std::max(0, bitmap.height);
+  if (bitmap.width <= 0 || bitmap.height <= 0 || bitmap.pixels.empty())
+    return;
+
+  int min_x = bitmap.width;
+  int min_y = bitmap.height;
+  int max_x = -1;
+  int max_y = -1;
+  for (int y = 0; y < bitmap.height; y++) {
+    for (int x = 0; x < bitmap.width; x++) {
+      const u16 pixel =
+          bitmap.pixels[(size_t)y * (size_t)bitmap.width + (size_t)x];
+      if (IsMostlyWhite(pixel))
+        continue;
+      min_x = std::min(min_x, x);
+      min_y = std::min(min_y, y);
+      max_x = std::max(max_x, x);
+      max_y = std::max(max_y, y);
+    }
+  }
+
+  if (max_x < min_x || max_y < min_y)
+    return;
+
+  bounds->left = min_x;
+  bounds->top = min_y;
+  bounds->width = max_x - min_x + 1;
+  bounds->height = max_y - min_y + 1;
+}
+
+static void ComputeBitmapContentBoundsNormalized(const RenderedPdfBitmap &bitmap,
+                                                 float *left, float *top,
+                                                 float *width, float *height) {
+  if (!left || !top || !width || !height)
+    return;
+  if (bitmap.width <= 0 || bitmap.height <= 0) {
+    *left = 0.0f;
+    *top = 0.0f;
+    *width = 1.0f;
+    *height = 1.0f;
+    return;
+  }
+
+  BitmapBoundsPx bounds;
+  ComputeBitmapContentBoundsPx(bitmap, &bounds);
+  *left = (float)bounds.left / (float)bitmap.width;
+  *top = (float)bounds.top / (float)bitmap.height;
+  *width = std::max(0.0001f, (float)bounds.width / (float)bitmap.width);
+  *height = std::max(0.0001f, (float)bounds.height / (float)bitmap.height);
+}
+
+static fz_matrix MakePdfRenderMatrix(fz_rect page_bounds, float scale) {
+  return fz_transform_page(page_bounds, 72.0f * scale, 0.0f);
 }
 
 static bool QueryPdfPageMetrics(fz_context *ctx, pdf_document *doc,
@@ -121,10 +304,8 @@ static bool QueryPdfPageMetrics(fz_context *ctx, pdf_document *doc,
 }
 
 static bool RenderPdfBitmap(fz_context *ctx, pdf_document *doc, int page_index,
-                            float scale,
-                            const pdf_view_utils::NormalizedRect *crop_rect,
-                            RenderedPdfBitmap *out, float *page_width,
-                            float *page_height) {
+                            float scale, RenderedPdfBitmap *out,
+                            float *page_width, float *page_height) {
   if (!ctx || !doc || !out || scale <= 0.0f)
     return false;
 
@@ -132,7 +313,6 @@ static bool RenderPdfBitmap(fz_context *ctx, pdf_document *doc, int page_index,
   fz_pixmap *pixmap = NULL;
   fz_device *device = NULL;
   fz_rect bounds = fz_empty_rect;
-  fz_rect render_rect = fz_empty_rect;
   fz_irect bbox = fz_empty_irect;
   bool ok = false;
 
@@ -153,28 +333,14 @@ static bool RenderPdfBitmap(fz_context *ctx, pdf_document *doc, int page_index,
     if (page_height)
       *page_height = height;
 
-    render_rect = bounds;
-    if (crop_rect) {
-      const float left = std::max(0.0f, std::min(1.0f, crop_rect->left));
-      const float top = std::max(0.0f, std::min(1.0f, crop_rect->top));
-      const float right =
-          std::max(left, std::min(1.0f, crop_rect->left + crop_rect->width));
-      const float bottom =
-          std::max(top, std::min(1.0f, crop_rect->top + crop_rect->height));
-      render_rect.x0 = bounds.x0 + left * width;
-      render_rect.y0 = bounds.y0 + top * height;
-      render_rect.x1 = bounds.x0 + right * width;
-      render_rect.y1 = bounds.y0 + bottom * height;
-    }
-
-    fz_matrix ctm = fz_transform_page(bounds, 72.0f * scale, 0.0f);
-    bbox = fz_round_rect(fz_transform_rect(render_rect, ctm));
+    const fz_matrix ctm = MakePdfRenderMatrix(bounds, scale);
+    bbox = fz_round_rect(fz_transform_rect(bounds, ctm));
     if (bbox.x1 <= bbox.x0 || bbox.y1 <= bbox.y0)
       fz_throw(ctx, FZ_ERROR_FORMAT, "invalid pdf render bbox");
 
     pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), bbox, NULL, 0);
     fz_clear_pixmap_with_value(ctx, pixmap, 255);
-    device = fz_new_draw_device(ctx, ctm, pixmap);
+    device = fz_new_draw_device(ctx, fz_identity, pixmap);
     fz_run_page(ctx, page, device, ctm, NULL);
     fz_close_device(ctx, device);
 
@@ -212,6 +378,28 @@ static bool RenderPdfBitmap(fz_context *ctx, pdf_document *doc, int page_index,
   }
 
   return ok;
+}
+
+static pdf_view_utils::NormalizedPoint RecenterViewportFromRawPreview(
+    const pdf_view_utils::PreviewLayout &preview,
+    const pdf_view_utils::NormalizedRect &viewport,
+    const PdfNavigationBounds &nav, int touch_x, int touch_y) {
+  pdf_view_utils::NormalizedPoint out = {0.5f, 0.5f};
+  if (preview.width <= 0 || preview.height <= 0)
+    return out;
+
+  float px = (float)(touch_x - preview.x) / (float)preview.width;
+  float py = (float)(touch_y - preview.y) / (float)preview.height;
+  px = std::max(0.0f, std::min(1.0f, px));
+  py = std::max(0.0f, std::min(1.0f, py));
+
+  const float min_x = nav.left + viewport.width * 0.5f;
+  const float max_x = nav.left + nav.width - viewport.width * 0.5f;
+  const float min_y = nav.top + viewport.height * 0.5f;
+  const float max_y = nav.top + nav.height - viewport.height * 0.5f;
+  out.x = std::max(min_x, std::min(max_x, px));
+  out.y = std::max(min_y, std::min(max_y, py));
+  return out;
 }
 
 static void AddPdfOutlineEntries(Book *book, fz_context *ctx, pdf_document *doc,
@@ -287,14 +475,20 @@ void Book::ResetPdfState() {
 }
 
 void Book::InitPdfView(u16 page_count, fz_context *ctx, pdf_document *doc,
-                       fz_outline *outline) {
+                       fz_outline *outline, bool is_new_3ds) {
   ResetPdfState();
   pdf_state = new PdfState();
+  const pdf_view_utils::DevicePolicy policy =
+      pdf_view_utils::GetDevicePolicy(is_new_3ds);
   pdf_state->ctx = ctx;
   pdf_state->doc = doc;
   pdf_state->outline = outline;
   pdf_state->page_count = page_count;
-  pdf_state->zoom_index = pdf_view_utils::DefaultZoomIndex();
+  pdf_state->is_new_3ds = is_new_3ds;
+  pdf_state->keep_preview_cache = policy.keep_preview_cache;
+  pdf_state->keep_tile_cache = policy.keep_tile_cache;
+  pdf_state->max_zoom_index = policy.max_zoom_index;
+  pdf_state->zoom_index = policy.default_zoom_index;
   pdf_state->viewport_center_x = 0.5f;
   pdf_state->viewport_center_y = 0.5f;
 }
@@ -302,8 +496,10 @@ void Book::InitPdfView(u16 page_count, fz_context *ctx, pdf_document *doc,
 bool Book::ChangePdfZoom(int delta) {
   if (!IsPdf() || !pdf_state || delta == 0)
     return false;
-  const int next =
-      pdf_view_utils::ClampZoomIndex(pdf_state->zoom_index + delta);
+  const int next = std::min(
+      pdf_state->max_zoom_index,
+      pdf_view_utils::ClampZoomIndexForDevice(pdf_state->zoom_index + delta,
+                                              pdf_state->is_new_3ds));
   if (next == pdf_state->zoom_index)
     return false;
   pdf_state->zoom_index = next;
@@ -313,18 +509,36 @@ bool Book::ChangePdfZoom(int delta) {
 bool Book::MovePdfViewportToPreview(int touch_x, int touch_y) {
   if (!IsPdf() || !pdf_state)
     return false;
-  const pdf_view_utils::PreviewLayout preview = pdf_view_utils::ComputePreviewLayout(
-      pdf_state->page_width, pdf_state->page_height, kPdfPreviewScreenWidth,
-      kPdfPreviewScreenHeight);
-  const pdf_view_utils::NormalizedRect viewport =
-      pdf_view_utils::ComputeViewportRect(
-          pdf_state->page_width, pdf_state->page_height,
-          pdf_view_utils::ZoomForIndex(pdf_state->zoom_index),
-          (float)kPdfZoomScreenWidth, (float)kPdfZoomScreenHeight,
-          pdf_state->viewport_center_x, pdf_state->viewport_center_y);
+  float preview_source_width = pdf_state->page_width;
+  float preview_source_height = pdf_state->page_height;
+  if (pdf_state->cached_preview_width > 0 && pdf_state->cached_preview_height > 0) {
+    preview_source_width = (float)pdf_state->cached_preview_width;
+    preview_source_height = (float)pdf_state->cached_preview_height;
+  }
+  const pdf_view_utils::PreviewLayout preview =
+      pdf_view_utils::ComputePreviewLayoutInBounds(
+          preview_source_width, preview_source_height,
+          kPdfPreviewPadding, kPdfPreviewPadding,
+          kPdfPreviewScreenWidth - 2 * kPdfPreviewPadding,
+          kPdfPreviewScreenHeight - 2 * kPdfPreviewPadding);
+  const PdfNavigationBounds nav = GetPdfNavigationBounds(
+      pdf_state->cached_preview_content_left,
+      pdf_state->cached_preview_content_top,
+      pdf_state->cached_preview_content_width,
+      pdf_state->cached_preview_content_height);
+  const pdf_view_utils::NormalizedRect viewport = ComputePdfViewportRect(
+      pdf_state->page_width, pdf_state->page_height, pdf_state->zoom_index,
+      pdf_state->viewport_center_x, pdf_state->viewport_center_y,
+      pdf_state->cached_preview_content_left,
+      pdf_state->cached_preview_content_top,
+      pdf_state->cached_preview_content_width,
+      pdf_state->cached_preview_content_height);
   const pdf_view_utils::NormalizedPoint center =
-      pdf_view_utils::RecenterViewportFromPreview(preview, viewport, touch_x,
-                                                  touch_y);
+      RecenterViewportFromRawPreview(preview, viewport, nav, touch_x, touch_y);
+  const float dx = std::abs(center.x - pdf_state->viewport_center_x);
+  const float dy = std::abs(center.y - pdf_state->viewport_center_y);
+  if (dx < 0.0005f && dy < 0.0005f)
+    return false;
   pdf_state->viewport_center_x = center.x;
   pdf_state->viewport_center_y = center.y;
   return true;
@@ -375,33 +589,35 @@ void Book::DrawCurrentView(Text *ts) {
     pdf_state->page_height = page_height;
   }
 
-  pdf_view_utils::PreviewLayout preview_layout =
-      pdf_view_utils::ComputePreviewLayout(
-          pdf_state->page_width, pdf_state->page_height, kPdfPreviewScreenWidth,
-          kPdfPreviewScreenHeight);
   pdf_view_utils::NormalizedRect viewport = pdf_view_utils::ComputeViewportRect(
       pdf_state->page_width, pdf_state->page_height,
-      pdf_view_utils::ZoomForIndex(pdf_state->zoom_index),
+      ComputeEffectivePdfZoom(pdf_state->zoom_index),
       (float)kPdfZoomScreenWidth, (float)kPdfZoomScreenHeight,
       pdf_state->viewport_center_x, pdf_state->viewport_center_y);
   pdf_state->viewport_center_x = viewport.left + viewport.width * 0.5f;
   pdf_state->viewport_center_y = viewport.top + viewport.height * 0.5f;
 
-  const float preview_scale =
-      ComputeFitScale(pdf_state->page_width, pdf_state->page_height,
-                      preview_layout.width, preview_layout.height);
   const float tile_scale =
       ComputeFitScale(pdf_state->page_width, pdf_state->page_height,
                       kPdfZoomScreenWidth, kPdfZoomScreenHeight) *
-      pdf_view_utils::ZoomForIndex(pdf_state->zoom_index);
+      ComputeEffectivePdfZoom(pdf_state->zoom_index);
+  const float preview_scale =
+      ComputeFitScale(pdf_state->page_width, pdf_state->page_height,
+                      kPdfZoomScreenWidth, kPdfZoomScreenHeight) *
+      ComputeEffectivePdfZoom(kPdfPreviewDetailZoomIndex);
 
   if (pdf_state->cached_preview_page != page_index ||
-      pdf_state->cached_preview_width != preview_layout.width ||
-      pdf_state->cached_preview_height != preview_layout.height) {
+      pdf_state->cached_preview_width <= 0 ||
+      pdf_state->cached_preview_height <= 0) {
     RenderedPdfBitmap rendered;
     if (RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
-                        preview_scale, NULL, &rendered, &page_width,
+                        preview_scale, &rendered, &page_width,
                         &page_height)) {
+      ComputeBitmapContentBoundsNormalized(
+          rendered, &pdf_state->cached_preview_content_left,
+          &pdf_state->cached_preview_content_top,
+          &pdf_state->cached_preview_content_width,
+          &pdf_state->cached_preview_content_height);
       pdf_state->cached_preview_page = page_index;
       pdf_state->cached_preview_width = rendered.width;
       pdf_state->cached_preview_height = rendered.height;
@@ -411,24 +627,32 @@ void Book::DrawCurrentView(Text *ts) {
     }
   }
 
-  if (pdf_state->cached_tile_page != page_index ||
-      pdf_state->cached_tile_zoom_index != pdf_state->zoom_index ||
-      pdf_state->cached_tile_center_x != pdf_state->viewport_center_x ||
-      pdf_state->cached_tile_center_y != pdf_state->viewport_center_y) {
+  // Full-page zoom cache: only re-render when page or zoom level changes.
+  // Viewport pan is then a cheap crop from this cached bitmap.
+  if (pdf_state->cached_zoom_page != page_index ||
+      pdf_state->cached_zoom_index != pdf_state->zoom_index) {
     RenderedPdfBitmap rendered;
     if (RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index, tile_scale,
-                        &viewport, &rendered, &page_width, &page_height)) {
-      pdf_state->cached_tile_page = page_index;
-      pdf_state->cached_tile_zoom_index = pdf_state->zoom_index;
-      pdf_state->cached_tile_center_x = pdf_state->viewport_center_x;
-      pdf_state->cached_tile_center_y = pdf_state->viewport_center_y;
-      pdf_state->cached_tile_width = rendered.width;
-      pdf_state->cached_tile_height = rendered.height;
-      pdf_state->cached_tile_pixels.swap(rendered.pixels);
+                        &rendered, &page_width, &page_height)) {
+      pdf_state->cached_zoom_page = page_index;
+      pdf_state->cached_zoom_index = pdf_state->zoom_index;
+      pdf_state->cached_zoom_width = rendered.width;
+      pdf_state->cached_zoom_height = rendered.height;
+      pdf_state->cached_zoom_pixels.swap(rendered.pixels);
       pdf_state->page_width = page_width;
       pdf_state->page_height = page_height;
     }
   }
+
+  const float preview_source_width =
+      std::max(1.0f, (float)pdf_state->cached_preview_width);
+  const float preview_source_height =
+      std::max(1.0f, (float)pdf_state->cached_preview_height);
+  const pdf_view_utils::PreviewLayout preview_layout =
+      pdf_view_utils::ComputePreviewLayoutInBounds(
+          preview_source_width, preview_source_height, kPdfPreviewPadding,
+          kPdfPreviewPadding, kPdfPreviewScreenWidth - 2 * kPdfPreviewPadding,
+          kPdfPreviewScreenHeight - 2 * kPdfPreviewPadding);
 
   const int saved_style = ts->GetStyle();
   const int saved_color = ts->GetColorMode();
@@ -441,23 +665,54 @@ void Book::DrawCurrentView(Text *ts) {
 
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
-  const int tile_draw_x =
-      std::max(0, (kPdfZoomScreenWidth - pdf_state->cached_tile_width) / 2);
-  const int tile_draw_y =
-      std::max(0, (kPdfZoomScreenHeight - pdf_state->cached_tile_height) / 2);
-  if (!pdf_state->cached_tile_pixels.empty()) {
-    BlitRgb565Bitmap(ts, ts->screenleft, kPdfZoomScreenHeight, tile_draw_x,
-                     tile_draw_y, pdf_state->cached_tile_pixels,
-                     pdf_state->cached_tile_width,
-                     pdf_state->cached_tile_height);
-    ts->DrawRect((u16)tile_draw_x, (u16)tile_draw_y,
-                 (u16)(tile_draw_x + pdf_state->cached_tile_width),
-                 (u16)(tile_draw_y + pdf_state->cached_tile_height), kPdfFrame);
+
+  // Extract the visible viewport crop from the full-page zoom cache.
+  if (!pdf_state->cached_zoom_pixels.empty() &&
+      pdf_state->cached_zoom_width > 0 && pdf_state->cached_zoom_height > 0) {
+    const int crop_x = std::max(0, std::min(pdf_state->cached_zoom_width - 1,
+        (int)(viewport.left * pdf_state->cached_zoom_width)));
+    const int crop_y = std::max(0, std::min(pdf_state->cached_zoom_height - 1,
+        (int)(viewport.top * pdf_state->cached_zoom_height)));
+    int crop_w = std::max(1, (int)(viewport.width * pdf_state->cached_zoom_width + 0.5f));
+    int crop_h = std::max(1, (int)(viewport.height * pdf_state->cached_zoom_height + 0.5f));
+    // Clamp to stay within the cached bitmap.
+    if (crop_x + crop_w > pdf_state->cached_zoom_width)
+      crop_w = pdf_state->cached_zoom_width - crop_x;
+    if (crop_y + crop_h > pdf_state->cached_zoom_height)
+      crop_h = pdf_state->cached_zoom_height - crop_y;
+
+    // Destination: fit the crop into the top screen, centered.
+    const int draw_w = std::min(kPdfZoomScreenWidth, crop_w);
+    const int draw_h = std::min(kPdfZoomScreenHeight, crop_h);
+    const int draw_x = std::max(0, (kPdfZoomScreenWidth - draw_w) / 2);
+    const int draw_y = std::max(0, (kPdfZoomScreenHeight - draw_h) / 2);
+
+    const int stride = ts->display.height;
+    const int logical_width = ts->display.width;
+    ts->MarkScreenDirty(ts->screenleft);
+    for (int row = 0; row < draw_h; row++) {
+      const int dy = draw_y + row;
+      if (dy < 0 || dy >= kPdfZoomScreenHeight)
+        continue;
+      const int src_y = crop_y + std::min(crop_h - 1, (row * crop_h) / draw_h);
+      for (int col = 0; col < draw_w; col++) {
+        const int dx = draw_x + col;
+        if (dx < 0 || dx >= logical_width)
+          continue;
+        const int src_x = crop_x + std::min(crop_w - 1, (col * crop_w) / draw_w);
+        ts->screenleft[(size_t)dy * (size_t)stride + (size_t)dx] =
+            pdf_state->cached_zoom_pixels[(size_t)src_y *
+                (size_t)pdf_state->cached_zoom_width + (size_t)src_x];
+      }
+    }
+
+    ts->DrawRect((u16)draw_x, (u16)draw_y,
+                 (u16)(draw_x + draw_w), (u16)(draw_y + draw_h), kPdfFrame);
   } else {
     ts->SetPen(18, 28);
     ts->PrintString("PDF render unavailable");
   }
-  char top_msg[64];
+  char top_msg[48];
   snprintf(top_msg, sizeof(top_msg), "PDF %u/%u  %.1fx",
            (unsigned)(page_index + 1), (unsigned)pdf_state->page_count,
            pdf_view_utils::ZoomForIndex(pdf_state->zoom_index));
@@ -472,52 +727,55 @@ void Book::DrawCurrentView(Text *ts) {
                (u16)(preview_layout.x + preview_layout.width),
                (u16)(preview_layout.y + preview_layout.height), kPdfPaper);
 
-  const int preview_draw_x = preview_layout.x +
-                             std::max(0, preview_layout.width -
-                                             pdf_state->cached_preview_width) /
-                                 2;
-  const int preview_draw_y = preview_layout.y +
-                             std::max(0, preview_layout.height -
-                                             pdf_state->cached_preview_height) /
-                                 2;
-  if (!pdf_state->cached_preview_pixels.empty()) {
-    BlitRgb565Bitmap(ts, ts->screenright, kPdfPreviewScreenHeight,
-                     preview_draw_x, preview_draw_y,
-                     pdf_state->cached_preview_pixels,
-                     pdf_state->cached_preview_width,
-                     pdf_state->cached_preview_height);
+  if (!pdf_state->cached_preview_pixels.empty() &&
+      pdf_state->cached_preview_width > 0 &&
+      pdf_state->cached_preview_height > 0) {
+    BlitRgb565BitmapScaledCrop(
+        ts, ts->screenright, kPdfPreviewScreenHeight, preview_layout.x,
+        preview_layout.y, preview_layout.width, preview_layout.height,
+        pdf_state->cached_preview_pixels, pdf_state->cached_preview_width,
+        pdf_state->cached_preview_height, 0, 0,
+        pdf_state->cached_preview_width, pdf_state->cached_preview_height);
   }
   ts->DrawRect((u16)preview_layout.x, (u16)preview_layout.y,
                (u16)(preview_layout.x + preview_layout.width),
                (u16)(preview_layout.y + preview_layout.height), kPdfFrame);
 
-  const int viewport_x = preview_draw_x +
-                         (int)(viewport.left * pdf_state->cached_preview_width +
-                               0.5f);
-  const int viewport_y = preview_draw_y +
-                         (int)(viewport.top * pdf_state->cached_preview_height +
-                               0.5f);
-  const int viewport_w =
-      std::max(1, (int)(viewport.width * pdf_state->cached_preview_width + 0.5f));
+  const int viewport_x = preview_layout.x +
+                         (int)(std::max(0.0f, viewport.left) * preview_layout.width + 0.5f);
+  const int viewport_y = preview_layout.y +
+                         (int)(std::max(0.0f, viewport.top) * preview_layout.height + 0.5f);
+  const int viewport_w = std::max(
+      1, (int)(std::min(1.0f, viewport.width) * preview_layout.width + 0.5f));
   const int viewport_h = std::max(
-      1, (int)(viewport.height * pdf_state->cached_preview_height + 0.5f));
+      1, (int)(std::min(1.0f, viewport.height) * preview_layout.height + 0.5f));
   ts->DrawRect((u16)viewport_x, (u16)viewport_y, (u16)(viewport_x + viewport_w),
                (u16)(viewport_y + viewport_h), kPdfAccent);
-
-  ts->SetPen(8, 20);
-  ts->PrintString("preview");
 
   ts->SetStyle(saved_style);
   ts->SetColorMode(saved_color);
   ts->SetScreen(saved_screen);
   ts->margin.bottom = saved_bottom_margin;
+
+  if (!pdf_state->keep_preview_cache) {
+    pdf_state->cached_preview_page = -1;
+    pdf_state->cached_preview_width = 0;
+    pdf_state->cached_preview_height = 0;
+    pdf_state->cached_preview_pixels.clear();
+  }
+  // The zoom page cache is always kept — it is the mechanism that enables
+  // smooth viewport panning without re-invoking MuPDF.  It is naturally
+  // invalidated when the page or zoom level changes.
 }
 
 uint8_t ParsePdfFile(Book *book, const char *path) {
   if (!book || !path)
     return 255;
 
-  fz_context *ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
+  const bool is_new_3ds = DetectNew3ds();
+  const pdf_view_utils::DevicePolicy policy =
+      pdf_view_utils::GetDevicePolicy(is_new_3ds);
+  fz_context *ctx = fz_new_context(NULL, NULL, policy.mupdf_store_bytes);
   pdf_document *doc = NULL;
   fz_outline *outline = NULL;
   uint8_t rc = 0;
@@ -568,7 +826,8 @@ uint8_t ParsePdfFile(Book *book, const char *path) {
                              0, 0);
     }
   }
-  book->InitPdfView((u16)std::min(page_count, 65535), ctx, doc, outline);
+  book->InitPdfView((u16)std::min(page_count, 65535), ctx, doc, outline,
+                    is_new_3ds);
   return 0;
 }
 

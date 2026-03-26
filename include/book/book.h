@@ -58,30 +58,41 @@ class Book {
     u16 page_count;
     float page_width;
     float page_height;
+    bool is_new_3ds;
+    bool keep_preview_cache;
+    bool keep_tile_cache;
+    int max_zoom_index;
     int zoom_index;
     float viewport_center_x;
     float viewport_center_y;
     int cached_preview_page;
     int cached_preview_width;
     int cached_preview_height;
+    float cached_preview_content_left;
+    float cached_preview_content_top;
+    float cached_preview_content_width;
+    float cached_preview_content_height;
     std::vector<u16> cached_preview_pixels;
-    int cached_tile_page;
-    int cached_tile_zoom_index;
-    float cached_tile_center_x;
-    float cached_tile_center_y;
-    int cached_tile_width;
-    int cached_tile_height;
-    std::vector<u16> cached_tile_pixels;
+    // Full-page bitmap rendered at the current zoom level.
+    // Only invalidated on page or zoom change — NOT on viewport pan —
+    // so viewport panning is a cheap crop+blit from this cache.
+    int cached_zoom_page;
+    int cached_zoom_index;
+    int cached_zoom_width;
+    int cached_zoom_height;
+    std::vector<u16> cached_zoom_pixels;
 
     PdfState()
         : ctx(NULL), doc(NULL), outline(NULL), page_count(0),
-          page_width(612.0f), page_height(792.0f), zoom_index(2),
-          viewport_center_x(0.5f), viewport_center_y(0.5f),
+          page_width(612.0f), page_height(792.0f), is_new_3ds(false),
+          keep_preview_cache(true), keep_tile_cache(false), max_zoom_index(3),
+          zoom_index(2), viewport_center_x(0.5f), viewport_center_y(0.5f),
           cached_preview_page(-1), cached_preview_width(0),
-          cached_preview_height(0), cached_tile_page(-1),
-          cached_tile_zoom_index(-1), cached_tile_center_x(-1.0f),
-          cached_tile_center_y(-1.0f), cached_tile_width(0),
-          cached_tile_height(0) {}
+          cached_preview_height(0), cached_preview_content_left(0.0f),
+          cached_preview_content_top(0.0f), cached_preview_content_width(1.0f),
+          cached_preview_content_height(1.0f), cached_zoom_page(-1),
+          cached_zoom_index(-1), cached_zoom_width(0),
+          cached_zoom_height(0) {}
   };
   struct InlineImageEntry {
     std::string path;
@@ -245,7 +256,7 @@ public:
   Page *AppendPage();
   void DrawCurrentView(Text *ts);
   void InitPdfView(u16 page_count, fz_context *ctx, pdf_document *doc,
-                   fz_outline *outline);
+                   fz_outline *outline, bool is_new_3ds);
   bool ChangePdfZoom(int delta);
   bool MovePdfViewportToPreview(int touch_x, int touch_y);
   bool JumpPdfChapter(int delta);

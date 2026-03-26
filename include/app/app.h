@@ -219,6 +219,9 @@ private:
   Book *bookcurrent_;
   std::deque<app_job_t> job_queue;
   unsigned int layout_revision;
+  bool pdf_touch_drag_active_;
+  int pdf_touch_last_x_;
+  int pdf_touch_last_y_;
 
   int FindBooks();
   void InitScreens();

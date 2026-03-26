@@ -3,6 +3,7 @@
 #include "shared/pdf_view_utils.h"
 
 #include <algorithm>
+#include <cstdlib>
 
 namespace pdf_view_utils {
 namespace {
@@ -39,6 +40,25 @@ int ClampZoomIndex(int zoom_index) {
   return zoom_index;
 }
 
+DevicePolicy GetDevicePolicy(bool is_new_3ds) {
+  DevicePolicy policy;
+  policy.default_zoom_index = 2;
+  policy.max_zoom_index = is_new_3ds ? 4 : 3;
+  policy.keep_preview_cache = true;
+  policy.keep_tile_cache = is_new_3ds;
+  policy.mupdf_store_bytes =
+      is_new_3ds ? (12u * 1024u * 1024u) : (4u * 1024u * 1024u);
+  return policy;
+}
+
+int ClampZoomIndexForDevice(int zoom_index, bool is_new_3ds) {
+  const DevicePolicy policy = GetDevicePolicy(is_new_3ds);
+  const int clamped = ClampZoomIndex(zoom_index);
+  if (clamped > policy.max_zoom_index)
+    return policy.max_zoom_index;
+  return clamped;
+}
+
 int DefaultZoomIndex() { return 2; }
 
 float ZoomForIndex(int zoom_index) {
@@ -60,6 +80,17 @@ PreviewLayout ComputePreviewLayout(float page_width, float page_height,
   out.height = (int)(page_height * scale + 0.5f);
   out.x = (preview_width - out.width) / 2;
   out.y = (preview_height - out.height) / 2;
+  return out;
+}
+
+PreviewLayout ComputePreviewLayoutInBounds(float page_width, float page_height,
+                                           int bounds_x, int bounds_y,
+                                           int bounds_width,
+                                           int bounds_height) {
+  PreviewLayout out =
+      ComputePreviewLayout(page_width, page_height, bounds_width, bounds_height);
+  out.x += bounds_x;
+  out.y += bounds_y;
   return out;
 }
 
@@ -112,6 +143,13 @@ NormalizedPoint RecenterViewportFromPreview(const PreviewLayout &preview,
   out.x = ClampCenter(px, viewport.width);
   out.y = ClampCenter(py, viewport.height);
   return out;
+}
+
+bool TouchMovementExceedsThreshold(int prev_x, int prev_y, int next_x,
+                                   int next_y, int min_delta) {
+  const int dx = std::abs(next_x - prev_x);
+  const int dy = std::abs(next_y - prev_y);
+  return std::max(dx, dy) >= min_delta;
 }
 
 } // namespace pdf_view_utils

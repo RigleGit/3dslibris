@@ -70,6 +70,11 @@ int main(int argc, char **argv) {
   // Once App::Run() starts, BlitToFramebuffer() takes over both screens.
   consoleInit(GFX_BOTTOM, NULL);
 
+  bool is_new_3ds = false;
+  APT_CheckNew3DS(&is_new_3ds);
+  if (is_new_3ds)
+    osSetSpeedupEnable(true);
+
   printf("================================\n");
   printf("  3dslibris %s\n", VERSION);
   printf("================================\n\n");

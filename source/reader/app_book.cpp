@@ -26,6 +26,7 @@
 #include "book/book.h"
 #include "formats/common/book_error.h"
 #include "shared/app_flow_utils.h"
+#include "shared/pdf_view_utils.h"
 #include "ui/button.h"
 #include "debug_log.h"
 #include "book/layout_reflow.h"
@@ -38,6 +39,8 @@
 //! Book-related methods for App class.
 
 namespace {
+
+static const int kPdfTouchRerenderDelta = 4;
 
 std::list<int> CopyBookmarksAsInts(const std::list<u16> &bookmarks) {
   std::list<int> out;
@@ -289,12 +292,32 @@ void App::HandleEventInBook() {
       } else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1)) {
         status_dirty = true;
       }
-    } else if ((keys & KEY_TOUCH) || (held & KEY_TOUCH)) {
+    } else if (keys & KEY_TOUCH) {
       touchPosition mapped = TouchRead();
+      pdf_touch_drag_active_ = true;
+      pdf_touch_last_x_ = (int)mapped.px;
+      pdf_touch_last_y_ = (int)mapped.py;
       if (bookcurrent_->MovePdfViewportToPreview((int)mapped.px,
                                                  (int)mapped.py)) {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
+      }
+    } else if (held & KEY_TOUCH) {
+      touchPosition mapped = TouchRead();
+      if (!pdf_touch_drag_active_ ||
+          pdf_view_utils::TouchMovementExceedsThreshold(
+              pdf_touch_last_x_, pdf_touch_last_y_, (int)mapped.px,
+              (int)mapped.py, kPdfTouchRerenderDelta)) {
+        pdf_touch_drag_active_ = true;
+        pdf_touch_last_x_ = (int)mapped.px;
+        pdf_touch_last_y_ = (int)mapped.py;
+        if (bookcurrent_->MovePdfViewportToPreview((int)mapped.px,
+                                                   (int)mapped.py)) {
+          // DrawCurrentView now uses the full-page zoom cache for viewport
+          // extraction (no MuPDF re-render), so updating both screens is fast.
+          DrawBookPage(bookcurrent_, ts);
+          status_dirty = true;
+        }
       }
     } else if (keys & KEY_START) {
       ts->SetStyle(TEXT_STYLE_BROWSER);
@@ -304,6 +327,16 @@ void App::HandleEventInBook() {
     } else if (keys & KEY_SELECT) {
       ShowSettingsView(true);
       prefs->Write();
+    }
+
+    if (!(held & KEY_TOUCH)) {
+      if (pdf_touch_drag_active_) {
+        DrawBookPage(bookcurrent_, ts);
+        status_dirty = true;
+      }
+      pdf_touch_drag_active_ = false;
+      pdf_touch_last_x_ = -1;
+      pdf_touch_last_y_ = -1;
     }
 
     if (status_dirty)
