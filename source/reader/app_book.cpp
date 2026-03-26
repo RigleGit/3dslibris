@@ -248,6 +248,7 @@ void EnsureBookMode(App *app, const char *log_message) {
 
 void App::HandleEventInBook() {
   u16 pagecurrent = bookcurrent_->GetPosition();
+  const u16 page_start = pagecurrent;
   u16 pagecount = bookcurrent_->GetPageCount();
   bool status_dirty = false;
   bool deferred_pumped = false;
@@ -341,9 +342,8 @@ void App::HandleEventInBook() {
 
     if (status_dirty) {
       RequestStatusRedraw();
-      // After rendering and displaying the current page, prefetch the next
-      // page in the background.  This makes forward page turns near-instant.
-      bookcurrent_->PrefetchAdjacentPdfPage();
+      if (bookcurrent_->GetPosition() != page_start)
+        bookcurrent_->PrefetchAdjacentPdfPage();
     }
     return;
   }
@@ -507,6 +507,8 @@ u8 App::OpenBook(void) {
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   DrawBookPage(bookcurrent_, ts);
+  if (bookcurrent_ && bookcurrent_->IsPdf())
+    bookcurrent_->PrefetchAdjacentPdfPage();
   RequestStatusRedraw();
   prefs_view_.layout_notice_pending = false;
   prefs->Write();

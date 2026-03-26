@@ -928,9 +928,11 @@ void Book::PrefetchAdjacentPdfPage() {
   if (next >= (int)pdf_state->page_count)
     return;
 
-  // Already prefetched this page at the right zoom.
+  const int target_zoom_index = pdf_state->max_zoom_index;
+
+  // Already prefetched this page at the highest cached zoom.
   if (pdf_state->prefetch_page == next &&
-      pdf_state->prefetch_zoom_index == pdf_state->zoom_index &&
+      pdf_state->prefetch_zoom_index == target_zoom_index &&
       pdf_state->prefetch_width > 0)
     return;
 
@@ -974,14 +976,14 @@ void Book::PrefetchAdjacentPdfPage() {
   const float tile_scale =
       ComputeFitScale(page_width, page_height,
                       kPdfZoomScreenWidth, kPdfZoomScreenHeight) *
-      ComputeEffectivePdfZoom(pdf_state->zoom_index);
+      ComputeEffectivePdfZoom(target_zoom_index);
 
   RenderedPdfBitmap zoom;
   if (RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, next,
                       tile_scale, &zoom, &page_width, &page_height,
                       list, NULL)) {
     pdf_state->prefetch_page = next;
-    pdf_state->prefetch_zoom_index = pdf_state->zoom_index;
+    pdf_state->prefetch_zoom_index = target_zoom_index;
     pdf_state->prefetch_width = zoom.width;
     pdf_state->prefetch_height = zoom.height;
     pdf_state->prefetch_zoom_pixels.swap(zoom.pixels);
