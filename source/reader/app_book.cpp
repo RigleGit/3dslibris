@@ -248,7 +248,6 @@ void EnsureBookMode(App *app, const char *log_message) {
 
 void App::HandleEventInBook() {
   u16 pagecurrent = bookcurrent_->GetPosition();
-  const u16 page_start = pagecurrent;
   u16 pagecount = bookcurrent_->GetPageCount();
   bool status_dirty = false;
   bool deferred_pumped = false;
@@ -342,8 +341,12 @@ void App::HandleEventInBook() {
 
     if (status_dirty) {
       RequestStatusRedraw();
-      if (bookcurrent_->GetPosition() != page_start)
-        bookcurrent_->PrefetchAdjacentPdfPage();
+    } else if (!(held & KEY_TOUCH) && keys == 0) {
+      const u32 budget_ms = 4;
+      if (bookcurrent_->PumpDeferredPdfWork(budget_ms)) {
+        DrawBookPage(bookcurrent_, ts);
+        RequestStatusRedraw();
+      }
     }
     return;
   }
@@ -507,8 +510,6 @@ u8 App::OpenBook(void) {
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   DrawBookPage(bookcurrent_, ts);
-  if (bookcurrent_ && bookcurrent_->IsPdf())
-    bookcurrent_->PrefetchAdjacentPdfPage();
   RequestStatusRedraw();
   prefs_view_.layout_notice_pending = false;
   prefs->Write();

@@ -52,7 +52,33 @@ enum TocQuality {
 //! App maintains a vector of Book to represent the available library.
 
 class Book {
+public:
   struct PdfState {
+    struct BitmapCache {
+      int page;
+      int zoom_index;
+      float left;
+      float top;
+      float width;
+      float height;
+      int bitmap_width;
+      int bitmap_height;
+      std::vector<u16> pixels;
+
+      BitmapCache()
+          : page(-1), zoom_index(-1), left(0.0f), top(0.0f), width(1.0f),
+            height(1.0f), bitmap_width(0), bitmap_height(0) {}
+    };
+
+    struct AdjacentSlot {
+      int page;
+      fz_display_list *display_list;
+      BitmapCache preview;
+      BitmapCache interactive_tile;
+
+      AdjacentSlot() : page(-1), display_list(NULL), preview(), interactive_tile() {}
+    };
+
     fz_context *ctx;
     pdf_document *doc;
     fz_outline *outline;
@@ -66,60 +92,23 @@ class Book {
     int zoom_index;
     float viewport_center_x;
     float viewport_center_y;
-    int cached_preview_page;
-    int cached_preview_width;
-    int cached_preview_height;
-    float cached_preview_content_left;
-    float cached_preview_content_top;
-    float cached_preview_content_width;
-    float cached_preview_content_height;
-    std::vector<u16> cached_preview_pixels;
-    // Full-page bitmap rendered at the current zoom level.
-    // Only invalidated on page or zoom change — NOT on viewport pan —
-    // so viewport panning is a cheap crop+blit from this cache.
-    int cached_zoom_page;
-    int cached_zoom_index;
-    int cached_zoom_width;
-    int cached_zoom_height;
-    std::vector<u16> cached_zoom_pixels;
-
-    // Display list cache: captures page drawing ops once, replays cheaply.
-    // Avoids re-parsing the page content for each render (preview + zoom).
+    BitmapCache current_preview;
+    BitmapCache current_interactive_tile;
+    BitmapCache current_final_zoom;
+    bool final_cache_pending;
     fz_display_list *cached_display_list;
     int cached_display_list_page;
-
-    // Prefetch cache for adjacent page to make page turns instant.
-    int prefetch_page;
-    int prefetch_zoom_index;
-    int prefetch_width;
-    int prefetch_height;
-    float prefetch_content_left;
-    float prefetch_content_top;
-    float prefetch_content_width;
-    float prefetch_content_height;
-    std::vector<u16> prefetch_zoom_pixels;
-    int prefetch_preview_width;
-    int prefetch_preview_height;
-    std::vector<u16> prefetch_preview_pixels;
-    fz_display_list *prefetch_display_list;
+    AdjacentSlot prev_slot;
+    AdjacentSlot next_slot;
 
     PdfState()
         : ctx(NULL), doc(NULL), outline(NULL), page_count(0),
           page_width(612.0f), page_height(792.0f), is_new_3ds(false),
           keep_preview_cache(true), keep_tile_cache(false), max_zoom_index(3),
           zoom_index(2), viewport_center_x(0.5f), viewport_center_y(0.5f),
-          cached_preview_page(-1), cached_preview_width(0),
-          cached_preview_height(0), cached_preview_content_left(0.0f),
-          cached_preview_content_top(0.0f), cached_preview_content_width(1.0f),
-          cached_preview_content_height(1.0f), cached_zoom_page(-1),
-          cached_zoom_index(-1), cached_zoom_width(0),
-          cached_zoom_height(0), cached_display_list(NULL),
-          cached_display_list_page(-1), prefetch_page(-1),
-          prefetch_zoom_index(-1), prefetch_width(0), prefetch_height(0),
-          prefetch_content_left(0.0f), prefetch_content_top(0.0f),
-          prefetch_content_width(1.0f), prefetch_content_height(1.0f),
-          prefetch_preview_width(0), prefetch_preview_height(0),
-          prefetch_display_list(NULL) {}
+          current_preview(), current_interactive_tile(), current_final_zoom(),
+          final_cache_pending(false), cached_display_list(NULL),
+          cached_display_list_page(-1), prev_slot(), next_slot() {}
   };
   struct InlineImageEntry {
     std::string path;
@@ -144,6 +133,7 @@ class Book {
     std::vector<u16> pixels;
   };
 
+private:
   std::string filename;
   std::string foldername;
   std::string title;
@@ -288,6 +278,7 @@ public:
   bool MovePdfViewportToPreview(int touch_x, int touch_y);
   bool JumpPdfChapter(int delta);
   void PrefetchAdjacentPdfPage();
+  bool PumpDeferredPdfWork(u32 budget_ms);
   void Close();
   u8 Index();
   void IndexHTML();

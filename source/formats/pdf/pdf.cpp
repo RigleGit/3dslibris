@@ -91,6 +91,65 @@ struct PdfNavigationBounds {
   PdfNavigationBounds() : left(0.0f), top(0.0f), width(1.0f), height(1.0f) {}
 };
 
+static void ResetBitmapCache(Book::PdfState::BitmapCache *cache) {
+  if (!cache)
+    return;
+  cache->page = -1;
+  cache->zoom_index = -1;
+  cache->left = 0.0f;
+  cache->top = 0.0f;
+  cache->width = 1.0f;
+  cache->height = 1.0f;
+  cache->bitmap_width = 0;
+  cache->bitmap_height = 0;
+  cache->pixels.clear();
+}
+
+static void ResetAdjacentSlot(Book::PdfState::AdjacentSlot *slot,
+                              fz_context *ctx) {
+  if (!slot)
+    return;
+  if (slot->display_list && ctx)
+    fz_drop_display_list(ctx, slot->display_list);
+  slot->page = -1;
+  slot->display_list = NULL;
+  ResetBitmapCache(&slot->preview);
+  ResetBitmapCache(&slot->interactive_tile);
+}
+
+static void StoreBitmapCache(Book::PdfState::BitmapCache *cache, int page,
+                             int zoom_index, float left, float top,
+                             float width, float height,
+                             RenderedPdfBitmap *rendered) {
+  if (!cache || !rendered)
+    return;
+  cache->page = page;
+  cache->zoom_index = zoom_index;
+  cache->left = left;
+  cache->top = top;
+  cache->width = width;
+  cache->height = height;
+  cache->bitmap_width = rendered->width;
+  cache->bitmap_height = rendered->height;
+  cache->pixels.swap(rendered->pixels);
+}
+
+static bool BitmapCacheValid(const Book::PdfState::BitmapCache &cache,
+                             int page) {
+  return cache.page == page && cache.bitmap_width > 0 &&
+         cache.bitmap_height > 0 && !cache.pixels.empty();
+}
+
+static bool BitmapCacheCoversRect(const Book::PdfState::BitmapCache &cache,
+                                  int page, int zoom_index,
+                                  const pdf_view_utils::NormalizedRect &rect) {
+  const float eps = 0.001f;
+  return BitmapCacheValid(cache, page) && cache.zoom_index == zoom_index &&
+         cache.left <= rect.left + eps && cache.top <= rect.top + eps &&
+         cache.left + cache.width >= rect.left + rect.width - eps &&
+         cache.top + cache.height >= rect.top + rect.height - eps;
+}
+
 static u16 RGB565FromRgb8(unsigned char r, unsigned char g, unsigned char b) {
   return (u16)(((u16)(r >> 3) << 11) | ((u16)(g >> 2) << 5) | (u16)(b >> 3));
 }
@@ -340,6 +399,7 @@ static bool QueryPdfPageMetrics(fz_context *ctx, pdf_document *doc,
 static bool RenderPdfBitmap(fz_context *ctx, pdf_document *doc, int page_index,
                             float scale, RenderedPdfBitmap *out,
                             float *page_width, float *page_height,
+                            const pdf_view_utils::NormalizedRect *crop_rect = NULL,
                             fz_display_list *reuse_list = NULL,
                             fz_display_list **out_list = NULL) {
   if (!ctx || !doc || !out || scale <= 0.0f)
@@ -350,6 +410,7 @@ static bool RenderPdfBitmap(fz_context *ctx, pdf_document *doc, int page_index,
   fz_device *device = NULL;
   fz_display_list *list = reuse_list;
   fz_rect bounds = fz_empty_rect;
+  fz_rect render_rect = fz_empty_rect;
   fz_irect bbox = fz_empty_irect;
   bool ok = false;
   bool owns_list = false;
@@ -372,6 +433,24 @@ static bool RenderPdfBitmap(fz_context *ctx, pdf_document *doc, int page_index,
     if (page_height)
       *page_height = height;
 
+    render_rect = bounds;
+    if (crop_rect) {
+      const float crop_left = std::max(0.0f, std::min(1.0f, crop_rect->left));
+      const float crop_top = std::max(0.0f, std::min(1.0f, crop_rect->top));
+      const float crop_right =
+          std::max(crop_left,
+                   std::min(1.0f, crop_rect->left + crop_rect->width));
+      const float crop_bottom =
+          std::max(crop_top,
+                   std::min(1.0f, crop_rect->top + crop_rect->height));
+      render_rect.x0 = bounds.x0 + width * crop_left;
+      render_rect.y0 = bounds.y0 + height * crop_top;
+      render_rect.x1 = bounds.x0 + width * crop_right;
+      render_rect.y1 = bounds.y0 + height * crop_bottom;
+      if (!(render_rect.x1 > render_rect.x0 && render_rect.y1 > render_rect.y0))
+        render_rect = bounds;
+    }
+
     // Build display list if not provided (captures page ops for cheap replay).
     if (!list) {
       list = fz_new_display_list_from_page(ctx, page);
@@ -379,7 +458,7 @@ static bool RenderPdfBitmap(fz_context *ctx, pdf_document *doc, int page_index,
     }
 
     const fz_matrix ctm = MakePdfRenderMatrix(bounds, scale);
-    bbox = fz_round_rect(fz_transform_rect(bounds, ctm));
+    bbox = fz_round_rect(fz_transform_rect(render_rect, ctm));
     if (bbox.x1 <= bbox.x0 || bbox.y1 <= bbox.y0)
       fz_throw(ctx, FZ_ERROR_FORMAT, "invalid pdf render bbox");
 
@@ -472,6 +551,291 @@ static pdf_view_utils::NormalizedPoint RecenterViewportFromRawPreview(
   return out;
 }
 
+static float ComputePdfPreviewScale(float page_width, float page_height) {
+  return ComputeFitScale(page_width, page_height,
+                         kPdfPreviewScreenWidth - 2 * kPdfPreviewPadding,
+                         kPdfPreviewScreenHeight - 2 * kPdfPreviewPadding);
+}
+
+static float ComputePdfFinalScale(float page_width, float page_height,
+                                  int max_zoom_index) {
+  return ComputeFitScale(page_width, page_height, kPdfZoomScreenWidth,
+                         kPdfZoomScreenHeight) *
+         ComputeEffectivePdfZoom(max_zoom_index);
+}
+
+static float ComputePdfInteractiveScale(float page_width, float page_height,
+                                        int zoom_index) {
+  return ComputeFitScale(page_width, page_height, kPdfZoomScreenWidth,
+                         kPdfZoomScreenHeight) *
+         ComputeEffectivePdfZoom(zoom_index);
+}
+
+static void GetPreviewContentBounds(const Book::PdfState *pdf_state, float *left,
+                                    float *top, float *width, float *height) {
+  if (!left || !top || !width || !height)
+    return;
+  if (pdf_state && BitmapCacheValid(pdf_state->current_preview, pdf_state->current_preview.page)) {
+    *left = pdf_state->current_preview.left;
+    *top = pdf_state->current_preview.top;
+    *width = pdf_state->current_preview.width;
+    *height = pdf_state->current_preview.height;
+    return;
+  }
+  *left = 0.0f;
+  *top = 0.0f;
+  *width = 1.0f;
+  *height = 1.0f;
+}
+
+static pdf_view_utils::NormalizedRect ComputeCurrentPdfViewport(
+    const Book::PdfState *pdf_state) {
+  float left = 0.0f;
+  float top = 0.0f;
+  float width = 1.0f;
+  float height = 1.0f;
+  GetPreviewContentBounds(pdf_state, &left, &top, &width, &height);
+  return ComputePdfViewportRect(pdf_state->page_width, pdf_state->page_height,
+                                pdf_state->zoom_index,
+                                pdf_state->viewport_center_x,
+                                pdf_state->viewport_center_y, left, top, width,
+                                height);
+}
+
+static Book::PdfState::AdjacentSlot *GetAdjacentSlot(Book::PdfState *pdf_state,
+                                                     int direction) {
+  if (!pdf_state)
+    return NULL;
+  return (direction < 0) ? &pdf_state->prev_slot : &pdf_state->next_slot;
+}
+
+static bool PromoteAdjacentSlotIfMatching(Book::PdfState *pdf_state,
+                                          int page_index) {
+  if (!pdf_state)
+    return false;
+  Book::PdfState::AdjacentSlot *slot = NULL;
+  if (pdf_state->prev_slot.page == page_index)
+    slot = &pdf_state->prev_slot;
+  else if (pdf_state->next_slot.page == page_index)
+    slot = &pdf_state->next_slot;
+  if (!slot)
+    return false;
+
+  ResetBitmapCache(&pdf_state->current_preview);
+  ResetBitmapCache(&pdf_state->current_interactive_tile);
+  pdf_state->current_preview = slot->preview;
+  pdf_state->current_interactive_tile = slot->interactive_tile;
+  ResetBitmapCache(&slot->preview);
+  ResetBitmapCache(&slot->interactive_tile);
+
+  if (pdf_state->cached_display_list && pdf_state->ctx)
+    fz_drop_display_list(pdf_state->ctx, pdf_state->cached_display_list);
+  pdf_state->cached_display_list = slot->display_list;
+  pdf_state->cached_display_list_page = page_index;
+  slot->display_list = NULL;
+  slot->page = -1;
+  pdf_state->final_cache_pending = true;
+  return true;
+}
+
+static bool EnsurePdfDisplayListForPage(Book::PdfState *pdf_state,
+                                        int page_index,
+                                        fz_display_list **out_list) {
+  if (!pdf_state || !out_list)
+    return false;
+  if (pdf_state->cached_display_list_page == page_index &&
+      pdf_state->cached_display_list) {
+    *out_list = pdf_state->cached_display_list;
+    return true;
+  }
+  if (PromoteAdjacentSlotIfMatching(pdf_state, page_index) &&
+      pdf_state->cached_display_list_page == page_index &&
+      pdf_state->cached_display_list) {
+    *out_list = pdf_state->cached_display_list;
+    return true;
+  }
+
+  if (pdf_state->cached_display_list && pdf_state->ctx) {
+    fz_drop_display_list(pdf_state->ctx, pdf_state->cached_display_list);
+    pdf_state->cached_display_list = NULL;
+    pdf_state->cached_display_list_page = -1;
+  }
+  *out_list = NULL;
+  return true;
+}
+
+static bool EnsureCurrentPreviewCache(Book::PdfState *pdf_state, int page_index) {
+  if (!pdf_state)
+    return false;
+  PromoteAdjacentSlotIfMatching(pdf_state, page_index);
+  if (BitmapCacheValid(pdf_state->current_preview, page_index))
+    return true;
+
+  fz_display_list *display_list = NULL;
+  if (!EnsurePdfDisplayListForPage(pdf_state, page_index, &display_list))
+    return false;
+
+  RenderedPdfBitmap rendered;
+  fz_display_list *new_list = NULL;
+  float page_width = pdf_state->page_width;
+  float page_height = pdf_state->page_height;
+  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
+                       ComputePdfPreviewScale(page_width, page_height),
+                       &rendered, &page_width, &page_height, NULL,
+                       display_list, display_list ? NULL : &new_list)) {
+    return false;
+  }
+
+  float left = 0.0f, top = 0.0f, width = 1.0f, height = 1.0f;
+  ComputeBitmapContentBoundsNormalized(rendered, &left, &top, &width, &height);
+  StoreBitmapCache(&pdf_state->current_preview, page_index, -1, left, top,
+                   width, height, &rendered);
+  pdf_state->page_width = page_width;
+  pdf_state->page_height = page_height;
+  if (new_list && !display_list) {
+    pdf_state->cached_display_list = new_list;
+    pdf_state->cached_display_list_page = page_index;
+  }
+  return true;
+}
+
+static bool EnsureCurrentInteractiveTile(Book::PdfState *pdf_state,
+                                         int page_index,
+                                         const pdf_view_utils::NormalizedRect &viewport) {
+  if (!pdf_state)
+    return false;
+  PromoteAdjacentSlotIfMatching(pdf_state, page_index);
+  if (BitmapCacheCoversRect(pdf_state->current_interactive_tile, page_index,
+                            pdf_state->zoom_index, viewport))
+    return true;
+
+  fz_display_list *display_list = NULL;
+  if (!EnsurePdfDisplayListForPage(pdf_state, page_index, &display_list))
+    return false;
+
+  RenderedPdfBitmap rendered;
+  fz_display_list *new_list = NULL;
+  float page_width = pdf_state->page_width;
+  float page_height = pdf_state->page_height;
+  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
+                       ComputePdfInteractiveScale(page_width, page_height,
+                                                  pdf_state->zoom_index),
+                       &rendered, &page_width, &page_height, &viewport,
+                       display_list, display_list ? NULL : &new_list)) {
+    return false;
+  }
+
+  StoreBitmapCache(&pdf_state->current_interactive_tile, page_index,
+                   pdf_state->zoom_index, viewport.left, viewport.top,
+                   viewport.width, viewport.height, &rendered);
+  pdf_state->page_width = page_width;
+  pdf_state->page_height = page_height;
+  if (new_list && !display_list) {
+    pdf_state->cached_display_list = new_list;
+    pdf_state->cached_display_list_page = page_index;
+  }
+  return true;
+}
+
+static bool EnsureCurrentFinalCache(Book::PdfState *pdf_state, int page_index) {
+  if (!pdf_state)
+    return false;
+  if (BitmapCacheValid(pdf_state->current_final_zoom, page_index) &&
+      pdf_state->current_final_zoom.zoom_index >= pdf_state->max_zoom_index) {
+    pdf_state->final_cache_pending = false;
+    return true;
+  }
+
+  fz_display_list *display_list = NULL;
+  if (!EnsurePdfDisplayListForPage(pdf_state, page_index, &display_list))
+    return false;
+
+  RenderedPdfBitmap rendered;
+  fz_display_list *new_list = NULL;
+  float page_width = pdf_state->page_width;
+  float page_height = pdf_state->page_height;
+  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
+                       ComputePdfFinalScale(page_width, page_height,
+                                            pdf_state->max_zoom_index),
+                       &rendered, &page_width, &page_height, NULL,
+                       display_list, display_list ? NULL : &new_list)) {
+    return false;
+  }
+
+  StoreBitmapCache(&pdf_state->current_final_zoom, page_index,
+                   pdf_state->max_zoom_index, 0.0f, 0.0f, 1.0f, 1.0f,
+                   &rendered);
+  pdf_state->page_width = page_width;
+  pdf_state->page_height = page_height;
+  pdf_state->final_cache_pending = false;
+  if (new_list && !display_list) {
+    pdf_state->cached_display_list = new_list;
+    pdf_state->cached_display_list_page = page_index;
+  }
+  return true;
+}
+
+static bool PrepareAdjacentPdfSlot(Book::PdfState *pdf_state, int current_page,
+                                   int direction) {
+  if (!pdf_state || !pdf_state->ctx || !pdf_state->doc || direction == 0)
+    return false;
+  const int page_index =
+      ClampPdfPageIndex(current_page + (direction < 0 ? -1 : 1),
+                        pdf_state->page_count);
+  if (page_index == current_page)
+    return false;
+
+  Book::PdfState::AdjacentSlot *slot = GetAdjacentSlot(pdf_state, direction);
+  if (!slot)
+    return false;
+
+  const pdf_view_utils::NormalizedRect viewport =
+      ComputeCurrentPdfViewport(pdf_state);
+  if (slot->page == page_index &&
+      BitmapCacheValid(slot->preview, page_index) &&
+      BitmapCacheCoversRect(slot->interactive_tile, page_index,
+                            pdf_state->zoom_index, viewport)) {
+    return false;
+  }
+
+  ResetAdjacentSlot(slot, pdf_state->ctx);
+
+  float page_width = pdf_state->page_width;
+  float page_height = pdf_state->page_height;
+  RenderedPdfBitmap preview;
+  fz_display_list *display_list = NULL;
+  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
+                       ComputePdfPreviewScale(page_width, page_height),
+                       &preview, &page_width, &page_height, NULL, NULL,
+                       &display_list) ||
+      !display_list) {
+    ResetAdjacentSlot(slot, pdf_state->ctx);
+    return false;
+  }
+
+  float left = 0.0f, top = 0.0f, width = 1.0f, height = 1.0f;
+  ComputeBitmapContentBoundsNormalized(preview, &left, &top, &width, &height);
+  StoreBitmapCache(&slot->preview, page_index, -1, left, top, width, height,
+                   &preview);
+
+  RenderedPdfBitmap interactive;
+  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
+                       ComputePdfInteractiveScale(page_width, page_height,
+                                                  pdf_state->zoom_index),
+                       &interactive, &page_width, &page_height, &viewport,
+                       display_list, NULL)) {
+    ResetAdjacentSlot(slot, pdf_state->ctx);
+    return false;
+  }
+  StoreBitmapCache(&slot->interactive_tile, page_index, pdf_state->zoom_index,
+                   viewport.left, viewport.top, viewport.width,
+                   viewport.height, &interactive);
+
+  slot->page = page_index;
+  slot->display_list = display_list;
+  return true;
+}
+
 static void AddPdfOutlineEntries(Book *book, fz_context *ctx, pdf_document *doc,
                                  const fz_outline *entry, u8 level) {
   if (!book || !ctx || !doc)
@@ -536,10 +900,10 @@ void Book::ResetPdfState() {
   if (!pdf_state)
     return;
   if (pdf_state->ctx) {
-    if (pdf_state->prefetch_display_list)
-      fz_drop_display_list(pdf_state->ctx, pdf_state->prefetch_display_list);
     if (pdf_state->cached_display_list)
       fz_drop_display_list(pdf_state->ctx, pdf_state->cached_display_list);
+    ResetAdjacentSlot(&pdf_state->prev_slot, pdf_state->ctx);
+    ResetAdjacentSlot(&pdf_state->next_slot, pdf_state->ctx);
     fz_drop_outline(pdf_state->ctx, pdf_state->outline);
     pdf_drop_document(pdf_state->ctx, pdf_state->doc);
     fz_drop_context(pdf_state->ctx);
@@ -565,6 +929,7 @@ void Book::InitPdfView(u16 page_count, fz_context *ctx, pdf_document *doc,
   pdf_state->zoom_index = policy.default_zoom_index;
   pdf_state->viewport_center_x = 0.5f;
   pdf_state->viewport_center_y = 0.5f;
+  pdf_state->final_cache_pending = true;
 }
 
 bool Book::ChangePdfZoom(int delta) {
@@ -577,6 +942,9 @@ bool Book::ChangePdfZoom(int delta) {
   if (next == pdf_state->zoom_index)
     return false;
   pdf_state->zoom_index = next;
+  if (pdf_state->current_final_zoom.page != position ||
+      pdf_state->current_final_zoom.zoom_index < pdf_state->max_zoom_index)
+    pdf_state->final_cache_pending = true;
   return true;
 }
 
@@ -585,9 +953,10 @@ bool Book::MovePdfViewportToPreview(int touch_x, int touch_y) {
     return false;
   float preview_source_width = pdf_state->page_width;
   float preview_source_height = pdf_state->page_height;
-  if (pdf_state->cached_preview_width > 0 && pdf_state->cached_preview_height > 0) {
-    preview_source_width = (float)pdf_state->cached_preview_width;
-    preview_source_height = (float)pdf_state->cached_preview_height;
+  if (pdf_state->current_preview.bitmap_width > 0 &&
+      pdf_state->current_preview.bitmap_height > 0) {
+    preview_source_width = (float)pdf_state->current_preview.bitmap_width;
+    preview_source_height = (float)pdf_state->current_preview.bitmap_height;
   }
   const pdf_view_utils::PreviewLayout preview =
       pdf_view_utils::ComputePreviewLayoutInBounds(
@@ -595,18 +964,13 @@ bool Book::MovePdfViewportToPreview(int touch_x, int touch_y) {
           kPdfPreviewPadding, kPdfPreviewPadding,
           kPdfPreviewScreenWidth - 2 * kPdfPreviewPadding,
           kPdfPreviewScreenHeight - 2 * kPdfPreviewPadding);
-  const PdfNavigationBounds nav = GetPdfNavigationBounds(
-      pdf_state->cached_preview_content_left,
-      pdf_state->cached_preview_content_top,
-      pdf_state->cached_preview_content_width,
-      pdf_state->cached_preview_content_height);
-  const pdf_view_utils::NormalizedRect viewport = ComputePdfViewportRect(
-      pdf_state->page_width, pdf_state->page_height, pdf_state->zoom_index,
-      pdf_state->viewport_center_x, pdf_state->viewport_center_y,
-      pdf_state->cached_preview_content_left,
-      pdf_state->cached_preview_content_top,
-      pdf_state->cached_preview_content_width,
-      pdf_state->cached_preview_content_height);
+  const PdfNavigationBounds nav =
+      GetPdfNavigationBounds(pdf_state->current_preview.left,
+                             pdf_state->current_preview.top,
+                             pdf_state->current_preview.width,
+                             pdf_state->current_preview.height);
+  const pdf_view_utils::NormalizedRect viewport =
+      ComputeCurrentPdfViewport(pdf_state);
   const pdf_view_utils::NormalizedPoint center =
       RecenterViewportFromRawPreview(preview, viewport, nav, touch_x, touch_y);
   const float dx = std::abs(center.x - pdf_state->viewport_center_x);
@@ -655,6 +1019,13 @@ void Book::DrawCurrentView(Text *ts) {
   const int page_index = ClampPdfPageIndex(position, pdf_state->page_count);
   position = page_index;
 
+  if (pdf_state->current_preview.page != page_index)
+    ResetBitmapCache(&pdf_state->current_preview);
+  if (pdf_state->current_interactive_tile.page != page_index)
+    ResetBitmapCache(&pdf_state->current_interactive_tile);
+  if (pdf_state->current_final_zoom.page != page_index)
+    ResetBitmapCache(&pdf_state->current_final_zoom);
+
   float page_width = pdf_state->page_width;
   float page_height = pdf_state->page_height;
   if (QueryPdfPageMetrics(pdf_state->ctx, pdf_state->doc, page_index,
@@ -663,142 +1034,23 @@ void Book::DrawCurrentView(Text *ts) {
     pdf_state->page_height = page_height;
   }
 
-  pdf_view_utils::NormalizedRect viewport = pdf_view_utils::ComputeViewportRect(
-      pdf_state->page_width, pdf_state->page_height,
-      ComputeEffectivePdfZoom(pdf_state->zoom_index),
-      (float)kPdfZoomScreenWidth, (float)kPdfZoomScreenHeight,
-      pdf_state->viewport_center_x, pdf_state->viewport_center_y);
+  if (!EnsureCurrentPreviewCache(pdf_state, page_index))
+    return;
+
+  pdf_view_utils::NormalizedRect viewport = ComputeCurrentPdfViewport(pdf_state);
   pdf_state->viewport_center_x = viewport.left + viewport.width * 0.5f;
   pdf_state->viewport_center_y = viewport.top + viewport.height * 0.5f;
-
-  // Low-res preview: only needs to fit the bottom screen preview box
-  // (~232x312 px) instead of the old full-res approach (~1080x1577 px).
-  const float preview_scale =
-      ComputeFitScale(pdf_state->page_width, pdf_state->page_height,
-                      kPdfPreviewScreenWidth - 2 * kPdfPreviewPadding,
-                      kPdfPreviewScreenHeight - 2 * kPdfPreviewPadding);
-
-  // Manage display list cache: parse page content once, replay cheaply.
-  fz_display_list *display_list = NULL;
-  if (pdf_state->cached_display_list_page == page_index) {
-    display_list = pdf_state->cached_display_list;
-  } else {
-    // Drop old display list.
-    if (pdf_state->cached_display_list && pdf_state->ctx) {
-      fz_drop_display_list(pdf_state->ctx, pdf_state->cached_display_list);
-      pdf_state->cached_display_list = NULL;
-      pdf_state->cached_display_list_page = -1;
-    }
-    // Check if the prefetch has a display list for this page.
-    if (pdf_state->prefetch_display_list &&
-        pdf_state->prefetch_page == page_index) {
-      display_list = pdf_state->prefetch_display_list;
-      pdf_state->cached_display_list = display_list;
-      pdf_state->cached_display_list_page = page_index;
-      pdf_state->prefetch_display_list = NULL; // ownership transferred
-    }
-  }
-
-  if (pdf_state->cached_preview_page != page_index ||
-      pdf_state->cached_preview_width <= 0 ||
-      pdf_state->cached_preview_height <= 0) {
-    // Check prefetch cache first.
-    if (pdf_state->prefetch_page == page_index &&
-        pdf_state->prefetch_preview_width > 0 &&
-        !pdf_state->prefetch_preview_pixels.empty()) {
-      pdf_state->cached_preview_page = page_index;
-      pdf_state->cached_preview_width = pdf_state->prefetch_preview_width;
-      pdf_state->cached_preview_height = pdf_state->prefetch_preview_height;
-      pdf_state->cached_preview_pixels.swap(pdf_state->prefetch_preview_pixels);
-      pdf_state->cached_preview_content_left = pdf_state->prefetch_content_left;
-      pdf_state->cached_preview_content_top = pdf_state->prefetch_content_top;
-      pdf_state->cached_preview_content_width = pdf_state->prefetch_content_width;
-      pdf_state->cached_preview_content_height = pdf_state->prefetch_content_height;
-    } else {
-      RenderedPdfBitmap rendered;
-      fz_display_list *new_list = NULL;
-      if (RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
-                          preview_scale, &rendered, &page_width,
-                          &page_height, display_list,
-                          display_list ? NULL : &new_list)) {
-        ComputeBitmapContentBoundsNormalized(
-            rendered, &pdf_state->cached_preview_content_left,
-            &pdf_state->cached_preview_content_top,
-            &pdf_state->cached_preview_content_width,
-            &pdf_state->cached_preview_content_height);
-        pdf_state->cached_preview_page = page_index;
-        pdf_state->cached_preview_width = rendered.width;
-        pdf_state->cached_preview_height = rendered.height;
-        pdf_state->cached_preview_pixels.swap(rendered.pixels);
-        pdf_state->page_width = page_width;
-        pdf_state->page_height = page_height;
-
-        // Capture newly created display list for reuse.
-        if (new_list && !display_list) {
-          display_list = new_list;
-          pdf_state->cached_display_list = display_list;
-          pdf_state->cached_display_list_page = page_index;
-        }
-      }
-    }
-  }
-
-  // Zoom cache: render once at the highest zoom level for this device.
-  // Lower zoom levels just crop a bigger region and downscale (looks great).
-  // Only re-render if the user zooms ABOVE the cached resolution.
-  const float tile_scale =
-      ComputeFitScale(pdf_state->page_width, pdf_state->page_height,
-                      kPdfZoomScreenWidth, kPdfZoomScreenHeight) *
-      ComputeEffectivePdfZoom(pdf_state->max_zoom_index);
-
-  const bool zoom_cache_invalid =
-      pdf_state->cached_zoom_page != page_index ||
-      pdf_state->cached_zoom_width <= 0 ||
-      pdf_state->zoom_index > pdf_state->cached_zoom_index;
-
-  if (zoom_cache_invalid) {
-    // Check prefetch cache — accept it if page matches and resolution is
-    // sufficient (i.e. prefetched at >= current zoom index).
-    bool used_prefetch = false;
-    if (pdf_state->prefetch_page == page_index &&
-        pdf_state->prefetch_zoom_index >= pdf_state->zoom_index &&
-        pdf_state->prefetch_width > 0 &&
-        !pdf_state->prefetch_zoom_pixels.empty()) {
-      pdf_state->cached_zoom_page = page_index;
-      pdf_state->cached_zoom_index = pdf_state->prefetch_zoom_index;
-      pdf_state->cached_zoom_width = pdf_state->prefetch_width;
-      pdf_state->cached_zoom_height = pdf_state->prefetch_height;
-      pdf_state->cached_zoom_pixels.swap(pdf_state->prefetch_zoom_pixels);
-      used_prefetch = true;
-    }
-    if (!used_prefetch) {
-      RenderedPdfBitmap rendered;
-      fz_display_list *new_list = NULL;
-      if (RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
-                          tile_scale, &rendered, &page_width, &page_height,
-                          display_list,
-                          display_list ? NULL : &new_list)) {
-        pdf_state->cached_zoom_page = page_index;
-        pdf_state->cached_zoom_index = pdf_state->max_zoom_index;
-        pdf_state->cached_zoom_width = rendered.width;
-        pdf_state->cached_zoom_height = rendered.height;
-        pdf_state->cached_zoom_pixels.swap(rendered.pixels);
-        pdf_state->page_width = page_width;
-        pdf_state->page_height = page_height;
-
-        if (new_list && !display_list) {
-          display_list = new_list;
-          pdf_state->cached_display_list = display_list;
-          pdf_state->cached_display_list_page = page_index;
-        }
-      }
-    }
-  }
+  const bool has_final_cache =
+      BitmapCacheValid(pdf_state->current_final_zoom, page_index) &&
+      pdf_state->current_final_zoom.zoom_index >= pdf_state->max_zoom_index;
+  if (!has_final_cache)
+    EnsureCurrentInteractiveTile(pdf_state, page_index, viewport);
+  pdf_state->final_cache_pending = !has_final_cache;
 
   const float preview_source_width =
-      std::max(1.0f, (float)pdf_state->cached_preview_width);
+      std::max(1.0f, (float)pdf_state->current_preview.bitmap_width);
   const float preview_source_height =
-      std::max(1.0f, (float)pdf_state->cached_preview_height);
+      std::max(1.0f, (float)pdf_state->current_preview.bitmap_height);
   const pdf_view_utils::PreviewLayout preview_layout =
       pdf_view_utils::ComputePreviewLayoutInBounds(
           preview_source_width, preview_source_height, kPdfPreviewPadding,
@@ -817,48 +1069,44 @@ void Book::DrawCurrentView(Text *ts) {
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
 
-  // Extract the visible viewport crop from the full-page zoom cache.
-  if (!pdf_state->cached_zoom_pixels.empty() &&
-      pdf_state->cached_zoom_width > 0 && pdf_state->cached_zoom_height > 0) {
-    const int crop_x = std::max(0, std::min(pdf_state->cached_zoom_width - 1,
-        (int)(viewport.left * pdf_state->cached_zoom_width)));
-    const int crop_y = std::max(0, std::min(pdf_state->cached_zoom_height - 1,
-        (int)(viewport.top * pdf_state->cached_zoom_height)));
-    int crop_w = std::max(1, (int)(viewport.width * pdf_state->cached_zoom_width + 0.5f));
-    int crop_h = std::max(1, (int)(viewport.height * pdf_state->cached_zoom_height + 0.5f));
-    // Clamp to stay within the cached bitmap.
-    if (crop_x + crop_w > pdf_state->cached_zoom_width)
-      crop_w = pdf_state->cached_zoom_width - crop_x;
-    if (crop_y + crop_h > pdf_state->cached_zoom_height)
-      crop_h = pdf_state->cached_zoom_height - crop_y;
+  if (has_final_cache) {
+    const int crop_x = std::max(
+        0, std::min(pdf_state->current_final_zoom.bitmap_width - 1,
+                    (int)(viewport.left *
+                          pdf_state->current_final_zoom.bitmap_width)));
+    const int crop_y = std::max(
+        0, std::min(pdf_state->current_final_zoom.bitmap_height - 1,
+                    (int)(viewport.top *
+                          pdf_state->current_final_zoom.bitmap_height)));
+    int crop_w =
+        std::max(1, (int)(viewport.width *
+                              pdf_state->current_final_zoom.bitmap_width +
+                          0.5f));
+    int crop_h =
+        std::max(1, (int)(viewport.height *
+                              pdf_state->current_final_zoom.bitmap_height +
+                          0.5f));
+    if (crop_x + crop_w > pdf_state->current_final_zoom.bitmap_width)
+      crop_w = pdf_state->current_final_zoom.bitmap_width - crop_x;
+    if (crop_y + crop_h > pdf_state->current_final_zoom.bitmap_height)
+      crop_h = pdf_state->current_final_zoom.bitmap_height - crop_y;
 
-    // Destination: fit the crop into the top screen, centered.
-    const int draw_w = std::min(kPdfZoomScreenWidth, crop_w);
-    const int draw_h = std::min(kPdfZoomScreenHeight, crop_h);
-    const int draw_x = std::max(0, (kPdfZoomScreenWidth - draw_w) / 2);
-    const int draw_y = std::max(0, (kPdfZoomScreenHeight - draw_h) / 2);
-
-    const int stride = ts->display.height;
-    const int logical_width = ts->display.width;
-    ts->MarkScreenDirty(ts->screenleft);
-    for (int row = 0; row < draw_h; row++) {
-      const int dy = draw_y + row;
-      if (dy < 0 || dy >= kPdfZoomScreenHeight)
-        continue;
-      const int src_y = crop_y + std::min(crop_h - 1, (row * crop_h) / draw_h);
-      for (int col = 0; col < draw_w; col++) {
-        const int dx = draw_x + col;
-        if (dx < 0 || dx >= logical_width)
-          continue;
-        const int src_x = crop_x + std::min(crop_w - 1, (col * crop_w) / draw_w);
-        ts->screenleft[(size_t)dy * (size_t)stride + (size_t)dx] =
-            pdf_state->cached_zoom_pixels[(size_t)src_y *
-                (size_t)pdf_state->cached_zoom_width + (size_t)src_x];
-      }
-    }
-
-    ts->DrawRect((u16)draw_x, (u16)draw_y,
-                 (u16)(draw_x + draw_w), (u16)(draw_y + draw_h), kPdfFrame);
+    BlitRgb565BitmapScaledCrop(
+        ts, ts->screenleft, kPdfZoomScreenHeight, 0, 0, kPdfZoomScreenWidth,
+        kPdfZoomScreenHeight, pdf_state->current_final_zoom.pixels,
+        pdf_state->current_final_zoom.bitmap_width,
+        pdf_state->current_final_zoom.bitmap_height, crop_x, crop_y, crop_w,
+        crop_h);
+  } else if (BitmapCacheCoversRect(pdf_state->current_interactive_tile,
+                                   page_index, pdf_state->zoom_index,
+                                   viewport)) {
+    BlitRgb565BitmapScaledCrop(
+        ts, ts->screenleft, kPdfZoomScreenHeight, 0, 0, kPdfZoomScreenWidth,
+        kPdfZoomScreenHeight, pdf_state->current_interactive_tile.pixels,
+        pdf_state->current_interactive_tile.bitmap_width,
+        pdf_state->current_interactive_tile.bitmap_height, 0, 0,
+        pdf_state->current_interactive_tile.bitmap_width,
+        pdf_state->current_interactive_tile.bitmap_height);
   } else {
     ts->SetPen(18, 28);
     ts->PrintString("PDF render unavailable");
@@ -878,15 +1126,17 @@ void Book::DrawCurrentView(Text *ts) {
                (u16)(preview_layout.x + preview_layout.width),
                (u16)(preview_layout.y + preview_layout.height), kPdfPaper);
 
-  if (!pdf_state->cached_preview_pixels.empty() &&
-      pdf_state->cached_preview_width > 0 &&
-      pdf_state->cached_preview_height > 0) {
+  if (!pdf_state->current_preview.pixels.empty() &&
+      pdf_state->current_preview.bitmap_width > 0 &&
+      pdf_state->current_preview.bitmap_height > 0) {
     BlitRgb565BitmapScaledCrop(
         ts, ts->screenright, kPdfPreviewScreenHeight, preview_layout.x,
         preview_layout.y, preview_layout.width, preview_layout.height,
-        pdf_state->cached_preview_pixels, pdf_state->cached_preview_width,
-        pdf_state->cached_preview_height, 0, 0,
-        pdf_state->cached_preview_width, pdf_state->cached_preview_height);
+        pdf_state->current_preview.pixels,
+        pdf_state->current_preview.bitmap_width,
+        pdf_state->current_preview.bitmap_height, 0, 0,
+        pdf_state->current_preview.bitmap_width,
+        pdf_state->current_preview.bitmap_height);
   }
   ts->DrawRect((u16)preview_layout.x, (u16)preview_layout.y,
                (u16)(preview_layout.x + preview_layout.width),
@@ -907,87 +1157,40 @@ void Book::DrawCurrentView(Text *ts) {
   ts->SetColorMode(saved_color);
   ts->SetScreen(saved_screen);
   ts->margin.bottom = saved_bottom_margin;
-
-  if (!pdf_state->keep_preview_cache) {
-    pdf_state->cached_preview_page = -1;
-    pdf_state->cached_preview_width = 0;
-    pdf_state->cached_preview_height = 0;
-    pdf_state->cached_preview_pixels.clear();
-  }
-  // The zoom page cache is always kept — it is the mechanism that enables
-  // smooth viewport panning without re-invoking MuPDF.  It is naturally
-  // invalidated when the page or zoom level changes.
 }
 
 void Book::PrefetchAdjacentPdfPage() {
+  if (!IsPdf() || !pdf_state)
+    return;
+  PrepareAdjacentPdfSlot(
+      pdf_state, ClampPdfPageIndex(position, pdf_state->page_count), 1);
+}
+
+bool Book::PumpDeferredPdfWork(u32 budget_ms) {
   if (!IsPdf() || !pdf_state || !pdf_state->ctx || !pdf_state->doc)
-    return;
+    return false;
 
-  const int current = ClampPdfPageIndex(position, pdf_state->page_count);
-  const int next = current + 1;
-  if (next >= (int)pdf_state->page_count)
-    return;
+  const int page_index = ClampPdfPageIndex(position, pdf_state->page_count);
+  const u64 start_ms = osGetTime();
+  bool worked = false;
 
-  const int target_zoom_index = pdf_state->max_zoom_index;
-
-  // Already prefetched this page at the highest cached zoom.
-  if (pdf_state->prefetch_page == next &&
-      pdf_state->prefetch_zoom_index == target_zoom_index &&
-      pdf_state->prefetch_width > 0)
-    return;
-
-  // Invalidate old prefetch.
-  if (pdf_state->prefetch_display_list && pdf_state->ctx) {
-    fz_drop_display_list(pdf_state->ctx, pdf_state->prefetch_display_list);
-    pdf_state->prefetch_display_list = NULL;
+  if (pdf_state->final_cache_pending ||
+      !BitmapCacheValid(pdf_state->current_final_zoom, page_index)) {
+    if (EnsureCurrentFinalCache(pdf_state, page_index))
+      worked = true;
+    if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)
+      return worked;
   }
-  pdf_state->prefetch_page = -1;
-  pdf_state->prefetch_zoom_pixels.clear();
-  pdf_state->prefetch_preview_pixels.clear();
 
-  float page_width = pdf_state->page_width;
-  float page_height = pdf_state->page_height;
+  if (PrepareAdjacentPdfSlot(pdf_state, page_index, 1))
+    worked = true;
+  if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)
+    return worked;
 
-  // 1. Render low-res preview (creates display list as side-effect).
-  const float preview_scale =
-      ComputeFitScale(page_width, page_height,
-                      kPdfPreviewScreenWidth - 2 * kPdfPreviewPadding,
-                      kPdfPreviewScreenHeight - 2 * kPdfPreviewPadding);
+  if (PrepareAdjacentPdfSlot(pdf_state, page_index, -1))
+    worked = true;
 
-  fz_display_list *list = NULL;
-  RenderedPdfBitmap preview;
-  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, next,
-                       preview_scale, &preview, &page_width, &page_height,
-                       NULL, &list))
-    return;
-
-  float cl = 0.0f, ct = 0.0f, cw = 1.0f, ch = 1.0f;
-  ComputeBitmapContentBoundsNormalized(preview, &cl, &ct, &cw, &ch);
-  pdf_state->prefetch_content_left = cl;
-  pdf_state->prefetch_content_top = ct;
-  pdf_state->prefetch_content_width = cw;
-  pdf_state->prefetch_content_height = ch;
-  pdf_state->prefetch_preview_width = preview.width;
-  pdf_state->prefetch_preview_height = preview.height;
-  pdf_state->prefetch_preview_pixels.swap(preview.pixels);
-  pdf_state->prefetch_display_list = list;
-
-  // 2. Render zoom cache using the display list (replay only, no re-parse).
-  const float tile_scale =
-      ComputeFitScale(page_width, page_height,
-                      kPdfZoomScreenWidth, kPdfZoomScreenHeight) *
-      ComputeEffectivePdfZoom(target_zoom_index);
-
-  RenderedPdfBitmap zoom;
-  if (RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, next,
-                      tile_scale, &zoom, &page_width, &page_height,
-                      list, NULL)) {
-    pdf_state->prefetch_page = next;
-    pdf_state->prefetch_zoom_index = target_zoom_index;
-    pdf_state->prefetch_width = zoom.width;
-    pdf_state->prefetch_height = zoom.height;
-    pdf_state->prefetch_zoom_pixels.swap(zoom.pixels);
-  }
+  return worked;
 }
 
 uint8_t ParsePdfFile(Book *book, const char *path) {
