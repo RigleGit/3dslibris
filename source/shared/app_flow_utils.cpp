@@ -22,7 +22,8 @@ BookFileFormat DetectBookFormat(const char *filename) {
     return BookFileFormat::Unsupported;
   if (EndsWithNoCase(filename, ".epub"))
     return BookFileFormat::Epub;
-  if (EndsWithNoCase(filename, ".pdf"))
+  if (EndsWithNoCase(filename, ".pdf") || EndsWithNoCase(filename, ".xps") ||
+      EndsWithNoCase(filename, ".oxps"))
     return BookFileFormat::MuPdf;
   if (EndsWithNoCase(filename, ".cbz"))
     return CbzSupportEnabled() ? BookFileFormat::Cbz
@@ -42,6 +43,8 @@ MuPdfDocumentKind DetectMuPdfDocumentKind(const char *filename) {
     return MuPdfDocumentKind::Unknown;
   if (EndsWithNoCase(filename, ".pdf"))
     return MuPdfDocumentKind::Pdf;
+  if (EndsWithNoCase(filename, ".xps") || EndsWithNoCase(filename, ".oxps"))
+    return MuPdfDocumentKind::Xps;
   return MuPdfDocumentKind::Unknown;
 }
 
@@ -49,6 +52,8 @@ const char *GetMuPdfDocumentLabel(MuPdfDocumentKind kind) {
   switch (kind) {
   case MuPdfDocumentKind::Pdf:
     return "PDF";
+  case MuPdfDocumentKind::Xps:
+    return "XPS";
   case MuPdfDocumentKind::Unknown:
   default:
     return "MuPDF";
@@ -58,6 +63,7 @@ const char *GetMuPdfDocumentLabel(MuPdfDocumentKind kind) {
 float GetMuPdfReadingBaseZoom(MuPdfDocumentKind kind) {
   switch (kind) {
   case MuPdfDocumentKind::Pdf:
+  case MuPdfDocumentKind::Xps:
   case MuPdfDocumentKind::Unknown:
   default:
     return 1.5f;
@@ -65,11 +71,11 @@ float GetMuPdfReadingBaseZoom(MuPdfDocumentKind kind) {
 }
 
 bool MuPdfWantsFinalQualityRender(MuPdfDocumentKind kind) {
-  return kind == MuPdfDocumentKind::Pdf;
+  return kind == MuPdfDocumentKind::Pdf || kind == MuPdfDocumentKind::Xps;
 }
 
 bool MuPdfShouldPrefetchAdjacent(MuPdfDocumentKind kind) {
-  return kind == MuPdfDocumentKind::Pdf;
+  return kind == MuPdfDocumentKind::Pdf || kind == MuPdfDocumentKind::Xps;
 }
 
 bool ShouldIndexBookFilename(const char *filename) {

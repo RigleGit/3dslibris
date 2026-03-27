@@ -5009,7 +5009,9 @@ u8 Book::Parse(bool fulltext) {
     return ParseOdtFile(this, path);
   if (fulltext && HasExtCI(GetFileName(), ".mobi"))
     return ParseMobiFile(this, path);
-  if (fulltext && HasExtCI(GetFileName(), ".pdf"))
+  if (fulltext && (HasExtCI(GetFileName(), ".pdf") ||
+                   HasExtCI(GetFileName(), ".xps") ||
+                   HasExtCI(GetFileName(), ".oxps")))
     return ParsePdfFile(this, path);
   if (fulltext && HasExtCI(GetFileName(), ".cbz"))
     return ParseCbzFile(this, path);

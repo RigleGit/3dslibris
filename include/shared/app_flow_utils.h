@@ -16,6 +16,7 @@ enum class BookFileFormat {
 enum class MuPdfDocumentKind {
   Unknown = 0,
   Pdf = 1,
+  Xps = 2,
 };
 
 enum class BookmarkJumpDirection {

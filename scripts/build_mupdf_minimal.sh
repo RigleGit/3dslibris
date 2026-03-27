@@ -10,8 +10,8 @@ MAKE_BIN="${MAKE:-make}"
 
 cd "$MUPDF_DIR"
 
-"$MAKE_BIN" build=release OUT=build/3ds-minimal minimal3ds=yes shared=no threading=no HAVE_PTHREAD=no HAVE_GLUT=no HAVE_OBJCOPY=no html=no xps=no svg=no mujs=no brotli=no extract=no barcode=no tofu=yes clean >/dev/null 2>&1 || true
-"$MAKE_BIN" build=release OUT=build/3ds-minimal minimal3ds=yes libs shared=no threading=no HAVE_PTHREAD=no HAVE_GLUT=no HAVE_OBJCOPY=no html=no xps=no svg=no mujs=no brotli=no extract=no barcode=no tofu=yes \
+"$MAKE_BIN" build=release OUT=build/3ds-minimal minimal3ds=yes shared=no threading=no HAVE_PTHREAD=no HAVE_GLUT=no HAVE_OBJCOPY=no html=no xps=yes svg=no mujs=no brotli=no extract=no barcode=no tofu=yes clean >/dev/null 2>&1 || true
+"$MAKE_BIN" build=release OUT=build/3ds-minimal minimal3ds=yes libs shared=no threading=no HAVE_PTHREAD=no HAVE_GLUT=no HAVE_OBJCOPY=no html=no xps=yes svg=no mujs=no brotli=no extract=no barcode=no tofu=yes \
   CC=/opt/devkitpro/devkitARM/bin/arm-none-eabi-gcc \
   CXX=/opt/devkitpro/devkitARM/bin/arm-none-eabi-g++ \
   AR=/opt/devkitpro/devkitARM/bin/arm-none-eabi-ar \
