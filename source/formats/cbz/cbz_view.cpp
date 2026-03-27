@@ -1,5 +1,3 @@
-#include "formats/cbz/cbz_view.h"
-
 #include "app/app.h"
 #include "book/book.h"
 #include "color_utils.h"
@@ -358,16 +356,15 @@ bool HasCbzNeighborPending(const Book::CbzState *cbz_state, int page_index) {
 
 } // namespace
 
-void DrawCurrentCbzView(Book *book, Text *ts) {
-  if (!book || !ts || !book->IsCbz() || !book->cbz_state)
+void Book::DrawCurrentCbzView(Text *ts) {
+  if (!ts || !IsCbz() || !cbz_state)
     return;
 
-  Book::CbzState *cbz_state = book->cbz_state;
   if (cbz_state->page_count == 0)
     return;
 
-  const int page_index = ClampCbzPageIndex(book->GetPosition(), cbz_state->page_count);
-  book->SetPosition(page_index);
+  const int page_index = ClampCbzPageIndex(GetPosition(), cbz_state->page_count);
+  SetPosition(page_index);
 
   if (cbz_state->current_preview.page != page_index)
     ResetCbzBitmapCache(&cbz_state->current_preview);
@@ -422,8 +419,8 @@ void DrawCurrentCbzView(Book *book, Text *ts) {
 
   ts->SetScreen(ts->screenright);
   ts->ClearScreen();
-  if (book->GetApp())
-    book->GetApp()->DrawBottomGradientBackground();
+  if (GetApp())
+    GetApp()->DrawBottomGradientBackground();
   ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
                (u16)(preview_layout.x + preview_layout.width),
                (u16)(preview_layout.y + preview_layout.height), kCbzPaper);
@@ -452,7 +449,7 @@ void DrawCurrentCbzView(Book *book, Text *ts) {
                (u16)(viewport_x + viewport_w),
                (u16)(viewport_y + viewport_h), kCbzAccent);
 
-  DBG_LOGF(book->GetApp(),
+  DBG_LOGF(GetApp(),
            "CBZ: draw page=%d source=%s zoom_index=%d final_pending=0 final=0 "
            "interactive=%d preview=%d inc=0/0 viewport=(%.3f,%.3f %.3fx%.3f)",
            page_index, top_source, cbz_state->zoom_index,
@@ -466,18 +463,13 @@ void DrawCurrentCbzView(Book *book, Text *ts) {
   ts->margin.bottom = saved_bottom_margin;
 }
 
-void Book::SetFixedLayoutViewportInteraction(bool active) {
-  if (IsPdf()) {
-    SetMuPdfViewportInteraction(active);
+void Book::SetCbzViewportInteraction(bool active) {
+  if (!IsCbz() || !cbz_state)
     return;
-  }
-  if (IsCbz() && cbz_state)
-    cbz_state->viewport_interaction_active = active;
+  cbz_state->viewport_interaction_active = active;
 }
 
-bool Book::ChangeFixedLayoutZoom(int delta) {
-  if (IsPdf())
-    return ChangeMuPdfZoom(delta);
+bool Book::ChangeCbzZoom(int delta) {
   if (!IsCbz() || !cbz_state || delta == 0)
     return false;
 
@@ -498,9 +490,7 @@ bool Book::ChangeFixedLayoutZoom(int delta) {
   return true;
 }
 
-bool Book::MoveFixedLayoutViewportToPreview(int touch_x, int touch_y) {
-  if (IsPdf())
-    return MoveMuPdfViewportToPreview(touch_x, touch_y);
+bool Book::MoveCbzViewportToPreview(int touch_x, int touch_y) {
   if (!IsCbz() || !cbz_state)
     return false;
 
@@ -528,16 +518,12 @@ bool Book::MoveFixedLayoutViewportToPreview(int touch_x, int touch_y) {
   return true;
 }
 
-bool Book::JumpFixedLayoutChapter(int delta) {
-  if (IsPdf())
-    return JumpMuPdfChapter(delta);
+bool Book::JumpCbzChapter(int delta) {
   (void)delta;
   return false;
 }
 
-bool Book::HasPendingFixedLayoutDeferredWork() const {
-  if (IsPdf())
-    return HasPendingMuPdfDeferredWork();
+bool Book::HasPendingCbzDeferredWork() const {
   if (!IsCbz() || !cbz_state || cbz_state->page_count == 0)
     return false;
 
@@ -561,9 +547,7 @@ bool Book::HasPendingFixedLayoutDeferredWork() const {
   return HasCbzNeighborPending(cbz_state, page_index);
 }
 
-u32 Book::GetFixedLayoutDeferredDelayMs() const {
-  if (IsPdf())
-    return GetMuPdfDeferredDelayMs();
+u32 Book::GetCbzDeferredDelayMs() const {
   if (!IsCbz() || !cbz_state || cbz_state->page_count == 0)
     return 0;
 
@@ -586,9 +570,7 @@ u32 Book::GetFixedLayoutDeferredDelayMs() const {
              : 0;
 }
 
-bool Book::PumpDeferredFixedLayoutWork(u32 budget_ms) {
-  if (IsPdf())
-    return PumpDeferredMuPdfWork(budget_ms);
+bool Book::PumpDeferredCbzWork(u32 budget_ms) {
   if (!IsCbz() || !cbz_state || cbz_state->page_count == 0)
     return false;
 
@@ -632,11 +614,7 @@ bool Book::PumpDeferredFixedLayoutWork(u32 budget_ms) {
   return worked || preload_result == CbzPreloadPumpResult::Integrated;
 }
 
-void Book::CancelFixedLayoutDeferredWork() {
-  if (IsPdf()) {
-    CancelMuPdfIncrementalRender();
-    return;
-  }
+void Book::CancelCbzDeferredWork() {
   if (!IsCbz() || !cbz_state)
     return;
   cbz_state->preload_pending = false;

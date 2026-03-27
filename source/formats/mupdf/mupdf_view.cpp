@@ -4,7 +4,6 @@
 
 #include "app/app.h"
 #include "book/page.h"
-#include "formats/cbz/cbz_view.h"
 #include "ui/text.h"
 #include "debug_log.h"
 
@@ -526,19 +525,9 @@ u32 Book::GetMuPdfDeferredDelayMs() const {
   }
 }
 
-void Book::DrawCurrentView(Text *ts) {
-  if (!ts)
+void Book::DrawCurrentMuPdfView(Text *ts) {
+  if (!ts || !IsPdf())
     return;
-  if (IsCbz()) {
-    DrawCurrentCbzView(this, ts);
-    return;
-  }
-  if (!IsPdf()) {
-    if (GetPageCount() == 0)
-      return;
-    GetPage()->Draw(ts);
-    return;
-  }
   if (!mupdf_state || !mupdf_state->ctx || !mupdf_state->doc || mupdf_state->page_count == 0)
     return;
 

@@ -61,7 +61,6 @@ enum TocQuality {
 
 class Book {
 public:
-  friend void DrawCurrentCbzView(Book *book, Text *ts);
   struct MuPdfState;
   struct CbzState;
   struct InlineImageEntry {
@@ -231,6 +230,8 @@ public:
   void SetTitle(const char *title);
   Page *AppendPage();
   void DrawCurrentView(Text *ts);
+  void DrawCurrentMuPdfView(Text *ts);
+  void DrawCurrentCbzView(Text *ts);
   void InitMuPdfView(u16 page_count, fz_context *ctx, fz_document *doc,
                      fz_outline *outline, bool is_new_3ds,
                      app_flow_utils::MuPdfDocumentKind document_kind);
@@ -245,6 +246,14 @@ public:
   u32 GetFixedLayoutDeferredDelayMs() const;
   bool PumpDeferredFixedLayoutWork(u32 budget_ms);
   void CancelFixedLayoutDeferredWork();
+  void SetCbzViewportInteraction(bool active);
+  bool ChangeCbzZoom(int delta);
+  bool MoveCbzViewportToPreview(int touch_x, int touch_y);
+  bool JumpCbzChapter(int delta);
+  bool HasPendingCbzDeferredWork() const;
+  u32 GetCbzDeferredDelayMs() const;
+  bool PumpDeferredCbzWork(u32 budget_ms);
+  void CancelCbzDeferredWork();
   void SetMuPdfViewportInteraction(bool active);
   bool ChangeMuPdfZoom(int delta);
   bool MoveMuPdfViewportToPreview(int touch_x, int touch_y);
