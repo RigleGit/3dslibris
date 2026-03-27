@@ -53,7 +53,9 @@ bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *mupdf_state,
   mupdf_state->cached_display_list_page = page_index;
   slot->display_list = NULL;
   slot->page = -1;
-  mupdf_state->final_cache_pending = true;
+  mupdf_state->final_cache_pending =
+      app_flow_utils::MuPdfWantsFinalQualityRender(
+          mupdf_state->document_kind);
   CancelMuPdfIncrementalRenderState(mupdf_state);
   return true;
 }
@@ -139,7 +141,9 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
                        kPdfInteractiveScale *
                            ComputeFitScale(page_width, page_height,
                                            kPdfZoomScreenWidth, kPdfZoomScreenHeight) *
-                           ComputeEffectiveMuPdfZoom(mupdf_state->zoom_index),
+                           ComputeEffectiveMuPdfZoom(
+                               mupdf_state->document_kind,
+                               mupdf_state->zoom_index),
                        &rendered, &page_width, &page_height, NULL,
                        display_list, display_list ? NULL : &new_list);
   if (!render_ok) {
@@ -268,7 +272,8 @@ void InitMuPdfWorker(Book::MuPdfState *mupdf_state) {
 
   w->worker_ctx = fz_clone_context(mupdf_state->ctx);
   if (!w->worker_ctx) {
-    DBG_LOG(app, "PDF[w]: init FAIL: fz_clone_context returned NULL");
+    DBG_LOGF(app, "%s[w]: init FAIL: fz_clone_context returned NULL",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind));
     delete w;
     return;
   }
@@ -285,14 +290,17 @@ void InitMuPdfWorker(Book::MuPdfState *mupdf_state) {
   w->thread_handle = threadCreate(MuPdfWorkerThreadFunc, mupdf_state,
                                    32 * 1024, prio + 1, 1, false);
   if (!w->thread_handle) {
-    DBG_LOG(app, "PDF[w]: init FAIL: threadCreate returned NULL (core 1 unavailable?)");
+    DBG_LOGF(app,
+             "%s[w]: init FAIL: threadCreate returned NULL (core 1 unavailable?)",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind));
     fz_drop_context(w->worker_ctx);
     w->worker_ctx = NULL;
     delete w;
     mupdf_state->worker = NULL;
     return;
   }
-  DBG_LOG(app, "PDF[w]: worker thread started on core 1");
+  DBG_LOGF(app, "%s[w]: worker thread started on core 1",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind));
 }
 
 void ShutdownMuPdfWorker(Book::MuPdfState *mupdf_state) {
@@ -337,10 +345,19 @@ bool PumpMuPdfIncrementalStripWorker(Book::MuPdfState *mupdf_state,
 
     const bool ok = w->job_result;
     const int s = inc.strips_completed;
-    DBG_LOGF(app, "PDF[w]: strip %s page=%d strip=%d/%d y=%d..%d",
+    DBG_LOGF(app, "%s[w]: strip %s page=%d strip=%d/%d y=%d..%d",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
              ok ? "done" : "FAIL", page_index,
              s + 1, inc.strips_total,
              w->job_strip_y0, w->job_strip_y1);
+
+    if (!ok) {
+      CancelMuPdfIncrementalRenderState(mupdf_state);
+      mupdf_state->final_cache_pending =
+          app_flow_utils::MuPdfWantsFinalQualityRender(
+              mupdf_state->document_kind);
+      return false;
+    }
 
     inc.strips_completed++;
     strip_just_collected = true;
@@ -355,7 +372,9 @@ bool PumpMuPdfIncrementalStripWorker(Book::MuPdfState *mupdf_state,
                        &promoted);
       mupdf_state->final_cache_pending = false;
       DBG_LOGF(app,
-               "PDF[w]: incremental COMPLETE page=%d zoom=%d size=%dx%d",
+               "%s[w]: incremental COMPLETE page=%d zoom=%d size=%dx%d",
+               app_flow_utils::GetMuPdfDocumentLabel(
+                   mupdf_state->document_kind),
                page_index, mupdf_state->max_zoom_index,
                promoted.width, promoted.height);
       CancelMuPdfIncrementalRenderState(mupdf_state);
@@ -374,9 +393,10 @@ bool PumpMuPdfIncrementalStripWorker(Book::MuPdfState *mupdf_state,
     return false;
 
   const int s = inc.strips_completed;
-  const float scale = ComputeMuPdfFinalScale(mupdf_state->page_width,
-                                           mupdf_state->page_height,
-                                           mupdf_state->max_zoom_index);
+  const float scale = ComputeMuPdfFinalScale(mupdf_state->document_kind,
+                                             mupdf_state->page_width,
+                                             mupdf_state->page_height,
+                                             mupdf_state->max_zoom_index);
   const int y0 = (s * inc.partial_height) / inc.strips_total;
   const int y1 = (s == inc.strips_total - 1)
                      ? inc.partial_height
@@ -403,6 +423,12 @@ bool PumpMuPdfIncrementalStripWorker(Book::MuPdfState *mupdf_state,
 bool PumpMuPdfIncrementalStrip(Book::MuPdfState *mupdf_state, int page_index) {
   if (!mupdf_state || !mupdf_state->ctx || !mupdf_state->doc)
     return false;
+  if (!app_flow_utils::MuPdfWantsFinalQualityRender(
+          mupdf_state->document_kind)) {
+    mupdf_state->final_cache_pending = false;
+    CancelMuPdfIncrementalRenderState(mupdf_state);
+    return false;
+  }
 
   Book::MuPdfState::IncrementalRenderState &inc = mupdf_state->incremental;
 
@@ -423,9 +449,10 @@ bool PumpMuPdfIncrementalStrip(Book::MuPdfState *mupdf_state, int page_index) {
         !display_list)
       return false;
 
-    const float scale = ComputeMuPdfFinalScale(mupdf_state->page_width,
-                                              mupdf_state->page_height,
-                                              mupdf_state->max_zoom_index);
+    const float scale = ComputeMuPdfFinalScale(mupdf_state->document_kind,
+                                               mupdf_state->page_width,
+                                               mupdf_state->page_height,
+                                               mupdf_state->max_zoom_index);
     fz_page *pg = NULL;
     fz_rect bounds = fz_empty_rect;
     fz_var(pg);
@@ -457,7 +484,8 @@ bool PumpMuPdfIncrementalStrip(Book::MuPdfState *mupdf_state, int page_index) {
     inc.partial_pixels.assign((size_t)full_w * (size_t)full_h, kPdfPaper);
 
     DBG_LOGF(app,
-             "PDF: incremental start page=%d zoom=%d strips=%d size=%dx%d",
+             "%s: incremental start page=%d zoom=%d strips=%d size=%dx%d",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
              page_index, mupdf_state->max_zoom_index, inc.strips_total,
              full_w, full_h);
   }
@@ -478,9 +506,10 @@ bool PumpMuPdfIncrementalStrip(Book::MuPdfState *mupdf_state, int page_index) {
     return false;
 
   const int s = inc.strips_completed;
-  const float scale = ComputeMuPdfFinalScale(mupdf_state->page_width,
-                                            mupdf_state->page_height,
-                                            mupdf_state->max_zoom_index);
+  const float scale = ComputeMuPdfFinalScale(mupdf_state->document_kind,
+                                             mupdf_state->page_width,
+                                             mupdf_state->page_height,
+                                             mupdf_state->max_zoom_index);
 
   const int strip_y0 = (s * inc.partial_height) / inc.strips_total;
   const int strip_y1 = (s == inc.strips_total - 1)
@@ -498,16 +527,23 @@ bool PumpMuPdfIncrementalStrip(Book::MuPdfState *mupdf_state, int page_index) {
   if (ok) {
     inc.strips_completed++;
     DBG_LOGF(app,
-             "PDF: strip done page=%d strip=%d/%d y=%d..%d ms=%llu",
+             "%s: strip done page=%d strip=%d/%d y=%d..%d ms=%llu",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
              page_index, inc.strips_completed, inc.strips_total,
              strip_y0, strip_y1,
              (unsigned long long)(osGetTime() - strip_t0));
   } else {
     DBG_LOGF(app,
-             "PDF: strip FAIL page=%d strip=%d/%d y=%d..%d ms=%llu",
+             "%s: strip FAIL page=%d strip=%d/%d y=%d..%d ms=%llu",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
              page_index, inc.strips_completed + 1, inc.strips_total,
              strip_y0, strip_y1,
              (unsigned long long)(osGetTime() - strip_t0));
+    CancelMuPdfIncrementalRenderState(mupdf_state);
+    mupdf_state->final_cache_pending =
+        app_flow_utils::MuPdfWantsFinalQualityRender(
+            mupdf_state->document_kind);
+    return false;
   }
 
   if (inc.strips_completed >= inc.strips_total) {
@@ -520,7 +556,8 @@ bool PumpMuPdfIncrementalStrip(Book::MuPdfState *mupdf_state, int page_index) {
                      &promoted);
     mupdf_state->final_cache_pending = false;
     DBG_LOGF(app,
-             "PDF: incremental COMPLETE page=%d zoom=%d size=%dx%d",
+             "%s: incremental COMPLETE page=%d zoom=%d size=%dx%d",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
              page_index, mupdf_state->max_zoom_index,
              promoted.width, promoted.height);
     CancelMuPdfIncrementalRenderState(mupdf_state);
@@ -584,7 +621,9 @@ bool PrepareAdjacentMuPdfSlot(Book::MuPdfState *mupdf_state, int current_page,
                          kPdfInteractiveScale *
                              ComputeFitScale(page_width, page_height,
                                              kPdfZoomScreenWidth, kPdfZoomScreenHeight) *
-                             ComputeEffectiveMuPdfZoom(mupdf_state->zoom_index),
+                             ComputeEffectiveMuPdfZoom(
+                                 mupdf_state->document_kind,
+                                 mupdf_state->zoom_index),
                          &interactive, &page_width, &page_height, NULL,
                          display_list, NULL);
     if (!render_ok) {

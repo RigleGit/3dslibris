@@ -10,6 +10,12 @@ enum class BookFileFormat {
   XhtmlLike = 1,
   Epub = 2,
   MuPdf = 3,
+  Cbz = 4,
+};
+
+enum class MuPdfDocumentKind {
+  Unknown = 0,
+  Pdf = 1,
 };
 
 enum class BookmarkJumpDirection {
@@ -53,6 +59,12 @@ struct StatusSnapshot {
 };
 
 BookFileFormat DetectBookFormat(const char *filename);
+bool CbzSupportEnabled();
+MuPdfDocumentKind DetectMuPdfDocumentKind(const char *filename);
+const char *GetMuPdfDocumentLabel(MuPdfDocumentKind kind);
+float GetMuPdfReadingBaseZoom(MuPdfDocumentKind kind);
+bool MuPdfWantsFinalQualityRender(MuPdfDocumentKind kind);
+bool MuPdfShouldPrefetchAdjacent(MuPdfDocumentKind kind);
 bool ShouldIndexBookFilename(const char *filename);
 bool SupportsMetadataIndexing(BookFileFormat format);
 std::string SdmcToArchiveRelPath(const std::string &path);

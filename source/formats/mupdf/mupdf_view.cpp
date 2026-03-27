@@ -4,6 +4,7 @@
 
 #include "app/app.h"
 #include "book/page.h"
+#include "formats/cbz/cbz_view.h"
 #include "ui/text.h"
 #include "debug_log.h"
 
@@ -20,9 +21,10 @@ MuPdfNavigationBounds GetMuPdfNavigationBounds(float content_left,
 }
 
 pdf_view_utils::NormalizedRect ComputeMuPdfViewportRect(
-    float page_width, float page_height, int zoom_index, float center_x,
-    float center_y, float content_left, float content_top, float content_width,
-    float content_height) {
+    float page_width, float page_height,
+    app_flow_utils::MuPdfDocumentKind document_kind, int zoom_index,
+    float center_x, float center_y, float content_left, float content_top,
+    float content_width, float content_height) {
   pdf_view_utils::NormalizedRect out = {0.0f, 0.0f, 1.0f, 1.0f};
   const MuPdfNavigationBounds nav =
       GetMuPdfNavigationBounds(content_left, content_top, content_width,
@@ -37,7 +39,8 @@ pdf_view_utils::NormalizedRect ComputeMuPdfViewportRect(
       pdf_view_utils::ComputeViewportRect(
           std::max(1.0f, page_width * nav.width),
           std::max(1.0f, page_height * nav.height),
-          ComputeEffectiveMuPdfZoom(zoom_index), (float)kPdfZoomScreenWidth,
+          ComputeEffectiveMuPdfZoom(document_kind, zoom_index),
+          (float)kPdfZoomScreenWidth,
           (float)kPdfZoomScreenHeight, local_center_x, local_center_y);
 
   out.left = nav.left + local.left * nav.width;
@@ -191,11 +194,11 @@ pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport(
   float width = 1.0f;
   float height = 1.0f;
   GetMuPdfPreviewContentBounds(mupdf_state, &left, &top, &width, &height);
-  return ComputeMuPdfViewportRect(mupdf_state->page_width, mupdf_state->page_height,
-                                mupdf_state->zoom_index,
-                                mupdf_state->viewport_center_x,
-                                mupdf_state->viewport_center_y, left, top, width,
-                                height);
+  return ComputeMuPdfViewportRect(
+      mupdf_state->page_width, mupdf_state->page_height,
+      mupdf_state->document_kind, mupdf_state->zoom_index,
+      mupdf_state->viewport_center_x, mupdf_state->viewport_center_y, left,
+      top, width, height);
 }
 
 MuPdfDeferredStage GetNextMuPdfDeferredStage(
@@ -208,9 +211,16 @@ MuPdfDeferredStage GetNextMuPdfDeferredStage(
     return MuPdfDeferredStage::Interactive;
   }
 
-  if (mupdf_state->final_cache_pending ||
-      !BitmapCacheValid(mupdf_state->current_final_zoom, page_index)) {
+  if (app_flow_utils::MuPdfWantsFinalQualityRender(
+          mupdf_state->document_kind) &&
+      (mupdf_state->final_cache_pending ||
+       !BitmapCacheValid(mupdf_state->current_final_zoom, page_index))) {
     return MuPdfDeferredStage::Final;
+  }
+
+  if (!app_flow_utils::MuPdfShouldPrefetchAdjacent(
+          mupdf_state->document_kind)) {
+    return MuPdfDeferredStage::None;
   }
 
   const int next = page_index + 1;
@@ -391,13 +401,21 @@ bool Book::ChangeMuPdfZoom(int delta) {
   if (next == mupdf_state->zoom_index)
     return false;
   mupdf_state->zoom_index = next;
-  if (mupdf_state->current_final_zoom.page != position ||
-      mupdf_state->current_final_zoom.zoom_index < mupdf_state->max_zoom_index) {
+  if (app_flow_utils::MuPdfWantsFinalQualityRender(
+          mupdf_state->document_kind) &&
+      (mupdf_state->current_final_zoom.page != position ||
+       mupdf_state->current_final_zoom.zoom_index <
+           mupdf_state->max_zoom_index)) {
     mupdf_state->final_cache_pending = true;
     CancelMuPdfIncrementalRenderState(mupdf_state);
+  } else if (!app_flow_utils::MuPdfWantsFinalQualityRender(
+                 mupdf_state->document_kind)) {
+    mupdf_state->final_cache_pending = false;
   }
-  DBG_LOGF(app, "PDF: zoom page=%d zoom_index=%d final_pending=%d", position,
-           mupdf_state->zoom_index, mupdf_state->final_cache_pending ? 1 : 0);
+  DBG_LOGF(app, "%s: zoom page=%d zoom_index=%d final_pending=%d",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
+           position, mupdf_state->zoom_index,
+           mupdf_state->final_cache_pending ? 1 : 0);
   return true;
 }
 
@@ -433,8 +451,9 @@ bool Book::MoveMuPdfViewportToPreview(int touch_x, int touch_y) {
   mupdf_state->viewport_center_x = center.x;
   mupdf_state->viewport_center_y = center.y;
   DBG_LOGF(app,
-           "PDF: viewport_move page=%d touch=(%d,%d) center=(%.3f,%.3f) "
+           "%s: viewport_move page=%d touch=(%d,%d) center=(%.3f,%.3f) "
            "zoom_index=%d final_pending=%d",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
            position, touch_x, touch_y, center.x, center.y,
            mupdf_state->zoom_index, mupdf_state->final_cache_pending ? 1 : 0);
   return true;
@@ -510,6 +529,10 @@ u32 Book::GetMuPdfDeferredDelayMs() const {
 void Book::DrawCurrentView(Text *ts) {
   if (!ts)
     return;
+  if (IsCbz()) {
+    DrawCurrentCbzView(this, ts);
+    return;
+  }
   if (!IsPdf()) {
     if (GetPageCount() == 0)
       return;
@@ -548,7 +571,9 @@ void Book::DrawCurrentView(Text *ts) {
       mupdf_state->current_final_zoom.zoom_index >= mupdf_state->max_zoom_index;
   const bool has_interactive_tile =
       BitmapCacheValid(mupdf_state->current_interactive_tile, page_index);
-  mupdf_state->final_cache_pending = !has_final_cache;
+  const bool wants_final_cache =
+      app_flow_utils::MuPdfWantsFinalQualityRender(mupdf_state->document_kind);
+  mupdf_state->final_cache_pending = wants_final_cache && !has_final_cache;
   const bool high_quality_viewport =
       !mupdf_state->viewport_interaction_active;
 #ifdef DSLIBRIS_DEBUG
@@ -646,10 +671,11 @@ void Book::DrawCurrentView(Text *ts) {
                             high_quality_viewport);
   } else {
     ts->SetPen(18, 28);
-    ts->PrintString("PDF render unavailable");
+    ts->PrintString("MuPDF render unavailable");
   }
   char top_msg[48];
-  snprintf(top_msg, sizeof(top_msg), "PDF %u/%u  %.1fx",
+  snprintf(top_msg, sizeof(top_msg), "%s %u/%u  %.1fx",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
            (unsigned)(page_index + 1), (unsigned)mupdf_state->page_count,
            pdf_view_utils::ZoomForIndex(mupdf_state->zoom_index));
   ts->SetPen(12, 18);
@@ -690,9 +716,10 @@ void Book::DrawCurrentView(Text *ts) {
   ts->DrawRect((u16)viewport_x, (u16)viewport_y, (u16)(viewport_x + viewport_w),
                (u16)(viewport_y + viewport_h), kPdfAccent);
   DBG_LOGF(app,
-           "PDF: draw page=%d source=%s zoom_index=%d final_pending=%d "
+           "%s: draw page=%d source=%s zoom_index=%d final_pending=%d "
            "final=%d interactive=%d preview=%d inc=%d/%d "
            "viewport=(%.3f,%.3f %.3fx%.3f)",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
            page_index, top_source, mupdf_state->zoom_index,
            mupdf_state->final_cache_pending ? 1 : 0,
            has_final_cache ? 1 : 0, has_interactive_tile ? 1 : 0,
@@ -712,6 +739,8 @@ void Book::DrawCurrentView(Text *ts) {
 void Book::PrefetchAdjacentMuPdfPage() {
   if (!IsPdf() || !mupdf_state)
     return;
+  if (!app_flow_utils::MuPdfShouldPrefetchAdjacent(mupdf_state->document_kind))
+    return;
   PrepareAdjacentMuPdfSlot(
       mupdf_state, ClampMuPdfPageIndex(position, mupdf_state->page_count), 1);
 }
@@ -727,8 +756,9 @@ bool Book::PumpDeferredMuPdfWork(u32 budget_ms) {
     return false;
 
   DBG_LOGF(app,
-           "PDF: deferred start page=%d budget=%u zoom_index=%d final_pending=%d "
+           "%s: deferred start page=%d budget=%u zoom_index=%d final_pending=%d "
            "have_final=%d have_interactive=%d",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
            page_index, (unsigned)budget_ms, mupdf_state->zoom_index,
            mupdf_state->final_cache_pending ? 1 : 0,
            BitmapCacheValid(mupdf_state->current_final_zoom, page_index) ? 1 : 0,
@@ -743,7 +773,8 @@ bool Book::PumpDeferredMuPdfWork(u32 budget_ms) {
     if (EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index))
       worked = true;
     DBG_LOGF(app,
-             "PDF: deferred interactive page=%d ms=%llu worked=%d",
+             "%s: deferred interactive page=%d ms=%llu worked=%d",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
              page_index, (unsigned long long)(osGetTime() - t0),
              worked ? 1 : 0);
     if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)
@@ -761,7 +792,8 @@ bool Book::PumpDeferredMuPdfWork(u32 budget_ms) {
     if (PumpMuPdfIncrementalStrip(mupdf_state, page_index))
       worked = true;
     DBG_LOGF(app,
-             "PDF: deferred strip page=%d strip=%d/%d ms=%llu worked=%d",
+             "%s: deferred strip page=%d strip=%d/%d ms=%llu worked=%d",
+             app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
              page_index, pre_strips, pre_total,
              (unsigned long long)(osGetTime() - t0), worked ? 1 : 0);
     if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)
@@ -773,7 +805,9 @@ bool Book::PumpDeferredMuPdfWork(u32 budget_ms) {
 #endif
   if (PrepareAdjacentMuPdfSlot(mupdf_state, page_index, 1))
     worked = true;
-  DBG_LOGF(app, "PDF: deferred next page=%d ms=%llu worked=%d", page_index,
+  DBG_LOGF(app, "%s: deferred next page=%d ms=%llu worked=%d",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
+           page_index,
            (unsigned long long)(osGetTime() - t_next), worked ? 1 : 0);
   if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)
     return worked;
@@ -783,9 +817,12 @@ bool Book::PumpDeferredMuPdfWork(u32 budget_ms) {
 #endif
   if (PrepareAdjacentMuPdfSlot(mupdf_state, page_index, -1))
     worked = true;
-  DBG_LOGF(app, "PDF: deferred prev page=%d ms=%llu worked=%d", page_index,
+  DBG_LOGF(app, "%s: deferred prev page=%d ms=%llu worked=%d",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
+           page_index,
            (unsigned long long)(osGetTime() - t_prev), worked ? 1 : 0);
-  DBG_LOGF(app, "PDF: deferred end page=%d total_ms=%llu worked=%d",
+  DBG_LOGF(app, "%s: deferred end page=%d total_ms=%llu worked=%d",
+           app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind),
            page_index, (unsigned long long)(osGetTime() - start_ms),
            worked ? 1 : 0);
 

@@ -29,7 +29,8 @@ void Book::ResetMuPdfState() {
 }
 
 void Book::InitMuPdfView(u16 page_count, fz_context *ctx, fz_document *doc,
-                       fz_outline *outline, bool is_new_3ds) {
+                       fz_outline *outline, bool is_new_3ds,
+                       app_flow_utils::MuPdfDocumentKind document_kind) {
   ResetMuPdfState();
   mupdf_state = new MuPdfState();
   const pdf_view_utils::DevicePolicy policy =
@@ -39,13 +40,15 @@ void Book::InitMuPdfView(u16 page_count, fz_context *ctx, fz_document *doc,
   mupdf_state->outline = outline;
   mupdf_state->page_count = page_count;
   mupdf_state->is_new_3ds = is_new_3ds;
+  mupdf_state->document_kind = document_kind;
   mupdf_state->keep_preview_cache = policy.keep_preview_cache;
   mupdf_state->keep_tile_cache = policy.keep_tile_cache;
   mupdf_state->max_zoom_index = policy.max_zoom_index;
   mupdf_state->zoom_index = policy.default_zoom_index;
   mupdf_state->viewport_center_x = 0.5f;
   mupdf_state->viewport_center_y = 0.5f;
-  mupdf_state->final_cache_pending = true;
+  mupdf_state->final_cache_pending =
+      app_flow_utils::MuPdfWantsFinalQualityRender(document_kind);
   InitMuPdfWorker(mupdf_state);
 }
 
@@ -54,6 +57,8 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
     return 255;
 
   const bool is_new_3ds = DetectNew3ds();
+  const app_flow_utils::MuPdfDocumentKind document_kind =
+      app_flow_utils::DetectMuPdfDocumentKind(path);
   const pdf_view_utils::DevicePolicy policy =
       pdf_view_utils::GetDevicePolicy(is_new_3ds);
   InitMuPdfLocks();
@@ -113,7 +118,7 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
     }
   }
   book->InitMuPdfView((u16)std::min(page_count, 65535), ctx, doc, outline,
-                    is_new_3ds);
+                    is_new_3ds, document_kind);
   return 0;
 }
 

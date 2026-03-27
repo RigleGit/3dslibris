@@ -252,11 +252,12 @@ float ComputeMuPdfPreviewScale(float page_width, float page_height) {
                          kPdfPreviewScreenHeight - 2 * kPdfPreviewPadding);
 }
 
-float ComputeMuPdfFinalScale(float page_width, float page_height,
-                                  int max_zoom_index) {
+float ComputeMuPdfFinalScale(app_flow_utils::MuPdfDocumentKind document_kind,
+                             float page_width, float page_height,
+                             int max_zoom_index) {
   return ComputeFitScale(page_width, page_height, kPdfZoomScreenWidth,
                          kPdfZoomScreenHeight) *
-         ComputeEffectiveMuPdfZoom(max_zoom_index);
+         ComputeEffectiveMuPdfZoom(document_kind, max_zoom_index);
 }
 void AddMuPdfOutlineEntries(Book *book, fz_context *ctx, fz_document *doc,
                                  const fz_outline *entry, u8 level) {

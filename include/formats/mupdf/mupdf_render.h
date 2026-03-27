@@ -15,7 +15,8 @@ void AddMuPdfOutlineEntries(Book *book, fz_context *ctx, fz_document *doc,
                             const fz_outline *entry, u8 level);
 void PopulateMuPdfMetadata(Book *book, fz_context *ctx, fz_document *doc);
 float ComputeMuPdfPreviewScale(float page_width, float page_height);
-float ComputeMuPdfFinalScale(float page_width, float page_height,
+float ComputeMuPdfFinalScale(app_flow_utils::MuPdfDocumentKind document_kind,
+                             float page_width, float page_height,
                              int max_zoom_index);
 void ComputeBitmapContentBoundsNormalized(const RenderedMuPdfBitmap &bitmap,
                                           float *left, float *top,

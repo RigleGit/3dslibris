@@ -64,6 +64,8 @@ static format_t ToBookFormat(app_flow_utils::BookFileFormat format) {
     return FORMAT_EPUB;
   case app_flow_utils::BookFileFormat::MuPdf:
     return FORMAT_PDF;
+  case app_flow_utils::BookFileFormat::Cbz:
+    return FORMAT_CBZ;
   case app_flow_utils::BookFileFormat::XhtmlLike:
     return FORMAT_XHTML;
   case app_flow_utils::BookFileFormat::Unsupported:
@@ -853,6 +855,8 @@ void App::ShowChaptersView() {
                  ? app_flow_utils::BookFileFormat::Epub
                  : (book->format == FORMAT_PDF)
                        ? app_flow_utils::BookFileFormat::MuPdf
+                       : (book->format == FORMAT_CBZ)
+                             ? app_flow_utils::BookFileFormat::Cbz
                        : app_flow_utils::BookFileFormat::XhtmlLike;
     toc_quality_known = book->GetTocQuality() != TOC_QUALITY_UNKNOWN;
   }

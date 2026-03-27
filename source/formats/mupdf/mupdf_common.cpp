@@ -77,6 +77,8 @@ float ComputeFitScale(float page_width, float page_height, int target_width,
   return (scale > 0.0f) ? scale : 1.0f;
 }
 
-float ComputeEffectiveMuPdfZoom(int zoom_index) {
-  return pdf_view_utils::ZoomForIndex(zoom_index) * kPdfReadingBaseZoom;
+float ComputeEffectiveMuPdfZoom(app_flow_utils::MuPdfDocumentKind kind,
+                                int zoom_index) {
+  return pdf_view_utils::ZoomForIndex(zoom_index) *
+         app_flow_utils::GetMuPdfReadingBaseZoom(kind);
 }

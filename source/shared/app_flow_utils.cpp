@@ -22,14 +22,54 @@ BookFileFormat DetectBookFormat(const char *filename) {
     return BookFileFormat::Unsupported;
   if (EndsWithNoCase(filename, ".epub"))
     return BookFileFormat::Epub;
-  if (EndsWithNoCase(filename, ".pdf") || EndsWithNoCase(filename, ".cbz"))
+  if (EndsWithNoCase(filename, ".pdf"))
     return BookFileFormat::MuPdf;
+  if (EndsWithNoCase(filename, ".cbz"))
+    return CbzSupportEnabled() ? BookFileFormat::Cbz
+                               : BookFileFormat::Unsupported;
   if (EndsWithNoCase(filename, ".fb2") || EndsWithNoCase(filename, ".txt") ||
       EndsWithNoCase(filename, ".rtf") || EndsWithNoCase(filename, ".odt") ||
       EndsWithNoCase(filename, ".mobi")) {
     return BookFileFormat::XhtmlLike;
   }
   return BookFileFormat::Unsupported;
+}
+
+bool CbzSupportEnabled() { return true; }
+
+MuPdfDocumentKind DetectMuPdfDocumentKind(const char *filename) {
+  if (!filename)
+    return MuPdfDocumentKind::Unknown;
+  if (EndsWithNoCase(filename, ".pdf"))
+    return MuPdfDocumentKind::Pdf;
+  return MuPdfDocumentKind::Unknown;
+}
+
+const char *GetMuPdfDocumentLabel(MuPdfDocumentKind kind) {
+  switch (kind) {
+  case MuPdfDocumentKind::Pdf:
+    return "PDF";
+  case MuPdfDocumentKind::Unknown:
+  default:
+    return "MuPDF";
+  }
+}
+
+float GetMuPdfReadingBaseZoom(MuPdfDocumentKind kind) {
+  switch (kind) {
+  case MuPdfDocumentKind::Pdf:
+  case MuPdfDocumentKind::Unknown:
+  default:
+    return 1.5f;
+  }
+}
+
+bool MuPdfWantsFinalQualityRender(MuPdfDocumentKind kind) {
+  return kind == MuPdfDocumentKind::Pdf;
+}
+
+bool MuPdfShouldPrefetchAdjacent(MuPdfDocumentKind kind) {
+  return kind == MuPdfDocumentKind::Pdf;
 }
 
 bool ShouldIndexBookFilename(const char *filename) {

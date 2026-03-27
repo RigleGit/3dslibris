@@ -1204,6 +1204,7 @@ Book::Book(App *a) {
   browser_display_name_cached = false;
   pages.clear();
   mupdf_state = NULL;
+  cbz_state = NULL;
   position = 0;
   format = FORMAT_UNDEF;
   app = a;
@@ -1502,9 +1503,24 @@ void Book::ClearChapters() { chapters.clear(); }
 
 bool Book::IsPdf() const { return format == FORMAT_PDF; }
 
-bool Book::UsesTextLayoutSettings() const { return !IsPdf(); }
+bool Book::IsCbz() const { return format == FORMAT_CBZ; }
 
-bool Book::SupportsBookmarks() const { return !IsPdf(); }
+bool Book::IsFixedLayout() const { return IsPdf() || IsCbz(); }
+
+const char *Book::GetFixedLayoutLabel() const {
+  if (IsCbz())
+    return "CBZ";
+  if (IsPdf() && mupdf_state) {
+    return app_flow_utils::GetMuPdfDocumentLabel(mupdf_state->document_kind);
+  }
+  if (IsPdf())
+    return "PDF";
+  return "BOOK";
+}
+
+bool Book::UsesTextLayoutSettings() const { return !IsFixedLayout(); }
+
+bool Book::SupportsBookmarks() const { return !IsFixedLayout(); }
 
 Page *Book::GetPage() { return pages[position]; }
 
@@ -1513,6 +1529,8 @@ Page *Book::GetPage(int index) { return pages[index]; }
 u16 Book::GetPageCount() {
   if (IsPdf() && mupdf_state)
     return mupdf_state->page_count;
+  if (IsCbz() && cbz_state)
+    return cbz_state->page_count;
   return pages.size();
 }
 
@@ -1543,12 +1561,13 @@ void Book::Close() {
     ++it;
   }
   pages.clear();
+  ResetCbzState();
+  ResetMuPdfState();
   chapters.clear();
   ClearChapterAnchors();
   ClearChapterDocStartPages();
   ClearInlineImages();
   ClearTocConfidence();
-  ResetMuPdfState();
 }
 
 bool Book::IsMobiFile() const { return HasExtCaseInsensitive(filename, ".mobi"); }

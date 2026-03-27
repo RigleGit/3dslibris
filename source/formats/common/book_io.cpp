@@ -29,6 +29,7 @@
 #include "formats/common/page_cache_utils.h"
 #include "formats/common/xml_parse_utils.h"
 #include "parse.h"
+#include "shared/app_flow_utils.h"
 #include "string_utils.h"
 #include "minizip/unzip.h"
 #include "shared/utf8_utils.h"
@@ -4973,10 +4974,13 @@ u8 Book::Index() {
     path.append(GetFolderName());
     path.append("/");
     path.append(GetFileName());
-    if (HasExtCI(GetFileName(), ".cbz"))
-      err = IndexCbzMetadata(this, path.c_str());
-    else
-      err = IndexPdfMetadata(this, path.c_str());
+    err = IndexPdfMetadata(this, path.c_str());
+  } else if (format == FORMAT_CBZ) {
+    std::string path;
+    path.append(GetFolderName());
+    path.append("/");
+    path.append(GetFileName());
+    err = IndexCbzMetadata(this, path.c_str());
   } else {
     // Non-EPUB files currently use filename labels in browser; defer full parse
     // until open to keep startup responsive.

@@ -42,7 +42,6 @@ static const int kPdfStripsNew3DS = 8;
 static const u16 kPdfPaper = 0xFFFF;
 static const u16 kPdfFrame = 0x2104;
 static const u16 kPdfAccent = 0x0000;
-static const float kPdfReadingBaseZoom = 1.5f;
 
 struct RenderedMuPdfBitmap {
   int width;
@@ -85,7 +84,8 @@ void RGB565ToRgb8(u16 pixel, int *r, int *g, int *b);
 bool IsMostlyWhite(u16 pixel);
 float ComputeFitScale(float page_width, float page_height, int target_width,
                       int target_height);
-float ComputeEffectiveMuPdfZoom(int zoom_index);
+float ComputeEffectiveMuPdfZoom(app_flow_utils::MuPdfDocumentKind kind,
+                                int zoom_index);
 
 inline void ResetBitmapCache(Book::MuPdfState::BitmapCache *cache) {
   if (!cache)
