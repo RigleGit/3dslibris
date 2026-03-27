@@ -192,15 +192,12 @@ MUPDF_SRC += $(sort $(wildcard source/cbz/*.c))
 ifeq ($(minimal3ds),yes)
 MUPDF_SRC := $(filter-out \
 	source/fitz/barcode.c \
-	source/fitz/document-all.c \
-	source/fitz/gz-doc.c \
 	source/fitz/leptonica-wrap.c \
 	source/fitz/ocr-device.c \
 	source/fitz/regexp.c \
 	source/fitz/stext-search.c \
 	source/fitz/output-%.c \
-	source/reflow/%.c \
-	source/cbz/%.c, \
+	source/reflow/%.c, \
 	$(MUPDF_SRC))
 endif
 

@@ -9,7 +9,7 @@ enum class BookFileFormat {
   Unsupported = 0,
   XhtmlLike = 1,
   Epub = 2,
-  Pdf = 3,
+  MuPdf = 3,
 };
 
 enum class BookmarkJumpDirection {

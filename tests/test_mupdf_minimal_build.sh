@@ -15,7 +15,7 @@ cat >"$OUTDIR/test_mupdf_link.c" <<'EOF'
 
 int main(void) {
   fz_context *ctx = NULL;
-  pdf_document *doc = NULL;
+  fz_document *doc = NULL;
   fz_outline *outline = NULL;
   fz_page *page = NULL;
   fz_pixmap *pix = NULL;
@@ -29,10 +29,11 @@ int main(void) {
   if (!ctx)
     return 2;
 
-  doc = pdf_open_document(ctx, "dummy.pdf");
-  page_count = fz_count_pages(ctx, (fz_document *)doc);
-  outline = pdf_load_outline(ctx, doc);
-  page = fz_load_page(ctx, (fz_document *)doc, 0);
+  fz_register_document_handlers(ctx);
+  doc = fz_open_document(ctx, "dummy.pdf");
+  page_count = fz_count_pages(ctx, doc);
+  outline = fz_load_outline(ctx, doc);
+  page = fz_load_page(ctx, doc, 0);
   bounds = fz_bound_page(ctx, page);
   bbox = fz_round_rect(bounds);
   pix = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), bbox, NULL, 0);
@@ -43,7 +44,7 @@ int main(void) {
   fz_drop_pixmap(ctx, pix);
   fz_drop_page(ctx, page);
   fz_drop_outline(ctx, outline);
-  pdf_drop_document(ctx, doc);
+  fz_drop_document(ctx, doc);
   fz_drop_context(ctx);
   return page_count;
 }

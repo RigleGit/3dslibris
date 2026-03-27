@@ -75,7 +75,7 @@ bool SetBookPage(Book *book, Text *ts, u16 page) {
   if (!book || !ts || page >= book->GetPageCount())
     return false;
   if (book->IsPdf())
-    book->CancelPdfIncrementalRender();
+    book->CancelMuPdfIncrementalRender();
   book->SetPosition(page);
   DrawBookPage(book, ts);
   return true;
@@ -261,19 +261,19 @@ void App::HandleEventInBook() {
 
   if (bookcurrent_ && bookcurrent_->IsPdf()) {
     const auto delay_pdf_deferred = [&]() {
-      const u32 delay_ms = bookcurrent_->GetPdfDeferredDelayMs();
+      const u32 delay_ms = bookcurrent_->GetMuPdfDeferredDelayMs();
       pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
       DBG_LOGF(this, "PDF: defer armed ready_in=%u", (unsigned)delay_ms);
     };
     if (keys & KEY_A) {
-      if (bookcurrent_->ChangePdfZoom(1)) {
+      if (bookcurrent_->ChangeMuPdfZoom(1)) {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_pdf_deferred();
         DBG_LOG(this, "PDF: event zoom_in");
       }
     } else if (keys & KEY_B) {
-      if (bookcurrent_->ChangePdfZoom(-1)) {
+      if (bookcurrent_->ChangeMuPdfZoom(-1)) {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_pdf_deferred();
@@ -293,7 +293,7 @@ void App::HandleEventInBook() {
       }
     } else if (keys & (key.down | KEY_DOWN)) {
       if (!bookcurrent_->GetChapters().empty()) {
-        if (bookcurrent_->JumpPdfChapter(1)) {
+        if (bookcurrent_->JumpMuPdfChapter(1)) {
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
           delay_pdf_deferred();
@@ -306,7 +306,7 @@ void App::HandleEventInBook() {
       }
     } else if (keys & (key.up | KEY_UP)) {
       if (!bookcurrent_->GetChapters().empty()) {
-        if (bookcurrent_->JumpPdfChapter(-1)) {
+        if (bookcurrent_->JumpMuPdfChapter(-1)) {
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
           delay_pdf_deferred();
@@ -320,9 +320,10 @@ void App::HandleEventInBook() {
     } else if (keys & KEY_TOUCH) {
       touchPosition mapped = TouchRead();
       pdf_touch_drag_active_ = true;
+      bookcurrent_->SetMuPdfViewportInteraction(true);
       pdf_touch_last_x_ = (int)mapped.px;
       pdf_touch_last_y_ = (int)mapped.py;
-      if (bookcurrent_->MovePdfViewportToPreview((int)mapped.px,
+      if (bookcurrent_->MoveMuPdfViewportToPreview((int)mapped.px,
                                                  (int)mapped.py)) {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
@@ -337,9 +338,10 @@ void App::HandleEventInBook() {
               pdf_touch_last_x_, pdf_touch_last_y_, (int)mapped.px,
               (int)mapped.py, kPdfTouchRerenderDelta)) {
         pdf_touch_drag_active_ = true;
+        bookcurrent_->SetMuPdfViewportInteraction(true);
         pdf_touch_last_x_ = (int)mapped.px;
         pdf_touch_last_y_ = (int)mapped.py;
-        if (bookcurrent_->MovePdfViewportToPreview((int)mapped.px,
+        if (bookcurrent_->MoveMuPdfViewportToPreview((int)mapped.px,
                                                    (int)mapped.py)) {
           // DrawCurrentView now uses the full-page zoom cache for viewport
           // extraction (no MuPDF re-render), so updating both screens is fast.
@@ -362,11 +364,13 @@ void App::HandleEventInBook() {
 
     if (!(held & KEY_TOUCH)) {
       if (pdf_touch_drag_active_) {
+        bookcurrent_->SetMuPdfViewportInteraction(false);
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_pdf_deferred();
         DBG_LOG(this, "PDF: event touch_release");
       }
+      bookcurrent_->SetMuPdfViewportInteraction(false);
       pdf_touch_drag_active_ = false;
       pdf_touch_last_x_ = -1;
       pdf_touch_last_y_ = -1;
@@ -375,7 +379,7 @@ void App::HandleEventInBook() {
     if (status_dirty) {
       RequestStatusRedraw();
     } else if (!(held & KEY_TOUCH) && keys == 0 &&
-               bookcurrent_->HasPendingPdfDeferredWork() &&
+               bookcurrent_->HasPendingMuPdfDeferredWork() &&
                osGetTime() >= pdf_deferred_ready_at_ms_) {
       const u32 budget_ms = 4;
       DBG_LOGF(this,
@@ -383,8 +387,8 @@ void App::HandleEventInBook() {
                (unsigned long long)osGetTime(),
                (unsigned long long)pdf_deferred_ready_at_ms_,
                (unsigned)budget_ms);
-      const bool worked = bookcurrent_->PumpDeferredPdfWork(budget_ms);
-      const u32 delay_ms = bookcurrent_->GetPdfDeferredDelayMs();
+      const bool worked = bookcurrent_->PumpDeferredMuPdfWork(budget_ms);
+      const u32 delay_ms = bookcurrent_->GetMuPdfDeferredDelayMs();
       pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
       if (worked) {
         DrawBookPage(bookcurrent_, ts);
@@ -478,7 +482,7 @@ void App::ToggleBookmark() {
   }
 
   DrawBookPage(bookcurrent_, ts);
-  const u32 delay_ms = bookcurrent_ ? bookcurrent_->GetPdfDeferredDelayMs() : 0;
+  const u32 delay_ms = bookcurrent_ ? bookcurrent_->GetMuPdfDeferredDelayMs() : 0;
   pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
   RequestStatusRedraw();
 }
@@ -557,8 +561,8 @@ u8 App::OpenBook(void) {
   DrawBookPage(bookcurrent_, ts);
   if (bookcurrent_ && bookcurrent_->IsPdf())
     pdf_deferred_ready_at_ms_ =
-        bookcurrent_->HasPendingPdfDeferredWork()
-            ? (osGetTime() + bookcurrent_->GetPdfDeferredDelayMs())
+        bookcurrent_->HasPendingMuPdfDeferredWork()
+            ? (osGetTime() + bookcurrent_->GetMuPdfDeferredDelayMs())
             : 0;
   RequestStatusRedraw();
   prefs_view_.layout_notice_pending = false;

@@ -1203,7 +1203,7 @@ Book::Book(App *a) {
   browser_display_name_cache.clear();
   browser_display_name_cached = false;
   pages.clear();
-  pdf_state = NULL;
+  mupdf_state = NULL;
   position = 0;
   format = FORMAT_UNDEF;
   app = a;
@@ -1511,8 +1511,8 @@ Page *Book::GetPage() { return pages[position]; }
 Page *Book::GetPage(int index) { return pages[index]; }
 
 u16 Book::GetPageCount() {
-  if (IsPdf() && pdf_state)
-    return pdf_state->page_count;
+  if (IsPdf() && mupdf_state)
+    return mupdf_state->page_count;
   return pages.size();
 }
 
@@ -1548,7 +1548,7 @@ void Book::Close() {
   ClearChapterDocStartPages();
   ClearInlineImages();
   ClearTocConfidence();
-  ResetPdfState();
+  ResetMuPdfState();
 }
 
 bool Book::IsMobiFile() const { return HasExtCaseInsensitive(filename, ".mobi"); }
