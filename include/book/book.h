@@ -79,6 +79,58 @@ public:
       AdjacentSlot() : page(-1), display_list(NULL), preview(), interactive_tile() {}
     };
 
+    struct IncrementalRenderState {
+      bool   active;
+      int    target_page;
+      int    target_zoom_index;
+      int    strips_completed;
+      int    strips_total;
+      int    partial_width;
+      int    partial_height;
+      std::vector<u16> partial_pixels;
+
+      IncrementalRenderState()
+          : active(false), target_page(-1), target_zoom_index(-1),
+            strips_completed(0), strips_total(8),
+            partial_width(0), partial_height(0) {}
+    };
+
+    struct PdfWorker {
+      // Cloned MuPDF context — lives on core 1, never touched by core 0 after init.
+      fz_context *worker_ctx;
+
+      // Job descriptor — written by core 0 before submit, read by core 1.
+      int              job_page_index;
+      float            job_scale;
+      fz_display_list *job_display_list;  // NOT owned; caller keeps alive
+      int              job_strip_y0;
+      int              job_strip_y1;
+      int              job_full_width;
+      int              job_full_height;
+      std::vector<u16> *job_pixel_buf;    // points into inc.partial_pixels
+
+      // Result — written by core 1, read by core 0 after done_event.
+      bool job_result;
+
+      // Synchronization: submit wakes worker, done signals completion.
+      LightEvent submit_event;
+      LightEvent done_event;
+
+      // Control flags (volatile for cross-core visibility).
+      volatile bool shutdown_requested;
+      volatile bool job_pending;
+      bool job_submitted;
+
+      Thread thread_handle;
+
+      PdfWorker()
+          : worker_ctx(NULL), job_page_index(-1), job_scale(1.0f),
+            job_display_list(NULL), job_strip_y0(0), job_strip_y1(0),
+            job_full_width(0), job_full_height(0), job_pixel_buf(NULL),
+          job_result(false), shutdown_requested(false), job_pending(false),
+          job_submitted(false), thread_handle(NULL) {}
+    };
+
     fz_context *ctx;
     pdf_document *doc;
     fz_outline *outline;
@@ -100,6 +152,9 @@ public:
     int cached_display_list_page;
     AdjacentSlot prev_slot;
     AdjacentSlot next_slot;
+    IncrementalRenderState incremental;
+    PdfWorker *worker;
+    bool worker_init_attempted;
 
     PdfState()
         : ctx(NULL), doc(NULL), outline(NULL), page_count(0),
@@ -108,7 +163,8 @@ public:
           zoom_index(2), viewport_center_x(0.5f), viewport_center_y(0.5f),
           current_preview(), current_interactive_tile(), current_final_zoom(),
           final_cache_pending(false), cached_display_list(NULL),
-          cached_display_list_page(-1), prev_slot(), next_slot() {}
+          cached_display_list_page(-1), prev_slot(), next_slot(),
+          incremental(), worker(NULL), worker_init_attempted(false) {}
   };
   struct InlineImageEntry {
     std::string path;
@@ -278,7 +334,10 @@ public:
   bool MovePdfViewportToPreview(int touch_x, int touch_y);
   bool JumpPdfChapter(int delta);
   void PrefetchAdjacentPdfPage();
+  bool HasPendingPdfDeferredWork() const;
+  u32 GetPdfDeferredDelayMs() const;
   bool PumpDeferredPdfWork(u32 budget_ms);
+  void CancelPdfIncrementalRender();
   void Close();
   u8 Index();
   void IndexHTML();

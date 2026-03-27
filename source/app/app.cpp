@@ -238,6 +238,7 @@ App::App() {
   pdf_touch_drag_active_ = false;
   pdf_touch_last_x_ = -1;
   pdf_touch_last_y_ = -1;
+  pdf_deferred_ready_at_ms_ = 0;
 
   ts = new Text();
   ts->app = this;

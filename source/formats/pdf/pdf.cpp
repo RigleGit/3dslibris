@@ -9,6 +9,7 @@
 #include "main.h"
 #include "shared/pdf_view_utils.h"
 #include "ui/text.h"
+#include "debug_log.h"
 
 #include <algorithm>
 #include <cmath>
@@ -34,11 +35,35 @@ extern App *app;
 
 namespace {
 
+static LightLock s_mupdf_locks[FZ_LOCK_MAX];
+static fz_locks_context s_mupdf_locks_ctx;
+
+static void MuPdfLockAcquire(void *, int lock) {
+  LightLock_Lock(&s_mupdf_locks[lock]);
+}
+static void MuPdfLockRelease(void *, int lock) {
+  LightLock_Unlock(&s_mupdf_locks[lock]);
+}
+
+static void InitMuPdfLocks() {
+  for (int i = 0; i < FZ_LOCK_MAX; i++)
+    LightLock_Init(&s_mupdf_locks[i]);
+  s_mupdf_locks_ctx.user = NULL;
+  s_mupdf_locks_ctx.lock = MuPdfLockAcquire;
+  s_mupdf_locks_ctx.unlock = MuPdfLockRelease;
+}
+
 static const int kPdfPreviewScreenWidth = 240;
 static const int kPdfPreviewScreenHeight = 320;
 static const int kPdfPreviewPadding = 4;
 static const int kPdfZoomScreenWidth = 240;
 static const int kPdfZoomScreenHeight = 400;
+static const float kPdfInteractiveScale = 1.0f;
+static const u32 kPdfInteractiveDeferredDelayMs = 180;
+static const u32 kPdfFinalDeferredDelayMs = 2200;
+static const u32 kPdfPrefetchDeferredDelayMs = 3500;
+static const int kPdfStripsOld3DS = 8;
+static const int kPdfStripsNew3DS = 8;
 static const u16 kPdfPaper = 0xFFFF;
 static const u16 kPdfFrame = 0x2104;
 static const u16 kPdfAccent = 0x0000;
@@ -91,6 +116,13 @@ struct PdfNavigationBounds {
   PdfNavigationBounds() : left(0.0f), top(0.0f), width(1.0f), height(1.0f) {}
 };
 
+enum class PdfDeferredStage {
+  None = 0,
+  Interactive,
+  Final,
+  Prefetch,
+};
+
 static void ResetBitmapCache(Book::PdfState::BitmapCache *cache) {
   if (!cache)
     return;
@@ -138,16 +170,6 @@ static bool BitmapCacheValid(const Book::PdfState::BitmapCache &cache,
                              int page) {
   return cache.page == page && cache.bitmap_width > 0 &&
          cache.bitmap_height > 0 && !cache.pixels.empty();
-}
-
-static bool BitmapCacheCoversRect(const Book::PdfState::BitmapCache &cache,
-                                  int page, int zoom_index,
-                                  const pdf_view_utils::NormalizedRect &rect) {
-  const float eps = 0.001f;
-  return BitmapCacheValid(cache, page) && cache.zoom_index == zoom_index &&
-         cache.left <= rect.left + eps && cache.top <= rect.top + eps &&
-         cache.left + cache.width >= rect.left + rect.width - eps &&
-         cache.top + cache.height >= rect.top + rect.height - eps;
 }
 
 static u16 RGB565FromRgb8(unsigned char r, unsigned char g, unsigned char b) {
@@ -564,12 +586,6 @@ static float ComputePdfFinalScale(float page_width, float page_height,
          ComputeEffectivePdfZoom(max_zoom_index);
 }
 
-static float ComputePdfInteractiveScale(float page_width, float page_height,
-                                        int zoom_index) {
-  return ComputeFitScale(page_width, page_height, kPdfZoomScreenWidth,
-                         kPdfZoomScreenHeight) *
-         ComputeEffectivePdfZoom(zoom_index);
-}
 
 static void GetPreviewContentBounds(const Book::PdfState *pdf_state, float *left,
                                     float *top, float *width, float *height) {
@@ -609,6 +625,63 @@ static Book::PdfState::AdjacentSlot *GetAdjacentSlot(Book::PdfState *pdf_state,
   return (direction < 0) ? &pdf_state->prev_slot : &pdf_state->next_slot;
 }
 
+static PdfDeferredStage GetNextPdfDeferredStage(
+    const Book::PdfState *pdf_state, int page_index,
+    const pdf_view_utils::NormalizedRect &viewport) {
+  if (!pdf_state || !pdf_state->ctx || !pdf_state->doc)
+    return PdfDeferredStage::None;
+
+  if (!BitmapCacheValid(pdf_state->current_interactive_tile, page_index)) {
+    return PdfDeferredStage::Interactive;
+  }
+
+  if (pdf_state->final_cache_pending ||
+      !BitmapCacheValid(pdf_state->current_final_zoom, page_index)) {
+    return PdfDeferredStage::Final;
+  }
+
+  const int next = page_index + 1;
+  if (next < (int)pdf_state->page_count) {
+    const Book::PdfState::AdjacentSlot &slot = pdf_state->next_slot;
+    if (slot.page != next || !BitmapCacheValid(slot.preview, next) ||
+        !BitmapCacheValid(slot.interactive_tile, next)) {
+      return PdfDeferredStage::Prefetch;
+    }
+  }
+
+  const int prev = page_index - 1;
+  if (prev >= 0) {
+    const Book::PdfState::AdjacentSlot &slot = pdf_state->prev_slot;
+    if (slot.page != prev || !BitmapCacheValid(slot.preview, prev) ||
+        !BitmapCacheValid(slot.interactive_tile, prev)) {
+      return PdfDeferredStage::Prefetch;
+    }
+  }
+
+  return PdfDeferredStage::None;
+}
+
+static void CancelIncrementalRender(Book::PdfState *pdf_state) {
+  if (!pdf_state)
+    return;
+  if (pdf_state->worker && pdf_state->worker->job_submitted) {
+    if (__atomic_load_n(&pdf_state->worker->job_pending, __ATOMIC_ACQUIRE)) {
+      LightEvent_Wait(&pdf_state->worker->done_event);
+    }
+    LightEvent_Clear(&pdf_state->worker->done_event);
+    __atomic_store_n(&pdf_state->worker->job_pending, false, __ATOMIC_RELEASE);
+    pdf_state->worker->job_submitted = false;
+    pdf_state->worker->job_strip_y0 = 0;
+    pdf_state->worker->job_strip_y1 = 0;
+  }
+  pdf_state->incremental.active = false;
+  pdf_state->incremental.strips_completed = 0;
+  pdf_state->incremental.partial_pixels.clear();
+  pdf_state->incremental.partial_pixels.shrink_to_fit();
+  pdf_state->incremental.partial_width = 0;
+  pdf_state->incremental.partial_height = 0;
+}
+
 static bool PromoteAdjacentSlotIfMatching(Book::PdfState *pdf_state,
                                           int page_index) {
   if (!pdf_state)
@@ -635,6 +708,7 @@ static bool PromoteAdjacentSlotIfMatching(Book::PdfState *pdf_state,
   slot->display_list = NULL;
   slot->page = -1;
   pdf_state->final_cache_pending = true;
+  CancelIncrementalRender(pdf_state);
   return true;
 }
 
@@ -700,13 +774,11 @@ static bool EnsureCurrentPreviewCache(Book::PdfState *pdf_state, int page_index)
 }
 
 static bool EnsureCurrentInteractiveTile(Book::PdfState *pdf_state,
-                                         int page_index,
-                                         const pdf_view_utils::NormalizedRect &viewport) {
+                                         int page_index) {
   if (!pdf_state)
     return false;
   PromoteAdjacentSlotIfMatching(pdf_state, page_index);
-  if (BitmapCacheCoversRect(pdf_state->current_interactive_tile, page_index,
-                            pdf_state->zoom_index, viewport))
+  if (BitmapCacheValid(pdf_state->current_interactive_tile, page_index))
     return true;
 
   fz_display_list *display_list = NULL;
@@ -717,17 +789,22 @@ static bool EnsureCurrentInteractiveTile(Book::PdfState *pdf_state,
   fz_display_list *new_list = NULL;
   float page_width = pdf_state->page_width;
   float page_height = pdf_state->page_height;
-  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
-                       ComputePdfInteractiveScale(page_width, page_height,
-                                                  pdf_state->zoom_index),
-                       &rendered, &page_width, &page_height, &viewport,
-                       display_list, display_list ? NULL : &new_list)) {
+  // Render at half the final scale with AA disabled for fast medium-quality preview.
+  const int saved_aa = fz_aa_level(pdf_state->ctx);
+  fz_set_aa_level(pdf_state->ctx, 0);
+  const bool render_ok = RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
+                       kPdfInteractiveScale *
+                           ComputeFitScale(page_width, page_height,
+                                           kPdfZoomScreenWidth, kPdfZoomScreenHeight),
+                       &rendered, &page_width, &page_height, NULL,
+                       display_list, display_list ? NULL : &new_list);
+  fz_set_aa_level(pdf_state->ctx, saved_aa);
+  if (!render_ok) {
     return false;
   }
 
   StoreBitmapCache(&pdf_state->current_interactive_tile, page_index,
-                   pdf_state->zoom_index, viewport.left, viewport.top,
-                   viewport.width, viewport.height, &rendered);
+                   pdf_state->zoom_index, 0.0f, 0.0f, 1.0f, 1.0f, &rendered);
   pdf_state->page_width = page_width;
   pdf_state->page_height = page_height;
   if (new_list && !display_list) {
@@ -737,42 +814,524 @@ static bool EnsureCurrentInteractiveTile(Book::PdfState *pdf_state,
   return true;
 }
 
-static bool EnsureCurrentFinalCache(Book::PdfState *pdf_state, int page_index) {
-  if (!pdf_state)
+static bool BlitBitmapCacheViewport(Text *ts, u16 *screen, int logical_height,
+                                    int draw_width, int draw_height,
+                                    const Book::PdfState::BitmapCache &cache,
+                                    const pdf_view_utils::NormalizedRect &viewport) {
+  if (!ts || !screen || !BitmapCacheValid(cache, cache.page))
     return false;
-  if (BitmapCacheValid(pdf_state->current_final_zoom, page_index) &&
-      pdf_state->current_final_zoom.zoom_index >= pdf_state->max_zoom_index) {
-    pdf_state->final_cache_pending = false;
-    return true;
+
+  const float cache_right = cache.left + cache.width;
+  const float cache_bottom = cache.top + cache.height;
+  if (viewport.left + viewport.width <= cache.left ||
+      viewport.top + viewport.height <= cache.top || viewport.left >= cache_right ||
+      viewport.top >= cache_bottom) {
+    return false;
+  }
+
+  const float rel_left =
+      std::max(0.0f, (viewport.left - cache.left) / std::max(0.0001f, cache.width));
+  const float rel_top =
+      std::max(0.0f, (viewport.top - cache.top) / std::max(0.0001f, cache.height));
+  const float rel_right =
+      std::min(1.0f, (viewport.left + viewport.width - cache.left) /
+                         std::max(0.0001f, cache.width));
+  const float rel_bottom =
+      std::min(1.0f, (viewport.top + viewport.height - cache.top) /
+                         std::max(0.0001f, cache.height));
+  int crop_x = std::max(0, std::min(cache.bitmap_width - 1,
+                                    (int)(rel_left * cache.bitmap_width)));
+  int crop_y = std::max(0, std::min(cache.bitmap_height - 1,
+                                    (int)(rel_top * cache.bitmap_height)));
+  int crop_w = std::max(
+      1, std::min(cache.bitmap_width - crop_x,
+                  (int)((rel_right - rel_left) * cache.bitmap_width + 0.5f)));
+  int crop_h = std::max(
+      1, std::min(cache.bitmap_height - crop_y,
+                  (int)((rel_bottom - rel_top) * cache.bitmap_height + 0.5f)));
+
+  BlitRgb565BitmapScaledCrop(ts, screen, logical_height, 0, 0, draw_width,
+                             draw_height, cache.pixels, cache.bitmap_width,
+                             cache.bitmap_height, crop_x, crop_y, crop_w,
+                             crop_h);
+  return true;
+}
+
+static bool BlitBitmapCacheViewportRegion(
+    Text *ts, u16 *screen, int logical_height, int draw_width, int draw_height,
+    int dst_y0, int dst_y1, const Book::PdfState::BitmapCache &cache,
+    const pdf_view_utils::NormalizedRect &viewport) {
+  if (!ts || !screen || !BitmapCacheValid(cache, cache.page))
+    return false;
+  dst_y0 = std::max(0, dst_y0);
+  dst_y1 = std::min(draw_height, dst_y1);
+  if (dst_y0 >= dst_y1)
+    return false;
+
+  const float vp_h = std::max(0.0001f, viewport.height);
+  const float region_top_norm = viewport.top + (float)dst_y0 / draw_height * vp_h;
+  const float region_bot_norm = viewport.top + (float)dst_y1 / draw_height * vp_h;
+
+  const float cache_h = std::max(0.0001f, cache.height);
+  const float cache_w = std::max(0.0001f, cache.width);
+
+  const float rel_left =
+      std::max(0.0f, (viewport.left - cache.left) / cache_w);
+  const float rel_right =
+      std::min(1.0f, (viewport.left + viewport.width - cache.left) / cache_w);
+  const float rel_top =
+      std::max(0.0f, (region_top_norm - cache.top) / cache_h);
+  const float rel_bottom =
+      std::min(1.0f, (region_bot_norm - cache.top) / cache_h);
+
+  if (rel_left >= rel_right || rel_top >= rel_bottom)
+    return false;
+
+  const int crop_x = std::max(0, std::min(cache.bitmap_width - 1,
+                                          (int)(rel_left * cache.bitmap_width)));
+  const int crop_y = std::max(0, std::min(cache.bitmap_height - 1,
+                                          (int)(rel_top * cache.bitmap_height)));
+  const int crop_w = std::max(
+      1, std::min(cache.bitmap_width - crop_x,
+                  (int)((rel_right - rel_left) * cache.bitmap_width + 0.5f)));
+  const int crop_h = std::max(
+      1, std::min(cache.bitmap_height - crop_y,
+                  (int)((rel_bottom - rel_top) * cache.bitmap_height + 0.5f)));
+
+  BlitRgb565BitmapScaledCrop(ts, screen, logical_height, 0, dst_y0, draw_width,
+                              dst_y1 - dst_y0, cache.pixels,
+                              cache.bitmap_width, cache.bitmap_height,
+                              crop_x, crop_y, crop_w, crop_h);
+  return true;
+}
+
+static bool BlitRawBitmapViewportRegion(
+    Text *ts, u16 *screen, int logical_height, int draw_width, int draw_height,
+    int dst_y0, int dst_y1, const std::vector<u16> &pixels, int bitmap_width,
+    int bitmap_height, float cache_left, float cache_top, float cache_width,
+    float cache_height, const pdf_view_utils::NormalizedRect &viewport) {
+  if (!ts || !screen || pixels.empty() || bitmap_width <= 0 ||
+      bitmap_height <= 0)
+    return false;
+
+  dst_y0 = std::max(0, dst_y0);
+  dst_y1 = std::min(draw_height, dst_y1);
+  if (dst_y0 >= dst_y1)
+    return false;
+
+  const float vp_h = std::max(0.0001f, viewport.height);
+  const float region_top_norm =
+      viewport.top + (float)dst_y0 / draw_height * vp_h;
+  const float region_bot_norm =
+      viewport.top + (float)dst_y1 / draw_height * vp_h;
+
+  const float cache_h = std::max(0.0001f, cache_height);
+  const float cache_w = std::max(0.0001f, cache_width);
+
+  const float rel_left =
+      std::max(0.0f, (viewport.left - cache_left) / cache_w);
+  const float rel_right =
+      std::min(1.0f, (viewport.left + viewport.width - cache_left) / cache_w);
+  const float rel_top =
+      std::max(0.0f, (region_top_norm - cache_top) / cache_h);
+  const float rel_bottom =
+      std::min(1.0f, (region_bot_norm - cache_top) / cache_h);
+
+  if (rel_left >= rel_right || rel_top >= rel_bottom)
+    return false;
+
+  const int crop_x = std::max(0, std::min(bitmap_width - 1,
+                                          (int)(rel_left * bitmap_width)));
+  const int crop_y = std::max(0, std::min(bitmap_height - 1,
+                                          (int)(rel_top * bitmap_height)));
+  const int crop_w = std::max(
+      1, std::min(bitmap_width - crop_x,
+                  (int)((rel_right - rel_left) * bitmap_width + 0.5f)));
+  const int crop_h = std::max(
+      1, std::min(bitmap_height - crop_y,
+                  (int)((rel_bottom - rel_top) * bitmap_height + 0.5f)));
+
+  BlitRgb565BitmapScaledCrop(ts, screen, logical_height, 0, dst_y0, draw_width,
+                             dst_y1 - dst_y0, pixels, bitmap_width,
+                             bitmap_height, crop_x, crop_y, crop_w, crop_h);
+  return true;
+}
+
+static bool RenderPdfBitmapStrip(fz_context *ctx, pdf_document *doc,
+                                  int page_index, float scale,
+                                  fz_display_list *reuse_list,
+                                  int strip_y0_px, int strip_y1_px,
+                                  int full_width_px, int full_height_px,
+                                  std::vector<u16> *partial_pixels) {
+  if (!ctx || !doc || !partial_pixels || !reuse_list)
+    return false;
+  if (strip_y0_px < 0 || strip_y1_px <= strip_y0_px ||
+      strip_y1_px > full_height_px || full_width_px <= 0)
+    return false;
+
+  fz_page *page = NULL;
+  fz_pixmap *pixmap = NULL;
+  fz_device *device = NULL;
+  bool ok = false;
+
+  fz_var(page);
+  fz_var(pixmap);
+  fz_var(device);
+
+  fz_try(ctx) {
+    page = fz_load_page(ctx, (fz_document *)doc, page_index);
+    fz_rect bounds = fz_bound_page(ctx, page);
+    if (!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0))
+      fz_throw(ctx, FZ_ERROR_FORMAT, "empty pdf page bounds");
+
+    const fz_matrix ctm = MakePdfRenderMatrix(bounds, scale);
+
+    const fz_irect bbox = fz_make_irect(0, strip_y0_px, full_width_px, strip_y1_px);
+    pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_gray(ctx), bbox, NULL, 0);
+    fz_clear_pixmap_with_value(ctx, pixmap, 255);
+    device = fz_new_draw_device(ctx, fz_identity, pixmap);
+
+    const fz_rect clip = fz_make_rect(0.0f, (float)strip_y0_px,
+                                       (float)full_width_px, (float)strip_y1_px);
+    fz_run_display_list(ctx, reuse_list, device, ctm, clip, NULL);
+    fz_close_device(ctx, device);
+
+    const int pix_w = fz_pixmap_width(ctx, pixmap);
+    const int pix_h = fz_pixmap_height(ctx, pixmap);
+    const int stride = fz_pixmap_stride(ctx, pixmap);
+    const int comps = fz_pixmap_components(ctx, pixmap);
+    unsigned char *samples = fz_pixmap_samples(ctx, pixmap);
+    if (!samples || pix_w <= 0 || pix_h <= 0 || comps < 1)
+      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid strip pixmap");
+
+    EnsureGrayLut();
+    const size_t row_offset = (size_t)strip_y0_px * (size_t)full_width_px;
+    u16 *dst = partial_pixels->data() + row_offset;
+    if (comps == 1) {
+      for (int y = 0; y < pix_h; y++) {
+        const unsigned char *src = samples + (size_t)y * (size_t)stride;
+        for (int x = 0; x < pix_w; x++)
+          *dst++ = kGrayToRgb565[*src++];
+      }
+    } else {
+      for (int y = 0; y < pix_h; y++) {
+        const unsigned char *src = samples + (size_t)y * (size_t)stride;
+        for (int x = 0; x < pix_w; x++) {
+          *dst++ = RGB565FromRgb8(src[0], src[1], src[2]);
+          src += comps;
+        }
+      }
+    }
+    ok = true;
+  }
+  fz_always(ctx) {
+    fz_drop_device(ctx, device);
+    fz_drop_pixmap(ctx, pixmap);
+    fz_drop_page(ctx, page);
+  }
+  fz_catch(ctx) { ok = false; }
+  return ok;
+}
+
+static void PdfWorkerThreadFunc(void *arg) {
+  Book::PdfState *pdf_state = static_cast<Book::PdfState *>(arg);
+  Book::PdfState::PdfWorker *w = pdf_state->worker;
+
+  while (true) {
+    LightEvent_Wait(&w->submit_event);
+    LightEvent_Clear(&w->submit_event);
+
+    if (__atomic_load_n(&w->shutdown_requested, __ATOMIC_ACQUIRE))
+      break;
+
+    if (!__atomic_load_n(&w->job_pending, __ATOMIC_ACQUIRE))
+      continue;
+
+    const int saved_aa = fz_aa_level(w->worker_ctx);
+    fz_set_aa_level(w->worker_ctx, 0);
+    w->job_result = RenderPdfBitmapStrip(
+        w->worker_ctx, pdf_state->doc,
+        w->job_page_index, w->job_scale, w->job_display_list,
+        w->job_strip_y0, w->job_strip_y1,
+        w->job_full_width, w->job_full_height,
+        w->job_pixel_buf);
+    fz_set_aa_level(w->worker_ctx, saved_aa);
+
+    __atomic_store_n(&w->job_pending, false, __ATOMIC_RELEASE);
+    LightEvent_Signal(&w->done_event);
+  }
+}
+
+static void InitPdfWorker(Book::PdfState *pdf_state) {
+  if (!pdf_state || !pdf_state->is_new_3ds || !pdf_state->ctx)
+    return;
+  pdf_state->worker_init_attempted = true;
+
+  Book::PdfState::PdfWorker *w = new Book::PdfState::PdfWorker();
+
+  w->worker_ctx = fz_clone_context(pdf_state->ctx);
+  if (!w->worker_ctx) {
+    DBG_LOG(app, "PDF[w]: init FAIL: fz_clone_context returned NULL");
+    delete w;
+    return;
+  }
+
+  LightEvent_Init(&w->submit_event, RESET_STICKY);
+  LightEvent_Init(&w->done_event,   RESET_STICKY);
+
+  s32 prio = 0x30;
+  svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+
+  pdf_state->worker = w;
+  w->thread_handle = threadCreate(PdfWorkerThreadFunc, pdf_state,
+                                   32 * 1024, prio + 1, 1, false);
+  if (!w->thread_handle) {
+    DBG_LOG(app, "PDF[w]: init FAIL: threadCreate returned NULL (core 1 unavailable?)");
+    fz_drop_context(w->worker_ctx);
+    w->worker_ctx = NULL;
+    delete w;
+    pdf_state->worker = NULL;
+    return;
+  }
+  DBG_LOG(app, "PDF[w]: worker thread started on core 1");
+}
+
+static void ShutdownPdfWorker(Book::PdfState *pdf_state) {
+  if (!pdf_state || !pdf_state->worker)
+    return;
+
+  Book::PdfState::PdfWorker *w = pdf_state->worker;
+
+  __atomic_store_n(&w->shutdown_requested, true, __ATOMIC_RELEASE);
+  LightEvent_Signal(&w->submit_event);
+
+  if (w->thread_handle) {
+    threadJoin(w->thread_handle, U64_MAX);
+    threadFree(w->thread_handle);
+    w->thread_handle = NULL;
+  }
+
+  if (w->worker_ctx) {
+    fz_drop_context(w->worker_ctx);
+    w->worker_ctx = NULL;
+  }
+
+  delete w;
+  pdf_state->worker = NULL;
+}
+
+static bool PumpIncrementalStripWorker(Book::PdfState *pdf_state,
+                                        int page_index) {
+  Book::PdfState::IncrementalRenderState &inc = pdf_state->incremental;
+  Book::PdfState::PdfWorker *w = pdf_state->worker;
+
+  if (__atomic_load_n(&w->job_pending, __ATOMIC_ACQUIRE)) {
+    return false;
+  }
+
+  bool strip_just_collected = false;
+
+  if (w->job_submitted) {
+    LightEvent_Wait(&w->done_event);
+    LightEvent_Clear(&w->done_event);
+    w->job_submitted = false;
+
+    const bool ok = w->job_result;
+    const int s = inc.strips_completed;
+    DBG_LOGF(app, "PDF[w]: strip %s page=%d strip=%d/%d y=%d..%d",
+             ok ? "done" : "FAIL", page_index,
+             s + 1, inc.strips_total,
+             w->job_strip_y0, w->job_strip_y1);
+
+    inc.strips_completed++;
+    strip_just_collected = true;
+
+    if (inc.strips_completed >= inc.strips_total) {
+      RenderedPdfBitmap promoted;
+      promoted.width  = inc.partial_width;
+      promoted.height = inc.partial_height;
+      promoted.pixels.swap(inc.partial_pixels);
+      StoreBitmapCache(&pdf_state->current_final_zoom, page_index,
+                       pdf_state->max_zoom_index, 0.0f, 0.0f, 1.0f, 1.0f,
+                       &promoted);
+      pdf_state->final_cache_pending = false;
+      DBG_LOGF(app,
+               "PDF[w]: incremental COMPLETE page=%d zoom=%d size=%dx%d",
+               page_index, pdf_state->max_zoom_index,
+               promoted.width, promoted.height);
+      CancelIncrementalRender(pdf_state);
+      return true;
+    }
+
+    // Expose the freshly completed strip to the UI before the next worker
+    // job starts. Submitting immediately races with DrawCurrentView on
+    // inc.partial_pixels and can leave later bands visually blank.
+    return strip_just_collected;
   }
 
   fz_display_list *display_list = NULL;
-  if (!EnsurePdfDisplayListForPage(pdf_state, page_index, &display_list))
+  if (!EnsurePdfDisplayListForPage(pdf_state, page_index, &display_list) ||
+      !display_list)
     return false;
 
-  RenderedPdfBitmap rendered;
-  fz_display_list *new_list = NULL;
-  float page_width = pdf_state->page_width;
-  float page_height = pdf_state->page_height;
-  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
-                       ComputePdfFinalScale(page_width, page_height,
-                                            pdf_state->max_zoom_index),
-                       &rendered, &page_width, &page_height, NULL,
-                       display_list, display_list ? NULL : &new_list)) {
+  const int s = inc.strips_completed;
+  const float scale = ComputePdfFinalScale(pdf_state->page_width,
+                                           pdf_state->page_height,
+                                           pdf_state->max_zoom_index);
+  const int y0 = (s * inc.partial_height) / inc.strips_total;
+  const int y1 = (s == inc.strips_total - 1)
+                     ? inc.partial_height
+                     : ((s + 1) * inc.partial_height) / inc.strips_total;
+
+  w->job_page_index   = page_index;
+  w->job_scale        = scale;
+  w->job_display_list = display_list;
+  w->job_strip_y0     = y0;
+  w->job_strip_y1     = y1;
+  w->job_full_width   = inc.partial_width;
+  w->job_full_height  = inc.partial_height;
+  w->job_pixel_buf    = &inc.partial_pixels;
+  w->job_result       = false;
+  w->job_submitted    = true;
+
+  LightEvent_Clear(&w->done_event);
+  __atomic_store_n(&w->job_pending, true, __ATOMIC_RELEASE);
+  LightEvent_Signal(&w->submit_event);
+
+  return strip_just_collected;
+}
+
+static bool PumpIncrementalStrip(Book::PdfState *pdf_state, int page_index) {
+  if (!pdf_state || !pdf_state->ctx || !pdf_state->doc)
+    return false;
+
+  Book::PdfState::IncrementalRenderState &inc = pdf_state->incremental;
+
+  if (BitmapCacheValid(pdf_state->current_final_zoom, page_index) &&
+      pdf_state->current_final_zoom.zoom_index >= pdf_state->max_zoom_index) {
+    pdf_state->final_cache_pending = false;
+    CancelIncrementalRender(pdf_state);
     return false;
   }
 
-  StoreBitmapCache(&pdf_state->current_final_zoom, page_index,
-                   pdf_state->max_zoom_index, 0.0f, 0.0f, 1.0f, 1.0f,
-                   &rendered);
-  pdf_state->page_width = page_width;
-  pdf_state->page_height = page_height;
-  pdf_state->final_cache_pending = false;
-  if (new_list && !display_list) {
-    pdf_state->cached_display_list = new_list;
-    pdf_state->cached_display_list_page = page_index;
+  if (!inc.active ||
+      inc.target_page != page_index ||
+      inc.target_zoom_index != pdf_state->max_zoom_index) {
+    CancelIncrementalRender(pdf_state);
+
+    fz_display_list *display_list = NULL;
+    if (!EnsurePdfDisplayListForPage(pdf_state, page_index, &display_list) ||
+        !display_list)
+      return false;
+
+    const float scale = ComputePdfFinalScale(pdf_state->page_width,
+                                              pdf_state->page_height,
+                                              pdf_state->max_zoom_index);
+    fz_page *pg = NULL;
+    fz_rect bounds = fz_empty_rect;
+    fz_var(pg);
+    bool measured = false;
+    fz_try(pdf_state->ctx) {
+      pg = fz_load_page(pdf_state->ctx, (fz_document *)pdf_state->doc, page_index);
+      bounds = fz_bound_page(pdf_state->ctx, pg);
+      measured = (bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0);
+    }
+    fz_always(pdf_state->ctx) { fz_drop_page(pdf_state->ctx, pg); }
+    fz_catch(pdf_state->ctx) { measured = false; }
+    if (!measured)
+      return false;
+
+    const fz_matrix ctm = MakePdfRenderMatrix(bounds, scale);
+    const fz_irect full_bbox = fz_round_rect(fz_transform_rect(bounds, ctm));
+    const int full_w = full_bbox.x1 - full_bbox.x0;
+    const int full_h = full_bbox.y1 - full_bbox.y0;
+    if (full_w <= 0 || full_h <= 0)
+      return false;
+
+    inc.active = true;
+    inc.target_page = page_index;
+    inc.target_zoom_index = pdf_state->max_zoom_index;
+    inc.strips_completed = 0;
+    inc.strips_total = pdf_state->is_new_3ds ? kPdfStripsNew3DS : kPdfStripsOld3DS;
+    inc.partial_width = full_w;
+    inc.partial_height = full_h;
+    inc.partial_pixels.assign((size_t)full_w * (size_t)full_h, kPdfPaper);
+
+    DBG_LOGF(app,
+             "PDF: incremental start page=%d zoom=%d strips=%d size=%dx%d",
+             page_index, pdf_state->max_zoom_index, inc.strips_total,
+             full_w, full_h);
   }
-  return true;
+
+  // Lazy-init worker for N3DS in case this pdf_state was reused without
+  // going through InitPdfView again (e.g. ReuseParsedBook path).
+  if (!pdf_state->worker && !pdf_state->worker_init_attempted && pdf_state->is_new_3ds) {
+    pdf_state->worker_init_attempted = true;
+    InitPdfWorker(pdf_state);
+  }
+
+  if (pdf_state->worker)
+    return PumpIncrementalStripWorker(pdf_state, page_index);
+
+  fz_display_list *display_list = NULL;
+  if (!EnsurePdfDisplayListForPage(pdf_state, page_index, &display_list) ||
+      !display_list)
+    return false;
+
+  const int s = inc.strips_completed;
+  const float scale = ComputePdfFinalScale(pdf_state->page_width,
+                                            pdf_state->page_height,
+                                            pdf_state->max_zoom_index);
+
+  const int strip_y0 = (s * inc.partial_height) / inc.strips_total;
+  const int strip_y1 = (s == inc.strips_total - 1)
+                           ? inc.partial_height
+                           : ((s + 1) * inc.partial_height) / inc.strips_total;
+
+#ifdef DSLIBRIS_DEBUG
+  const u64 strip_t0 = osGetTime();
+#endif
+  const int saved_strip_aa = fz_aa_level(pdf_state->ctx);
+  fz_set_aa_level(pdf_state->ctx, 0);
+  const bool ok = RenderPdfBitmapStrip(pdf_state->ctx, pdf_state->doc,
+                                        page_index, scale, display_list,
+                                        strip_y0, strip_y1,
+                                        inc.partial_width, inc.partial_height,
+                                        &inc.partial_pixels);
+  fz_set_aa_level(pdf_state->ctx, saved_strip_aa);
+  if (ok) {
+    inc.strips_completed++;
+    DBG_LOGF(app,
+             "PDF: strip done page=%d strip=%d/%d y=%d..%d ms=%llu",
+             page_index, inc.strips_completed, inc.strips_total,
+             strip_y0, strip_y1,
+             (unsigned long long)(osGetTime() - strip_t0));
+  } else {
+    DBG_LOGF(app,
+             "PDF: strip FAIL page=%d strip=%d/%d y=%d..%d ms=%llu",
+             page_index, inc.strips_completed + 1, inc.strips_total,
+             strip_y0, strip_y1,
+             (unsigned long long)(osGetTime() - strip_t0));
+  }
+
+  if (inc.strips_completed >= inc.strips_total) {
+    RenderedPdfBitmap promoted;
+    promoted.width = inc.partial_width;
+    promoted.height = inc.partial_height;
+    promoted.pixels.swap(inc.partial_pixels);
+    StoreBitmapCache(&pdf_state->current_final_zoom, page_index,
+                     pdf_state->max_zoom_index, 0.0f, 0.0f, 1.0f, 1.0f,
+                     &promoted);
+    pdf_state->final_cache_pending = false;
+    DBG_LOGF(app,
+             "PDF: incremental COMPLETE page=%d zoom=%d size=%dx%d",
+             page_index, pdf_state->max_zoom_index,
+             promoted.width, promoted.height);
+    CancelIncrementalRender(pdf_state);
+    return true;
+  }
+
+  return ok;
 }
 
 static bool PrepareAdjacentPdfSlot(Book::PdfState *pdf_state, int current_page,
@@ -789,12 +1348,9 @@ static bool PrepareAdjacentPdfSlot(Book::PdfState *pdf_state, int current_page,
   if (!slot)
     return false;
 
-  const pdf_view_utils::NormalizedRect viewport =
-      ComputeCurrentPdfViewport(pdf_state);
   if (slot->page == page_index &&
       BitmapCacheValid(slot->preview, page_index) &&
-      BitmapCacheCoversRect(slot->interactive_tile, page_index,
-                            pdf_state->zoom_index, viewport)) {
+      BitmapCacheValid(slot->interactive_tile, page_index)) {
     return false;
   }
 
@@ -819,17 +1375,24 @@ static bool PrepareAdjacentPdfSlot(Book::PdfState *pdf_state, int current_page,
                    &preview);
 
   RenderedPdfBitmap interactive;
-  if (!RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
-                       ComputePdfInteractiveScale(page_width, page_height,
-                                                  pdf_state->zoom_index),
-                       &interactive, &page_width, &page_height, &viewport,
-                       display_list, NULL)) {
-    ResetAdjacentSlot(slot, pdf_state->ctx);
-    return false;
+  {
+    // Render at half the final scale with AA disabled for fast medium-quality preview.
+    const int saved_aa = fz_aa_level(pdf_state->ctx);
+    fz_set_aa_level(pdf_state->ctx, 0);
+    const bool render_ok = RenderPdfBitmap(pdf_state->ctx, pdf_state->doc, page_index,
+                         kPdfInteractiveScale *
+                             ComputeFitScale(page_width, page_height,
+                                             kPdfZoomScreenWidth, kPdfZoomScreenHeight),
+                         &interactive, &page_width, &page_height, NULL,
+                         display_list, NULL);
+    fz_set_aa_level(pdf_state->ctx, saved_aa);
+    if (!render_ok) {
+      ResetAdjacentSlot(slot, pdf_state->ctx);
+      return false;
+    }
   }
   StoreBitmapCache(&slot->interactive_tile, page_index, pdf_state->zoom_index,
-                   viewport.left, viewport.top, viewport.width,
-                   viewport.height, &interactive);
+                   0.0f, 0.0f, 1.0f, 1.0f, &interactive);
 
   slot->page = page_index;
   slot->display_list = display_list;
@@ -899,6 +1462,7 @@ static void PopulatePdfMetadata(Book *book, fz_context *ctx, pdf_document *doc) 
 void Book::ResetPdfState() {
   if (!pdf_state)
     return;
+  ShutdownPdfWorker(pdf_state);
   if (pdf_state->ctx) {
     if (pdf_state->cached_display_list)
       fz_drop_display_list(pdf_state->ctx, pdf_state->cached_display_list);
@@ -930,6 +1494,7 @@ void Book::InitPdfView(u16 page_count, fz_context *ctx, pdf_document *doc,
   pdf_state->viewport_center_x = 0.5f;
   pdf_state->viewport_center_y = 0.5f;
   pdf_state->final_cache_pending = true;
+  InitPdfWorker(pdf_state);
 }
 
 bool Book::ChangePdfZoom(int delta) {
@@ -943,8 +1508,12 @@ bool Book::ChangePdfZoom(int delta) {
     return false;
   pdf_state->zoom_index = next;
   if (pdf_state->current_final_zoom.page != position ||
-      pdf_state->current_final_zoom.zoom_index < pdf_state->max_zoom_index)
+      pdf_state->current_final_zoom.zoom_index < pdf_state->max_zoom_index) {
     pdf_state->final_cache_pending = true;
+    CancelIncrementalRender(pdf_state);
+  }
+  DBG_LOGF(app, "PDF: zoom page=%d zoom_index=%d final_pending=%d", position,
+           pdf_state->zoom_index, pdf_state->final_cache_pending ? 1 : 0);
   return true;
 }
 
@@ -979,6 +1548,11 @@ bool Book::MovePdfViewportToPreview(int touch_x, int touch_y) {
     return false;
   pdf_state->viewport_center_x = center.x;
   pdf_state->viewport_center_y = center.y;
+  DBG_LOGF(app,
+           "PDF: viewport_move page=%d touch=(%d,%d) center=(%.3f,%.3f) "
+           "zoom_index=%d final_pending=%d",
+           position, touch_x, touch_y, center.x, center.y,
+           pdf_state->zoom_index, pdf_state->final_cache_pending ? 1 : 0);
   return true;
 }
 
@@ -1002,6 +1576,45 @@ bool Book::JumpPdfChapter(int delta) {
     }
   }
   return false;
+}
+
+bool Book::HasPendingPdfDeferredWork() const {
+  if (!IsPdf() || !pdf_state || !pdf_state->ctx || !pdf_state->doc)
+    return false;
+
+  const int page_index = ClampPdfPageIndex(position, pdf_state->page_count);
+  const pdf_view_utils::NormalizedRect viewport =
+      ComputeCurrentPdfViewport(pdf_state);
+  return GetNextPdfDeferredStage(pdf_state, page_index, viewport) !=
+         PdfDeferredStage::None;
+}
+
+void Book::CancelPdfIncrementalRender() {
+  if (IsPdf() && pdf_state)
+    CancelIncrementalRender(pdf_state);
+}
+
+u32 Book::GetPdfDeferredDelayMs() const {
+  if (!IsPdf() || !pdf_state || !pdf_state->ctx || !pdf_state->doc)
+    return 0;
+
+  const int page_index = ClampPdfPageIndex(position, pdf_state->page_count);
+  const pdf_view_utils::NormalizedRect viewport =
+      ComputeCurrentPdfViewport(pdf_state);
+
+  switch (GetNextPdfDeferredStage(pdf_state, page_index, viewport)) {
+  case PdfDeferredStage::Interactive:
+    return kPdfInteractiveDeferredDelayMs;
+  case PdfDeferredStage::Final:
+    // If a strip render is already in progress, pump the next strip quickly.
+    // The long delay is only needed to detect idle before starting.
+    return pdf_state->incremental.active ? 50u : kPdfFinalDeferredDelayMs;
+  case PdfDeferredStage::Prefetch:
+    return kPdfPrefetchDeferredDelayMs;
+  case PdfDeferredStage::None:
+  default:
+    return 0;
+  }
 }
 
 void Book::DrawCurrentView(Text *ts) {
@@ -1043,10 +1656,12 @@ void Book::DrawCurrentView(Text *ts) {
   const bool has_final_cache =
       BitmapCacheValid(pdf_state->current_final_zoom, page_index) &&
       pdf_state->current_final_zoom.zoom_index >= pdf_state->max_zoom_index;
-  if (!has_final_cache)
-    EnsureCurrentInteractiveTile(pdf_state, page_index, viewport);
+  const bool has_interactive_tile =
+      BitmapCacheValid(pdf_state->current_interactive_tile, page_index);
   pdf_state->final_cache_pending = !has_final_cache;
-
+#ifdef DSLIBRIS_DEBUG
+  const char *top_source = "none";
+#endif
   const float preview_source_width =
       std::max(1.0f, (float)pdf_state->current_preview.bitmap_width);
   const float preview_source_height =
@@ -1070,43 +1685,69 @@ void Book::DrawCurrentView(Text *ts) {
   ts->ClearScreen();
 
   if (has_final_cache) {
-    const int crop_x = std::max(
-        0, std::min(pdf_state->current_final_zoom.bitmap_width - 1,
-                    (int)(viewport.left *
-                          pdf_state->current_final_zoom.bitmap_width)));
-    const int crop_y = std::max(
-        0, std::min(pdf_state->current_final_zoom.bitmap_height - 1,
-                    (int)(viewport.top *
-                          pdf_state->current_final_zoom.bitmap_height)));
-    int crop_w =
-        std::max(1, (int)(viewport.width *
-                              pdf_state->current_final_zoom.bitmap_width +
-                          0.5f));
-    int crop_h =
-        std::max(1, (int)(viewport.height *
-                              pdf_state->current_final_zoom.bitmap_height +
-                          0.5f));
-    if (crop_x + crop_w > pdf_state->current_final_zoom.bitmap_width)
-      crop_w = pdf_state->current_final_zoom.bitmap_width - crop_x;
-    if (crop_y + crop_h > pdf_state->current_final_zoom.bitmap_height)
-      crop_h = pdf_state->current_final_zoom.bitmap_height - crop_y;
+#ifdef DSLIBRIS_DEBUG
+    top_source = "final";
+#endif
+    BlitBitmapCacheViewport(ts, ts->screenleft, kPdfZoomScreenHeight,
+                            kPdfZoomScreenWidth, kPdfZoomScreenHeight,
+                            pdf_state->current_final_zoom, viewport);
+  } else if (pdf_state->incremental.active &&
+             pdf_state->incremental.strips_completed > 0 &&
+             pdf_state->incremental.target_page == page_index) {
+#ifdef DSLIBRIS_DEBUG
+    top_source = "incremental";
+#endif
+    Book::PdfState::IncrementalRenderState &inc = pdf_state->incremental;
+    const int rendered_h = (inc.strips_completed * inc.partial_height) /
+                           inc.strips_total;
+    const float rendered_top_norm =
+        (inc.partial_height > 0)
+            ? (float)rendered_h / (float)inc.partial_height
+            : 0.0f;
 
-    BlitRgb565BitmapScaledCrop(
-        ts, ts->screenleft, kPdfZoomScreenHeight, 0, 0, kPdfZoomScreenWidth,
-        kPdfZoomScreenHeight, pdf_state->current_final_zoom.pixels,
-        pdf_state->current_final_zoom.bitmap_width,
-        pdf_state->current_final_zoom.bitmap_height, crop_x, crop_y, crop_w,
-        crop_h);
-  } else if (BitmapCacheCoversRect(pdf_state->current_interactive_tile,
-                                   page_index, pdf_state->zoom_index,
-                                   viewport)) {
-    BlitRgb565BitmapScaledCrop(
-        ts, ts->screenleft, kPdfZoomScreenHeight, 0, 0, kPdfZoomScreenWidth,
-        kPdfZoomScreenHeight, pdf_state->current_interactive_tile.pixels,
-        pdf_state->current_interactive_tile.bitmap_width,
-        pdf_state->current_interactive_tile.bitmap_height, 0, 0,
-        pdf_state->current_interactive_tile.bitmap_width,
-        pdf_state->current_interactive_tile.bitmap_height);
+    const float vp_h = std::max(0.0001f, viewport.height);
+    const float rendered_in_vp =
+        std::min(rendered_top_norm, viewport.top + vp_h) - viewport.top;
+    const int split_y = (rendered_in_vp > 0.0f)
+        ? std::min(kPdfZoomScreenHeight,
+                   (int)(rendered_in_vp / vp_h * kPdfZoomScreenHeight + 0.5f))
+        : 0;
+
+    if (split_y > 0) {
+      BlitRawBitmapViewportRegion(ts, ts->screenleft, kPdfZoomScreenHeight,
+                                  kPdfZoomScreenWidth, kPdfZoomScreenHeight,
+                                  0, split_y, inc.partial_pixels,
+                                  inc.partial_width, inc.partial_height,
+                                  0.0f, 0.0f, 1.0f, 1.0f, viewport);
+    }
+    if (split_y < kPdfZoomScreenHeight) {
+      if (has_interactive_tile) {
+        BlitBitmapCacheViewportRegion(ts, ts->screenleft, kPdfZoomScreenHeight,
+                                      kPdfZoomScreenWidth, kPdfZoomScreenHeight,
+                                      split_y, kPdfZoomScreenHeight,
+                                      pdf_state->current_interactive_tile,
+                                      viewport);
+      } else if (BitmapCacheValid(pdf_state->current_preview, page_index)) {
+        BlitBitmapCacheViewportRegion(ts, ts->screenleft, kPdfZoomScreenHeight,
+                                      kPdfZoomScreenWidth, kPdfZoomScreenHeight,
+                                      split_y, kPdfZoomScreenHeight,
+                                      pdf_state->current_preview, viewport);
+      }
+    }
+  } else if (has_interactive_tile) {
+#ifdef DSLIBRIS_DEBUG
+    top_source = "interactive";
+#endif
+    BlitBitmapCacheViewport(ts, ts->screenleft, kPdfZoomScreenHeight,
+                            kPdfZoomScreenWidth, kPdfZoomScreenHeight,
+                            pdf_state->current_interactive_tile, viewport);
+  } else if (BitmapCacheValid(pdf_state->current_preview, page_index)) {
+#ifdef DSLIBRIS_DEBUG
+    top_source = "preview";
+#endif
+    BlitBitmapCacheViewport(ts, ts->screenleft, kPdfZoomScreenHeight,
+                            kPdfZoomScreenWidth, kPdfZoomScreenHeight,
+                            pdf_state->current_preview, viewport);
   } else {
     ts->SetPen(18, 28);
     ts->PrintString("PDF render unavailable");
@@ -1152,6 +1793,19 @@ void Book::DrawCurrentView(Text *ts) {
       1, (int)(std::min(1.0f, viewport.height) * preview_layout.height + 0.5f));
   ts->DrawRect((u16)viewport_x, (u16)viewport_y, (u16)(viewport_x + viewport_w),
                (u16)(viewport_y + viewport_h), kPdfAccent);
+  DBG_LOGF(app,
+           "PDF: draw page=%d source=%s zoom_index=%d final_pending=%d "
+           "final=%d interactive=%d preview=%d inc=%d/%d "
+           "viewport=(%.3f,%.3f %.3fx%.3f)",
+           page_index, top_source, pdf_state->zoom_index,
+           pdf_state->final_cache_pending ? 1 : 0,
+           has_final_cache ? 1 : 0, has_interactive_tile ? 1 : 0,
+           BitmapCacheValid(pdf_state->current_preview, page_index) ? 1 : 0,
+           (pdf_state->incremental.active && pdf_state->incremental.target_page == page_index)
+               ? pdf_state->incremental.strips_completed : 0,
+           (pdf_state->incremental.active && pdf_state->incremental.target_page == page_index)
+               ? pdf_state->incremental.strips_total : 0,
+           viewport.left, viewport.top, viewport.width, viewport.height);
 
   ts->SetStyle(saved_style);
   ts->SetColorMode(saved_color);
@@ -1173,22 +1827,71 @@ bool Book::PumpDeferredPdfWork(u32 budget_ms) {
   const int page_index = ClampPdfPageIndex(position, pdf_state->page_count);
   const u64 start_ms = osGetTime();
   bool worked = false;
+  if (!HasPendingPdfDeferredWork())
+    return false;
 
-  if (pdf_state->final_cache_pending ||
-      !BitmapCacheValid(pdf_state->current_final_zoom, page_index)) {
-    if (EnsureCurrentFinalCache(pdf_state, page_index))
+  DBG_LOGF(app,
+           "PDF: deferred start page=%d budget=%u zoom_index=%d final_pending=%d "
+           "have_final=%d have_interactive=%d",
+           page_index, (unsigned)budget_ms, pdf_state->zoom_index,
+           pdf_state->final_cache_pending ? 1 : 0,
+           BitmapCacheValid(pdf_state->current_final_zoom, page_index) ? 1 : 0,
+           BitmapCacheValid(pdf_state->current_interactive_tile, page_index)
+               ? 1
+               : 0);
+
+  if (!BitmapCacheValid(pdf_state->current_interactive_tile, page_index)) {
+#ifdef DSLIBRIS_DEBUG
+    const u64 t0 = osGetTime();
+#endif
+    if (EnsureCurrentInteractiveTile(pdf_state, page_index))
       worked = true;
+    DBG_LOGF(app,
+             "PDF: deferred interactive page=%d ms=%llu worked=%d",
+             page_index, (unsigned long long)(osGetTime() - t0),
+             worked ? 1 : 0);
     if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)
       return worked;
   }
 
+  if (pdf_state->final_cache_pending ||
+      !BitmapCacheValid(pdf_state->current_final_zoom, page_index) ||
+      pdf_state->incremental.active) {
+#ifdef DSLIBRIS_DEBUG
+    const u64 t0 = osGetTime();
+    const int pre_strips = pdf_state->incremental.strips_completed;
+    const int pre_total = pdf_state->incremental.strips_total;
+#endif
+    if (PumpIncrementalStrip(pdf_state, page_index))
+      worked = true;
+    DBG_LOGF(app,
+             "PDF: deferred strip page=%d strip=%d/%d ms=%llu worked=%d",
+             page_index, pre_strips, pre_total,
+             (unsigned long long)(osGetTime() - t0), worked ? 1 : 0);
+    if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)
+      return worked;
+  }
+
+#ifdef DSLIBRIS_DEBUG
+  const u64 t_next = osGetTime();
+#endif
   if (PrepareAdjacentPdfSlot(pdf_state, page_index, 1))
     worked = true;
+  DBG_LOGF(app, "PDF: deferred next page=%d ms=%llu worked=%d", page_index,
+           (unsigned long long)(osGetTime() - t_next), worked ? 1 : 0);
   if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)
     return worked;
 
+#ifdef DSLIBRIS_DEBUG
+  const u64 t_prev = osGetTime();
+#endif
   if (PrepareAdjacentPdfSlot(pdf_state, page_index, -1))
     worked = true;
+  DBG_LOGF(app, "PDF: deferred prev page=%d ms=%llu worked=%d", page_index,
+           (unsigned long long)(osGetTime() - t_prev), worked ? 1 : 0);
+  DBG_LOGF(app, "PDF: deferred end page=%d total_ms=%llu worked=%d",
+           page_index, (unsigned long long)(osGetTime() - start_ms),
+           worked ? 1 : 0);
 
   return worked;
 }
@@ -1200,7 +1903,8 @@ uint8_t ParsePdfFile(Book *book, const char *path) {
   const bool is_new_3ds = DetectNew3ds();
   const pdf_view_utils::DevicePolicy policy =
       pdf_view_utils::GetDevicePolicy(is_new_3ds);
-  fz_context *ctx = fz_new_context(NULL, NULL, policy.mupdf_store_bytes);
+  InitMuPdfLocks();
+  fz_context *ctx = fz_new_context(NULL, &s_mupdf_locks_ctx, policy.mupdf_store_bytes);
   pdf_document *doc = NULL;
   fz_outline *outline = NULL;
   uint8_t rc = 0;

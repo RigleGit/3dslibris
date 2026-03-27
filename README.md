@@ -20,12 +20,28 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 </table>
 
 ## Project status
-- Current app version: `1.1.0`
+- Current app version: `1.2.0`
 - Focus: stable daily reading on 3DS hardware and Citra/Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
 - Supported install paths: `.3dsx` plus `3dslibris-sdmc.zip`, or `3dslibris.cia`
+
+## v1.2.0 release notes
+- Adds MuPDF-backed PDF reading with zoomed top-screen viewing, full-page preview on the bottom screen, outline navigation when available, and touch-controlled viewport movement.
+- Introduces a progressive PDF rendering pipeline: preview first, interactive cache next, then full-page refinement in the background instead of a single blocking render.
+- Adds progressive strip rendering for zoomed PDF pages, with strips composited on screen as they complete.
+- Uses a dedicated PDF worker thread on the New Nintendo 3DS extra core when available, while keeping an automatic synchronous fallback path for Old 3DS hardware.
+- Improves PDF cache behavior by stabilizing preview viewport updates, accelerating cache reuse, and deferring expensive prefetch work until page turns or idle periods.
+- Tightens PDF release documentation and licensing notes for MuPDF-enabled builds, including corresponding-source guidance for release packaging.
+
+Commits already included in the `v1.2.0` line:
+- `983be1f` `feat: integrate MuPDF-backed PDF reader`
+- `ee6fcc9` `docs: add AGPL compliance for PDF-enabled releases`
+- `57737ac` `fix: stabilize PDF preview viewport rendering`
+- `a756191` `perf: accelerate PDF render caching`
+- `b326c54` `perf: defer PDF prefetch until page turns`
+- `c422eca` `perf: add progressive PDF page rendering`
 
 ## Supported formats
 
@@ -109,7 +125,7 @@ Generated install package targets:
 - `make zip-sdmc` creates `dist/3dslibris-sdmc.zip`
 - `make cia` creates `3dslibris.cia`
 - `make source-release` creates `dist/3dslibris-source.tar.gz`
-- GitHub Releases: pushing a tag like `v1.1.0` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `dist/3dslibris-sdmc.zip`, and `dist/3dslibris-source.tar.gz` to the release
+- GitHub Releases: pushing a tag like `v1.2.0` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `dist/3dslibris-sdmc.zip`, and `dist/3dslibris-source.tar.gz` to the release
 
 ## Library controls
 - `D-Pad`: move the current selection around the library grid

@@ -222,6 +222,7 @@ private:
   bool pdf_touch_drag_active_;
   int pdf_touch_last_x_;
   int pdf_touch_last_y_;
+  u64 pdf_deferred_ready_at_ms_;
 
   int FindBooks();
   void InitScreens();

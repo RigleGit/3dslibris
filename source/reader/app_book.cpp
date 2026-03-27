@@ -74,6 +74,8 @@ void DrawBookPage(Book *book, Text *ts) {
 bool SetBookPage(Book *book, Text *ts, u16 page) {
   if (!book || !ts || page >= book->GetPageCount())
     return false;
+  if (book->IsPdf())
+    book->CancelPdfIncrementalRender();
   book->SetPosition(page);
   DrawBookPage(book, ts);
   return true;
@@ -258,39 +260,62 @@ void App::HandleEventInBook() {
   u32 held = hidKeysHeld();
 
   if (bookcurrent_ && bookcurrent_->IsPdf()) {
+    const auto delay_pdf_deferred = [&]() {
+      const u32 delay_ms = bookcurrent_->GetPdfDeferredDelayMs();
+      pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
+      DBG_LOGF(this, "PDF: defer armed ready_in=%u", (unsigned)delay_ms);
+    };
     if (keys & KEY_A) {
       if (bookcurrent_->ChangePdfZoom(1)) {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
+        delay_pdf_deferred();
+        DBG_LOG(this, "PDF: event zoom_in");
       }
     } else if (keys & KEY_B) {
       if (bookcurrent_->ChangePdfZoom(-1)) {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
+        delay_pdf_deferred();
+        DBG_LOG(this, "PDF: event zoom_out");
       }
     } else if (keys & (key.right | KEY_RIGHT)) {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1))
+      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1)) {
         status_dirty = true;
+        delay_pdf_deferred();
+        DBG_LOGF(this, "PDF: event page_turn delta=1 page=%u", pagecurrent);
+      }
     } else if (keys & (key.left | KEY_LEFT)) {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
+      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1)) {
         status_dirty = true;
+        delay_pdf_deferred();
+        DBG_LOGF(this, "PDF: event page_turn delta=-1 page=%u", pagecurrent);
+      }
     } else if (keys & (key.down | KEY_DOWN)) {
       if (!bookcurrent_->GetChapters().empty()) {
         if (bookcurrent_->JumpPdfChapter(1)) {
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
+          delay_pdf_deferred();
+          DBG_LOG(this, "PDF: event chapter_next");
         }
       } else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1)) {
         status_dirty = true;
+        delay_pdf_deferred();
+        DBG_LOGF(this, "PDF: event page_turn delta=1 page=%u", pagecurrent);
       }
     } else if (keys & (key.up | KEY_UP)) {
       if (!bookcurrent_->GetChapters().empty()) {
         if (bookcurrent_->JumpPdfChapter(-1)) {
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
+          delay_pdf_deferred();
+          DBG_LOG(this, "PDF: event chapter_prev");
         }
       } else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1)) {
         status_dirty = true;
+        delay_pdf_deferred();
+        DBG_LOGF(this, "PDF: event page_turn delta=-1 page=%u", pagecurrent);
       }
     } else if (keys & KEY_TOUCH) {
       touchPosition mapped = TouchRead();
@@ -301,6 +326,9 @@ void App::HandleEventInBook() {
                                                  (int)mapped.py)) {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
+        delay_pdf_deferred();
+        DBG_LOGF(this, "PDF: event touch_down x=%d y=%d", (int)mapped.px,
+                 (int)mapped.py);
       }
     } else if (held & KEY_TOUCH) {
       touchPosition mapped = TouchRead();
@@ -317,6 +345,9 @@ void App::HandleEventInBook() {
           // extraction (no MuPDF re-render), so updating both screens is fast.
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
+          delay_pdf_deferred();
+          DBG_LOGF(this, "PDF: event touch_drag x=%d y=%d", (int)mapped.px,
+                   (int)mapped.py);
         }
       }
     } else if (keys & KEY_START) {
@@ -333,6 +364,8 @@ void App::HandleEventInBook() {
       if (pdf_touch_drag_active_) {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
+        delay_pdf_deferred();
+        DBG_LOG(this, "PDF: event touch_release");
       }
       pdf_touch_drag_active_ = false;
       pdf_touch_last_x_ = -1;
@@ -341,9 +374,19 @@ void App::HandleEventInBook() {
 
     if (status_dirty) {
       RequestStatusRedraw();
-    } else if (!(held & KEY_TOUCH) && keys == 0) {
+    } else if (!(held & KEY_TOUCH) && keys == 0 &&
+               bookcurrent_->HasPendingPdfDeferredWork() &&
+               osGetTime() >= pdf_deferred_ready_at_ms_) {
       const u32 budget_ms = 4;
-      if (bookcurrent_->PumpDeferredPdfWork(budget_ms)) {
+      DBG_LOGF(this,
+               "PDF: deferred gate open now=%llu ready_at=%llu budget=%u",
+               (unsigned long long)osGetTime(),
+               (unsigned long long)pdf_deferred_ready_at_ms_,
+               (unsigned)budget_ms);
+      const bool worked = bookcurrent_->PumpDeferredPdfWork(budget_ms);
+      const u32 delay_ms = bookcurrent_->GetPdfDeferredDelayMs();
+      pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
+      if (worked) {
         DrawBookPage(bookcurrent_, ts);
         RequestStatusRedraw();
       }
@@ -435,6 +478,8 @@ void App::ToggleBookmark() {
   }
 
   DrawBookPage(bookcurrent_, ts);
+  const u32 delay_ms = bookcurrent_ ? bookcurrent_->GetPdfDeferredDelayMs() : 0;
+  pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
   RequestStatusRedraw();
 }
 
@@ -510,6 +555,11 @@ u8 App::OpenBook(void) {
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   DrawBookPage(bookcurrent_, ts);
+  if (bookcurrent_ && bookcurrent_->IsPdf())
+    pdf_deferred_ready_at_ms_ =
+        bookcurrent_->HasPendingPdfDeferredWork()
+            ? (osGetTime() + bookcurrent_->GetPdfDeferredDelayMs())
+            : 0;
   RequestStatusRedraw();
   prefs_view_.layout_notice_pending = false;
   prefs->Write();

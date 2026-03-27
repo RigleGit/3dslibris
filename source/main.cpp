@@ -72,8 +72,10 @@ int main(int argc, char **argv) {
 
   bool is_new_3ds = false;
   APT_CheckNew3DS(&is_new_3ds);
-  if (is_new_3ds)
+  if (is_new_3ds) {
     osSetSpeedupEnable(true);
+    APT_SetAppCpuTimeLimit(30);
+  }
 
   printf("================================\n");
   printf("  3dslibris %s\n", VERSION);
