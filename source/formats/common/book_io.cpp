@@ -21,6 +21,7 @@
 #include "main.h"
 #include "formats/mobi/mobi.h"
 #include "formats/mobi/mobi_cache_utils.h"
+#include "formats/mobi/mobi_decode_plan.h"
 #include "formats/mobi/mobi_heading_markers.h"
 #include "formats/mobi/mobi_markup_tag.h"
 #include "formats/mobi/mobi_position_map.h"
@@ -55,7 +56,6 @@ static const char *kMobiCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
 static const char *kMobiCacheDir = "sdmc:/3ds/3dslibris/cache/mobi";
 static const u32 kMobiInitialOpenBudgetMs = 320;
 static const u16 kMobiInitialOpenPageBudget = 24;
-static const size_t kMobiDeferredTocMetadataMinBytes = 1024 * 1024;
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // Bump when serialized MOBI pages become semantically incompatible with the
 // current text cleanup or TOC mapping logic.
@@ -4295,13 +4295,6 @@ static bool BuildMobiMergedText(const std::string &raw,
   return mobi_record_decode::BuildMergedText(raw, header.offsets, rec0, merged);
 }
 
-static bool ShouldDeferMobiTocMetadata(const MobiHeaderInfo &header,
-                                       const std::string &merged) {
-  const size_t text_bytes =
-      (header.text_len > 0) ? (size_t)header.text_len : merged.size();
-  return text_bytes >= kMobiDeferredTocMetadataMinBytes;
-}
-
 static void CleanupDecodedMobiText(std::string *text,
                                    std::vector<std::pair<u32, u32>> *html_map,
                                    bool line_wrap_fix_applied) {
@@ -4397,13 +4390,15 @@ static void PrepareMobiDeferredState(const char *path,
                                      u64 t_after_decode,
                                      u64 t_after_markup_scan,
                                      u64 t_after_cleanup, u64 t_after_markup,
-                                     bool line_wrap_fix_applied, MobiDecodedText *decoded,
+                                     bool line_wrap_fix_applied,
+                                     bool retain_markup_utf8,
+                                     MobiDecodedText *decoded,
                                      MobiDeferredState *deferred) {
   if (!decoded || !deferred)
     return;
 
   deferred->source_path = path ? path : "";
-  if (!decoded->toc_metadata_ready)
+  if (retain_markup_utf8)
     deferred->markup_utf8.swap(decoded->utf8);
   else
     deferred->markup_utf8.clear();
@@ -4590,16 +4585,21 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   u64 t_after_markup_scan = 0;
   u64 t_after_cleanup = 0;
   u64 t_after_markup = 0;
-  const bool collect_toc_metadata = !ShouldDeferMobiTocMetadata(header, merged);
-  DecodeAndCleanupMobiText(book, deps, header, merged, collect_toc_metadata,
-                           &decoded, &t_after_decode, &t_after_markup_scan,
-                           &t_after_cleanup, &t_after_markup);
+  const size_t text_bytes =
+      (header.text_len > 0) ? (size_t)header.text_len : merged.size();
+  const mobi_decode_plan::Plan decode_plan =
+      mobi_decode_plan::Build(text_bytes);
+  DecodeAndCleanupMobiText(
+      book, deps, header, merged, decode_plan.capture_toc_metadata, &decoded,
+      &t_after_decode, &t_after_markup_scan, &t_after_cleanup,
+      &t_after_markup);
 
   MobiDeferredState deferred;
   PrepareMobiDeferredState(path, header, merged.size(), t_parse_begin,
                            t_after_read, t_after_decompress, t_after_decode,
                            t_after_markup_scan, t_after_cleanup,
-                           t_after_markup, book->GetMobiLineWrapFix(), &decoded,
+                           t_after_markup, book->GetMobiLineWrapFix(),
+                           decode_plan.retain_markup_utf8, &decoded,
                            &deferred);
   deferred.have_structured_toc = ParseMobiStructuredToc(
       raw, header.offsets, header.ncx_index, header.encoding,
@@ -4613,12 +4613,11 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   if (!pages_done_initial) {
     g_mobi_deferred_states[book] = std::move(deferred);
     if (app) {
-      if (!collect_toc_metadata) {
+      if (decode_plan.defer_toc_finalize) {
         DBG_LOGF(app,
-                 "MOBI: deferred TOC metadata enabled text_bytes=%u threshold=%u",
-                 (unsigned)((header.text_len > 0) ? header.text_len
-                                                  : (u32)merged.size()),
-                 (unsigned)kMobiDeferredTocMetadataMinBytes);
+                 "MOBI: deferred TOC finalize enabled text_bytes=%u threshold=%u",
+                 (unsigned)text_bytes,
+                 (unsigned)mobi_decode_plan::kDeferredTocFinalizeMinBytes);
       }
       DBG_LOGF(app,
                "MOBI: deferred open armed pages=%u initial_budget_ms=%u "
