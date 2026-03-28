@@ -77,11 +77,32 @@ void TestFindPreformattedBreaks() {
            text_layout_utils::FindPreformattedLineBreak(run, 4, 3), (size_t)7);
 }
 
+void TestMeasureCombinedBreaks() {
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  ExpectTrue("shape combined normal",
+             text_layout_utils::ShapeTextRunUtf8("hola mundo", 10, NULL,
+                                                 MeasureMono, NULL, &run));
+  text_layout_utils::LineBreakMeasureResult normal =
+      text_layout_utils::FindLineBreakAndMeasure(run, 0, 5);
+  ExpectEq("combined normal end", normal.end_index, (size_t)4);
+  ExpectEq("combined normal width", normal.width, 4);
+
+  run.clear();
+  ExpectTrue("shape combined preformatted",
+             text_layout_utils::ShapeTextRunUtf8(">>> abcdef", 10, NULL,
+                                                 MeasureMono, NULL, &run));
+  text_layout_utils::LineBreakMeasureResult pre =
+      text_layout_utils::FindPreformattedLineBreakAndMeasure(run, 0, 5);
+  ExpectEq("combined preformatted end", pre.end_index, (size_t)5);
+  ExpectEq("combined preformatted width", pre.width, 5);
+}
+
 } // namespace
 
 int main() {
   TestShapeAndMeasure();
   TestFindLineBreaks();
   TestFindPreformattedBreaks();
+  TestMeasureCombinedBreaks();
   return 0;
 }

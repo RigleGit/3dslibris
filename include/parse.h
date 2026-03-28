@@ -82,6 +82,10 @@ struct parsedata_t {
 	int fb2_title_capture_depth;
 	bool fb2_section_has_chapter[32];
 	std::string fb2_title_text;
+	u64 perf_chardata_ms;
+	u32 perf_chardata_calls;
+	u32 perf_inline_images;
+	u32 perf_page_overflows;
 	int status;
 	int totalbytes;
 	int pagecount;

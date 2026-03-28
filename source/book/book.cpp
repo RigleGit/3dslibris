@@ -245,6 +245,7 @@ static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
   if ((p->pen.y + lineheight) <= (maxHeight - bottomMargin))
     return;
 
+  p->perf_page_overflows++;
   if (p->screen == 1) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
@@ -268,6 +269,21 @@ static int MeasureParsedTextAdvance(uint32_t codepoint, void *ctx) {
   Text *ts = (Text *)ctx;
   return ts ? ts->GetAdvance(codepoint) : 0;
 }
+
+struct ChardataPerfScope {
+  parsedata_t *parsedata;
+  u64 t_begin;
+
+  explicit ChardataPerfScope(parsedata_t *parsedata_)
+      : parsedata(parsedata_), t_begin(osGetTime()) {}
+
+  ~ChardataPerfScope() {
+    if (!parsedata)
+      return;
+    parsedata->perf_chardata_calls++;
+    parsedata->perf_chardata_ms += (u64)(osGetTime() - t_begin);
+  }
+};
 
 } // namespace
 
@@ -733,6 +749,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
   //! reflow text on the fly, into page data structure.
 
   parsedata_t *p = (parsedata_t *)data;
+  ChardataPerfScope perf_scope(p);
   Text *ts = p->ts;
 
   if (p->collecting_fb2_binary) {
@@ -887,8 +904,10 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
         continue;
       }
 
-      size_t segment_end_index = text_layout_utils::FindPreformattedLineBreak(
-          pre_run, unit_index, maxPreLineWidth);
+      text_layout_utils::LineBreakMeasureResult segment =
+          text_layout_utils::FindPreformattedLineBreakAndMeasure(
+              pre_run, unit_index, maxPreLineWidth);
+      size_t segment_end_index = segment.end_index;
       if (segment_end_index <= unit_index)
         segment_end_index = unit_index + 1;
 
@@ -896,8 +915,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
       size_t segment_end =
           pre_run[segment_end_index - 1].text.byte_offset +
           pre_run[segment_end_index - 1].text.byte_length;
-      const int advance = text_layout_utils::MeasureTextRun(
-          pre_run, unit_index, segment_end_index);
+      const int advance = segment.width;
 
       if ((p->pen.x + advance) > (ts->display.width - ts->margin.right) &&
           p->pen.x > ts->margin.left) {
@@ -965,12 +983,13 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
       p->paragraph_has_content = true;
 
     size_t segment_start = unit.text.byte_offset;
-    size_t segment_end_index =
-        text_layout_utils::FindLineBreak(run, unit_index, maxLineWidth);
+    text_layout_utils::LineBreakMeasureResult segment =
+        text_layout_utils::FindLineBreakAndMeasure(run, unit_index,
+                                                   maxLineWidth);
+    size_t segment_end_index = segment.end_index;
     if (segment_end_index <= unit_index)
       segment_end_index = unit_index + 1;
-    u16 advance =
-        (u16)text_layout_utils::MeasureTextRun(run, unit_index, segment_end_index);
+    u16 advance = (u16)segment.width;
     size_t segment_end = run[segment_end_index - 1].text.byte_offset +
                          run[segment_end_index - 1].text.byte_length;
 

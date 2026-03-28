@@ -34,6 +34,7 @@
 #include "formats/common/xml_parse_utils.h"
 #include "parse.h"
 #include "shared/app_flow_utils.h"
+#include "shared/text_layout_utils.h"
 #include "string_utils.h"
 #include "minizip/unzip.h"
 #include "shared/utf8_utils.h"
@@ -1251,6 +1252,114 @@ struct PlainTextStreamState {
   size_t text_bytes_fed;
 };
 
+struct PlainTextStreamPerf {
+  u64 stream_ms;
+  u64 chardata_ms;
+  u64 shape_ms;
+  u64 measure_ms;
+  u64 line_break_ms;
+  u64 pre_line_break_ms;
+  u32 chardata_calls;
+  u32 shape_calls;
+  u32 measure_calls;
+  u32 line_break_calls;
+  u32 pre_line_break_calls;
+  u32 shaped_glyphs;
+  u32 input_bytes;
+  u16 pages_generated;
+  u32 inline_images;
+  u32 page_overflows;
+
+  PlainTextStreamPerf()
+      : stream_ms(0), chardata_ms(0), shape_ms(0), measure_ms(0),
+        line_break_ms(0), pre_line_break_ms(0), chardata_calls(0),
+        shape_calls(0), measure_calls(0), line_break_calls(0),
+        pre_line_break_calls(0), shaped_glyphs(0), input_bytes(0),
+        pages_generated(0), inline_images(0), page_overflows(0) {}
+};
+
+struct PlainTextPerfBaseline {
+  u64 chardata_ms;
+  u32 chardata_calls;
+  u32 inline_images;
+  u32 page_overflows;
+  text_layout_utils::PerfStats layout;
+
+  PlainTextPerfBaseline()
+      : chardata_ms(0), chardata_calls(0), inline_images(0),
+        page_overflows(0), layout() {}
+};
+
+static void CapturePlainTextPerfBaseline(const parsedata_t &parsedata,
+                                         PlainTextPerfBaseline *out) {
+  if (!out)
+    return;
+  out->chardata_ms = parsedata.perf_chardata_ms;
+  out->chardata_calls = parsedata.perf_chardata_calls;
+  out->inline_images = parsedata.perf_inline_images;
+  out->page_overflows = parsedata.perf_page_overflows;
+  out->layout = text_layout_utils::GetPerfStats();
+}
+
+static void FillPlainTextStreamPerf(const parsedata_t &parsedata,
+                                    const PlainTextPerfBaseline &baseline,
+                                    u64 stream_ms, u32 input_bytes,
+                                    u16 pages_generated,
+                                    PlainTextStreamPerf *out) {
+  if (!out)
+    return;
+  const text_layout_utils::PerfStats layout_after =
+      text_layout_utils::GetPerfStats();
+  out->stream_ms = stream_ms;
+  out->chardata_ms = parsedata.perf_chardata_ms - baseline.chardata_ms;
+  out->shape_ms = layout_after.shape_ms - baseline.layout.shape_ms;
+  out->measure_ms = layout_after.measure_ms - baseline.layout.measure_ms;
+  out->line_break_ms =
+      layout_after.line_break_ms - baseline.layout.line_break_ms;
+  out->pre_line_break_ms =
+      layout_after.pre_line_break_ms - baseline.layout.pre_line_break_ms;
+  out->chardata_calls =
+      parsedata.perf_chardata_calls - baseline.chardata_calls;
+  out->shape_calls = layout_after.shape_calls - baseline.layout.shape_calls;
+  out->measure_calls =
+      layout_after.measure_calls - baseline.layout.measure_calls;
+  out->line_break_calls =
+      layout_after.line_break_calls - baseline.layout.line_break_calls;
+  out->pre_line_break_calls = layout_after.pre_line_break_calls -
+                              baseline.layout.pre_line_break_calls;
+  out->shaped_glyphs = layout_after.shaped_glyphs - baseline.layout.shaped_glyphs;
+  out->input_bytes = input_bytes;
+  out->pages_generated = pages_generated;
+  out->inline_images = parsedata.perf_inline_images - baseline.inline_images;
+  out->page_overflows =
+      parsedata.perf_page_overflows - baseline.page_overflows;
+}
+
+static void LogPlainTextStreamPerf(App *app, const char *label,
+                                   const PlainTextStreamPerf &perf,
+                                   bool completed) {
+  if (!app || !label)
+    return;
+  DBG_LOGF(app,
+           "%s: stream=%llums chardata=%llums/%u shape=%llums/%u "
+           "break=%llums/%u pre=%llums/%u measure=%llums/%u "
+           "bytes=%u glyphs=%u pages=%u inline_images=%u overflow_pages=%u "
+           "done=%d",
+           label, (unsigned long long)perf.stream_ms,
+           (unsigned long long)perf.chardata_ms,
+           (unsigned)perf.chardata_calls, (unsigned long long)perf.shape_ms,
+           (unsigned)perf.shape_calls,
+           (unsigned long long)perf.line_break_ms,
+           (unsigned)perf.line_break_calls,
+           (unsigned long long)perf.pre_line_break_ms,
+           (unsigned)perf.pre_line_break_calls,
+           (unsigned long long)perf.measure_ms,
+           (unsigned)perf.measure_calls, (unsigned)perf.input_bytes,
+           (unsigned)perf.shaped_glyphs, (unsigned)perf.pages_generated,
+           (unsigned)perf.inline_images, (unsigned)perf.page_overflows,
+           completed ? 1 : 0);
+}
+
 static PlainLineChunk ReadNextLineChunk(const std::string &text,
                                         size_t *cursor) {
   PlainLineChunk out;
@@ -1408,6 +1517,7 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
   parse_append_page_byte(p, TEXT_IMAGE);
   parse_append_page_byte(p, (u8)((image_id >> 8) & 0xFF));
   parse_append_page_byte(p, (u8)(image_id & 0xFF));
+  p->perf_inline_images++;
 
   switch (image_plan.mode) {
   case INLINE_IMAGE_LAYOUT_INLINE:
@@ -1442,32 +1552,43 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
                                          const std::string &text_utf8,
                                          u32 budget_ms, u16 page_budget,
                                          u16 min_pages_before_stop,
-                                         std::vector<u32> *text_cursor_per_page) {
+                                         std::vector<u32> *text_cursor_per_page,
+                                         PlainTextStreamPerf *perf_out) {
   if (!state || !state->initialized || state->completed)
     return true;
 
   const u64 t_begin = osGetTime();
   const u16 page_start = state->parsedata.book->GetPageCount();
   u16 last_page_count = state->parsedata.book->GetPageCount();
+  const size_t bytes_before_stream = state->text_bytes_fed;
+  PlainTextPerfBaseline perf_baseline;
+  CapturePlainTextPerfBaseline(state->parsedata, &perf_baseline);
 
   while (state->curr.valid) {
-    bool curr_blank = IsBlankLine(state->curr.text);
-    bool next_blank = !state->next.valid || IsBlankLine(state->next.text);
+    bool curr_blank = false;
+    bool next_blank = false;
+    bool curr_candidate = false;
+    const bool heuristic_headings = state->detect_heuristic_headings;
+    bool curr_keep_with_next = false;
+    if (heuristic_headings) {
+      curr_blank = IsBlankLine(state->curr.text);
+      next_blank = !state->next.valid || IsBlankLine(state->next.text);
 
-    bool curr_strong = false;
-    bool curr_candidate = LooksLikePlainChapterHeading(state->curr.text,
-                                                       &curr_strong);
-    bool next_strong = false;
-    bool next_candidate =
-        state->next.valid &&
-        LooksLikePlainChapterHeading(state->next.text, &next_strong);
-    const bool curr_keep_with_next =
-        curr_candidate &&
-        ShouldAcceptHeuristicHeading(state->curr.text, state->prev_blank,
-                                     next_blank, state->prev_candidate,
-                                     next_candidate, curr_strong);
+      bool curr_strong = false;
+      curr_candidate =
+          LooksLikePlainChapterHeading(state->curr.text, &curr_strong);
+      bool next_strong = false;
+      bool next_candidate =
+          state->next.valid &&
+          LooksLikePlainChapterHeading(state->next.text, &next_strong);
+      curr_keep_with_next =
+          curr_candidate &&
+          ShouldAcceptHeuristicHeading(state->curr.text, state->prev_blank,
+                                       next_blank, state->prev_candidate,
+                                       next_candidate, curr_strong);
+    }
 
-    if (state->detect_heuristic_headings && curr_keep_with_next) {
+    if (heuristic_headings && curr_keep_with_next) {
       AddChapterIfUnique(state->parsedata.book, state->curr.text, 0);
     }
 
@@ -1559,8 +1680,8 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
       }
     }
 
-    state->prev_blank = curr_blank;
-    state->prev_candidate = curr_candidate;
+    state->prev_blank = heuristic_headings ? curr_blank : false;
+    state->prev_candidate = heuristic_headings ? curr_candidate : false;
     state->curr = state->next;
     state->next = ReadNextLineChunk(text_utf8, &state->cursor);
 
@@ -1583,6 +1704,15 @@ static bool ContinuePlainTextStreamState(PlainTextStreamState *state,
     state->completed = true;
   }
 
+  if (perf_out) {
+    const u64 stream_ms = osGetTime() - t_begin;
+    const u32 input_bytes = (u32)(state->text_bytes_fed - bytes_before_stream);
+    const u16 pages_generated =
+        state->parsedata.book->GetPageCount() - page_start;
+    FillPlainTextStreamPerf(state->parsedata, perf_baseline, stream_ms,
+                            input_bytes, pages_generated, perf_out);
+  }
+
   return state->completed;
 }
 
@@ -1598,7 +1728,11 @@ static u8 ParsePlainTextBuffer(Book *book, const std::string &text_utf8,
   if (!InitPlainTextStreamState(book, text_utf8, deps,
                                 detect_heuristic_headings, &state))
     return 1;
-  ContinuePlainTextStreamState(&state, text_utf8, 0, 0, 0, nullptr);
+  PlainTextStreamPerf perf;
+  ContinuePlainTextStreamState(&state, text_utf8, 0, 0, 0, nullptr, &perf);
+#ifdef DSLIBRIS_DEBUG
+  LogPlainTextStreamPerf(deps.app, "PLAIN", perf, state.completed);
+#endif
   return 0;
 }
 
@@ -4434,10 +4568,15 @@ static bool StartInitialMobiPagination(Book *book, const BookIoDeps &deps,
     return false;
   }
   book->MarkMobiRenderSettingsApplied(deferred->line_wrap_fix_applied);
+  PlainTextStreamPerf perf;
   *pages_done_initial = ContinuePlainTextStreamState(
       &deferred->stream, deferred->text_utf8, kMobiInitialOpenBudgetMs,
       kMobiInitialOpenPageBudget, 1,
-      &deferred->text_cursor_per_page);
+      &deferred->text_cursor_per_page, &perf);
+#ifdef DSLIBRIS_DEBUG
+  LogPlainTextStreamPerf(deps.app, "PLAIN-MOBI initial", perf,
+                         *pages_done_initial);
+#endif
   deferred->t_after_initial_pages = osGetTime();
   deferred->t_after_pages = deferred->t_after_initial_pages;
   return true;
@@ -5033,10 +5172,15 @@ static bool ContinueDeferredMobiState(Book *book, MobiDeferredState *state,
   if (!book || !state)
     return true;
 
+  App *app = BuildBookIoDeps(book).app;
   const u16 pages_before = book->GetPageCount();
+  PlainTextStreamPerf perf;
   const bool done = ContinuePlainTextStreamState(
       &state->stream, state->text_utf8, budget_ms, page_budget, 0,
-      &state->text_cursor_per_page);
+      &state->text_cursor_per_page, &perf);
+#ifdef DSLIBRIS_DEBUG
+  LogPlainTextStreamPerf(app, "PLAIN-MOBI deferred", perf, done);
+#endif
   if (book->GetPageCount() > pages_before)
     state->t_after_pages = osGetTime();
 
@@ -5121,6 +5265,10 @@ u8 Book::Parse(bool fulltext) {
   parsedata_t parsedata;
   InitParsedataWithBookIoDeps(&parsedata, this, deps);
   parsedata.fb2_mode = fulltext && HasExtCI(GetFileName(), ".fb2");
+  const u64 xml_parse_begin = osGetTime();
+  const u16 xml_pages_before = GetPageCount();
+  PlainTextPerfBaseline xml_perf_baseline;
+  CapturePlainTextPerfBaseline(parsedata, &xml_perf_baseline);
 
   xml_parse_utils::XmlParserOptions options;
   options.user_data = &parsedata;
@@ -5158,6 +5306,18 @@ u8 Book::Parse(bool fulltext) {
     else
       ClearTocConfidence();
   }
+
+#ifdef DSLIBRIS_DEBUG
+  if (deps.app && fulltext) {
+    PlainTextStreamPerf perf;
+    FillPlainTextStreamPerf(parsedata, xml_perf_baseline,
+                            osGetTime() - xml_parse_begin, 0,
+                            GetPageCount() - xml_pages_before, &perf);
+    LogPlainTextStreamPerf(
+        deps.app, parsedata.fb2_mode ? "FB2 layout" : "XML layout", perf,
+        rc == 0);
+  }
+#endif
 
   return (rc);
 }

@@ -154,6 +154,10 @@ void parse_init(parsedata_t *data) {
   for (int i = 0; i < 32; i++)
     data->fb2_section_has_chapter[i] = false;
   data->fb2_title_text.clear();
+  data->perf_chardata_ms = 0;
+  data->perf_chardata_calls = 0;
+  data->perf_inline_images = 0;
+  data->perf_page_overflows = 0;
   parse_reset_page_buffer(data);
   data->status = 0;
   data->pagecount = 0;
