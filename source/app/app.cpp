@@ -236,11 +236,13 @@ App::App() {
   status_.progress_lock_book = NULL;
   status_.progress_pagecount_lock = 0;
   status_.force_redraw = true;
+  opening_ = OpeningState();
   layout_revision = 0;
   pdf_touch_drag_active_ = false;
   pdf_touch_last_x_ = -1;
   pdf_touch_last_y_ = -1;
   pdf_deferred_ready_at_ms_ = 0;
+  mobi_deferred_ready_at_ms_ = 0;
 
   ts = new Text();
   ts->app = this;
@@ -554,13 +556,18 @@ int App::Run(void) {
     hidScanInput();
     // Keep reading mode responsive: avoid running heavy background jobs while
     // the user is paging through a book.
-    if (mode_ != AppMode::Book)
+    if (mode_ != AppMode::Book && mode_ != AppMode::Opening)
       ProcessJobs(3); // Cooperative budget per frame (ms).
 
     switch (mode_) {
     case AppMode::Book:
       UpdateStatus();
       HandleEventInBook();
+      break;
+
+    case AppMode::Opening:
+      UpdateStatus();
+      HandleEventInOpening();
       break;
 
     case AppMode::Browser:
@@ -896,7 +903,7 @@ void App::ShowCurrentBookView() {
 void App::RequestStatusRedraw() { status_.force_redraw = true; }
 
 void App::UpdateStatus() {
-  if (mode_ != AppMode::Book)
+  if (mode_ != AppMode::Book && mode_ != AppMode::Opening)
     return;
   u16 *screen = ts->GetScreen();
   time_t unixTime = time(NULL);
@@ -906,14 +913,25 @@ void App::UpdateStatus() {
     minute_of_day = timeStruct->tm_hour * 60 + timeStruct->tm_min;
   }
 
-  app_flow_utils::StatusSnapshot snapshot =
-      app_flow_utils::ComputeStatusSnapshot(
-          {bookcurrent_, bookcurrent_ ? (int)bookcurrent_->GetPosition() : 0,
-           bookcurrent_ ? (int)bookcurrent_->GetPageCount() : 0,
-           bookcurrent_ ? bookcurrent_->HasDeferredMobiParse() : false,
-           status_.progress_lock_book, status_.progress_pagecount_lock});
-  status_.progress_lock_book = (Book *)snapshot.next_locked_book;
-  status_.progress_pagecount_lock = snapshot.next_locked_pagecount;
+  app_flow_utils::StatusSnapshot snapshot = {};
+  if (mode_ == AppMode::Book) {
+    snapshot = app_flow_utils::ComputeStatusSnapshot(
+        {bookcurrent_, bookcurrent_ ? (int)bookcurrent_->GetPosition() : 0,
+         bookcurrent_ ? (int)bookcurrent_->GetPageCount() : 0,
+         bookcurrent_ ? bookcurrent_->HasDeferredMobiParse() : false,
+         status_.progress_lock_book, status_.progress_pagecount_lock});
+    status_.progress_lock_book = (Book *)snapshot.next_locked_book;
+    status_.progress_pagecount_lock = snapshot.next_locked_pagecount;
+  } else {
+    status_.progress_lock_book = NULL;
+    status_.progress_pagecount_lock = 0;
+    snapshot.percent_tenths = -1;
+    snapshot.percent_value = 0.0f;
+    snapshot.draw_page_count = 0;
+    snapshot.has_progress = false;
+    snapshot.next_locked_book = NULL;
+    snapshot.next_locked_pagecount = 0;
+  }
 
   if (!status_.force_redraw && minute_of_day == status_.last_minute &&
       snapshot.percent_tenths == status_.last_percent_tenths) {
@@ -942,20 +960,28 @@ void App::UpdateStatus() {
   ts->margin.bottom = 0;
   ts->SetStyle(TEXT_STYLE_BROWSER); // smaller, readable font
 
-  // Clear the status bar area at the bottom: y=380 to 400
-  ts->ClearRect(0, 380, 240, 400);
-
   u16 fgColor = ts->GetFgColor();
 
   // Print Clock (Left)
   int textY = 384;
+  // Clear a taller band than the nominal footer because the browser font
+  // extends several pixels above the baseline and would otherwise leave
+  // minute-change artifacts behind.
+  const int statusTop = std::max(0, textY - ts->GetHeight() - 8);
+  ts->ClearRect(0, (u16)statusTop, 240, 400);
   ts->SetPen(8, textY);
   ts->PrintString(tmsg);
   int clockWidth = ts->GetStringWidth(tmsg, TEXT_STYLE_BROWSER);
 
-  // Print Percentage and Page Number (Right)
+  // Print Percentage / opening state (Right)
   int pX = 232;
-  if (snapshot.has_progress) {
+  if (mode_ == AppMode::Opening) {
+    const char *opening_msg = "opening";
+    int pw = ts->GetStringWidth(opening_msg, TEXT_STYLE_BROWSER);
+    pX = 232 - pw;
+    ts->SetPen(pX, textY);
+    ts->PrintString(opening_msg);
+  } else if (snapshot.has_progress) {
     char pmsg[32];
     snprintf(pmsg, sizeof(pmsg), "%.1f%%", snapshot.percent_value);
     int pw = ts->GetStringWidth(pmsg, TEXT_STYLE_BROWSER);

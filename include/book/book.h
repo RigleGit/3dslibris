@@ -63,6 +63,7 @@ class Book {
 public:
   struct MuPdfState;
   struct CbzState;
+  struct ReflowWorkerState;
   struct InlineImageEntry {
     std::string path;
     bool metadata_probed;
@@ -117,6 +118,7 @@ private:
   std::vector<Page *> pages;
   MuPdfState *mupdf_state;
   CbzState *cbz_state;
+  ReflowWorkerState *reflow_worker_state;
   App *app; //! pointer to the App instance.
   unsigned int layout_revision;
 
@@ -126,6 +128,7 @@ private:
   bool EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out);
   void ResetMuPdfState();
   void ResetCbzState();
+  void ResetReflowWorkerState();
 
 public:
   //! Cover thumbnail for library grid (RGB565, scaled to fit)
@@ -232,6 +235,8 @@ public:
   void DrawCurrentView(Text *ts);
   void DrawCurrentMuPdfView(Text *ts);
   void DrawCurrentCbzView(Text *ts);
+  void PrepareForOpen();
+  u8 OpenPrepared();
   void InitMuPdfView(u16 page_count, fz_context *ctx, fz_document *doc,
                      fz_outline *outline, bool is_new_3ds,
                      app_flow_utils::MuPdfDocumentKind document_kind);
@@ -269,6 +274,12 @@ public:
   u8 Open();
   u8 Parse(bool fulltext = true);
   int ParseHTML();
+  bool SupportsAsyncReflowOpen() const;
+  bool StartAsyncReflowOpen();
+  bool PumpAsyncReflowOpen();
+  bool IsAsyncReflowOpenPending() const;
+  u8 ConsumeAsyncReflowOpenResult();
+  void CancelAsyncReflowOpen();
   bool HasDeferredMobiParse() const;
   bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
   void CancelDeferredMobiParse();

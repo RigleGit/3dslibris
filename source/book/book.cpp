@@ -1205,6 +1205,7 @@ Book::Book(App *a) {
   pages.clear();
   mupdf_state = NULL;
   cbz_state = NULL;
+  reflow_worker_state = NULL;
   position = 0;
   format = FORMAT_UNDEF;
   app = a;
@@ -1553,6 +1554,7 @@ Page *Book::AppendPage() {
 }
 
 void Book::Close() {
+  CancelAsyncReflowOpen();
   CancelDeferredMobiParse();
   std::vector<Page *>::iterator it = pages.begin();
   while (it != pages.end()) {
@@ -1561,6 +1563,7 @@ void Book::Close() {
     ++it;
   }
   pages.clear();
+  ResetReflowWorkerState();
   ResetCbzState();
   ResetMuPdfState();
   chapters.clear();

@@ -21,6 +21,8 @@
 #include "main.h"
 #include "formats/mobi/mobi.h"
 #include "formats/mobi/mobi_heading_markers.h"
+#include "formats/mobi/mobi_markup_tag.h"
+#include "formats/mobi/mobi_position_map.h"
 #include "formats/mobi/mobi_record_decode.h"
 #include "formats/mobi/mobi_text_cleanup.h"
 #include "formats/pdf/pdf.h"
@@ -50,6 +52,9 @@ static const size_t kOdtContentMaxBytes = 24 * 1024 * 1024;
 static const size_t kMobiMaxBytes = 64 * 1024 * 1024;
 static const char *kMobiCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
 static const char *kMobiCacheDir = "sdmc:/3ds/3dslibris/cache/mobi";
+static const u32 kMobiInitialOpenBudgetMs = 320;
+static const u16 kMobiInitialOpenPageBudget = 24;
+static const size_t kMobiDeferredTocMetadataMinBytes = 1024 * 1024;
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // Bump when serialized MOBI pages become semantically incompatible with the
 // current text cleanup or TOC mapping logic.
@@ -65,7 +70,10 @@ static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
 // v14→v15: corrected MOBI record-header offsets, added trailingFlags stripping,
 //          and changed record decompression paths; old caches may reflect broken
 //          header parsing or undecoded trailing data.
-static const u16 kMobiPageCacheVersion = 15;
+// v15→v16: deferred MOBI TOC metadata must be rebuilt from original markup
+//          coordinates, not paginated plain text; old caches may carry wrong
+//          chapter targets from the broken remap path.
+static const u16 kMobiPageCacheVersion = 16;
 static const u16 kPageCacheTitleMaxBytes = 1000;
 static const u16 kPageCachePageMaxBytes = 4096;
 static const u16 kPageCacheChapterTitleMaxBytes = 2048;
@@ -2410,20 +2418,6 @@ static void AppendSingleSpace(std::string *out) {
     out->push_back(' ');
 }
 
-static bool IsMobiBlockTag(const std::string &name) {
-  static const char *kTags[] = {
-      "p",      "div",   "section", "article",      "h1",  "h2",
-      "h3",     "h4",    "h5",      "h6",           "tr",  "table",
-      "td",     "th",    "li",      "ul",           "ol",  "blockquote",
-      "pre",    "header","footer",  "aside",        "title",
-      "mbp:pagebreak"};
-  for (size_t i = 0; i < sizeof(kTags) / sizeof(kTags[0]); i++) {
-    if (name == kTags[i])
-      return true;
-  }
-  return false;
-}
-
 struct MobiHeadingHint {
   std::string title;
   u8 level;
@@ -2432,6 +2426,7 @@ struct MobiHeadingHint {
 struct MobiDeferredState {
   PlainTextStreamState stream;
   std::string source_path;
+  std::string markup_utf8;
   std::string text_utf8;
   std::vector<MobiHeadingHint> heading_hints;
   std::vector<MobiStructuredTocEntry> structured_toc;
@@ -2440,6 +2435,7 @@ struct MobiDeferredState {
   std::vector<u32> text_cursor_per_page;
   bool have_structured_toc;
   bool structured_from_filepos;
+  bool toc_metadata_ready;
   bool used_utf8_guess;
   bool used_legacy_guess;
   bool line_wrap_fix_applied;
@@ -2449,6 +2445,9 @@ struct MobiDeferredState {
   u64 t_after_read;
   u64 t_after_decompress;
   u64 t_after_decode;
+  u64 t_after_markup_scan;
+  u64 t_after_cleanup;
+  u64 t_after_initial_pages;
   u64 t_after_markup;
   u64 t_after_pages;
   u64 t_after_toc;
@@ -2456,12 +2455,6 @@ struct MobiDeferredState {
 
 static std::unordered_map<const Book *, MobiDeferredState>
     g_mobi_deferred_states;
-
-static int MobiHeadingTagLevel(const std::string &name) {
-  if (name.size() == 2 && name[0] == 'h' && name[1] >= '1' && name[1] <= '6')
-    return (name[1] - '1');
-  return -1;
-}
 
 static std::string NormalizeHeadingNeedle(const std::string &s) {
   std::string trimmed = TrimAsciiWhitespace(s);
@@ -2654,7 +2647,8 @@ static size_t BuildMobiChaptersFromStructuredToc(
 
   const u16 page_count = book->GetPageCount();
   const bool have_precise_map =
-      html_to_text_map.size() >= 2 && !text_cursor_per_page.empty();
+      mobi_position_map::LooksUsableForToc(html_to_text_map,
+                                           text_cursor_per_page);
 
   // Heading search is used to verify/correct page estimates.  When loading
   // from page cache, both mapping tables are empty (pagination was skipped),
@@ -3410,6 +3404,20 @@ static bool LoadDeferredMobiStructuredToc(
   out->clear();
   if (structured_from_filepos)
     *structured_from_filepos = false;
+
+  if (state.have_structured_toc && !state.structured_toc.empty()) {
+    *out = state.structured_toc;
+    return true;
+  }
+
+  if (!state.markup_utf8.empty() &&
+      ParseMobiInlineFileposToc(state.markup_utf8, state.text_len_for_pos, out,
+                                app)) {
+    if (structured_from_filepos)
+      *structured_from_filepos = true;
+    return true;
+  }
+
   if (state.source_path.empty())
     return false;
 
@@ -3473,7 +3481,7 @@ static bool LoadDeferredMobiStructuredToc(
 }
 
 // html_to_text_map: if non-null, receives (html_byte_offset, text_byte_offset)
-// samples captured every ~4KB of HTML input.  Because this function strips tags,
+// samples captured every 256-512 bytes of HTML input.  Because this function strips tags,
 // scripts, styles, and entities at highly non-uniform rates, a global linear
 // ratio (html_pos / html_len) is a poor proxy for the corresponding text
 // position.  The sampling table lets MobiHtmlPosToPage() do piecewise-linear
@@ -3874,7 +3882,8 @@ static std::string ExtractMobiMarkupToText(
   std::string heading_text;
 
   // Build a sampling table mapping HTML byte offsets to output text offsets.
-  const size_t kSampleInterval = 256;
+  const size_t kSampleInterval =
+      mobi_position_map::HtmlSampleIntervalForTextBytes(in.size());
   size_t next_sample = 0;
   if (html_to_text_map) {
     html_to_text_map->clear();
@@ -3894,10 +3903,22 @@ static std::string ExtractMobiMarkupToText(
     FinalizeMobiMarkupBlock(&blocks, &current_block);
   };
 
+  auto append_pending_space = [&]() {
+    if (!pending_space)
+      return;
+    AppendSingleSpace(&out);
+    if (!out.empty() && out.back() == ' ')
+      block_pending_text.push_back(' ');
+    if (heading_level >= 0 && !heading_text.empty() &&
+        heading_text.back() != ' ')
+      heading_text.push_back(' ');
+    pending_space = false;
+    at_paragraph_start = false;
+  };
+
   for (size_t i = 0; i < in.size();) {
     if (html_to_text_map && i >= next_sample) {
-      html_to_text_map->push_back(
-          {(u32)i, (u32)out.size()});
+      html_to_text_map->push_back({(u32)i, (u32)out.size()});
       next_sample = i + kSampleInterval;
     }
     unsigned char c = (unsigned char)in[i];
@@ -3908,46 +3929,36 @@ static std::string ExtractMobiMarkupToText(
         continue;
       }
 
-      std::string tag = TrimAsciiWhitespace(in.substr(i + 1, close - i - 1));
+      const size_t tag_offset = i + 1;
+      const size_t tag_length = close - tag_offset;
       i = close + 1;
-      if (tag.empty())
-        continue;
-      if (tag.size() >= 3 && tag[0] == '!' && tag[1] == '-' && tag[2] == '-')
+      if (tag_length >= 3 && in[tag_offset] == '!' && in[tag_offset + 1] == '-' &&
+          in[tag_offset + 2] == '-')
         continue;
 
-      bool closing = false;
-      if (!tag.empty() && tag[0] == '/') {
-        closing = true;
-        tag = TrimAsciiWhitespace(tag.substr(1));
-      }
-
-      std::string lower;
-      lower.reserve(tag.size());
-      for (size_t j = 0; j < tag.size(); j++) {
-        char tc = tag[j];
-        if (isspace((unsigned char)tc) || tc == '/')
-          break;
-        lower.push_back((char)tolower((unsigned char)tc));
-      }
-
-      if (lower.empty())
-        continue;
-      if (lower == "script") {
-        in_script = !closing;
+      MobiMarkupTagInfo tag_info;
+      if (!mobi_parse_markup_tag(in.data() + tag_offset, tag_length, &tag_info) ||
+          !tag_info.valid) {
         continue;
       }
-      if (lower == "style") {
-        in_style = !closing;
+
+      if (tag_info.kind == MOBI_MARKUP_TAG_SCRIPT) {
+        in_script = !tag_info.closing;
+        continue;
+      }
+      if (tag_info.kind == MOBI_MARKUP_TAG_STYLE) {
+        in_style = !tag_info.closing;
         continue;
       }
       if (in_script || in_style)
         continue;
 
-      int tag_heading_level = MobiHeadingTagLevel(lower);
-      if (!closing && tag_heading_level >= 0) {
+      int tag_heading_level = tag_info.heading_level;
+      if (!tag_info.closing && tag_heading_level >= 0) {
         heading_level = tag_heading_level;
         heading_text.clear();
-      } else if (closing && tag_heading_level >= 0 && heading_level >= 0) {
+      } else if (tag_info.closing && tag_heading_level >= 0 &&
+                 heading_level >= 0) {
         std::string normalized =
             CollapseAsciiWhitespace(TrimAsciiWhitespace(heading_text));
         if (heading_hints && normalized.size() >= 3 &&
@@ -3965,7 +3976,7 @@ static std::string ExtractMobiMarkupToText(
         heading_text.clear();
       }
 
-      if (lower == "br") {
+      if (tag_info.kind == MOBI_MARKUP_TAG_BR) {
         flush_block_text();
         AppendHardBreakToMobiMarkupBlock(&current_block);
         out.push_back('\n');
@@ -3975,9 +3986,12 @@ static std::string ExtractMobiMarkupToText(
         pending_space = false;
         continue;
       }
-      if (lower == "img" && !closing) {
+      if (tag_info.kind == MOBI_MARKUP_TAG_IMG && !tag_info.closing) {
         u16 recindex = 0;
-        if (book && mobi_extract_image_recindex(tag, &recindex)) {
+        if (book) {
+          const std::string tag(in, tag_offset, tag_length);
+          if (!mobi_extract_image_recindex(tag, &recindex))
+            continue;
           if (pending_space) {
             AppendSingleSpace(&out);
             if (!out.empty() && out.back() == ' ')
@@ -3999,7 +4013,7 @@ static std::string ExtractMobiMarkupToText(
         }
         continue;
       }
-      if (lower == "li" && !closing) {
+      if (tag_info.kind == MOBI_MARKUP_TAG_LI && !tag_info.closing) {
         finalize_block();
         AppendParagraphBreak(&out);
         out.append("- ");
@@ -4008,12 +4022,12 @@ static std::string ExtractMobiMarkupToText(
         at_paragraph_start = false;
         continue;
       }
-      if (IsMobiBlockTag(lower)) {
+      if (tag_info.kind == MOBI_MARKUP_TAG_BLOCK) {
         finalize_block();
         AppendParagraphBreak(&out);
         pending_space = false;
         at_paragraph_start = true;
-        if (!closing && tag_heading_level >= 0) {
+        if (!tag_info.closing && tag_heading_level >= 0) {
           const unsigned char marker =
               mobi_heading_markers::MarkerForHeadingLevel(tag_heading_level);
           if (marker != 0)
@@ -4051,35 +4065,46 @@ static std::string ExtractMobiMarkupToText(
 
     if (c == '\r' || c == '\n' || c == '\t' || c == ' ') {
       pending_space = true;
-      i++;
+      while (i < in.size()) {
+        i++;
+        if (i >= in.size())
+          break;
+        c = (unsigned char)in[i];
+        if (c != '\r' && c != '\n' && c != '\t' && c != ' ')
+          break;
+      }
       continue;
     }
     if (c < 0x20) {
-      i++;
+      do {
+        i++;
+      } while (i < in.size() && (unsigned char)in[i] < 0x20 &&
+               in[i] != '\r' && in[i] != '\n' && in[i] != '\t');
       continue;
-    }
-
-    if (pending_space) {
-      AppendSingleSpace(&out);
-      if (!out.empty() && out.back() == ' ')
-        block_pending_text.push_back(' ');
-      if (heading_level >= 0 && !heading_text.empty() &&
-          heading_text.back() != ' ')
-        heading_text.push_back(' ');
-      pending_space = false;
-      at_paragraph_start = false;
     }
 
     if (c < 0x80) {
-      out.push_back((char)c);
-      block_pending_text.push_back((char)c);
+      append_pending_space();
+      const size_t run_start = i;
+      while (i < in.size()) {
+        i++;
+        if (i >= in.size())
+          break;
+        c = (unsigned char)in[i];
+        if (c >= 0x80 || c == '<' || c == '&' || c == '\r' || c == '\n' ||
+            c == '\t' || c == ' ' || c < 0x20)
+          break;
+      }
+      const size_t run_len = i - run_start;
+      out.append(in, run_start, run_len);
+      block_pending_text.append(in, run_start, run_len);
       if (heading_level >= 0)
-        heading_text.push_back((char)c);
+        heading_text.append(in, run_start, run_len);
       at_paragraph_start = false;
-      i++;
       continue;
     }
 
+    append_pending_space();
     int step = 1;
     if ((c & 0xE0) == 0xC0)
       step = 2;
@@ -4138,10 +4163,13 @@ struct MobiDecodedText {
   std::string text;
   std::vector<MobiHeadingHint> heading_hints;
   std::vector<std::pair<u32, u32>> html_to_text_map;
+  bool toc_metadata_ready;
   bool used_utf8_guess;
   bool used_legacy_guess;
 
-  MobiDecodedText() : used_utf8_guess(false), used_legacy_guess(false) {}
+  MobiDecodedText()
+      : toc_metadata_ready(false), used_utf8_guess(false),
+        used_legacy_guess(false) {}
 };
 
 static u8 LoadMobiSource(const char *path, std::string *raw,
@@ -4260,11 +4288,72 @@ static bool BuildMobiMergedText(const std::string &raw,
   return mobi_record_decode::BuildMergedText(raw, header.offsets, rec0, merged);
 }
 
+static bool ShouldDeferMobiTocMetadata(const MobiHeaderInfo &header,
+                                       const std::string &merged) {
+  const size_t text_bytes =
+      (header.text_len > 0) ? (size_t)header.text_len : merged.size();
+  return text_bytes >= kMobiDeferredTocMetadataMinBytes;
+}
+
+static void CleanupDecodedMobiText(std::string *text,
+                                   std::vector<std::pair<u32, u32>> *html_map,
+                                   bool line_wrap_fix_applied) {
+  if (!text)
+    return;
+
+  const size_t text_pre_cleanup = text->size();
+  const bool have_map = html_map && !html_map->empty();
+  std::string text_before_cleanup;
+  if (have_map)
+    text_before_cleanup = *text;
+
+  NormalizeNewlines(text);
+  const std::string text_before_mobi_cleanup = *text;
+  std::vector<u16> image_ids_before_cleanup;
+  CollectMobiInlineImageTokenIds(*text, &image_ids_before_cleanup);
+  *text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(
+      *text);
+  if (line_wrap_fix_applied) {
+    *text = mobi_text_cleanup::FixBrokenParagraphWrapsPreservingMobiImageTokens(
+        *text);
+  }
+  size_t text_post_cleanup = text->size();
+  std::vector<u16> image_ids_after_cleanup;
+  CollectMobiInlineImageTokenIds(*text, &image_ids_after_cleanup);
+  if (image_ids_before_cleanup != image_ids_after_cleanup) {
+    *text = text_before_mobi_cleanup;
+    text_post_cleanup = text->size();
+  }
+
+  if (have_map && text_post_cleanup != text_pre_cleanup) {
+    mobi_position_map::RemapHtmlToTextAfterCleanup(text_before_cleanup, *text,
+                                                   html_map);
+  }
+}
+
+static void BuildMobiTocMetadataFromUtf8(
+    Book *book, const BookIoDeps &deps, const std::string &utf8,
+    bool line_wrap_fix_applied, std::vector<MobiHeadingHint> *heading_hints,
+    std::vector<std::pair<u32, u32>> *html_to_text_map) {
+  if (!book || !heading_hints || !html_to_text_map)
+    return;
+
+  heading_hints->clear();
+  html_to_text_map->clear();
+
+  std::string text = ExtractMobiMarkupToText(book, deps, utf8, heading_hints,
+                                             html_to_text_map);
+  CleanupDecodedMobiText(&text, html_to_text_map, line_wrap_fix_applied);
+}
+
 static void DecodeAndCleanupMobiText(Book *book, const BookIoDeps &deps,
                                      const MobiHeaderInfo &header,
                                      const std::string &merged,
+                                     bool collect_toc_metadata,
                                      MobiDecodedText *decoded,
                                      u64 *t_after_decode,
+                                     u64 *t_after_markup_scan,
+                                     u64 *t_after_cleanup,
                                      u64 *t_after_markup) {
   if (!decoded)
     return;
@@ -4276,67 +4365,19 @@ static void DecodeAndCleanupMobiText(Book *book, const BookIoDeps &deps,
     *t_after_decode = osGetTime();
 
   book->ClearInlineImages();
-  decoded->text = ExtractMobiMarkupToText(book, deps, decoded->utf8,
-                                          &decoded->heading_hints,
-                                          &decoded->html_to_text_map);
-  const size_t text_pre_cleanup = decoded->text.size();
-
-  std::string text_before_cleanup;
-  const bool have_map = !decoded->html_to_text_map.empty();
-  if (have_map)
-    text_before_cleanup = decoded->text;
-
-  NormalizeNewlines(&decoded->text);
-  const std::string text_before_mobi_cleanup = decoded->text;
-  std::vector<u16> image_ids_before_cleanup;
-  CollectMobiInlineImageTokenIds(decoded->text, &image_ids_before_cleanup);
-  decoded->text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(
-      decoded->text);
-  if (book->GetMobiLineWrapFix()) {
-    decoded->text =
-        mobi_text_cleanup::FixBrokenParagraphWrapsPreservingMobiImageTokens(
-            decoded->text);
-  }
-  size_t text_post_cleanup = decoded->text.size();
-  std::vector<u16> image_ids_after_cleanup;
-  CollectMobiInlineImageTokenIds(decoded->text, &image_ids_after_cleanup);
-  if (image_ids_before_cleanup != image_ids_after_cleanup) {
-    decoded->text = text_before_mobi_cleanup;
-    text_post_cleanup = decoded->text.size();
-  }
-
-  if (have_map && text_post_cleanup != text_pre_cleanup) {
-    const size_t pre_len = text_before_cleanup.size();
-    const size_t post_len = text_post_cleanup;
-    size_t pi = 0, qi = 0, entry = 0;
-    const size_t n_entries = decoded->html_to_text_map.size();
-    while (entry < n_entries && pi <= pre_len && qi <= post_len) {
-      const u32 target = decoded->html_to_text_map[entry].second;
-      if ((size_t)target <= pi) {
-        decoded->html_to_text_map[entry].second =
-            (u32)(qi - (pi - (size_t)target));
-        entry++;
-        continue;
-      }
-      while (pi < (size_t)target && pi < pre_len && qi < post_len) {
-        if (text_before_cleanup[pi] == decoded->text[qi]) {
-          pi++;
-          qi++;
-        } else {
-          pi++;
-        }
-      }
-    }
-    while (entry < n_entries) {
-      decoded->html_to_text_map[entry].second = (u32)post_len;
-      entry++;
-    }
-    text_before_cleanup.clear();
-    text_before_cleanup.shrink_to_fit();
-  } else if (have_map) {
-    text_before_cleanup.clear();
-    text_before_cleanup.shrink_to_fit();
-  }
+  decoded->text = ExtractMobiMarkupToText(
+      book, deps, decoded->utf8,
+      collect_toc_metadata ? &decoded->heading_hints : NULL,
+      collect_toc_metadata ? &decoded->html_to_text_map : NULL);
+  if (t_after_markup_scan)
+    *t_after_markup_scan = osGetTime();
+  CleanupDecodedMobiText(&decoded->text,
+                         collect_toc_metadata ? &decoded->html_to_text_map
+                                              : NULL,
+                         book->GetMobiLineWrapFix());
+  if (t_after_cleanup)
+    *t_after_cleanup = osGetTime();
+  decoded->toc_metadata_ready = collect_toc_metadata;
 
   if (t_after_markup)
     *t_after_markup = osGetTime();
@@ -4346,20 +4387,23 @@ static void PrepareMobiDeferredState(const char *path,
                                      const MobiHeaderInfo &header,
                                      size_t merged_size, u64 t_parse_begin,
                                      u64 t_after_read, u64 t_after_decompress,
-                                     u64 t_after_decode, u64 t_after_markup,
-                                     bool line_wrap_fix_applied,
-                                     MobiDecodedText *decoded,
+                                     u64 t_after_decode,
+                                     u64 t_after_markup_scan,
+                                     u64 t_after_cleanup, u64 t_after_markup,
+                                     bool line_wrap_fix_applied, MobiDecodedText *decoded,
                                      MobiDeferredState *deferred) {
   if (!decoded || !deferred)
     return;
 
   deferred->source_path = path ? path : "";
+  if (!decoded->toc_metadata_ready)
+    deferred->markup_utf8.swap(decoded->utf8);
+  else
+    deferred->markup_utf8.clear();
   deferred->text_utf8.swap(decoded->text);
   deferred->heading_hints.swap(decoded->heading_hints);
   deferred->html_to_text_map.swap(decoded->html_to_text_map);
-  deferred->structured_toc.clear();
-  deferred->have_structured_toc = false;
-  deferred->structured_from_filepos = false;
+  deferred->toc_metadata_ready = decoded->toc_metadata_ready;
   deferred->used_utf8_guess = decoded->used_utf8_guess;
   deferred->used_legacy_guess = decoded->used_legacy_guess;
   deferred->line_wrap_fix_applied = line_wrap_fix_applied;
@@ -4370,6 +4414,9 @@ static void PrepareMobiDeferredState(const char *path,
   deferred->t_after_read = t_after_read;
   deferred->t_after_decompress = t_after_decompress;
   deferred->t_after_decode = t_after_decode;
+  deferred->t_after_markup_scan = t_after_markup_scan;
+  deferred->t_after_cleanup = t_after_cleanup;
+  deferred->t_after_initial_pages = 0;
   deferred->t_after_markup = t_after_markup;
   deferred->t_after_pages = 0;
   deferred->t_after_toc = 0;
@@ -4386,9 +4433,11 @@ static bool StartInitialMobiPagination(Book *book, const BookIoDeps &deps,
   }
   book->MarkMobiRenderSettingsApplied(deferred->line_wrap_fix_applied);
   *pages_done_initial = ContinuePlainTextStreamState(
-      &deferred->stream, deferred->text_utf8, 1200, 96, 1,
+      &deferred->stream, deferred->text_utf8, kMobiInitialOpenBudgetMs,
+      kMobiInitialOpenPageBudget, 1,
       &deferred->text_cursor_per_page);
-  deferred->t_after_pages = osGetTime();
+  deferred->t_after_initial_pages = osGetTime();
+  deferred->t_after_pages = deferred->t_after_initial_pages;
   return true;
 }
 
@@ -4407,10 +4456,22 @@ static void FinalizeImmediateMobiParse(Book *book, const char *path,
   if (!toc_result)
     toc_result = &local_result;
 
-  deferred->have_structured_toc = PrepareMobiStructuredToc(
-      raw, header.offsets, header.ncx_index, header.encoding, &utf8,
-      deferred->text_len_for_pos, &deferred->structured_toc,
-      &deferred->structured_from_filepos, app);
+  if (!deferred->toc_metadata_ready) {
+    const std::string &markup_source =
+        !deferred->markup_utf8.empty() ? deferred->markup_utf8 : utf8;
+    BuildMobiTocMetadataFromUtf8(book, deps, markup_source,
+                                 deferred->line_wrap_fix_applied,
+                                 &deferred->heading_hints,
+                                 &deferred->html_to_text_map);
+    deferred->toc_metadata_ready = true;
+  }
+
+  if (!deferred->have_structured_toc) {
+    deferred->have_structured_toc = PrepareMobiStructuredToc(
+        raw, header.offsets, header.ncx_index, header.encoding, &utf8,
+        deferred->text_len_for_pos, &deferred->structured_toc,
+        &deferred->structured_from_filepos, app);
+  }
   FinalizeMobiPreparedToc(
       book, app, deferred->structured_toc, deferred->have_structured_toc,
       deferred->structured_from_filepos, deferred->heading_hints,
@@ -4519,15 +4580,24 @@ static u8 ParseMobiFile(Book *book, const char *path) {
 
   MobiDecodedText decoded;
   u64 t_after_decode = 0;
+  u64 t_after_markup_scan = 0;
+  u64 t_after_cleanup = 0;
   u64 t_after_markup = 0;
-  DecodeAndCleanupMobiText(book, deps, header, merged, &decoded,
-                           &t_after_decode, &t_after_markup);
+  const bool collect_toc_metadata = !ShouldDeferMobiTocMetadata(header, merged);
+  DecodeAndCleanupMobiText(book, deps, header, merged, collect_toc_metadata,
+                           &decoded, &t_after_decode, &t_after_markup_scan,
+                           &t_after_cleanup, &t_after_markup);
 
   MobiDeferredState deferred;
   PrepareMobiDeferredState(path, header, merged.size(), t_parse_begin,
                            t_after_read, t_after_decompress, t_after_decode,
-                           t_after_markup, book->GetMobiLineWrapFix(),
-                           &decoded, &deferred);
+                           t_after_markup_scan, t_after_cleanup,
+                           t_after_markup, book->GetMobiLineWrapFix(), &decoded,
+                           &deferred);
+  deferred.have_structured_toc = ParseMobiStructuredToc(
+      raw, header.offsets, header.ncx_index, header.encoding,
+      &deferred.structured_toc, app);
+  deferred.structured_from_filepos = false;
 
   bool pages_done_initial = false;
   if (!StartInitialMobiPagination(book, deps, &deferred, &pages_done_initial))
@@ -4536,16 +4606,33 @@ static u8 ParseMobiFile(Book *book, const char *path) {
   if (!pages_done_initial) {
     g_mobi_deferred_states[book] = std::move(deferred);
     if (app) {
+      if (!collect_toc_metadata) {
+        DBG_LOGF(app,
+                 "MOBI: deferred TOC metadata enabled text_bytes=%u threshold=%u",
+                 (unsigned)((header.text_len > 0) ? header.text_len
+                                                  : (u32)merged.size()),
+                 (unsigned)kMobiDeferredTocMetadataMinBytes);
+      }
+      DBG_LOGF(app,
+               "MOBI: deferred open armed pages=%u initial_budget_ms=%u "
+               "initial_page_budget=%u",
+               (unsigned)book->GetPageCount(),
+               (unsigned)kMobiInitialOpenBudgetMs,
+               (unsigned)kMobiInitialOpenPageBudget);
       char tmsg[320];
       snprintf(tmsg, sizeof(tmsg),
                "MOBI: timing read=%llums decomp=%llums decode=%llums "
-               "markup=%llums initial=%llums total_open=%llums",
+               "markup_scan=%llums cleanup=%llums initial_pages=%llums "
+               "total_open=%llums",
                (unsigned long long)(t_after_read - t_parse_begin),
                (unsigned long long)(t_after_decompress - t_after_read),
                (unsigned long long)(t_after_decode - t_after_decompress),
-               (unsigned long long)(t_after_markup - t_after_decode),
-               (unsigned long long)(deferred.t_after_pages - t_after_markup),
-               (unsigned long long)(deferred.t_after_pages - t_parse_begin));
+               (unsigned long long)(t_after_markup_scan - t_after_decode),
+               (unsigned long long)(t_after_cleanup - t_after_markup_scan),
+               (unsigned long long)(deferred.t_after_initial_pages -
+                                    t_after_cleanup),
+               (unsigned long long)(deferred.t_after_initial_pages -
+                                    t_parse_begin));
       append_debug_log(tmsg);
       append_debug_log("MOBI: parse end");
     }
@@ -4576,15 +4663,22 @@ static u8 ParseMobiFile(Book *book, const char *path) {
     char tmsg[320];
     snprintf(
         tmsg, sizeof(tmsg),
-        "MOBI: timing read=%llums decomp=%llums decode=%llums markup=%llums "
-        "pages=%llums toc=%llums total=%llums",
+        "MOBI: timing read=%llums decomp=%llums decode=%llums "
+        "markup_scan=%llums cleanup=%llums initial_pages=%llums "
+        "deferred_pages=%llums deferred_toc=%llums total=%llums",
         (unsigned long long)(deferred.t_after_read - deferred.t_parse_begin),
         (unsigned long long)(deferred.t_after_decompress -
                              deferred.t_after_read),
         (unsigned long long)(deferred.t_after_decode -
                              deferred.t_after_decompress),
-        (unsigned long long)(deferred.t_after_markup - deferred.t_after_decode),
-        (unsigned long long)(deferred.t_after_pages - deferred.t_after_markup),
+        (unsigned long long)(deferred.t_after_markup_scan -
+                             deferred.t_after_decode),
+        (unsigned long long)(deferred.t_after_cleanup -
+                             deferred.t_after_markup_scan),
+        (unsigned long long)(deferred.t_after_initial_pages -
+                             deferred.t_after_cleanup),
+        (unsigned long long)(deferred.t_after_pages -
+                             deferred.t_after_initial_pages),
         (unsigned long long)(deferred.t_after_toc - deferred.t_after_pages),
         (unsigned long long)(deferred.t_after_toc - deferred.t_parse_begin));
     append_debug_log(tmsg);
@@ -4859,6 +4953,21 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
 
   const BookIoDeps deps = BuildBookIoDeps(book);
   App *app = deps.app;
+  if (!state->toc_metadata_ready) {
+    const u64 t_meta_begin = osGetTime();
+    BuildMobiTocMetadataFromUtf8(book, deps, state->markup_utf8,
+                                 state->line_wrap_fix_applied,
+                                 &state->heading_hints,
+                                 &state->html_to_text_map);
+    state->toc_metadata_ready = true;
+    if (app) {
+      DBG_LOGF(app,
+               "MOBI: deferred toc metadata ready ms=%llu headings=%u map=%u",
+               (unsigned long long)(osGetTime() - t_meta_begin),
+               (unsigned)state->heading_hints.size(),
+               (unsigned)state->html_to_text_map.size());
+    }
+  }
   // Deferred TOC resolution runs only once we already have the full page map,
   // which keeps initial open responsive even for large MOBIs.
   state->have_structured_toc = LoadDeferredMobiStructuredToc(
@@ -4891,13 +5000,16 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
     char tmsg[320];
     snprintf(
         tmsg, sizeof(tmsg),
-        "MOBI: timing read=%llums decomp=%llums decode=%llums markup=%llums "
-        "pages=%llums toc=%llums total=%llums",
+        "MOBI: timing read=%llums decomp=%llums decode=%llums "
+        "markup_scan=%llums cleanup=%llums initial_pages=%llums "
+        "deferred_pages=%llums deferred_toc=%llums total=%llums",
         (unsigned long long)(state->t_after_read - state->t_parse_begin),
         (unsigned long long)(state->t_after_decompress - state->t_after_read),
         (unsigned long long)(state->t_after_decode - state->t_after_decompress),
-        (unsigned long long)(state->t_after_markup - state->t_after_decode),
-        (unsigned long long)(state->t_after_pages - state->t_after_markup),
+        (unsigned long long)(state->t_after_markup_scan - state->t_after_decode),
+        (unsigned long long)(state->t_after_cleanup - state->t_after_markup_scan),
+        (unsigned long long)(state->t_after_initial_pages - state->t_after_cleanup),
+        (unsigned long long)(state->t_after_pages - state->t_after_initial_pages),
         (unsigned long long)(state->t_after_toc - state->t_after_pages),
         (unsigned long long)(state->t_after_toc - state->t_parse_begin));
     DBG_LOG(app, tmsg);
@@ -4930,31 +5042,8 @@ static bool ContinueDeferredMobiState(Book *book, MobiDeferredState *state,
 } // namespace
 
 u8 Book::Open() {
-  std::string path;
-  path.append(GetFolderName());
-  path.append("/");
-  path.append(GetFileName());
-
-  char logmsg[256];
-  snprintf(logmsg, sizeof(logmsg), "Opening: %s", path.c_str());
-  DBG_LOG(app, logmsg);
-
-  // Page layout is a function of the current style.
-  app->ts->SetStyle(TEXT_STYLE_REGULAR);
-  tocResolveTried = false;
-  tocResolved = false;
-  ClearTocConfidence();
-  ClearChapterAnchors();
-  u8 err = 1;
-  if (format == FORMAT_EPUB) {
-    err = epub(this, path, false);
-  } else {
-    err = Parse(true);
-  }
-  if (!err)
-    if (position > (int)pages.size())
-      position = pages.size() - 1;
-  return err;
+  PrepareForOpen();
+  return OpenPrepared();
 }
 
 u8 Book::Index() {

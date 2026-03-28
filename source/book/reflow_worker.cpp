@@ -1,0 +1,253 @@
+#include "book/book.h"
+
+#include <3ds.h>
+
+#include "app/app.h"
+#include "debug_log.h"
+#include "formats/epub/epub.h"
+
+namespace {
+
+static const u32 kReflowWorkerDeferredBudgetMs = 250;
+static const u16 kReflowWorkerDeferredPageBudget = 96;
+
+bool DetectNew3dsForReflow() {
+  bool is_new_3ds = false;
+  APT_CheckNew3DS(&is_new_3ds);
+  return is_new_3ds;
+}
+
+} // namespace
+
+struct Book::ReflowWorkerState {
+  struct Worker {
+    Book *owner;
+    volatile bool shutdown_requested;
+    volatile bool job_pending;
+    bool job_submitted;
+    u8 job_result;
+    u64 submitted_at_ms;
+    u64 started_at_ms;
+    u64 finished_at_ms;
+    LightEvent submit_event;
+    LightEvent done_event;
+    Thread thread_handle;
+
+    Worker()
+        : owner(NULL), shutdown_requested(false), job_pending(false),
+          job_submitted(false), job_result(1), submitted_at_ms(0),
+          started_at_ms(0), finished_at_ms(0), thread_handle(NULL) {}
+  };
+
+  bool is_new_3ds;
+  bool open_pending;
+  bool open_completed;
+  u8 open_result;
+  Worker *worker;
+  bool worker_init_attempted;
+
+  ReflowWorkerState()
+      : is_new_3ds(false), open_pending(false), open_completed(false),
+        open_result(1), worker(NULL), worker_init_attempted(false) {}
+};
+
+namespace {
+
+void ReflowWorkerThreadFunc(void *arg) {
+  Book::ReflowWorkerState::Worker *w =
+      static_cast<Book::ReflowWorkerState::Worker *>(arg);
+  if (!w || !w->owner)
+    return;
+  Book *book = w->owner;
+
+  while (true) {
+    LightEvent_Wait(&w->submit_event);
+    LightEvent_Clear(&w->submit_event);
+
+    if (__atomic_load_n(&w->shutdown_requested, __ATOMIC_ACQUIRE))
+      break;
+    if (!__atomic_load_n(&w->job_pending, __ATOMIC_ACQUIRE))
+      continue;
+
+    w->started_at_ms = osGetTime();
+    if (book->GetApp()) {
+      const u64 queue_ms = (w->submitted_at_ms && w->started_at_ms >= w->submitted_at_ms)
+                               ? (w->started_at_ms - w->submitted_at_ms)
+                               : 0;
+      DBG_LOGF(book->GetApp(), "REFLOW[w]: open begin queue_ms=%llu book=%s",
+               (unsigned long long)queue_ms,
+               book->GetFileName() ? book->GetFileName() : "");
+    }
+    w->job_result = book->OpenPrepared();
+    if (w->job_result == 0 && book->HasDeferredMobiParse()) {
+      while (!__atomic_load_n(&w->shutdown_requested, __ATOMIC_ACQUIRE) &&
+             book->HasDeferredMobiParse()) {
+        book->ContinueDeferredMobiParse(kReflowWorkerDeferredBudgetMs,
+                                        kReflowWorkerDeferredPageBudget);
+      }
+    }
+    w->finished_at_ms = osGetTime();
+    if (book->GetApp()) {
+      const u64 worker_ms =
+          (w->finished_at_ms >= w->started_at_ms)
+              ? (w->finished_at_ms - w->started_at_ms)
+              : 0;
+      DBG_LOGF(book->GetApp(),
+               "REFLOW[w]: open finish rc=%u worker_ms=%llu book=%s",
+               (unsigned)w->job_result, (unsigned long long)worker_ms,
+               book->GetFileName() ? book->GetFileName() : "");
+    }
+    __atomic_store_n(&w->job_pending, false, __ATOMIC_RELEASE);
+    LightEvent_Signal(&w->done_event);
+  }
+}
+
+} // namespace
+
+void Book::PrepareForOpen() {
+  if (app && app->ts)
+    app->ts->SetStyle(TEXT_STYLE_REGULAR);
+  tocResolveTried = false;
+  tocResolved = false;
+  ClearTocConfidence();
+  ClearChapterAnchors();
+}
+
+u8 Book::OpenPrepared() {
+  std::string path;
+  path.append(GetFolderName());
+  path.append("/");
+  path.append(GetFileName());
+
+  char logmsg[256];
+  snprintf(logmsg, sizeof(logmsg), "Opening: %s", path.c_str());
+  DBG_LOG(app, logmsg);
+
+  u8 err = 1;
+  if (format == FORMAT_EPUB) {
+    err = epub(this, path, false);
+  } else {
+    err = Parse(true);
+  }
+  if (!err)
+    if (position > (int)pages.size())
+      position = pages.size() - 1;
+  return err;
+}
+
+bool Book::SupportsAsyncReflowOpen() const {
+  return UsesTextLayoutSettings();
+}
+
+bool Book::StartAsyncReflowOpen() {
+  if (!SupportsAsyncReflowOpen())
+    return false;
+
+  if (!reflow_worker_state) {
+    reflow_worker_state = new ReflowWorkerState();
+    reflow_worker_state->is_new_3ds = DetectNew3dsForReflow();
+  }
+  if (!reflow_worker_state || !reflow_worker_state->is_new_3ds)
+    return false;
+
+  if (!reflow_worker_state->worker && !reflow_worker_state->worker_init_attempted) {
+    reflow_worker_state->worker_init_attempted = true;
+    ReflowWorkerState::Worker *w = new ReflowWorkerState::Worker();
+    w->owner = this;
+    LightEvent_Init(&w->submit_event, RESET_STICKY);
+    LightEvent_Init(&w->done_event, RESET_STICKY);
+
+    s32 prio = 0x30;
+    svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
+    reflow_worker_state->worker = w;
+    w->thread_handle = threadCreate(ReflowWorkerThreadFunc, w, 128 * 1024,
+                                    prio + 1, 1, false);
+    if (!w->thread_handle) {
+      delete w;
+      reflow_worker_state->worker = NULL;
+      return false;
+    }
+    if (GetApp())
+      DBG_LOG(GetApp(), "REFLOW[w]: worker thread started on core 1");
+  }
+  if (!reflow_worker_state->worker)
+    return false;
+
+  Book::ReflowWorkerState::Worker *w = reflow_worker_state->worker;
+  if (w->job_submitted || __atomic_load_n(&w->job_pending, __ATOMIC_ACQUIRE))
+    return false;
+
+  PrepareForOpen();
+  reflow_worker_state->open_pending = true;
+  reflow_worker_state->open_completed = false;
+  reflow_worker_state->open_result = 1;
+  w->job_result = 1;
+  w->submitted_at_ms = osGetTime();
+  w->started_at_ms = 0;
+  w->finished_at_ms = 0;
+  LightEvent_Clear(&w->done_event);
+  __atomic_store_n(&w->job_pending, true, __ATOMIC_RELEASE);
+  w->job_submitted = true;
+  LightEvent_Signal(&w->submit_event);
+  return true;
+}
+
+bool Book::PumpAsyncReflowOpen() {
+  if (!reflow_worker_state || !reflow_worker_state->open_pending ||
+      !reflow_worker_state->worker) {
+    return false;
+  }
+
+  Book::ReflowWorkerState::Worker *w = reflow_worker_state->worker;
+  if (!w->job_submitted || __atomic_load_n(&w->job_pending, __ATOMIC_ACQUIRE))
+    return false;
+
+  LightEvent_Wait(&w->done_event);
+  LightEvent_Clear(&w->done_event);
+  w->job_submitted = false;
+  reflow_worker_state->open_pending = false;
+  reflow_worker_state->open_completed = true;
+  reflow_worker_state->open_result = w->job_result;
+  return true;
+}
+
+bool Book::IsAsyncReflowOpenPending() const {
+  return reflow_worker_state && reflow_worker_state->open_pending;
+}
+
+u8 Book::ConsumeAsyncReflowOpenResult() {
+  if (!reflow_worker_state || !reflow_worker_state->open_completed)
+    return 1;
+  reflow_worker_state->open_completed = false;
+  return reflow_worker_state->open_result;
+}
+
+void Book::CancelAsyncReflowOpen() {
+  if (!reflow_worker_state)
+    return;
+
+  Book::ReflowWorkerState::Worker *w = reflow_worker_state->worker;
+  reflow_worker_state->open_pending = false;
+  reflow_worker_state->open_completed = false;
+  reflow_worker_state->open_result = 1;
+
+  if (!w)
+    return;
+
+  __atomic_store_n(&w->shutdown_requested, true, __ATOMIC_RELEASE);
+  LightEvent_Signal(&w->submit_event);
+  if (w->thread_handle) {
+    threadJoin(w->thread_handle, U64_MAX);
+    threadFree(w->thread_handle);
+    w->thread_handle = NULL;
+  }
+  delete w;
+  reflow_worker_state->worker = NULL;
+}
+
+void Book::ResetReflowWorkerState() {
+  if (!reflow_worker_state)
+    return;
+  delete reflow_worker_state;
+  reflow_worker_state = NULL;
+}

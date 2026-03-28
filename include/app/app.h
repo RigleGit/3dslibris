@@ -79,6 +79,7 @@ enum class AppMode : u8 {
   Quit = 7,
   Bookmarks = 8,
   Chapters = 9,
+  Opening = 10,
 };
 
 enum prefsbuttonindex {
@@ -173,6 +174,7 @@ public:
   void CloseBook();
   int GetBookIndex(Book *);
   void HandleEventInBook();
+  void HandleEventInOpening();
   u8 OpenBook();
   void ToggleBookmark();
   void MarkBookLayoutDirty();
@@ -210,12 +212,28 @@ private:
     bool force_redraw;
   };
 
+  struct OpeningState {
+    bool pending;
+    Book *book;
+    bool needs_relayout;
+    int old_page_count;
+    int old_position;
+    std::list<int> old_bookmarks;
+    u64 started_at_ms;
+
+    OpeningState()
+        : pending(false), book(NULL), needs_relayout(false),
+          old_page_count(0), old_position(0), old_bookmarks(),
+          started_at_ms(0) {}
+  };
+
   static bool IsFontMode(AppMode mode);
 
   AppMode mode_;
   BrowserState browser_;
   PrefsViewState prefs_view_;
   StatusState status_;
+  OpeningState opening_;
   Book *bookcurrent_;
   std::deque<app_job_t> job_queue;
   unsigned int layout_revision;
@@ -223,6 +241,7 @@ private:
   int pdf_touch_last_x_;
   int pdf_touch_last_y_;
   u64 pdf_deferred_ready_at_ms_;
+  u64 mobi_deferred_ready_at_ms_;
 
   int FindBooks();
   void InitScreens();
