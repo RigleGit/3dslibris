@@ -66,8 +66,14 @@ Commits already included in the `v2.0.0` line:
 - `PDF`
   - Viewer-only path with MuPDF-backed rendering
   - Top screen shows a zoomed page region; bottom screen shows the full-page preview and viewport box
-  - `A/B` control zoom, `Left/Right` move page, `Up/Down` move through outline entries when available, and touch moves the viewport
+  - Uses the shared fixed-layout reader controls documented below
   - PDF-enabled builds in this branch are distributed with AGPL-driven notice and source-release requirements; see the license section below
+- `CBZ`
+  - Viewer-only path with MuPDF-backed image-page rendering
+  - Uses the shared fixed-layout reader controls documented below
+- `XPS`
+  - Viewer-only path with MuPDF-backed rendering
+  - Uses the shared fixed-layout reader controls documented below
 
 ## Known limitations
 - Some EPUB files have malformed anchors; index jumps can be approximate when source metadata is broken.
@@ -166,6 +172,15 @@ sdmc:/3ds/3dslibris/resources/ui/icons/png/{back,gear,home,next,prev}.png
 - `SELECT`: settings
 - `START`: return to library
 - Touch UI for library, settings, index, bookmarks, font menus...
+
+## Controls (PDF / CBZ / XPS)
+- `A`: zoom in
+- `B`: zoom out
+- `Left/Right`: previous or next page
+- `Up/Down`: next or previous chapter when the document exposes an outline; otherwise previous or next page
+- `Touch`: move the viewport by tapping or dragging on the page preview
+- `SELECT`: open settings
+- `START`: return to library
 
 ## Documentation
 - Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
