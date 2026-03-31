@@ -78,6 +78,7 @@ MUPDF_ROOT	:=	third_party/mupdf
 MUPDF_OUT	:=	$(MUPDF_ROOT)/build/3ds-minimal
 MUPDF_LIB_A	:=	$(MUPDF_OUT)/libmupdf.a
 MUPDF_LIB_THIRD_A := $(MUPDF_OUT)/libmupdf-third.a
+MUPDF_STAMP	:=	$(MUPDF_OUT)/.built-stamp
 #GFXBUILD	:=	$(ROMFS)/gfx
 
 #---------------------------------------------------------------------------------
@@ -270,11 +271,15 @@ stage-romfs:
 	@cp docs/PDF_SOURCE_RELEASE.md "$(ROMFS_RUNTIME_APPDIR)/licenses/PDF_SOURCE_RELEASE.md"
 	@cp LICENSES/GPL-2.0-or-later.txt "$(ROMFS_RUNTIME_APPDIR)/licenses/GPL-2.0-or-later.txt"
 	@cp LICENSES/AGPL-3.0-or-later.txt "$(ROMFS_RUNTIME_APPDIR)/licenses/AGPL-3.0-or-later.txt"
-mupdf-minimal: $(MUPDF_LIB_A) $(MUPDF_LIB_THIRD_A)
+mupdf-minimal: $(MUPDF_STAMP)
 
-$(MUPDF_LIB_A) $(MUPDF_LIB_THIRD_A): $(CURDIR)/scripts/build_mupdf_minimal.sh
+$(MUPDF_STAMP): $(CURDIR)/scripts/build_mupdf_minimal.sh
 	@echo building mupdf minimal ...
 	@sh "$(CURDIR)/scripts/build_mupdf_minimal.sh"
+	@touch "$@"
+
+$(MUPDF_LIB_A) $(MUPDF_LIB_THIRD_A): $(MUPDF_STAMP)
+	@true
 
 #---------------------------------------------------------------------------------
 clean:
