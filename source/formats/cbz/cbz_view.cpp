@@ -82,7 +82,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
 
   const int stride = ts->display.height;
   const int logical_width = ts->display.width;
-  ts->MarkScreenDirty(screen);
+  ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
 
   for (int row = 0; row < draw_height; row++) {
     const int dy = y + row;
@@ -272,8 +272,11 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
                   (int)(cbz_state->page_height * fit_scale * zoom + 0.5f)));
 
   CbzBitmap scaled;
+  // The interactive cache is for drag/page-turn responsiveness, not final
+  // quality. Use the fast scaler here and keep HQ filtering only at blit time
+  // when the viewer is idle.
   if (!ScaleCbzBitmap(cbz_state->current_source.bitmap, target_width,
-                      target_height, true, &scaled)) {
+                      target_height, false, &scaled)) {
     return false;
   }
 

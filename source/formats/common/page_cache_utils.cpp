@@ -117,17 +117,29 @@ bool WritePages(FILE *fp, const std::vector<CachedPage> &pages,
   if (!fp)
     return false;
 
+  std::vector<uint8_t> buffer;
+  size_t total_size = 0;
+  for (size_t i = 0; i < pages.size(); i++) {
+    total_size += sizeof(uint16_t) + pages[i].size();
+  }
+  buffer.reserve(total_size);
+
   for (size_t i = 0; i < pages.size(); i++) {
     const CachedPage &page = pages[i];
     if (page.size() > max_page_bytes)
       return false;
     const uint16_t length = (uint16_t)page.size();
-    if (fwrite(&length, 1, sizeof(length), fp) != sizeof(length))
-      return false;
-    if (!page.empty() &&
-        fwrite(page.data(), 1, page.size(), fp) != page.size()) {
-      return false;
+    const uint8_t *ptr = reinterpret_cast<const uint8_t *>(&length);
+    buffer.push_back(ptr[0]);
+    buffer.push_back(ptr[1]);
+    if (!page.empty()) {
+      buffer.insert(buffer.end(), page.data(), page.data() + page.size());
     }
+  }
+
+  if (!buffer.empty()) {
+    if (fwrite(buffer.data(), 1, buffer.size(), fp) != buffer.size())
+      return false;
   }
   return true;
 }
@@ -159,15 +171,41 @@ bool WriteChapters(FILE *fp, const std::vector<CachedChapter> &chapters,
   if (!fp)
     return false;
 
+  std::vector<uint8_t> buffer;
+  size_t total_size = 0;
+  for (size_t i = 0; i < chapters.size(); i++) {
+    // page (2 bytes) + level (1 byte)
+    total_size += 3;
+    // title length (2 bytes) + title bytes
+    uint16_t length = (uint16_t)ClampString(chapters[i].title, max_title_bytes).size();
+    total_size += 2 + length;
+  }
+  buffer.reserve(total_size);
+
   for (size_t i = 0; i < chapters.size(); i++) {
     const CachedChapter &chapter = chapters[i];
-    if (fwrite(&chapter.page, 1, sizeof(chapter.page), fp) !=
-            sizeof(chapter.page) ||
-        fwrite(&chapter.level, 1, sizeof(chapter.level), fp) !=
-            sizeof(chapter.level)) {
-      return false;
+
+    // Write page
+    const uint8_t *page_ptr = reinterpret_cast<const uint8_t *>(&chapter.page);
+    buffer.push_back(page_ptr[0]);
+    buffer.push_back(page_ptr[1]);
+
+    // Write level
+    buffer.push_back(chapter.level);
+
+    // Write title
+    const std::string bounded = ClampString(chapter.title, max_title_bytes);
+    const uint16_t length = (uint16_t)bounded.size();
+    const uint8_t *len_ptr = reinterpret_cast<const uint8_t *>(&length);
+    buffer.push_back(len_ptr[0]);
+    buffer.push_back(len_ptr[1]);
+    if (!bounded.empty()) {
+      buffer.insert(buffer.end(), bounded.data(), bounded.data() + bounded.size());
     }
-    if (!WriteLengthPrefixedString16(fp, chapter.title, max_title_bytes, true))
+  }
+
+  if (!buffer.empty()) {
+    if (fwrite(buffer.data(), 1, buffer.size(), fp) != buffer.size())
       return false;
   }
   return true;

@@ -141,6 +141,7 @@ public:
   bool metadataIndexed;
   bool tocResolveTried;
   bool tocResolved;
+  bool epub_page_cache_save_pending;
   //! Per-book opt-in for collapsing visually hard-wrapped MOBI prose.
   bool mobi_line_wrap_fix;
   //! Remembers which wrap-fix state produced the currently cached pages.
@@ -283,6 +284,8 @@ public:
   bool IsAsyncReflowOpenPending() const;
   u8 ConsumeAsyncReflowOpenResult();
   void CancelAsyncReflowOpen();
+  bool HasPendingEpubPageCacheSave() const;
+  void SetPendingEpubPageCacheSave(bool pending);
   bool HasDeferredMobiParse() const;
   bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
   void CancelDeferredMobiParse();

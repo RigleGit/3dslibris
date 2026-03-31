@@ -52,6 +52,7 @@ https://github.com/rhaleblian/dslibris
 #include <deque>
 #include <list>
 #include <sstream>
+#include <stdio.h>
 #include <unistd.h>
 #include <vector>
 
@@ -190,6 +191,9 @@ public:
   void DrawBottomGradientBackground();
 
 private:
+  void ClearDeferredRelayoutState();
+  bool MaybeFinalizeDeferredRelayout(Book *book, int page_count);
+
   struct BrowserState {
     Book *selected_book;
     int page_start;
@@ -228,6 +232,19 @@ private:
           started_at_ms(0) {}
   };
 
+  struct DeferredRelayoutState {
+    bool pending;
+    Book *book;
+    int old_page_count;
+    int old_position;
+    std::list<int> old_bookmarks;
+    int initial_position;
+
+    DeferredRelayoutState()
+        : pending(false), book(NULL), old_page_count(0), old_position(0),
+          old_bookmarks(), initial_position(0) {}
+  };
+
   static bool IsFontMode(AppMode mode);
 
   AppMode mode_;
@@ -235,7 +252,11 @@ private:
   PrefsViewState prefs_view_;
   StatusState status_;
   OpeningState opening_;
+  DeferredRelayoutState deferred_relayout_;
   Book *bookcurrent_;
+  FILE *status_log_file_;
+  unsigned int status_log_write_count_;
+  LightLock status_log_lock_;
   std::deque<app_job_t> job_queue;
   unsigned int layout_revision;
   bool pdf_touch_drag_active_;
@@ -256,12 +277,14 @@ private:
   void browser_draw();
   void browser_handleevent();
   void browser_init();
+  void UnloadNonVisibleBrowserCoverCaches();
   void browser_nextpage();
   void browser_prevpage();
   void LoadVisibleBrowserCoverCaches();
   void PruneBrowserWarmupJobs(Book *selected_book);
   bool HasQueuedJob(app_job_type_t type, Book *book) const;
   void EnqueueJob(app_job_type_t type, Book *book);
+  void TickBrowserWarmup();
   void QueueBookWarmup(Book *book);
   void QueueTocResolve(Book *book);
   void ProcessJobs(u32 budget_ms);

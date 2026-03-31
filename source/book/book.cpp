@@ -16,10 +16,12 @@
 #include "app/app.h"
 #include "book/book_xml.h"
 #include "book/heading_layout.h"
+#include "formats/epub/epub.h"
 #include "main.h"
 #include "book/page.h"
 #include "shared/page_buffer_utils.h"
 #include "parse.h"
+#include "shared/reflow_cache_save_utils.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
 #include <algorithm>
@@ -1239,6 +1241,7 @@ Book::Book(App *a) {
   metadataIndexed = false;
   tocResolveTried = false;
   tocResolved = false;
+  epub_page_cache_save_pending = false;
   mobi_line_wrap_fix = false;
   parsed_with_mobi_line_wrap_fix = false;
   inline_image_probe_uf = NULL;
@@ -1582,7 +1585,14 @@ void Book::ReservePageCapacity(size_t incoming_pages) {
 }
 
 void Book::Close() {
+  const bool flush_pending_epub_cache =
+      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
+          epub_page_cache_save_pending, IsAsyncReflowOpenPending(),
+          (unsigned int)GetPageCount());
   CancelAsyncReflowOpen();
+  if (flush_pending_epub_cache)
+    SavePendingEpubPageCache(this);
+  epub_page_cache_save_pending = false;
   CancelDeferredMobiParse();
   std::vector<Page *>::iterator it = pages.begin();
   while (it != pages.end()) {
@@ -1613,6 +1623,14 @@ void Book::MarkMobiRenderSettingsApplied(bool enabled) {
 
 bool Book::NeedsMobiRenderRefresh() const {
   return IsMobiFile() && parsed_with_mobi_line_wrap_fix != mobi_line_wrap_fix;
+}
+
+bool Book::HasPendingEpubPageCacheSave() const {
+  return epub_page_cache_save_pending;
+}
+
+void Book::SetPendingEpubPageCacheSave(bool pending) {
+  epub_page_cache_save_pending = pending;
 }
 
 unsigned int Book::GetLayoutRevision() const { return layout_revision; }

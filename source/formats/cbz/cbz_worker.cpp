@@ -56,8 +56,10 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
       1, std::min(decoded.source_bitmap.height,
                   (int)(decoded.original_height * fit_scale * zoom + 0.5f)));
   CbzBitmap interactive_bitmap;
+  // Preloaded interactive tiles are latency-oriented. Nearest-neighbor here
+  // avoids paying bilinear scaling cost during background preparation.
   if (!ScaleCbzBitmap(decoded.source_bitmap, interactive_width,
-                      interactive_height, true, &interactive_bitmap)) {
+                      interactive_height, false, &interactive_bitmap)) {
     return false;
   }
 

@@ -18,7 +18,9 @@
 #include <map>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
+#include "shared/framebuffer_blit_utils.h"
 #include "shared/glyph_cache_lru.h"
 #include "ft2build.h"
 #include FT_FREETYPE_H
@@ -102,6 +104,14 @@ public:
   u16 *screen, *screenleft, *screenright;
   //! Offscreen buffer. Only used when OFFSCREEN defined.
   u16 *offscreen;
+  std::vector<u8> screenleft_fb_cache;
+  std::vector<u8> screenright_fb_cache;
+  u64 screenleft_cache_generation;
+  u64 screenright_cache_generation;
+  framebuffer_blit_utils::PhysicalFramebufferSyncState screenleft_hw_sync;
+  framebuffer_blit_utils::PhysicalFramebufferSyncState screenright_hw_sync;
+  framebuffer_blit_utils::DirtyRect screenleft_dirty_rect;
+  framebuffer_blit_utils::DirtyRect screenright_dirty_rect;
   struct {
     int left, right, top, bottom;
   } margin;
@@ -155,10 +165,18 @@ public:
   void SetScreen(u16 *s);
   inline void SetStyle(int astyle) { style = astyle; }
   void MarkScreenDirty(u16 *target);
+  void MarkScreenDirtyRect(u16 *target, int x0, int y0, int x1, int y1);
   inline void MarkCurrentScreenDirty() { MarkScreenDirty(screen); }
+  inline void MarkCurrentScreenDirtyRect(int x0, int y0, int x1, int y1) {
+    MarkScreenDirtyRect(screen, x0, y0, x1, y1);
+  }
   inline void MarkAllScreensDirty() {
     screenleft_dirty = true;
     screenright_dirty = true;
+    screenleft_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
+        0, 0, display.width, framebuffer_blit_utils::LogicalTextScreenHeight(true));
+    screenright_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
+        0, 0, display.width, framebuffer_blit_utils::LogicalTextScreenHeight(false));
   }
   inline bool HasDirtyScreens() const {
     return screenleft_dirty || screenright_dirty;

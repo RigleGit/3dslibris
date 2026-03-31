@@ -62,10 +62,38 @@ void TestNullSelectedPrunesAllWarmupJobs() {
   ExpectTrue("keeps non-warmup", jobs[0].type == 3);
 }
 
+void TestHeavyBrowserJobClassification() {
+  ExpectTrue("metadata is heavy",
+             browser_job_queue_utils::IsHeavyBrowserJobType(1, 1, 2));
+  ExpectTrue("cover is heavy",
+             browser_job_queue_utils::IsHeavyBrowserJobType(2, 1, 2));
+  if (browser_job_queue_utils::IsHeavyBrowserJobType(3, 1, 2))
+    Fail("toc should not be treated as heavy browser job");
+}
+
+void TestTakeFirstAllowedJobPreservesOrderOfOthers() {
+  int a = 1;
+  std::deque<FakeJob> jobs;
+  jobs.push_back(FakeJob{1, &a});
+  jobs.push_back(FakeJob{2, &a});
+  jobs.push_back(FakeJob{3, &a});
+
+  FakeJob out = {0, NULL};
+  const bool found = browser_job_queue_utils::TakeFirstAllowedJob(
+      &jobs, &out, [](const FakeJob &job) { return job.type == 2; });
+  ExpectTrue("finds allowed middle job", found);
+  ExpectTrue("selected job is type 2", out.type == 2);
+  ExpectEq("remaining count after dequeue", jobs.size(), (size_t)2);
+  ExpectTrue("preserves first remaining order", jobs[0].type == 1);
+  ExpectTrue("preserves second remaining order", jobs[1].type == 3);
+}
+
 } // namespace
 
 int main() {
   TestPrunesWarmupJobsForOtherBooks();
   TestNullSelectedPrunesAllWarmupJobs();
+  TestHeavyBrowserJobClassification();
+  TestTakeFirstAllowedJobPreservesOrderOfOthers();
   return 0;
 }

@@ -26,6 +26,7 @@
 #include "book/book.h"
 #include "formats/common/book_error.h"
 #include "shared/app_flow_utils.h"
+#include "shared/deferred_relayout_utils.h"
 #include "shared/pdf_view_utils.h"
 #include "ui/button.h"
 #include "debug_log.h"
@@ -218,16 +219,6 @@ bool PumpDeferredMobi(Book *book, u32 budget_ms, u16 page_budget,
     *pagecount = after;
   if (after != before)
     *status_dirty = true;
-  if ((after != before) || done) {
-    App *app = book->GetApp();
-    if (app) {
-      DBG_LOGF(app,
-               "MOBI: deferred progress pages_before=%u pages_after=%u done=%u "
-               "budget_ms=%u page_budget=%u",
-               (unsigned)before, (unsigned)after, done ? 1u : 0u,
-               (unsigned)budget_ms, (unsigned)page_budget);
-    }
-  }
   if (done)
     *status_dirty = true;
   *deferred_pumped = true;
@@ -347,18 +338,6 @@ u8 OpenSelectedBook(App *app) {
   return 0;
 }
 
-void ApplyRelayoutState(Book *book, const OpenBookRelayoutState &state,
-                        int pageCount) {
-  if (!book || !state.needs_relayout)
-    return;
-  book->SetPosition(layout_reflow::RemapPageIndexApprox(
-      state.old_position, state.old_page_count, pageCount));
-  ApplyRemappedBookmarks(
-      book, layout_reflow::RemapBookmarksApprox(state.old_bookmarks,
-                                                state.old_page_count,
-                                                pageCount));
-}
-
 void EnsureBookMode(App *app, const char *log_message) {
   if (!app || app->GetMode() != AppMode::Browser)
     return;
@@ -371,6 +350,43 @@ void EnsureBookMode(App *app, const char *log_message) {
 }
 
 } // namespace
+
+void App::ClearDeferredRelayoutState() {
+  deferred_relayout_.pending = false;
+  deferred_relayout_.book = NULL;
+  deferred_relayout_.old_page_count = 0;
+  deferred_relayout_.old_position = 0;
+  deferred_relayout_.old_bookmarks.clear();
+  deferred_relayout_.initial_position = 0;
+}
+
+bool App::MaybeFinalizeDeferredRelayout(Book *book, int page_count) {
+  if (!book || !deferred_relayout_.pending || deferred_relayout_.book != book)
+    return false;
+
+  if (deferred_relayout_utils::ShouldCancelFinalDeferredRelayout(
+          deferred_relayout_.pending, book->GetPosition(),
+          deferred_relayout_.initial_position)) {
+    ClearDeferredRelayoutState();
+    return false;
+  }
+
+  if (!deferred_relayout_utils::ShouldApplyFinalDeferredRelayout(
+          deferred_relayout_.pending, book->HasDeferredMobiParse(),
+          book->GetPosition(), deferred_relayout_.initial_position)) {
+    return false;
+  }
+
+  book->SetPosition(layout_reflow::RemapPageIndexApprox(
+      deferred_relayout_.old_position, deferred_relayout_.old_page_count,
+      page_count));
+  ApplyRemappedBookmarks(
+      book, layout_reflow::RemapBookmarksApprox(
+                deferred_relayout_.old_bookmarks,
+                deferred_relayout_.old_page_count, page_count));
+  ClearDeferredRelayoutState();
+  return true;
+}
 
 void App::HandleEventInOpening() {
   if (!opening_.pending || !opening_.book) {
@@ -403,6 +419,7 @@ void App::HandleEventInOpening() {
   opening_.started_at_ms = 0;
 
   if (err) {
+    ClearDeferredRelayoutState();
     if (const char *desc = DescribeBookOpenError(err)) {
       PrintStatus(desc);
     } else {
@@ -430,7 +447,25 @@ void App::HandleEventInOpening() {
     return;
   }
 
-  ApplyRelayoutState(bookcurrent_, relayout_state, pageCount);
+  deferred_relayout_utils::OpenRelayoutPlan open_plan =
+      deferred_relayout_utils::BuildOpenRelayoutPlan(
+          relayout_state.needs_relayout, bookcurrent_->HasDeferredMobiParse(),
+          relayout_state.old_page_count, relayout_state.old_position, pageCount,
+          relayout_state.old_bookmarks);
+  if (open_plan.has_remap) {
+    bookcurrent_->SetPosition(open_plan.mapped_position);
+    ApplyRemappedBookmarks(bookcurrent_, open_plan.mapped_bookmarks);
+  }
+  if (open_plan.defer_final_remap) {
+    deferred_relayout_.pending = true;
+    deferred_relayout_.book = bookcurrent_;
+    deferred_relayout_.old_page_count = relayout_state.old_page_count;
+    deferred_relayout_.old_position = relayout_state.old_position;
+    deferred_relayout_.old_bookmarks = relayout_state.old_bookmarks;
+    deferred_relayout_.initial_position = open_plan.mapped_position;
+  } else {
+    ClearDeferredRelayoutState();
+  }
   ShowCurrentBookView();
   DBG_LOG(this, "OpenBook: switched mode to APP_MODE_BOOK");
 
@@ -652,6 +687,11 @@ void App::HandleEventInBook() {
     }
   }
 
+  if (MaybeFinalizeDeferredRelayout(bookcurrent_, pagecount)) {
+    DrawBookPage(bookcurrent_, ts);
+    status_dirty = true;
+  }
+
   if (status_dirty)
     RequestStatusRedraw();
 }
@@ -686,12 +726,13 @@ void App::ToggleBookmark() {
 }
 
 void App::CloseBook() {
-  if (!bookcurrent_)
-    return;
-  bookcurrent_->Close();
-  bookcurrent_ = NULL;
+  if (bookcurrent_) {
+    bookcurrent_->Close();
+    bookcurrent_ = NULL;
+  }
   pdf_deferred_ready_at_ms_ = 0;
   mobi_deferred_ready_at_ms_ = 0;
+  ClearDeferredRelayoutState();
 }
 
 int App::GetBookIndex(Book *b) {
@@ -721,6 +762,8 @@ u8 App::OpenBook(void) {
   // Fast path: selected book is already parsed and resident.
   if (browser_.selected_book->GetPageCount() > 0 && !needs_relayout) {
     ReuseParsedBook(this);
+    if (deferred_relayout_.book != bookcurrent_)
+      ClearDeferredRelayoutState();
     mobi_deferred_ready_at_ms_ =
         (bookcurrent_ && bookcurrent_->HasDeferredMobiParse())
             ? (osGetTime() + kMobiDeferredIdleDelayMs)
@@ -733,6 +776,7 @@ u8 App::OpenBook(void) {
 
   OpenBookRelayoutState relayout_state =
       CaptureRelayoutState(browser_.selected_book, needs_relayout);
+  ClearDeferredRelayoutState();
 
   // While parsing a new book, avoid displaying stale browser highlight state.
   DrawOpeningSplash(this);
@@ -780,7 +824,25 @@ u8 App::OpenBook(void) {
   }
 
   // Keep the reader roughly in the same part of the book after repagination.
-  ApplyRelayoutState(bookcurrent_, relayout_state, pageCount);
+  deferred_relayout_utils::OpenRelayoutPlan open_plan =
+      deferred_relayout_utils::BuildOpenRelayoutPlan(
+          relayout_state.needs_relayout, bookcurrent_->HasDeferredMobiParse(),
+          relayout_state.old_page_count, relayout_state.old_position, pageCount,
+          relayout_state.old_bookmarks);
+  if (open_plan.has_remap) {
+    bookcurrent_->SetPosition(open_plan.mapped_position);
+    ApplyRemappedBookmarks(bookcurrent_, open_plan.mapped_bookmarks);
+  }
+  if (open_plan.defer_final_remap) {
+    deferred_relayout_.pending = true;
+    deferred_relayout_.book = bookcurrent_;
+    deferred_relayout_.old_page_count = relayout_state.old_page_count;
+    deferred_relayout_.old_position = relayout_state.old_position;
+    deferred_relayout_.old_bookmarks = relayout_state.old_bookmarks;
+    deferred_relayout_.initial_position = open_plan.mapped_position;
+  } else {
+    ClearDeferredRelayoutState();
+  }
 
   EnsureBookMode(this, "OpenBook: switched mode to APP_MODE_BOOK");
 

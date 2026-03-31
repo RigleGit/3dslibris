@@ -11,9 +11,9 @@
 
 #include "app/app.h"
 #include "formats/common/book_error.h"
-#include "formats/common/file_read_utils.h"
 #include "formats/mobi/mobi_cover_meta_cache.h"
 #include "formats/mobi/mobi_record_scan.h"
+#include "shared/mobi_cover_utils.h"
 #include "stb_image.h"
 #include "string_utils.h"
 
@@ -29,7 +29,6 @@
 
 namespace {
 
-static const size_t kMobiCoverFileMaxBytes = 64 * 1024 * 1024;
 static const size_t kMobiCoverRecordMaxBytes = 8 * 1024 * 1024;
 static const int kMobiCoverMaxDimension = 2048;
 static const char *kMobiCoverMetaCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
@@ -45,6 +44,101 @@ struct MobiCoverCandidate {
 };
 
 static bool DecodeAndScaleToCover(Book *book, const u8 *data, size_t size);
+
+class MobiRecordReader {
+public:
+  explicit MobiRecordReader(const std::string &path)
+      : path_(path), fp_(NULL), file_size_(0) {}
+
+  ~MobiRecordReader() {
+    if (fp_)
+      fclose(fp_);
+  }
+
+  bool EnsureOpen() {
+    if (fp_)
+      return true;
+    if (path_.empty())
+      return false;
+    fp_ = fopen(path_.c_str(), "rb");
+    if (!fp_)
+      return false;
+    if (fseek(fp_, 0L, SEEK_END) != 0) {
+      fclose(fp_);
+      fp_ = NULL;
+      return false;
+    }
+    long end = ftell(fp_);
+    if (end < 0) {
+      fclose(fp_);
+      fp_ = NULL;
+      return false;
+    }
+    file_size_ = (size_t)end;
+    rewind(fp_);
+    return true;
+  }
+
+  size_t file_size() const { return file_size_; }
+
+  bool ReadPrefix(size_t len, std::vector<u8> *out) {
+    if (!out || len == 0 || !EnsureOpen() || len > file_size_)
+      return false;
+    out->resize(len);
+    rewind(fp_);
+    if (fread(out->data(), 1, len, fp_) != len) {
+      out->clear();
+      return false;
+    }
+    return true;
+  }
+
+  bool ReadRange(u32 start, u32 end, std::vector<u8> *out) {
+    if (!out || end <= start || !EnsureOpen())
+      return false;
+    const size_t len = (size_t)(end - start);
+    if (len == 0 || len > kMobiCoverRecordMaxBytes || end > file_size_)
+      return false;
+    out->resize(len);
+    if (fseek(fp_, (long)start, SEEK_SET) != 0 ||
+        fread(out->data(), 1, len, fp_) != len) {
+      out->clear();
+      return false;
+    }
+    return true;
+  }
+
+  bool GetRecord(const std::vector<u32> &offsets, u32 record_idx,
+                 const std::vector<u8> **out) {
+    if (!out || record_idx + 1 >= offsets.size())
+      return false;
+    std::unordered_map<u32, std::vector<u8>>::const_iterator it =
+        record_cache_.find(record_idx);
+    if (it != record_cache_.end()) {
+      *out = &it->second;
+      return true;
+    }
+
+    std::vector<u8> record;
+    if (!ReadRange(offsets[(size_t)record_idx], offsets[(size_t)record_idx + 1],
+                   &record)) {
+      return false;
+    }
+
+    std::pair<std::unordered_map<u32, std::vector<u8>>::iterator, bool> inserted =
+        record_cache_.insert(
+            std::make_pair(record_idx, std::vector<u8>()));
+    inserted.first->second.swap(record);
+    *out = &inserted.first->second;
+    return true;
+  }
+
+private:
+  std::string path_;
+  FILE *fp_;
+  size_t file_size_;
+  std::unordered_map<u32, std::vector<u8>> record_cache_;
+};
 
 static void EnsureMobiCoverMetaCacheDirs() {
   static bool initialized = false;
@@ -144,34 +238,11 @@ static void SaveMobiCoverMetaMiss(const std::string &cache_path) {
   mobi_cover_meta_cache::Save(cache_path, meta);
 }
 
-static u16 ReadBE16(const u8 *p) {
-  return (u16)((u16)p[0] << 8 | (u16)p[1]);
-}
-
-static u32 ReadBE32(const u8 *p) {
-  return (u32)((u32)p[0] << 24 | (u32)p[1] << 16 | (u32)p[2] << 8 | (u32)p[3]);
-}
-
 static bool ParseMobiOffsets(const std::string &raw, std::vector<u32> *offsets) {
-  if (!offsets || raw.size() < 78)
+  if (!offsets || raw.size() < 78 || raw.size() > (size_t)UINT_MAX)
     return false;
-
-  const u8 *buf = (const u8 *)raw.data();
-  const u16 rec_count = ReadBE16(buf + 76);
-  if (rec_count == 0 || raw.size() < 78 + (size_t)rec_count * 8)
-    return false;
-
-  offsets->assign((size_t)rec_count + 1, 0);
-  for (u16 i = 0; i < rec_count; i++) {
-    u32 off = ReadBE32(buf + 78 + (size_t)i * 8);
-    if (off >= raw.size())
-      return false;
-    if (i > 0 && off < (*offsets)[(size_t)i - 1])
-      return false;
-    (*offsets)[i] = off;
-  }
-  (*offsets)[(size_t)rec_count] = (u32)raw.size();
-  return true;
+  return mobi_cover_utils::ParsePdbRecordOffsets(
+      (const uint8_t *)raw.data(), raw.size(), (uint32_t)raw.size(), offsets);
 }
 
 static void AddRecordCandidate(std::vector<u32> *out, std::set<u32> *seen,
@@ -193,7 +264,7 @@ static bool ParseMobiCoverHints(const u8 *rec0, size_t rec0_len,
     return false;
 
   if (text_rec_count)
-    *text_rec_count = ReadBE16(rec0 + 8);
+    *text_rec_count = mobi_cover_utils::ReadBE16(rec0 + 8);
   if (first_non_book_index)
     *first_non_book_index = 0;
   if (first_image_index)
@@ -209,18 +280,18 @@ static bool ParseMobiCoverHints(const u8 *rec0, size_t rec0_len,
     return false;
 
   const u8 *mobi = rec0 + 16;
-  const u32 mobi_len = ReadBE32(mobi + 4);
+  const u32 mobi_len = mobi_cover_utils::ReadBE32(mobi + 4);
   if (mobi_len < 0x20 || rec0_len < 16 + (size_t)mobi_len)
     return false;
 
   if (mobi_len >= 0x84 && rec0_len >= 16 + (size_t)0x84 && first_non_book_index)
-    *first_non_book_index = ReadBE32(mobi + 0x80);
+    *first_non_book_index = mobi_cover_utils::ReadBE32(mobi + 0x80);
   if (mobi_len >= 0x70 && rec0_len >= 16 + (size_t)0x70 && first_image_index)
-    *first_image_index = ReadBE32(mobi + 0x6C);
+    *first_image_index = mobi_cover_utils::ReadBE32(mobi + 0x6C);
 
   // EXTH records (when bit 0x40 is set in EXTH flags at 0x80)
   if (mobi_len >= 0x84) {
-    u32 exth_flags = ReadBE32(mobi + 0x80);
+    u32 exth_flags = mobi_cover_utils::ReadBE32(mobi + 0x80);
     const bool flagged_exth = (exth_flags & 0x40) != 0;
     const u8 *exth = mobi + mobi_len;
     size_t remain = rec0_len - (size_t)(exth - rec0);
@@ -228,18 +299,18 @@ static bool ParseMobiCoverHints(const u8 *rec0, size_t rec0_len,
         (remain >= 12 && memcmp(exth, "EXTH", 4) == 0);
     if (flagged_exth || looks_like_exth) {
       if (looks_like_exth) {
-        u32 exth_len = ReadBE32(exth + 4);
-        u32 recs = ReadBE32(exth + 8);
+        u32 exth_len = mobi_cover_utils::ReadBE32(exth + 4);
+        u32 recs = mobi_cover_utils::ReadBE32(exth + 8);
         if (exth_len >= 12 && exth_len <= remain) {
           const u8 *p = exth + 12;
           const u8 *end = exth + exth_len;
           for (u32 i = 0; i < recs && p + 8 <= end; i++) {
-            u32 type = ReadBE32(p + 0);
-            u32 size = ReadBE32(p + 4);
+            u32 type = mobi_cover_utils::ReadBE32(p + 0);
+            u32 size = mobi_cover_utils::ReadBE32(p + 4);
             if (size < 8 || p + size > end)
               break;
             if ((type == 201 || type == 202) && size >= 12) {
-              u32 val = ReadBE32(p + 8);
+              u32 val = mobi_cover_utils::ReadBE32(p + 8);
               if (type == 201 && cover_offset)
                 *cover_offset = val;
               if (type == 202 && thumb_offset)
@@ -247,7 +318,7 @@ static bool ParseMobiCoverHints(const u8 *rec0, size_t rec0_len,
             } else if (type == 121 && size >= 12) {
               // EXTH 121 = KF8 boundary record index (combo files).
               if (kf8_boundary)
-                *kf8_boundary = ReadBE32(p + 8);
+                *kf8_boundary = mobi_cover_utils::ReadBE32(p + 8);
             }
             p += size;
           }
@@ -394,25 +465,24 @@ static float ScoreCoverCandidate(const MobiCoverCandidate &c) {
   return ratio_score + orientation_score + area_score + tiny_penalty;
 }
 
-static bool ProbeRecordAsCoverCandidate(const std::string &raw,
+static bool ProbeRecordAsCoverCandidate(MobiRecordReader *reader,
                                         const std::vector<u32> &offsets,
                                         u32 record_idx,
                                         MobiCoverCandidate *out) {
-  if (!out)
+  if (!reader || !out)
     return false;
   if (record_idx >= offsets.size() - 1)
     return false;
 
-  u32 start = offsets[(size_t)record_idx];
-  u32 end = offsets[(size_t)record_idx + 1];
-  if (end <= start)
+  const std::vector<u8> *record = NULL;
+  if (!reader->GetRecord(offsets, record_idx, &record) || !record)
     return false;
 
-  size_t len = (size_t)(end - start);
+  const size_t len = record->size();
   if (len < 32 || len > kMobiCoverRecordMaxBytes)
     return false;
 
-  const u8 *data = (const u8 *)raw.data() + start;
+  const u8 *data = record->data();
   size_t image_off = FindImageStartOffset(data, len);
   if (image_off == SIZE_MAX)
     return false;
@@ -438,10 +508,12 @@ static bool ProbeRecordAsCoverCandidate(const std::string &raw,
   return true;
 }
 
-static u32 FindFirstImageRecordIndex(const std::string &raw,
+static u32 FindFirstImageRecordIndex(MobiRecordReader *reader,
                                      const std::vector<u32> &offsets,
                                      u32 start_idx,
                                      u32 max_probe_records) {
+  if (!reader)
+    return 0;
   const u32 rec_count = (u32)offsets.size() - 1;
   if (rec_count < 2 || start_idx == 0 || start_idx >= rec_count)
     return 0;
@@ -451,16 +523,15 @@ static u32 FindFirstImageRecordIndex(const std::string &raw,
     end_idx = start_idx + max_probe_records;
 
   for (u32 i = start_idx; i < end_idx; i++) {
-    u32 start = offsets[(size_t)i];
-    u32 end = offsets[(size_t)i + 1];
-    if (end <= start || end > raw.size())
+    const std::vector<u8> *record = NULL;
+    if (!reader->GetRecord(offsets, i, &record) || !record)
       continue;
 
-    size_t len = (size_t)(end - start);
+    const size_t len = record->size();
     if (len < 32 || len > kMobiCoverRecordMaxBytes)
       continue;
 
-    const u8 *data = (const u8 *)raw.data() + start;
+    const u8 *data = record->data();
     size_t image_off = FindImageStartOffset(data, len);
     if (image_off == SIZE_MAX)
       continue;
@@ -484,20 +555,18 @@ static u32 FindFirstImageRecordIndex(const std::string &raw,
   return 0;
 }
 
-static bool TryDecodeCoverCandidate(Book *book, const std::string &raw,
+static bool TryDecodeCoverCandidate(Book *book, MobiRecordReader *reader,
                                     const std::vector<u32> &offsets,
                                     const MobiCoverCandidate &cand, App *app) {
-  if (!book || cand.record_idx >= offsets.size() - 1)
+  if (!book || !reader || cand.record_idx >= offsets.size() - 1)
     return false;
-  u32 start = offsets[(size_t)cand.record_idx];
-  u32 end = offsets[(size_t)cand.record_idx + 1];
-  if (end <= start || end > raw.size())
+  const std::vector<u8> *record = NULL;
+  if (!reader->GetRecord(offsets, cand.record_idx, &record) || !record)
     return false;
-  const u8 *data = (const u8 *)raw.data() + start;
-  if (cand.image_off >= (size_t)(end - start))
+  if (cand.image_off >= record->size())
     return false;
-  const u8 *image = data + cand.image_off;
-  size_t image_len = (size_t)(end - start) - cand.image_off;
+  const u8 *image = record->data() + cand.image_off;
+  size_t image_len = record->size() - cand.image_off;
   if (!DecodeAndScaleToCover(book, image, image_len))
     return false;
   if (app) {
@@ -537,28 +606,37 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
     }
   }
 
-  std::string raw;
-  // Cover extraction reads the same MOBI while the library is busy, so reuse
-  // the short-read-safe helper instead of stopping on the first partial chunk.
-  if (!file_read_utils::ReadPathToStringLimited(mobipath, &raw,
-                                                kMobiCoverFileMaxBytes))
+  MobiRecordReader reader(mobipath);
+  if (!reader.EnsureOpen())
     return 2;
-  if (raw.empty())
+  if (reader.file_size() == 0 || reader.file_size() > (size_t)UINT_MAX)
     return BOOK_ERR_CORRUPT;
+
+  std::vector<u8> offset_table;
+  if (!reader.ReadPrefix(78, &offset_table))
+    return BOOK_ERR_CORRUPT;
+  const size_t offset_table_size = mobi_cover_utils::PdbOffsetTableSizeFromHeader(
+      offset_table.data(), offset_table.size());
+  if (offset_table_size == 0 || offset_table_size > reader.file_size() ||
+      !reader.ReadPrefix(offset_table_size, &offset_table)) {
+    return BOOK_ERR_CORRUPT;
+  }
 
   std::vector<u32> offsets;
-  if (!ParseMobiOffsets(raw, &offsets) || offsets.size() < 3)
+  if (!mobi_cover_utils::ParsePdbRecordOffsets(
+          offset_table.data(), offset_table.size(),
+          (uint32_t)reader.file_size(), &offsets) ||
+      offsets.size() < 3) {
     return BOOK_ERR_CORRUPT;
+  }
 
   const u32 rec_count = (u32)offsets.size() - 1;
-  const u8 *data = (const u8 *)raw.data();
-  const u32 rec0_start = offsets[0];
-  const u32 rec0_end = offsets[1];
-  if (rec0_end <= rec0_start || rec0_end > raw.size())
+  const std::vector<u8> *rec0_buf = NULL;
+  if (!reader.GetRecord(offsets, 0, &rec0_buf) || !rec0_buf || rec0_buf->empty())
     return 4;
 
-  const u8 *rec0 = data + rec0_start;
-  const size_t rec0_len = (size_t)(rec0_end - rec0_start);
+  const u8 *rec0 = rec0_buf->data();
+  const size_t rec0_len = rec0_buf->size();
 
   u32 text_rec_count = 0;
   u32 first_non_book_index = 0;
@@ -587,7 +665,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
     const u32 first_image_probe_budget =
         mobi_record_scan::FirstImageProbeLimit(rec_count - start_idx);
     detected_first_image_index =
-        FindFirstImageRecordIndex(raw, offsets, start_idx,
+        FindFirstImageRecordIndex(&reader, offsets, start_idx,
                                   first_image_probe_budget);
   }
   if (first_image_index == 0 && detected_first_image_index > 0)
@@ -617,9 +695,11 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   if (kf8_boundary != UINT_MAX && kf8_boundary > 0 && kf8_boundary < rec_count) {
     const u32 rec_start = offsets[(size_t)kf8_boundary];
     const u32 rec_end = offsets[(size_t)kf8_boundary + 1];
-    if (rec_end > rec_start && rec_end <= raw.size()) {
-      const u8 *kf8_rec = data + rec_start;
-      const size_t kf8_len = (size_t)(rec_end - rec_start);
+    const std::vector<u8> *kf8_record = NULL;
+    if (rec_end > rec_start &&
+        reader.GetRecord(offsets, kf8_boundary, &kf8_record) && kf8_record) {
+      const u8 *kf8_rec = kf8_record->data();
+      const size_t kf8_len = kf8_record->size();
       has_kf8_hints = ParseMobiCoverHints(
           kf8_rec, kf8_len, &kf8_text_rec_count, &kf8_first_non_book,
           &kf8_first_image, &kf8_cover_offset, &kf8_thumb_offset,
@@ -753,7 +833,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
            cover_hint_bonus.begin();
        it != cover_hint_bonus.end(); ++it) {
     MobiCoverCandidate c;
-    if (!ProbeRecordAsCoverCandidate(raw, offsets, it->first, &c))
+    if (!ProbeRecordAsCoverCandidate(&reader, offsets, it->first, &c))
       continue;
     if (c.width < 24 || c.height < 24)
       continue;
@@ -764,7 +844,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
            thumb_hint_bonus.begin();
        it != thumb_hint_bonus.end(); ++it) {
     MobiCoverCandidate c;
-    if (!ProbeRecordAsCoverCandidate(raw, offsets, it->first, &c))
+    if (!ProbeRecordAsCoverCandidate(&reader, offsets, it->first, &c))
       continue;
     if (c.width < 24 || c.height < 24)
       continue;
@@ -792,7 +872,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
       }
     }
     for (size_t i = 0; i < meta_ranked.size(); i++) {
-      if (TryDecodeCoverCandidate(book, raw, offsets, meta_ranked[i], app)) {
+      if (TryDecodeCoverCandidate(book, &reader, offsets, meta_ranked[i], app)) {
         SaveMobiCoverMetaCandidate(meta_cache_path, offsets, meta_ranked[i]);
         return 0;
       }
@@ -803,7 +883,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   ranked.reserve(candidates.size() + 64);
   for (size_t i = 0; i < candidates.size(); i++) {
     MobiCoverCandidate c;
-    if (!ProbeRecordAsCoverCandidate(raw, offsets, candidates[i], &c))
+    if (!ProbeRecordAsCoverCandidate(&reader, offsets, candidates[i], &c))
       continue;
     int bonus = 220 - (int)i * 12;
     if (bonus < 0)
@@ -820,7 +900,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
     if (seen.find(i) != seen.end())
       continue;
     MobiCoverCandidate c;
-    if (!ProbeRecordAsCoverCandidate(raw, offsets, i, &c))
+    if (!ProbeRecordAsCoverCandidate(&reader, offsets, i, &c))
       continue;
     c.score -= 24.0f; // Prefer explicit/proximal candidates over global scan.
     ranked.push_back(c);
@@ -834,7 +914,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
                 return a.score > b.score;
               });
     for (size_t i = 0; i < ranked.size(); i++) {
-      if (TryDecodeCoverCandidate(book, raw, offsets, ranked[i], app)) {
+      if (TryDecodeCoverCandidate(book, &reader, offsets, ranked[i], app)) {
         SaveMobiCoverMetaCandidate(meta_cache_path, offsets, ranked[i]);
         return 0;
       }

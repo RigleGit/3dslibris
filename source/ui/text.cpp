@@ -215,6 +215,13 @@ Text::Text() {
   screen = screenleft;
   screenleft_dirty = true;
   screenright_dirty = true;
+  screenleft_cache_generation = 1;
+  screenright_cache_generation = 1;
+  screenleft_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
+      0, 0, display.width, framebuffer_blit_utils::LogicalTextScreenHeight(true));
+  screenright_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
+      0, 0, display.width,
+      framebuffer_blit_utils::LogicalTextScreenHeight(false));
 
   imagetype.face_id = (FTC_FaceID)&face_id;
   imagetype.flags = FT_LOAD_DEFAULT;
@@ -470,10 +477,10 @@ void Text::ClearCache(FT_Face face) {
 }
 
 void Text::ClearScreen() {
-  MarkCurrentScreenDirty();
   const bool is_left_screen = (screen == screenleft);
   const int logicalHeight =
       framebuffer_blit_utils::LogicalTextScreenHeight(is_left_screen);
+  MarkCurrentScreenDirtyRect(0, 0, display.width, logicalHeight);
   u16 bg_color;
   if (colorMode == 1)
     bg_color = 0x0000;
@@ -491,7 +498,7 @@ void Text::ClearScreen() {
 }
 
 void Text::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
-  MarkCurrentScreenDirty();
+  MarkCurrentScreenDirtyRect((int)xl, (int)yl, (int)xh, (int)yh);
   u16 clearcolor;
   if (colorMode == 1)
     clearcolor = 0x0000;
@@ -531,7 +538,7 @@ u16 Text::GetBgColor() {
 }
 
 void Text::FillRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
-  MarkCurrentScreenDirty();
+  MarkCurrentScreenDirtyRect((int)xl, (int)yl, (int)xh, (int)yh);
   for (u16 y = yl; y < yh; y++) {
     for (u16 x = xl; x < xh; x++) {
       if (y < (u16)display.height && x < (u16)display.width)
@@ -541,7 +548,7 @@ void Text::FillRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
 }
 
 void Text::DrawRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
-  MarkCurrentScreenDirty();
+  MarkCurrentScreenDirtyRect((int)xl, (int)yl, (int)xh, (int)yh);
   int maxHeight = (screen == screenleft ? 400 : 320);
   for (u16 x = xl; x < xh; x++) {
     if (yl < maxHeight && x < (u16)display.width)
@@ -661,7 +668,12 @@ void Text::SetColorMode(int state) { colorMode = state; }
 
 int Text::GetColorMode() { return colorMode; }
 
-void Text::SetOrientation(bool right) { turned_right = right; }
+void Text::SetOrientation(bool right) {
+  if (turned_right == right)
+    return;
+  turned_right = right;
+  MarkAllScreensDirty();
+}
 
 bool Text::GetOrientation() const { return turned_right; }
 
@@ -782,7 +794,6 @@ void Text::PrintChar(u32 ucs, u8 astyle) { PrintChar(ucs, GetFace(astyle)); }
 void Text::PrintChar(u32 ucs, FT_Face face) {
   // Draw a character for the given UCS codepoint,
   // into the current screen buffer at the current pen position.
-  MarkCurrentScreenDirty();
 
   u16 bx, by, width, height = 0;
   FT_Byte *buffer = NULL;
@@ -857,6 +868,10 @@ void Text::PrintChar(u32 ucs, FT_Face face) {
       FTC_Node_Unref(anode, cache.manager);
     return;
   }
+
+  MarkCurrentScreenDirtyRect((int)pen.x + (int)bx, (int)pen.y - (int)by,
+                             (int)pen.x + (int)bx + (int)width,
+                             (int)pen.y - (int)by + (int)height);
 
 #ifdef DRAW_PEN_POSITION
   // Mark the pen position.
@@ -964,7 +979,10 @@ void Text::PrintString(const char *s, FT_Face face) {
 }
 
 void Text::ClearScreen(u16 *screen, u8 r, u8 g, u8 b) {
-  MarkScreenDirty(screen);
+  const int logicalHeight = (screen == screenright)
+                                ? framebuffer_blit_utils::LogicalTextScreenHeight(false)
+                                : display.height;
+  MarkScreenDirtyRect(screen, 0, 0, display.width, logicalHeight);
   u16 pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
   for (int i = 0; i < display.width * display.height; i++)
     screen[i] = pixel;
@@ -1118,10 +1136,35 @@ void Text::SetFontFile(const char *path, u8 style) {
 std::string Text::GetFontFile(u8 style) { return filenames[style]; }
 
 void Text::MarkScreenDirty(u16 *target) {
-  if (target == screenleft)
+  if (target == screenleft) {
     screenleft_dirty = true;
-  else if (target == screenright)
+    screenleft_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
+        0, 0, display.width, framebuffer_blit_utils::LogicalTextScreenHeight(true));
+  } else if (target == screenright) {
     screenright_dirty = true;
+    screenright_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
+        0, 0, display.width,
+        framebuffer_blit_utils::LogicalTextScreenHeight(false));
+  }
+}
+
+void Text::MarkScreenDirtyRect(u16 *target, int x0, int y0, int x1, int y1) {
+  framebuffer_blit_utils::DirtyRect *dirty_rect = nullptr;
+  int logical_height = display.height;
+  if (target == screenleft) {
+    screenleft_dirty = true;
+    dirty_rect = &screenleft_dirty_rect;
+    logical_height = framebuffer_blit_utils::LogicalTextScreenHeight(true);
+  } else if (target == screenright) {
+    screenright_dirty = true;
+    dirty_rect = &screenright_dirty_rect;
+    logical_height = framebuffer_blit_utils::LogicalTextScreenHeight(false);
+  } else {
+    return;
+  }
+
+  framebuffer_blit_utils::ExpandDirtyRect(dirty_rect, x0, y0, x1, y1,
+                                          display.width, logical_height);
 }
 
 /*
@@ -1148,74 +1191,72 @@ bool Text::BlitToFramebuffer() {
   if (!screenleft_dirty && !screenright_dirty)
     return false;
 
-  u16 fbW, fbH;
+  u16 fbW = 0, fbH = 0;
 
-  auto blitPage = [&](u8 *fb, u16 *src, u16 logicalHeight) {
+  auto blitPage = [&](u8 *fb, std::vector<u8> &cache, u16 *src,
+                      u16 logicalHeight, bool dirty,
+                      framebuffer_blit_utils::DirtyRect &dirty_rect,
+                      u64 &cache_generation,
+                      framebuffer_blit_utils::PhysicalFramebufferSyncState &sync) {
     if (!fb || !src)
       return;
 
-    // libctru can report dimensions in either orientation depending on screen.
-    // Use stride=min and width=max to keep mapping stable.
-    const u32 stride = (fbW < fbH) ? fbW : fbH;    // usually 240
-    const u32 physWidth = (fbW > fbH) ? fbW : fbH; // 320 or 400
-    const size_t fbSize = (size_t)fbW * (size_t)fbH * 3;
-    if (!stride || !physWidth || !fbSize)
+    const framebuffer_blit_utils::FramebufferGeometry geometry =
+        framebuffer_blit_utils::MakeFramebufferGeometry((int)fbW, (int)fbH);
+    if (geometry.stride <= 0 || geometry.phys_width <= 0 ||
+        geometry.byte_size == 0)
       return;
 
-    memset(fb, 0xFF, fbSize);
+    if (cache.size() != geometry.byte_size) {
+      cache.assign(geometry.byte_size, 0xFF);
+      dirty = true;
+      dirty_rect = framebuffer_blit_utils::MakeDirtyRect(0, 0, display.width,
+                                                         logicalHeight);
+    }
 
-    u32 maxSy = logicalHeight;
-    if (maxSy > physWidth)
-      maxSy = physWidth;
-    u32 maxSx = (u32)display.width;
-    if (maxSx > stride)
-      maxSx = stride;
-
-    for (u32 sy = 0; sy < maxSy; sy++) {
-      for (u32 sx = 0; sx < maxSx; sx++) {
-        u16 pixel = src[sy * display.height + sx];
-        if (pixel == 0xFFFF)
-          continue;
-
-        u8 r = ((pixel >> 11) & 0x1F) << 3;
-        u8 g = ((pixel >> 5) & 0x3F) << 2;
-        u8 b = (pixel & 0x1F) << 3;
-
-        // Rotate logical page into linear framebuffer layout.
-        // turned_right=false keeps the historical mapping used by the port.
-        // turned_right=true rotates to the opposite handed orientation.
-        u32 dx, dy;
-        if (!turned_right) {
-          dx = physWidth - 1 - sy;
-          dy = stride - 1 - sx;
-        } else {
-          dx = sy;
-          dy = sx;
-        }
-        const size_t off = ((size_t)dx * (size_t)stride + (size_t)dy) * 3;
-        if (off + 2 >= fbSize)
-          continue;
-
-        fb[off + 0] = b;
-        fb[off + 1] = g;
-        fb[off + 2] = r;
+    if (dirty) {
+      if (dirty_rect.valid) {
+        framebuffer_blit_utils::ConvertLogicalRgb565RectToPhysicalBgr888(
+            cache.data(), geometry, src, display.height, display.width,
+            logicalHeight, turned_right, dirty_rect);
+      } else {
+        framebuffer_blit_utils::ConvertLogicalRgb565ToPhysicalBgr888(
+            cache.data(), geometry, src, display.height, display.width,
+            logicalHeight, turned_right);
       }
+      cache_generation++;
+    }
+
+    const int slot =
+        framebuffer_blit_utils::ResolvePhysicalFramebufferSlot(&sync, fb);
+    if (framebuffer_blit_utils::NeedsPhysicalFramebufferCopy(
+            sync, slot, cache_generation)) {
+      memcpy(fb, cache.data(), geometry.byte_size);
+      framebuffer_blit_utils::MarkPhysicalFramebufferCopied(
+          &sync, slot, fb, cache_generation);
     }
   };
 
   // With double-buffering on 3DS, a swap flips both screens. If we only write
   // one side, the other side can show stale content from an older backbuffer.
-  // So when anything is dirty, refresh both software pages into current
-  // backbuffers before swapping.
+  // So when anything is dirty, we must still populate both current backbuffers
+  // before swapping. We keep persistent physical caches so the clean side can
+  // be copied without paying the RGB565->BGR888 conversion cost again.
   u8 *fbBottom = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, &fbW, &fbH);
-  blitPage(fbBottom, screenright,
-           framebuffer_blit_utils::LogicalTextScreenHeight(false));
+  blitPage(fbBottom, screenright_fb_cache, screenright,
+           framebuffer_blit_utils::LogicalTextScreenHeight(false),
+           screenright_dirty, screenright_dirty_rect,
+           screenright_cache_generation, screenright_hw_sync);
 
   u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
-  blitPage(fbTop, screenleft,
-           framebuffer_blit_utils::LogicalTextScreenHeight(true));
+  blitPage(fbTop, screenleft_fb_cache, screenleft,
+           framebuffer_blit_utils::LogicalTextScreenHeight(true),
+           screenleft_dirty, screenleft_dirty_rect, screenleft_cache_generation,
+           screenleft_hw_sync);
 
   screenright_dirty = false;
   screenleft_dirty = false;
+  screenright_dirty_rect.valid = false;
+  screenleft_dirty_rect.valid = false;
   return true;
 }

@@ -5,6 +5,11 @@
 
 namespace browser_job_queue_utils {
 
+inline bool IsHeavyBrowserJobType(int type, int metadata_job_type,
+                                  int cover_job_type) {
+  return type == metadata_job_type || type == cover_job_type;
+}
+
 template <typename JobT>
 size_t PruneWarmupJobsForOtherBooks(std::deque<JobT> *jobs,
                                     const void *selected_book,
@@ -28,6 +33,28 @@ size_t PruneWarmupJobsForOtherBooks(std::deque<JobT> *jobs,
   }
   jobs->swap(kept);
   return removed;
+}
+
+template <typename JobT, typename PredicateT>
+bool TakeFirstAllowedJob(std::deque<JobT> *jobs, JobT *out,
+                         PredicateT predicate) {
+  if (!jobs || !out)
+    return false;
+
+  std::deque<JobT> kept;
+  bool found = false;
+  while (!jobs->empty()) {
+    JobT job = jobs->front();
+    jobs->pop_front();
+    if (!found && predicate(job)) {
+      *out = job;
+      found = true;
+      continue;
+    }
+    kept.push_back(job);
+  }
+  jobs->swap(kept);
+  return found;
 }
 
 } // namespace browser_job_queue_utils

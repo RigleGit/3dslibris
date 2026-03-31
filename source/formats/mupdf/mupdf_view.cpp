@@ -111,7 +111,7 @@ static void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height
 
   const int stride = ts->display.height;
   const int logical_width = ts->display.width;
-  ts->MarkScreenDirty(screen);
+  ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
   for (int row = 0; row < draw_height; row++) {
     const int dy = y + row;
     if (dy < 0 || dy >= logical_height)

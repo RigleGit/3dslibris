@@ -30,6 +30,7 @@
 #include "book/book.h"
 #include "ui/browser_nav.h"
 #include "formats/common/book_error.h"
+#include "formats/cbz/cbz.h"
 #include "ui/button.h"
 #include "menus/chapter_menu.h"
 #include "debug_log.h"
@@ -37,8 +38,10 @@
 #include "formats/fb2/fb2.h"
 #include "main.h"
 #include "formats/mobi/mobi.h"
+#include "formats/pdf/pdf.h"
 #include "parse.h"
 #include "shared/app_flow_utils.h"
+#include "shared/browser_cover_cache_utils.h"
 #include "shared/browser_job_queue_utils.h"
 #include "shared/browser_warmup_utils.h"
 #include "string_utils.h"
@@ -209,8 +212,16 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
 
   std::string cache_path = BuildCoverCachePath(book_path);
   FILE *fp = fopen(cache_path.c_str(), "rb");
-  if (!fp)
+  if (!fp) {
+#ifdef DSLIBRIS_DEBUG
+    if (book->GetApp()) {
+      DBG_LOGF(book->GetApp(), "COVER: cache miss book=%s path=%s",
+               book->GetFileName() ? book->GetFileName() : "(null)",
+               cache_path.c_str());
+    }
+#endif
     return false;
+  }
 
   u8 header[8];
   bool ok = fread(header, 1, sizeof(header), fp) == sizeof(header);
@@ -246,6 +257,13 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   memcpy(book->coverPixels, pixels.data(), count * sizeof(u16));
   book->coverWidth = w;
   book->coverHeight = h;
+#ifdef DSLIBRIS_DEBUG
+  if (book->GetApp()) {
+    DBG_LOGF(book->GetApp(), "COVER: cache hit book=%s path=%s size=%ux%u",
+             book->GetFileName() ? book->GetFileName() : "(null)",
+             cache_path.c_str(), (unsigned)w, (unsigned)h);
+  }
+#endif
   return true;
 }
 
@@ -279,19 +297,50 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
   fclose(fp);
   if (ok)
     PruneCoverCache(false);
+#ifdef DSLIBRIS_DEBUG
+  if (book->GetApp()) {
+    DBG_LOGF(book->GetApp(), "COVER: cache save %s book=%s path=%s size=%dx%d",
+             ok ? "ok" : "fail",
+             book->GetFileName() ? book->GetFileName() : "(null)",
+             cache_path.c_str(), book->coverWidth, book->coverHeight);
+  }
+#endif
   return ok;
 }
 
 } // namespace
 
+void App::UnloadNonVisibleBrowserCoverCaches() {
+  if (BookCount() <= 0)
+    return;
+
+  const browser_cover_cache_utils::VisibleRange visible =
+      browser_cover_cache_utils::ComputeVisibleRange(
+          browser_.page_start, BookCount(), APP_BROWSER_BUTTON_COUNT);
+  for (int i = 0; i < BookCount(); i++) {
+    if (browser_cover_cache_utils::RangeContains(visible, i))
+      continue;
+
+    Book *book = books[i];
+    if (!book || !book->coverPixels)
+      continue;
+    delete[] book->coverPixels;
+    book->coverPixels = nullptr;
+    book->coverWidth = 0;
+    book->coverHeight = 0;
+  }
+}
+
 void App::LoadVisibleBrowserCoverCaches() {
   if (BookCount() <= 0)
     return;
 
-  const int start = std::max(0, browser_.page_start);
-  const int end = std::min(BookCount(), start + APP_BROWSER_BUTTON_COUNT);
-  int loaded = 0;
-  size_t bytes = 0;
+  UnloadNonVisibleBrowserCoverCaches();
+  const browser_cover_cache_utils::VisibleRange visible =
+      browser_cover_cache_utils::ComputeVisibleRange(
+          browser_.page_start, BookCount(), APP_BROWSER_BUTTON_COUNT);
+  const int start = visible.start;
+  const int end = visible.end;
   for (int i = start; i < end; i++) {
     Book *book = books[i];
     if (!book || book->coverPixels)
@@ -300,9 +349,6 @@ void App::LoadVisibleBrowserCoverCaches() {
     std::string path = bookdir + "/" + book->GetFileName();
     if (TryLoadCoverCache(book, path)) {
       book->coverTried = true;
-      loaded++;
-      bytes += (size_t)book->coverWidth * (size_t)book->coverHeight *
-               sizeof(u16);
       if (book->format == FORMAT_EPUB) {
         book->metadataIndexTried = true;
         book->metadataIndexed = true;
@@ -582,6 +628,13 @@ void App::QueueBookWarmup(Book *book) {
   if (!book || book->coverPixels || book->coverTried)
     return;
   const size_t queue_before = job_queue.size();
+  const bool is_selected_book = (book == browser_.selected_book);
+  const bool warmup_idle = browser_warmup_utils::IsBrowserWarmupIdle(
+      osGetTime(), browser_.last_interaction_ms, browser_.wait_input_release);
+  const bool heavy_idle = browser_warmup_utils::IsBrowserHeavyWarmupIdle(
+      osGetTime(), browser_.last_interaction_ms, browser_.wait_input_release);
+  const bool should_queue_cover = browser_warmup_utils::ShouldQueueCoverWarmup(
+      is_selected_book, warmup_idle, heavy_idle);
 
   const app_flow_utils::BookFileFormat format =
       app_flow_utils::DetectBookFormat(book->GetFileName());
@@ -590,26 +643,48 @@ void App::QueueBookWarmup(Book *book) {
     if (!book->metadataIndexTried &&
         app_flow_utils::SupportsMetadataIndexing(format))
       EnqueueJob(APP_JOB_INDEX_METADATA, book);
-    EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+    if (should_queue_cover)
+      EnqueueJob(APP_JOB_EXTRACT_COVER, book);
   } else if (book->format == FORMAT_PDF) {
     if (!book->metadataIndexTried &&
         app_flow_utils::SupportsMetadataIndexing(format))
       EnqueueJob(APP_JOB_INDEX_METADATA, book);
+    if (should_queue_cover)
+      EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+  } else if (book->format == FORMAT_CBZ) {
+    if (should_queue_cover)
+      EnqueueJob(APP_JOB_EXTRACT_COVER, book);
   } else if (book->format == FORMAT_XHTML) {
     if (HasExtCI(book->GetFileName(), ".fb2") ||
         HasExtCI(book->GetFileName(), ".mobi")) {
-      EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+      if (should_queue_cover)
+        EnqueueJob(APP_JOB_EXTRACT_COVER, book);
     }
   }
 #ifdef DSLIBRIS_DEBUG
   if (job_queue.size() != queue_before) {
-    DBG_LOGF(this, "BROWSER: warmup queued added=%u queue=%u book=%s format=%d",
+    DBG_LOGF(this,
+             "BROWSER: warmup queued added=%u queue=%u book=%s format=%d "
+             "selected=%u warmup_idle=%u heavy_idle=%u cover=%u",
              (unsigned)(job_queue.size() - queue_before),
              (unsigned)job_queue.size(),
              book->GetFileName() ? book->GetFileName() : "(null)",
-             (int)book->format);
+             (int)book->format, is_selected_book ? 1u : 0u,
+             warmup_idle ? 1u : 0u, heavy_idle ? 1u : 0u,
+             should_queue_cover ? 1u : 0u);
   }
 #endif
+}
+
+void App::TickBrowserWarmup() {
+  if (mode_ != AppMode::Browser || !browser_.selected_book)
+    return;
+  if (!browser_warmup_utils::IsBrowserWarmupIdle(
+          osGetTime(), browser_.last_interaction_ms,
+          browser_.wait_input_release)) {
+    return;
+  }
+  QueueBookWarmup(browser_.selected_book);
 }
 
 void App::QueueTocResolve(Book *book) {
@@ -637,10 +712,40 @@ void App::ProcessJobs(u32 budget_ms) {
 
   u64 start_ms = osGetTime();
   while (!job_queue.empty()) {
-    app_job_t job = job_queue.front();
-    job_queue.pop_front();
-    if (!job.book)
-      continue;
+    while (!job_queue.empty() && !job_queue.front().book)
+      job_queue.pop_front();
+    if (job_queue.empty())
+      break;
+
+    const bool allow_selected_browser_jobs =
+        mode_ != AppMode::Browser ||
+        browser_warmup_utils::IsBrowserWarmupIdle(
+            osGetTime(), browser_.last_interaction_ms,
+            browser_.wait_input_release);
+    const bool allow_heavy_browser_jobs =
+        mode_ != AppMode::Browser ||
+        browser_warmup_utils::IsBrowserHeavyWarmupIdle(
+            osGetTime(), browser_.last_interaction_ms,
+            browser_.wait_input_release);
+    app_job_t job = {};
+    const bool got_job = browser_job_queue_utils::TakeFirstAllowedJob(
+        &job_queue, &job, [&](const app_job_t &candidate) {
+          if (!candidate.book)
+            return false;
+          if (!browser_job_queue_utils::IsHeavyBrowserJobType(
+                  candidate.type, APP_JOB_INDEX_METADATA,
+                  APP_JOB_EXTRACT_COVER)) {
+            return true;
+          }
+          if (mode_ != AppMode::Browser)
+            return true;
+          if (candidate.book == browser_.selected_book)
+            return allow_selected_browser_jobs;
+          return allow_heavy_browser_jobs;
+        });
+    if (!got_job)
+      break;
+
 
     Book *book = job.book;
     int rc = 0;
@@ -658,6 +763,11 @@ void App::ProcessJobs(u32 budget_ms) {
     } else if (job.type == APP_JOB_EXTRACT_COVER) {
       if (!book->coverPixels && !book->coverTried) {
         std::string path = bookdir + "/" + book->GetFileName();
+#ifdef DSLIBRIS_DEBUG
+        DBG_LOGF(this, "COVER: extract start book=%s format=%d",
+                 book->GetFileName() ? book->GetFileName() : "(null)",
+                 (int)book->format);
+#endif
         if (book->format == FORMAT_EPUB) {
           if (!book->metadataIndexTried) {
             EnqueueJob(APP_JOB_INDEX_METADATA, book);
@@ -688,7 +798,26 @@ void App::ProcessJobs(u32 budget_ms) {
           }
           book->coverTried = true;
           browser_.view_dirty = true;
+        } else if (book->format == FORMAT_PDF) {
+          rc = pdf_extract_cover(book, path);
+          if (rc == 0 && book->coverPixels) {
+            SaveCoverCache(book, path);
+          }
+          book->coverTried = true;
+          browser_.view_dirty = true;
+        } else if (book->format == FORMAT_CBZ) {
+          rc = cbz_extract_cover(book, path);
+          if (rc == 0 && book->coverPixels) {
+            SaveCoverCache(book, path);
+          }
+          book->coverTried = true;
+          browser_.view_dirty = true;
         }
+#ifdef DSLIBRIS_DEBUG
+        DBG_LOGF(this, "COVER: extract end rc=%d book=%s pixels=%u tried=%u",
+                 rc, book->GetFileName() ? book->GetFileName() : "(null)",
+                 book->coverPixels ? 1u : 0u, book->coverTried ? 1u : 0u);
+#endif
       }
     } else if (job.type == APP_JOB_RESOLVE_TOC) {
       if (book->format == FORMAT_EPUB && !book->tocResolveTried) {
@@ -958,11 +1087,6 @@ void App::browser_draw(void) {
   ts->SetColorMode(0); // Normal for browser text
   ts->ClearScreen();
   DrawBottomGradientBackground();
-  if (browser_.selected_book &&
-      browser_warmup_utils::IsBrowserWarmupIdle(
-          osGetTime(), browser_.last_interaction_ms,
-          browser_.wait_input_release))
-    QueueBookWarmup(browser_.selected_book);
 
   for (int i = browser_.page_start;
        (i < BookCount()) &&
@@ -979,6 +1103,9 @@ void App::browser_draw(void) {
       int cx = btnX + 2 + (kBrowserCoverW - books[i]->coverWidth) / 2;
       int cy = btnY + 2 + (kBrowserCoverH - books[i]->coverHeight) / 2;
       int w = ts->display.height; // buffer stride
+      ts->MarkScreenDirtyRect(ts->screenright, cx, cy,
+                              cx + books[i]->coverWidth,
+                              cy + books[i]->coverHeight);
       for (int py = 0; py < books[i]->coverHeight && (cy + py) < 320; py++) {
         for (int px = 0; px < books[i]->coverWidth && (cx + px) < 240; px++) {
           ts->screenright[(cy + py) * w + (cx + px)] =

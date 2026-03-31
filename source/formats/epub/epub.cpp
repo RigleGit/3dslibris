@@ -42,6 +42,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/common/page_cache_utils.h"
 #include "parse.h"
 #include "path_utils.h"
+#include "shared/reflow_cache_save_utils.h"
 #include "stb_image.h"
 #include "string_utils.h"
 #include "minizip/unzip.h"
@@ -418,6 +419,24 @@ static void SaveEpubPageCache(Book *book, const char *book_path,
   fclose(fp);
   if (!ok)
     remove(cache_path.c_str());
+}
+
+void SavePendingEpubPageCache(Book *book) {
+  if (!book || !book->HasPendingEpubPageCacheSave())
+    return;
+
+  const char *folder = book->GetFolderName();
+  const char *file = book->GetFileName();
+  if (!folder || !*folder || !file || !*file) {
+    book->SetPendingEpubPageCacheSave(false);
+    return;
+  }
+
+  std::string path(folder);
+  path.push_back('/');
+  path += file;
+  SaveEpubPageCache(book, path.c_str(), BuildEpubDeps(book));
+  book->SetPendingEpubPageCacheSave(false);
 }
 
 static std::string BuildChapterLabel(const std::string &path, int chapter_num) {
@@ -3135,8 +3154,16 @@ static void ResolveEpubTocFromPackageData(
 static int FinalizeEpubParse(unzFile uf, epub_data_t *parsedata, Book *book,
                              const std::string &name, const EpubDeps &deps,
                              int rc, bool save_cache) {
-  if (save_cache)
-    SaveEpubPageCache(book, name.c_str(), deps);
+  if (save_cache) {
+    if (reflow_cache_save_utils::ShouldDeferAsyncOpenCacheSave(
+            true, book && book->IsAsyncReflowOpenPending())) {
+      book->SetPendingEpubPageCacheSave(true);
+    } else {
+      SaveEpubPageCache(book, name.c_str(), deps);
+      if (book)
+        book->SetPendingEpubPageCacheSave(false);
+    }
+  }
   if (uf)
     unzClose(uf);
   if (parsedata)

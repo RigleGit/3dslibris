@@ -8,9 +8,6 @@
 
 namespace {
 
-static const u32 kReflowWorkerDeferredBudgetMs = 250;
-static const u16 kReflowWorkerDeferredPageBudget = 96;
-
 bool DetectNew3dsForReflow() {
   bool is_new_3ds = false;
   APT_CheckNew3DS(&is_new_3ds);
@@ -79,13 +76,6 @@ void ReflowWorkerThreadFunc(void *arg) {
                book->GetFileName() ? book->GetFileName() : "");
     }
     w->job_result = book->OpenPrepared();
-    if (w->job_result == 0 && book->HasDeferredMobiParse()) {
-      while (!__atomic_load_n(&w->shutdown_requested, __ATOMIC_ACQUIRE) &&
-             book->HasDeferredMobiParse()) {
-        book->ContinueDeferredMobiParse(kReflowWorkerDeferredBudgetMs,
-                                        kReflowWorkerDeferredPageBudget);
-      }
-    }
     w->finished_at_ms = osGetTime();
     if (book->GetApp()) {
       const u64 worker_ms =

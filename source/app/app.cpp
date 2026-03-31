@@ -250,6 +250,9 @@ App::App() {
   pdf_touch_last_y_ = -1;
   pdf_deferred_ready_at_ms_ = 0;
   mobi_deferred_ready_at_ms_ = 0;
+  status_log_file_ = NULL;
+  status_log_write_count_ = 0;
+  LightLock_Init(&status_log_lock_);
 
   ts = new Text();
   ts->app = this;
@@ -260,6 +263,13 @@ App::App() {
 }
 
 App::~App() {
+  LightLock_Lock(&status_log_lock_);
+  if (status_log_file_) {
+    fflush(status_log_file_);
+    fclose(status_log_file_);
+    status_log_file_ = NULL;
+  }
+  LightLock_Unlock(&status_log_lock_);
   if (prefs)
     delete prefs;
   if (ts)
@@ -593,6 +603,7 @@ int App::Run(void) {
 
     case AppMode::Browser:
       browser_handleevent();
+      TickBrowserWarmup();
       if (browser_.view_dirty)
         browser_draw();
       break;
@@ -1123,9 +1134,18 @@ void App::InitScreens() {
 }
 
 void App::PrintStatus(const char *msg) {
-  // Write status to log file since the console is disabled during rendering.
-  FILE *f = fopen(LOGFILEPATH, "a");
-  if (f) {
+  if (!msg)
+    return;
+
+  LightLock_Lock(&status_log_lock_);
+
+  if (!status_log_file_) {
+    status_log_file_ = fopen(LOGFILEPATH, "a");
+    if (status_log_file_)
+      setvbuf(status_log_file_, NULL, _IOFBF, 4096);
+  }
+
+  if (status_log_file_) {
     time_t rawtime;
     struct tm *info;
     char buffer[80];
@@ -1133,9 +1153,13 @@ void App::PrintStatus(const char *msg) {
     info = localtime(&rawtime);
     strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", info);
 
-    fprintf(f, "[%s] %s\n", buffer, msg);
-    fclose(f);
+    fprintf(status_log_file_, "[%s] %s\n", buffer, msg);
+    status_log_write_count_++;
+    if ((status_log_write_count_ & 15u) == 0u)
+      fflush(status_log_file_);
   }
+
+  LightLock_Unlock(&status_log_lock_);
 }
 
 void App::PrintStatus(std::string msg) { PrintStatus(msg.c_str()); }
