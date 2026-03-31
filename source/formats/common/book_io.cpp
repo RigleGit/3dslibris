@@ -714,6 +714,16 @@ static void CollectMobiInlineImageTokenIds(const std::string &text,
   }
 }
 
+static bool HasMobiInlineImageTokens(const std::string &text) {
+  for (size_t i = 0; i < text.size();) {
+    const size_t token_len = MobiInlineTokenLengthAt(text, i, NULL);
+    if (token_len != 0)
+      return true;
+    i++;
+  }
+  return false;
+}
+
 static std::string FoldLatinForMatch(const std::string &in) {
   std::string out;
   out.reserve(in.size());
@@ -4425,9 +4435,13 @@ static void CleanupDecodedMobiText(std::string *text,
     text_before_cleanup = *text;
 
   NormalizeNewlines(text);
-  const std::string text_before_mobi_cleanup = *text;
+  const bool track_image_tokens = HasMobiInlineImageTokens(*text);
+  std::string text_before_mobi_cleanup;
   std::vector<u16> image_ids_before_cleanup;
-  CollectMobiInlineImageTokenIds(*text, &image_ids_before_cleanup);
+  if (track_image_tokens) {
+    text_before_mobi_cleanup = *text;
+    CollectMobiInlineImageTokenIds(*text, &image_ids_before_cleanup);
+  }
   *text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(
       *text);
   if (line_wrap_fix_applied) {
@@ -4435,11 +4449,13 @@ static void CleanupDecodedMobiText(std::string *text,
         *text);
   }
   size_t text_post_cleanup = text->size();
-  std::vector<u16> image_ids_after_cleanup;
-  CollectMobiInlineImageTokenIds(*text, &image_ids_after_cleanup);
-  if (image_ids_before_cleanup != image_ids_after_cleanup) {
-    *text = text_before_mobi_cleanup;
-    text_post_cleanup = text->size();
+  if (track_image_tokens) {
+    std::vector<u16> image_ids_after_cleanup;
+    CollectMobiInlineImageTokenIds(*text, &image_ids_after_cleanup);
+    if (image_ids_before_cleanup != image_ids_after_cleanup) {
+      *text = text_before_mobi_cleanup;
+      text_post_cleanup = text->size();
+    }
   }
 
   if (have_map && text_post_cleanup != text_pre_cleanup) {
