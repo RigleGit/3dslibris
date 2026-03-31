@@ -31,6 +31,9 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 - Adds MuPDF-backed fixed-layout reading for `PDF`, `CBZ`, and `XPS`.
 - Ships a progressive fixed-layout pipeline with preview-first rendering, strip refinement, worker-thread acceleration on New 3DS, and stronger cache reuse.
 - Expands the reflow stack with asynchronous MOBI open/reflow on New 3DS, better persistent caches, and a much faster deferred TOC path for large books.
+- Improves the real-hardware open path by deferring expensive cache writes out of the critical path, buffering debug logging, and keeping deferred MOBI pagination responsive while you start reading.
+- Adds a more aggressive library-cover pipeline with visible-page cache reuse, selected-book warmup, and generated thumbs for `EPUB`, `FB2`, `MOBI`, `PDF`, and `CBZ` on actual 3DS hardware.
+- Tightens fixed-layout and browser rendering by tracking dirty rectangles precisely, reusing physical framebuffer caches, and avoiding redraw stalls that previously hid freshly generated cover thumbs.
 - Improves EPUB and FB2 layout instrumentation and shared text-layout performance while keeping existing reader behavior stable.
 - Keeps the CIA packaging flow self-contained by bundling default runtime assets through `romfs`.
 - Full release notes: [.github/release-notes/v2.0.0.md](.github/release-notes/v2.0.0.md)
@@ -43,6 +46,7 @@ Commits already included in the `v2.0.0` line:
 - `b3d2f2c` `feat: add xps support via mupdf`
 - `8be3c1f` `Optimize async MOBI parsing and deferred reflow`
 - `cc5ffb6` `Optimize shared EPUB/FB2 layout instrumentation`
+- `5dab1de` `feat: optimize deferred rendering and library covers`
 
 ## Supported formats
 
