@@ -475,17 +475,18 @@ int App::Run(void) {
   if (!missing_runtime.empty()) {
     PrintStatus("error: incomplete sdmc install");
     std::vector<std::string> lines;
-    lines.push_back("Descarga 3dslibris-sdmc.zip");
-    lines.push_back("y extraelo en sdmc:/");
-    lines.push_back("Ruta esperada: sdmc:/3ds/3dslibris/");
-    lines.push_back("Faltan archivos del paquete SD");
+    lines.push_back("Download 3dslibris-sdmc.zip");
+    lines.push_back("and extract it to sdmc:/");
+    lines.push_back("Expected path: sdmc:/3ds/3dslibris/");
+    lines.push_back("Missing files from the SD package");
     lines.push_back(missing_runtime[0]);
     if (missing_runtime.size() > 1) {
       char extra[48];
-      snprintf(extra, sizeof(extra), "+%u mas", (unsigned)(missing_runtime.size() - 1));
+      snprintf(extra, sizeof(extra), "+%u more",
+               (unsigned)(missing_runtime.size() - 1));
       lines.push_back(extra);
     }
-    drawBootStatus("Instalacion incompleta", lines, true);
+    drawBootStatus("Incomplete installation", lines, true);
     return haltOnFatalBootStatus();
   }
 
@@ -496,18 +497,18 @@ int App::Run(void) {
 #endif
   if (FindBooks() != ok) {
     PrintStatus("error: no book directory");
-    drawBootStatus("Instalacion incompleta",
-                   {"Descarga 3dslibris-sdmc.zip",
-                    "y extraelo en sdmc:/",
-                    "Debe existir sdmc:/3ds/3dslibris/book"},
+    drawBootStatus("Incomplete installation",
+                   {"Download 3dslibris-sdmc.zip",
+                    "and extract it to sdmc:/",
+                    "Expected folder: sdmc:/3ds/3dslibris/book"},
                    true);
     return haltOnFatalBootStatus();
   }
   if (BookCount() == 0) {
     PrintStatus("error: no epub files found");
-    drawBootStatus("No se encontraron libros",
-                   {"Coloca tus EPUB/FB2/TXT/RTF/ODT",
-                    "en sdmc:/3ds/3dslibris/book"},
+    drawBootStatus("No books found",
+                   {"Put your EPUB/FB2/TXT/RTF/ODT files",
+                    "in sdmc:/3ds/3dslibris/book"},
                    true);
     return haltOnFatalBootStatus();
   }
