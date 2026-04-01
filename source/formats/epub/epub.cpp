@@ -37,6 +37,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/common/epub_image_utils.h"
 #include "formats/common/xml_parse_utils.h"
 #include "formats/epub/epub_page_cache.h"
+#include "formats/epub/epub_ncx_parser.h"
 #include "main.h"
 #include "path_utils.h"
 #include "book/page.h"
@@ -212,12 +213,6 @@ static const char *LocalName(const char *name) {
   const char *c = strrchr(name, ':');
   return c ? c + 1 : name;
 }
-
-typedef struct {
-  std::string href;
-  std::string title;
-  u8 level;
-} toc_entry_t;
 
 typedef struct {
   std::vector<toc_entry_t> *entries;
@@ -1607,9 +1602,9 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
     }
     if (ncx_read_ok) {
       std::vector<toc_entry_t> ncx_entries;
-      bool parsed = ParseNcxWithExpat(toc_xml, toc_doc_path, &ncx_entries, app);
+      bool parsed = epub_ncx_parser::ParseNcxWithExpat(toc_xml, toc_doc_path, &ncx_entries);
       if (!parsed)
-        parsed = ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app);
+        parsed = epub_ncx_parser::ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries);
       if (parsed && app)
         LogTocEntrySamples(app, "NCX parsed", ncx_entries, 4);
       if (parsed && looks_reasonable_toc(ncx_entries)) {
@@ -1688,10 +1683,10 @@ static bool LoadTocEntriesFromPackage(unzFile uf, epub_data_t &parsedata,
         if (ReadZipEntryText(uf, toc_doc_path, toc_xml, app, "NCX-FALLBACK")) {
           std::vector<toc_entry_t> ncx_entries;
           bool parsed =
-              ParseNcxWithExpat(toc_xml, toc_doc_path, &ncx_entries, app);
+              epub_ncx_parser::ParseNcxWithExpat(toc_xml, toc_doc_path, &ncx_entries);
           if (!parsed)
             parsed =
-                ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries, app);
+                epub_ncx_parser::ParseNcxLightweight(toc_xml, toc_doc_path, &ncx_entries);
           if (parsed && app)
             LogTocEntrySamples(app, "NCX fallback parsed", ncx_entries, 4);
           if (parsed && looks_reasonable_toc(ncx_entries)) {
