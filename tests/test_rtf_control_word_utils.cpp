@@ -1,4 +1,4 @@
-#include "shared/rtf_control_word_utils.h"
+#include "formats/common/rtf_control_word_utils.h"
 
 #include <cstdio>
 #include <cstdlib>

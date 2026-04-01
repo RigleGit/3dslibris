@@ -1,4 +1,4 @@
-#include "shared/glyph_cache_lru.h"
+#include "ui/glyph_cache_lru.h"
 
 #include <cstdio>
 #include <cstdlib>

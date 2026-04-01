@@ -1,4 +1,4 @@
-#include "shared/fixed_layout_viewport_utils.h"
+#include "formats/common/fixed_layout_viewport_utils.h"
 
 #include <cstdio>
 #include <cstdlib>

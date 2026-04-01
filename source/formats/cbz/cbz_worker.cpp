@@ -3,7 +3,7 @@
 #include "book/book.h"
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
-#include "shared/pdf_view_utils.h"
+#include "formats/common/pdf_view_utils.h"
 
 #include <algorithm>
 

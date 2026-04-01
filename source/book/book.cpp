@@ -19,9 +19,9 @@
 #include "formats/epub/epub.h"
 #include "main.h"
 #include "book/page.h"
-#include "shared/page_buffer_utils.h"
+#include "book/page_buffer_utils.h"
 #include "parse.h"
-#include "shared/reflow_cache_save_utils.h"
+#include "book/reflow_cache_save_utils.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
 #include <algorithm>

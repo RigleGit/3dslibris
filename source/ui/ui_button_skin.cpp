@@ -11,6 +11,7 @@
 #include "ui/ui_button_skin.h"
 
 #include "color_utils.h"
+#include "path_utils.h"
 #include <algorithm>
 #include <cmath>
 #include <ctype.h>
@@ -171,13 +172,13 @@ static void try_load_icons_once() {
   };
 
   const char *dirs[] = {
-      "sdmc:/3ds/3dslibris/resources/ui/icons/png",
-      "sdmc:/3ds/3dslibris/resources/ui/icons",
+      paths::kIconPngDir,
+      paths::kIconDir,
       "romfs:/3ds/3dslibris/resources/ui/icons/png",
       "romfs:/3ds/3dslibris/resources/ui/icons",
       "resources/ui/icons/png",
       "resources/ui/icons",
-      "sdmc:/3ds/3dslibris/resources",
+      paths::kResourceBase,
       "data/ui/icons/png",
       "./data/ui/icons/png",
       nullptr,

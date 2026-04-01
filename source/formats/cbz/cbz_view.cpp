@@ -4,8 +4,8 @@
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
 #include "formats/cbz/cbz_worker.h"
-#include "shared/fixed_layout_viewport_utils.h"
-#include "shared/pdf_view_utils.h"
+#include "formats/common/fixed_layout_viewport_utils.h"
+#include "formats/common/pdf_view_utils.h"
 #include "ui/text.h"
 
 #include <algorithm>

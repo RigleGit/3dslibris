@@ -41,9 +41,9 @@
 #include "formats/pdf/pdf.h"
 #include "parse.h"
 #include "shared/app_flow_utils.h"
-#include "shared/browser_cover_cache_utils.h"
-#include "shared/browser_job_queue_utils.h"
-#include "shared/browser_warmup_utils.h"
+#include "library/browser_cover_cache_utils.h"
+#include "library/browser_job_queue_utils.h"
+#include "library/browser_warmup_utils.h"
 #include "string_utils.h"
 #include "ui/text.h"
 #include "shared/utf8_utils.h"
@@ -55,8 +55,8 @@
 
 namespace {
 
-static const char *kCoverCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
-static const char *kCoverCacheDir = "sdmc:/3ds/3dslibris/cache/covers";
+static const char *kCoverCacheBaseDir = paths::kCacheBaseDir;
+static const char *kCoverCacheDir = paths::kCoverCacheDir;
 static const char *kCoverCacheMagic = "CVR2";
 static const size_t kCoverCacheMaxFiles = 256;
 static const size_t kCoverCacheMaxBytes = 6 * 1024 * 1024;

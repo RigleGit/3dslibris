@@ -1,4 +1,4 @@
-#include "shared/mobi_deferred_finalize_utils.h"
+#include "formats/mobi/mobi_deferred_finalize_utils.h"
 
 #include <cstdlib>
 #include <string>

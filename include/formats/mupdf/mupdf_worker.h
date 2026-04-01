@@ -2,7 +2,7 @@
 
 #include "formats/mupdf/mupdf_common.h"
 #include "formats/mupdf/mupdf_render.h"
-#include "shared/pdf_view_utils.h"
+#include "formats/common/pdf_view_utils.h"
 
 void CancelMuPdfIncrementalRenderState(Book::MuPdfState *mupdf_state);
 bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *mupdf_state,

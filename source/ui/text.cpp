@@ -43,8 +43,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "app/app.h"
 #include "debug_log.h"
 #include "main.h"
-#include "shared/framebuffer_blit_utils.h"
-#include "shared/text_buffer_utils.h"
+#include "ui/framebuffer_blit_utils.h"
+#include "ui/text_buffer_utils.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
 #include "stb_image.h"
@@ -994,12 +994,12 @@ bool Text::EnsureSplashLoaded() {
   splash_attempted = true;
 
   static const char *kSplashCandidates[] = {
-      "sdmc:/3ds/3dslibris/resources/splash.jpg",
-      "sdmc:/3ds/3dslibris/resources/splash.jpeg",
+      paths::kSplashPaths[0],
+      paths::kSplashPaths[1],
       "romfs:/3ds/3dslibris/resources/splash.jpg",
       "romfs:/3ds/3dslibris/resources/splash.jpeg",
-      "sdmc:/3ds/3dslibris/splash.jpg",
-      "sdmc:/3ds/3dslibris/splash.jpeg",
+      paths::kSplashPaths[2],
+      paths::kSplashPaths[3],
       nullptr,
   };
 

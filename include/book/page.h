@@ -32,7 +32,7 @@ A Book contains a vector of Pages.
 #pragma once
 
 #include <3ds.h>
-#include "shared/page_buffer_utils.h"
+#include "book/page_buffer_utils.h"
 #include "ui/text.h"
 #include <vector>
 

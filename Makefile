@@ -40,7 +40,7 @@ SOURCES		:=	source source/core source/app source/shared source/ui source/menus \
 			source/library source/reader source/settings source/book \
 			source/formats/common source/formats/epub source/formats/fb2 \
 			source/formats/mobi source/formats/pdf source/formats/cbz \
-			source/formats/mupdf source/expat third_party/utf8proc \
+			source/formats/mupdf third_party/expat third_party/utf8proc \
 			third_party/libunibreak/src
 DATA		:=	data
 INCLUDES	:=	include third_party/stb third_party/utf8proc third_party/libunibreak/src \
@@ -121,7 +121,7 @@ CFLAGS	:=	-g -Wall -O2 -mword-relocations \
 			$(ARCH)
 
 CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include \
-			-I$(CURDIR)/source/expat \
+			-I$(CURDIR)/third_party/expat \
 			-D__3DS__ -DXML_STATIC -DHAVE_MEMMOVE -DXML_POOR_ENTROPY \
 			-DDSLIBRIS_EXPAT_ENABLE_DTD=$(EXPAT_ENABLE_DTD) \
 			-DDSLIBRIS_EXPAT_ENABLE_NS=$(EXPAT_ENABLE_NS) \

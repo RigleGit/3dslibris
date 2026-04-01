@@ -1,4 +1,4 @@
-#include "shared/mobi_cover_utils.h"
+#include "formats/mobi/mobi_cover_utils.h"
 
 #include <cstdio>
 #include <cstdlib>

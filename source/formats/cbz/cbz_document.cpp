@@ -5,7 +5,7 @@
 #include "formats/cbz/cbz_decode.h"
 #include "formats/cbz/cbz_worker.h"
 #include "formats/common/book_error.h"
-#include "shared/pdf_view_utils.h"
+#include "formats/common/pdf_view_utils.h"
 
 #include <3ds.h>
 #include <algorithm>

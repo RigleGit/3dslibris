@@ -7,7 +7,7 @@
 #include "formats/common/book_error.h"
 #include "formats/mupdf/mupdf_render.h"
 #include "formats/mupdf/mupdf_worker.h"
-#include "shared/pdf_view_utils.h"
+#include "formats/common/pdf_view_utils.h"
 
 #include "debug_log.h"
 

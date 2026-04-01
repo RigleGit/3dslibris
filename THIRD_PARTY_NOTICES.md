@@ -52,7 +52,7 @@ corresponding source for that binary available.
 
 ### Expat
 
-- Upstream code lives under `source/expat/`.
+- Upstream code lives under `third_party/expat/`.
 - Preserve the upstream Expat license notice embedded in that code.
 
 ### Fonts and MuPDF bundled resources

@@ -1,4 +1,4 @@
-#include "shared/browser_job_queue_utils.h"
+#include "library/browser_job_queue_utils.h"
 
 #include <cstdio>
 #include <cstdlib>

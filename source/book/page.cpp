@@ -28,7 +28,7 @@
 #include "book/page.h"
 
 #include "book/book.h"
-#include "shared/page_buffer_utils.h"
+#include "book/page_buffer_utils.h"
 #include <list>
 #include <string.h>
 #include <time.h>

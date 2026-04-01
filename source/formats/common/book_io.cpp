@@ -19,6 +19,7 @@
 #include "formats/common/file_read_utils.h"
 #include "book/heading_layout.h"
 #include "main.h"
+#include "path_utils.h"
 #include "formats/mobi/mobi.h"
 #include "formats/mobi/mobi_cache_utils.h"
 #include "formats/mobi/mobi_decode_plan.h"
@@ -34,8 +35,8 @@
 #include "formats/common/xml_parse_utils.h"
 #include "parse.h"
 #include "shared/app_flow_utils.h"
-#include "shared/mobi_deferred_finalize_utils.h"
-#include "shared/rtf_control_word_utils.h"
+#include "formats/mobi/mobi_deferred_finalize_utils.h"
+#include "formats/common/rtf_control_word_utils.h"
 #include "shared/text_layout_utils.h"
 #include "string_utils.h"
 #include "minizip/unzip.h"
@@ -56,8 +57,8 @@ namespace {
 static const size_t kPlainTextMaxBytes = 12 * 1024 * 1024;
 static const size_t kOdtContentMaxBytes = 24 * 1024 * 1024;
 static const size_t kMobiMaxBytes = 64 * 1024 * 1024;
-static const char *kMobiCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
-static const char *kMobiCacheDir = "sdmc:/3ds/3dslibris/cache/mobi";
+static const char *kMobiCacheBaseDir = paths::kCacheBaseDir;
+static const char *kMobiCacheDir = paths::kMobiCacheDir;
 static const u32 kMobiInitialOpenBudgetMs = 320;
 static const u16 kMobiInitialOpenPageBudget = 24;
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"

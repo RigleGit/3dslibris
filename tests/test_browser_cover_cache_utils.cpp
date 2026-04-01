@@ -1,4 +1,4 @@
-#include "shared/browser_cover_cache_utils.h"
+#include "library/browser_cover_cache_utils.h"
 
 #include <cstdio>
 #include <cstdlib>

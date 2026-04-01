@@ -20,8 +20,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "shared/framebuffer_blit_utils.h"
-#include "shared/glyph_cache_lru.h"
+#include "ui/framebuffer_blit_utils.h"
+#include "ui/glyph_cache_lru.h"
 #include "ft2build.h"
 #include FT_FREETYPE_H
 #include FT_CACHE_H

@@ -1,5 +1,6 @@
 #include "formats/mobi/mobi_cover_meta_cache.h"
 
+#include "path_utils.h"
 #include "string_utils.h"
 
 #include <stdio.h>
@@ -10,7 +11,7 @@ namespace {
 
 static const uint32_t kMagic = 0x4D434D43U; // MCMC
 static const uint16_t kVersion = 1;
-static const char *kBaseDir = "sdmc:/3ds/3dslibris/cache/mobi-cover";
+static const char *kBaseDir = paths::kMobiCoverMetaCacheDir;
 
 struct Header {
   uint32_t magic;

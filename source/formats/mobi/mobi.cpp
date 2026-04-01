@@ -13,7 +13,8 @@
 #include "formats/common/book_error.h"
 #include "formats/mobi/mobi_cover_meta_cache.h"
 #include "formats/mobi/mobi_record_scan.h"
-#include "shared/mobi_cover_utils.h"
+#include "formats/mobi/mobi_cover_utils.h"
+#include "path_utils.h"
 #include "stb_image.h"
 #include "string_utils.h"
 
@@ -31,8 +32,8 @@ namespace {
 
 static const size_t kMobiCoverRecordMaxBytes = 8 * 1024 * 1024;
 static const int kMobiCoverMaxDimension = 2048;
-static const char *kMobiCoverMetaCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
-static const char *kMobiCoverMetaCacheDir = "sdmc:/3ds/3dslibris/cache/mobi-cover";
+static const char *kMobiCoverMetaCacheBaseDir = paths::kCacheBaseDir;
+static const char *kMobiCoverMetaCacheDir = paths::kMobiCoverMetaCacheDir;
 
 struct MobiCoverCandidate {
   u32 record_idx;

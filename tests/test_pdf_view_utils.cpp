@@ -1,4 +1,4 @@
-#include "shared/pdf_view_utils.h"
+#include "formats/common/pdf_view_utils.h"
 
 #include <cmath>
 #include <cstdio>

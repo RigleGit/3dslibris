@@ -31,8 +31,8 @@
 #include "ui/button.h"
 #include "menus/chapter_menu.h"
 #include "shared/app_flow_utils.h"
-#include "shared/browser_warmup_utils.h"
-#include "shared/status_layout_utils.h"
+#include "app/status_layout_utils.h"
+#include "library/browser_warmup_utils.h"
 #include "settings/font.h"
 #include "debug_log.h"
 #include "main.h"
@@ -98,7 +98,7 @@ static bool UsesFixedLayoutMinimalHud(const Book *book) {
 }
 
 static std::string ResolveDefaultFontDir() {
-  static const char *kSdmcFontDir = "sdmc:/3ds/3dslibris/font";
+  static const char *kSdmcFontDir = paths::kFontDir;
   static const char *kRomfsFontDir = "romfs:/3ds/3dslibris/font";
   static const char *kProbeFont = "LiberationSerif-Regular.ttf";
 
@@ -126,17 +126,12 @@ static void CollectMissingRuntimeFiles(std::vector<std::string> *missing) {
   missing->clear();
 
   static const RuntimeFileCheck kRequired[] = {
-      {"sdmc:/3ds/3dslibris/book", true, "book/"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Regular.ttf", false,
-       "font/LiberationSerif-Regular.ttf"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Bold.ttf", false,
-       "font/LiberationSerif-Bold.ttf"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Italic.ttf", false,
-       "font/LiberationSerif-Italic.ttf"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf", false,
-       "font/LiberationSerif-BoldItalic.ttf"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSans-Regular.ttf", false,
-       "font/LiberationSans-Regular.ttf"},
+      {paths::kBookDir, true, "book/"},
+      {paths::kDefaultFonts[0][1], false, paths::kDefaultFonts[0][0]},
+      {paths::kDefaultFonts[1][1], false, paths::kDefaultFonts[1][0]},
+      {paths::kDefaultFonts[2][1], false, paths::kDefaultFonts[2][0]},
+      {paths::kDefaultFonts[3][1], false, paths::kDefaultFonts[3][0]},
+      {paths::kDefaultFonts[4][1], false, paths::kDefaultFonts[4][0]},
   };
 
   if (!PathExistsAndType(kRequired[0].path, kRequired[0].directory))
@@ -148,21 +143,11 @@ static void CollectMissingRuntimeFiles(std::vector<std::string> *missing) {
     const char *label;
   };
   static const RuntimeFallbackFile kBundled[] = {
-      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Regular.ttf",
-       "romfs:/3ds/3dslibris/font/LiberationSerif-Regular.ttf",
-       "font/LiberationSerif-Regular.ttf"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Bold.ttf",
-       "romfs:/3ds/3dslibris/font/LiberationSerif-Bold.ttf",
-       "font/LiberationSerif-Bold.ttf"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSerif-Italic.ttf",
-       "romfs:/3ds/3dslibris/font/LiberationSerif-Italic.ttf",
-       "font/LiberationSerif-Italic.ttf"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf",
-       "romfs:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf",
-       "font/LiberationSerif-BoldItalic.ttf"},
-      {"sdmc:/3ds/3dslibris/font/LiberationSans-Regular.ttf",
-       "romfs:/3ds/3dslibris/font/LiberationSans-Regular.ttf",
-       "font/LiberationSans-Regular.ttf"},
+      {paths::kDefaultFonts[0][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Regular.ttf", paths::kDefaultFonts[0][0]},
+      {paths::kDefaultFonts[1][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Bold.ttf", paths::kDefaultFonts[1][0]},
+      {paths::kDefaultFonts[2][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Italic.ttf", paths::kDefaultFonts[2][0]},
+      {paths::kDefaultFonts[3][1], "romfs:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf", paths::kDefaultFonts[3][0]},
+      {paths::kDefaultFonts[4][1], "romfs:/3ds/3dslibris/font/LiberationSans-Regular.ttf", paths::kDefaultFonts[4][0]},
   };
 
   for (size_t i = 0; i < sizeof(kBundled) / sizeof(kBundled[0]); i++) {
@@ -204,7 +189,7 @@ App::App() {
   melonds = false;
 
   fontdir = ResolveDefaultFontDir();
-  bookdir = std::string("sdmc:/3ds/3dslibris/book");
+  bookdir = std::string(paths::kBookDir);
   bookcurrent_ = NULL;
   reopen = true;
   mode_ = AppMode::Browser;

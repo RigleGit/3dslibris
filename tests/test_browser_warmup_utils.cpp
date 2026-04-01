@@ -1,4 +1,4 @@
-#include "shared/browser_warmup_utils.h"
+#include "library/browser_warmup_utils.h"
 
 #include <cstdio>
 #include <cstdlib>

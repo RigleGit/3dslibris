@@ -37,12 +37,13 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/common/epub_image_utils.h"
 #include "formats/common/xml_parse_utils.h"
 #include "main.h"
+#include "path_utils.h"
 #include "book/page.h"
 #include "shared/text_layout_utils.h"
 #include "formats/common/page_cache_utils.h"
 #include "parse.h"
 #include "path_utils.h"
-#include "shared/reflow_cache_save_utils.h"
+#include "book/reflow_cache_save_utils.h"
 #include "stb_image.h"
 #include "string_utils.h"
 #include "minizip/unzip.h"
@@ -60,8 +61,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unordered_map>
 #include <vector>
 
-static const char *kEpubCacheBaseDir = "sdmc:/3ds/3dslibris/cache";
-static const char *kEpubCacheDir = "sdmc:/3ds/3dslibris/cache/epub";
+static const char *kEpubCacheBaseDir = paths::kCacheBaseDir;
+static const char *kEpubCacheDir = paths::kEpubCacheDir;
 static const u32 kEpubPageCacheMagic = 0x45504347U; // "EPCG"
 static const u16 kEpubPageCacheVersion = 2;
 static const u16 kPageCacheTitleMaxBytes = 1000;

@@ -1,4 +1,4 @@
-#include "shared/text_buffer_utils.h"
+#include "ui/text_buffer_utils.h"
 
 #include <cstdio>
 #include <cstdlib>
