@@ -1,4 +1,5 @@
 #include "formats/common/epub_image_utils.h"
+#include "string_utils.h"
 
 #include <cstdlib>
 #include <string>
@@ -32,7 +33,6 @@ void ExpectEq(const char *label, const std::string &actual,
 int main() {
   using epub_image_utils::DecodeDataUriImage;
   using epub_image_utils::LooksLikeSvgWrapper;
-  using epub_image_utils::StartsWithNoCase;
 
   ExpectTrue("startswith no case", StartsWithNoCase("DaTa:image/png", "data:"));
   ExpectFalse("startswith mismatch", StartsWithNoCase("file.png", "data:"));

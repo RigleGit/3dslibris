@@ -20,25 +20,6 @@ static bool DefaultZipBinaryReader(unzFile uf, const std::string &path,
 
 } // namespace
 
-bool StartsWithNoCase(const std::string &s, const char *prefix) {
-  if (!prefix)
-    return false;
-  size_t len = strlen(prefix);
-  if (s.size() < len)
-    return false;
-  for (size_t i = 0; i < len; i++) {
-    unsigned char a = (unsigned char)s[i];
-    unsigned char b = (unsigned char)prefix[i];
-    if (a >= 'A' && a <= 'Z')
-      a = (unsigned char)(a - 'A' + 'a');
-    if (b >= 'A' && b <= 'Z')
-      b = (unsigned char)(b - 'A' + 'a');
-    if (a != b)
-      return false;
-  }
-  return true;
-}
-
 bool LooksLikeSvgWrapper(const std::string &path_hint,
                          const std::vector<unsigned char> &buf) {
   std::string lower_path = ToLowerAscii(path_hint);

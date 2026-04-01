@@ -25,6 +25,27 @@ inline std::string Trim(const std::string &s) {
   return s.substr(start, end - start);
 }
 
+// --- Case-insensitive prefix check ---
+
+inline bool StartsWithNoCase(const std::string &s, const char *prefix) {
+  if (!prefix)
+    return false;
+  size_t len = strlen(prefix);
+  if (s.size() < len)
+    return false;
+  for (size_t i = 0; i < len; i++) {
+    unsigned char a = (unsigned char)s[i];
+    unsigned char b = (unsigned char)prefix[i];
+    if (a >= 'A' && a <= 'Z')
+      a = (unsigned char)(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z')
+      b = (unsigned char)(b - 'A' + 'a');
+    if (a != b)
+      return false;
+  }
+  return true;
+}
+
 // --- ASCII lowercase ---
 
 inline std::string ToLowerAscii(const std::string &s) {

@@ -12,7 +12,6 @@ typedef bool (*ZipBinaryReader)(unzFile uf, const std::string &path,
                                 std::vector<unsigned char> *out,
                                 size_t max_bytes, void *ctx);
 
-bool StartsWithNoCase(const std::string &s, const char *prefix);
 bool LooksLikeSvgWrapper(const std::string &path_hint,
                          const std::vector<unsigned char> &buf);
 bool DecodeDataUriImage(const std::string &href,
