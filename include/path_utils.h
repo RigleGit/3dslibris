@@ -1,6 +1,6 @@
 /*
     3dslibris - path_utils.h
-    Shared path/URL utilities for EPUB, FB2, inline-image, and browser modules.
+    Shared path/URL utilities and project path constants.
     Extracted by Rigle to eliminate duplication across the codebase.
 */
 
@@ -13,6 +13,55 @@
 #include <string.h>
 #include <string>
 #include <vector>
+
+// --- Project paths (single source of truth) ---
+// All runtime paths on the SD card are defined here.
+// If the directory layout changes, update these constants only.
+
+namespace paths {
+
+// Base directories
+static const char *kSdmcBase        = "sdmc:/3ds/3dslibris";
+static const char *kBookDir         = "sdmc:/3ds/3dslibris/book";
+static const char *kFontDir         = "sdmc:/3ds/3dslibris/font";
+static const char *kResourceDir     = "sdmc:/3ds/3dslibris/resources";
+static const char *kCacheBaseDir    = "sdmc:/3ds/3dslibris/cache";
+
+// Cache subdirectories
+static const char *kCoverCacheDir   = "sdmc:/3ds/3dslibris/cache/covers";
+static const char *kEpubCacheDir    = "sdmc:/3ds/3dslibris/cache/epub";
+static const char *kMobiCacheDir    = "sdmc:/3ds/3dslibris/cache/mobi";
+static const char *kMobiCoverMetaCacheDir = "sdmc:/3ds/3dslibris/cache/mobi-cover";
+
+// Runtime files
+static const char *kLogFile         = "sdmc:/3ds/3dslibris/3dslibris.log";
+static const char *kPrefsFile       = "sdmc:/3ds/3dslibris/3dslibris.xml";
+
+// Splash screen search paths
+static const char *kSplashPaths[] = {
+    "sdmc:/3ds/3dslibris/resources/splash.jpg",
+    "sdmc:/3ds/3dslibris/resources/splash.jpeg",
+    "sdmc:/3ds/3dslibris/splash.jpg",
+    "sdmc:/3ds/3dslibris/splash.jpeg",
+};
+static const int kSplashPathCount = 4;
+
+// UI icon search paths
+static const char *kIconPngDir     = "sdmc:/3ds/3dslibris/resources/ui/icons/png";
+static const char *kIconDir        = "sdmc:/3ds/3dslibris/resources/ui/icons";
+static const char *kResourceBase   = "sdmc:/3ds/3dslibris/resources";
+
+// Bundled fonts
+static const char *kDefaultFonts[][2] = {
+    {"LiberationSerif-Regular.ttf",    "sdmc:/3ds/3dslibris/font/LiberationSerif-Regular.ttf"},
+    {"LiberationSerif-Bold.ttf",       "sdmc:/3ds/3dslibris/font/LiberationSerif-Bold.ttf"},
+    {"LiberationSerif-Italic.ttf",     "sdmc:/3ds/3dslibris/font/LiberationSerif-Italic.ttf"},
+    {"LiberationSerif-BoldItalic.ttf", "sdmc:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf"},
+    {"LiberationSans-Regular.ttf",     "sdmc:/3ds/3dslibris/font/LiberationSans-Regular.ttf"},
+};
+static const int kDefaultFontCount = 5;
+
+} // namespace paths
 
 // --- URL decoding ---
 
