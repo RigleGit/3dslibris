@@ -20,12 +20,29 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 </table>
 
 ## Project status
-- Current app version: `2.0.0`
+- Current app version: `2.0.1`
 - Focus: stable daily reading on 3DS hardware and Citra/Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
 - Supported install paths: `.3dsx` plus `3dslibris-sdmc.zip`, or `3dslibris.cia`
+
+## v2.0.1 release notes
+- Publishes the full post-`v2.0.0` branch state as the actual public release, so the GitHub tag now matches the code that was already finished locally.
+- Keeps the complete fixed-layout and reflow stack from `v2.0.0`, including MuPDF-backed `PDF` / `CBZ` / `XPS`, deferred MOBI open, library cover generation, and the CIA runtime bundle.
+- Reorganizes shared code and path handling so SD/cache/runtime paths live in a central place and common utilities are easier to maintain.
+- Moves bundled `expat` sources under `third_party/` and documents the current 3DS/NDS hardware and architecture references in the repo.
+- Extracts MOBI page-cache serialization into its own module and adds a shared native test-build helper for the text-layout/unit scripts.
+- Full release notes: [.github/release-notes/v2.0.1.md](.github/release-notes/v2.0.1.md)
+
+Commits already included in the `v2.0.1` line:
+- `3fde057` `build: serialize MuPDF minimal generation`
+- `322dc39` `docs: simplify release notes highlights for end users`
+- `c4ab9fe` `docs: add NDS and 3DS hardware reference from GBATek`
+- `89e27b6` `refactor: reorganize shared/ utilities and move expat to third_party/`
+- `0e4f1a1` `refactor: centralize SD paths and add architecture documentation`
+- `db6e400` `refactor: remove original files after reorganization`
+- `4cb884b` `refactor: extract mobi page cache helpers`
 
 ## v2.0.0 release notes
 - Adds MuPDF-backed fixed-layout reading for `PDF`, `CBZ`, and `XPS`.
