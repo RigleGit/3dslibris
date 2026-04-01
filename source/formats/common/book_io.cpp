@@ -20,6 +20,7 @@
 #include "book/heading_layout.h"
 #include "main.h"
 #include "path_utils.h"
+#include "formats/mobi/mobi_page_cache.h"
 #include "formats/mobi/mobi.h"
 #include "formats/mobi/mobi_cache_utils.h"
 #include "formats/mobi/mobi_decode_plan.h"
@@ -57,33 +58,8 @@ namespace {
 static const size_t kPlainTextMaxBytes = 12 * 1024 * 1024;
 static const size_t kOdtContentMaxBytes = 24 * 1024 * 1024;
 static const size_t kMobiMaxBytes = 64 * 1024 * 1024;
-static const char *kMobiCacheBaseDir = paths::kCacheBaseDir;
-static const char *kMobiCacheDir = paths::kMobiCacheDir;
 static const u32 kMobiInitialOpenBudgetMs = 320;
 static const u16 kMobiInitialOpenPageBudget = 24;
-static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-// Bump when serialized MOBI pages become semantically incompatible with the
-// current text cleanup or TOC mapping logic.
-// v3→v4: added precise html→text→page mapping tables for TOC chapter
-//         positioning; old caches used an inaccurate linear ratio that placed
-//         chapters dozens of pages away from their actual location.
-// v6→v7: recindex parsing now accepts zero-padded MOBI image references, so
-//         old cached page streams must be invalidated to repaginate with the
-//         recovered TEXT_IMAGE markers.
-// v12→v13: MOBI keep-with-next now follows only heading markers emitted during
-//          markup extraction; old caches may still contain broader heuristic
-//          pagination decisions.
-// v14→v15: corrected MOBI record-header offsets, added trailingFlags stripping,
-//          and changed record decompression paths; old caches may reflect broken
-//          header parsing or undecoded trailing data.
-// v15→v16: deferred MOBI TOC metadata must be rebuilt from original markup
-//          coordinates, not paginated plain text; old caches may carry wrong
-//          chapter targets from the broken remap path.
-static const u16 kMobiPageCacheVersion = 16;
-static const u16 kPageCacheTitleMaxBytes = 1000;
-static const u16 kPageCachePageMaxBytes = 4096;
-static const u16 kPageCacheChapterTitleMaxBytes = 2048;
-static const u16 kPageCachePathMaxBytes = 2048;
 
 #ifdef DSLIBRIS_DEBUG
 static void FlushBufferedStatusLog(
@@ -93,21 +69,6 @@ static void FlushBufferedStatusLog(
   log->Flush([&](const std::string &chunk) { app->PrintStatus(chunk.c_str()); });
 }
 #endif
-
-struct MobiPageCacheHeader {
-  u32 magic;
-  u16 version;
-  u16 title_len;
-  u32 page_count;
-  u32 chapter_count;
-  u32 image_count;
-  u8 toc_quality;
-  u8 reserved0;
-  u16 reserved1;
-  u16 toc_direct;
-  u16 toc_heuristic;
-  u16 toc_unresolved;
-};
 
 struct BookIoDeps {
   App *app;
@@ -148,283 +109,37 @@ static void InitParsedataWithBookIoDeps(parsedata_t *parsedata, Book *book,
   parsedata->book = book;
 }
 
-static void EnsureMobiCacheDirs() {
-  static bool initialized = false;
-  if (initialized)
-    return;
-  mkdir(kMobiCacheBaseDir, 0777);
-  mkdir(kMobiCacheDir, 0777);
-  initialized = true;
-}
-
-static page_cache_utils::PageCacheLayoutParams
-BuildMobiPageCacheLayoutParams(const char *book_path, const BookIoDeps &deps,
-                               bool line_wrap_fix_enabled) {
-  page_cache_utils::PageCacheLayoutParams params;
-  if (!book_path || !deps.ts)
-    return params;
-
-  struct stat st;
-  if (stat(book_path, &st) == 0) {
-    params.file_size = (long long)st.st_size;
-    params.file_mtime = (long long)st.st_mtime;
-  }
-
-  Text *ts = deps.ts;
-  params.pixel_size = (int)ts->GetPixelSize();
-  params.line_spacing = (int)ts->linespacing;
-  params.paragraph_spacing = deps.paragraph_spacing;
-  params.paragraph_indent = deps.paragraph_indent;
-  params.orientation = deps.orientation;
-  params.margin_left = (int)ts->margin.left;
-  params.margin_right = (int)ts->margin.right;
-  params.margin_top = (int)ts->margin.top;
-  params.margin_bottom = (int)ts->margin.bottom;
-  params.regular_font = ts->GetFontFile(TEXT_STYLE_REGULAR);
-  params.variant_token = line_wrap_fix_enabled ? "1" : "0";
-  return params;
-}
-
-static std::vector<page_cache_utils::CachedPage>
-CollectCachedPages(Book *book) {
-  std::vector<page_cache_utils::CachedPage> pages;
-  if (!book)
-    return pages;
-
-  const u16 page_count = book->GetPageCount();
-  pages.reserve(page_count);
-  for (u16 i = 0; i < page_count; i++) {
-    Page *page = book->GetPage((int)i);
-    const int length = page ? page->GetLength() : 0;
-    page_cache_utils::CachedPage cached_page;
-    if (page && length > 0) {
-      const u8 *buffer = page->GetBuffer();
-      if (!buffer)
-        return std::vector<page_cache_utils::CachedPage>();
-      cached_page.assign(buffer, buffer + length);
-    }
-    pages.push_back(cached_page);
-  }
-  return pages;
-}
-
-static void AppendCachedPages(
-    Book *book, std::vector<page_cache_utils::CachedPage> *pages) {
-  if (!book)
-    return;
-
-  book->ReservePageCapacity(pages ? pages->size() : 0);
-
-  for (size_t i = 0; pages && i < pages->size(); i++) {
-    page_cache_utils::CachedPage &cached_page = pages->at(i);
-    Page *page = book->AppendPage();
-    page_buffer_utils::OwnedPageBuffer owned =
-        page_buffer_utils::AdoptPageBuffer(&cached_page);
-    page->AdoptBuffer(&owned);
-  }
-}
-
-static std::vector<page_cache_utils::CachedChapter>
-CollectCachedChapters(const std::vector<ChapterEntry> &chapters) {
-  std::vector<page_cache_utils::CachedChapter> cached;
-  cached.reserve(chapters.size());
-  for (size_t i = 0; i < chapters.size(); i++) {
-    const ChapterEntry &chapter = chapters[i];
-    cached.push_back(page_cache_utils::CachedChapter(chapter.page, chapter.level,
-                                                     chapter.title));
-  }
-  return cached;
-}
-
-static void AppendCachedChapters(
-    Book *book,
-    const std::vector<page_cache_utils::CachedChapter> &chapters) {
-  if (!book)
-    return;
-
-  for (size_t i = 0; i < chapters.size(); i++) {
-    const page_cache_utils::CachedChapter &chapter = chapters[i];
-    if (chapter.page < book->GetPageCount())
-      book->AddChapter(chapter.page, chapter.title, chapter.level);
-  }
-}
-
-static std::string BuildMobiPageCachePath(const char *book_path,
-                                          const BookIoDeps &deps,
-                                          bool line_wrap_fix_enabled) {
-  if (!book_path || !deps.ts)
-    return std::string();
-  return page_cache_utils::BuildPageCachePath(
-      kMobiCacheDir, ".mpc", book_path,
-      BuildMobiPageCacheLayoutParams(book_path, deps, line_wrap_fix_enabled));
-}
-
 static bool TryLoadMobiPageCache(Book *book, const char *book_path,
                                  const BookIoDeps &deps) {
-  if (!book || !book_path || !deps.app)
+  if (!book || !book_path || !deps.app || !deps.ts)
     return false;
-  EnsureMobiCacheDirs();
-  std::string cache_path =
-      BuildMobiPageCachePath(book_path, deps, book->GetMobiLineWrapFix());
-  if (cache_path.empty())
-    return false;
-
-  FILE *fp = fopen(cache_path.c_str(), "rb");
-  if (!fp)
-    return false;
-
-  MobiPageCacheHeader hdr;
-  if (fread(&hdr, 1, sizeof(hdr), fp) != sizeof(hdr)) {
-    fclose(fp);
-    remove(cache_path.c_str());
-    return false;
-  }
-  if (hdr.magic != kMobiPageCacheMagic ||
-      hdr.version != kMobiPageCacheVersion || hdr.page_count == 0 ||
-      hdr.page_count > 10000 || hdr.chapter_count > 4000 ||
-      hdr.image_count > 65535 ||
-      hdr.title_len > 1000) {
-    fclose(fp);
-    remove(cache_path.c_str());
-    return false;
-  }
-
-  std::string title;
-  if (!page_cache_utils::ReadRawString(fp, hdr.title_len, &title)) {
-    fclose(fp);
-    remove(cache_path.c_str());
-    return false;
-  }
-
-  bool ok = true;
-  std::vector<page_cache_utils::CachedPage> pages;
-  ok = page_cache_utils::ReadPages(fp, hdr.page_count, kPageCachePageMaxBytes,
-                                   &pages);
-  if (ok)
-    AppendCachedPages(book, &pages);
-
-  if (ok) {
-    std::vector<page_cache_utils::CachedChapter> chapters;
-    ok = page_cache_utils::ReadChapters(fp, hdr.chapter_count,
-                                        kPageCacheChapterTitleMaxBytes,
-                                        &chapters);
-    if (ok)
-      AppendCachedChapters(book, chapters);
-  }
-
-  if (ok) {
-    for (u32 i = 0; i < hdr.image_count; i++) {
-      std::string imgpath;
-      if (!page_cache_utils::ReadLengthPrefixedString16(
-              fp, kPageCachePathMaxBytes, false, &imgpath)) {
-        ok = false;
-        break;
-      }
-      u8 follow_lines = 0;
-      if (fread(&follow_lines, 1, sizeof(follow_lines), fp) !=
-          sizeof(follow_lines)) {
-        ok = false;
-        break;
-      }
-      u16 image_id = book->RegisterInlineImage(imgpath);
-      book->SetInlineImageFollowTextLines(image_id, follow_lines);
-    }
-  }
-
-  fclose(fp);
-  if (!ok) {
-    book->Close();
-    remove(cache_path.c_str());
-    return false;
-  }
-
-  if (!title.empty())
-    book->SetTitle(title.c_str());
-
-  TocQuality q = TOC_QUALITY_UNKNOWN;
-  if (hdr.toc_quality <= TOC_QUALITY_HEURISTIC)
-    q = (TocQuality)hdr.toc_quality;
-  book->SetTocConfidence(q, hdr.toc_direct, hdr.toc_heuristic,
-                         hdr.toc_unresolved);
-  book->MarkMobiRenderSettingsApplied(book->GetMobiLineWrapFix());
-  return true;
+  Text *ts = deps.ts;
+  std::string font = ts->GetFontFile(TEXT_STYLE_REGULAR);
+  return mobi_page_cache::TryLoad(
+      book, book_path,
+      (int)ts->GetPixelSize(), (int)ts->linespacing,
+      deps.paragraph_spacing, deps.paragraph_indent,
+      deps.orientation, (int)ts->margin.left, (int)ts->margin.right,
+      (int)ts->margin.top, (int)ts->margin.bottom,
+      font.c_str(),
+      book->GetMobiLineWrapFix());
 }
 
 static void SaveMobiPageCache(Book *book, const char *book_path,
                               const BookIoDeps &deps,
                               bool line_wrap_fix_enabled) {
-  if (!book || !book_path || !deps.app || book->GetPageCount() == 0)
+  if (!book || !book_path || !deps.app || !deps.ts || book->GetPageCount() == 0)
     return;
-  EnsureMobiCacheDirs();
-  std::string cache_path =
-      BuildMobiPageCachePath(book_path, deps, line_wrap_fix_enabled);
-  if (cache_path.empty())
-    return;
-
-  const char *title_c = book->GetTitle();
-  std::string title = title_c ? title_c : "";
-  title = page_cache_utils::ClampString(title, kPageCacheTitleMaxBytes);
-  const std::vector<ChapterEntry> &chapters = book->GetChapters();
-  const std::vector<page_cache_utils::CachedPage> pages =
-      CollectCachedPages(book);
-  if (pages.size() != book->GetPageCount())
-    return;
-  const std::vector<page_cache_utils::CachedChapter> cached_chapters =
-      CollectCachedChapters(chapters);
-
-  MobiPageCacheHeader hdr;
-  memset(&hdr, 0, sizeof(hdr));
-  hdr.magic = kMobiPageCacheMagic;
-  hdr.version = kMobiPageCacheVersion;
-  hdr.title_len = (u16)title.size();
-  hdr.page_count = (u32)pages.size();
-  hdr.chapter_count = (u32)cached_chapters.size();
-  hdr.image_count = book->GetInlineImageCount();
-  hdr.toc_quality = (u8)book->GetTocQuality();
-  hdr.toc_direct = book->GetTocDirectCount();
-  hdr.toc_heuristic = book->GetTocHeuristicCount();
-  hdr.toc_unresolved = book->GetTocUnresolvedCount();
-
-  FILE *fp = fopen(cache_path.c_str(), "wb");
-  if (!fp)
-    return;
-
-  bool ok = fwrite(&hdr, 1, sizeof(hdr), fp) == sizeof(hdr);
-  if (ok)
-    ok = page_cache_utils::WriteRawString(fp, title);
-
-  if (ok)
-    ok = page_cache_utils::WritePages(fp, pages, kPageCachePageMaxBytes);
-
-  if (ok)
-    ok = page_cache_utils::WriteChapters(fp, cached_chapters,
-                                         kPageCacheChapterTitleMaxBytes);
-
-  if (ok) {
-    u32 img_count = book->GetInlineImageCount();
-    for (u32 i = 0; i < img_count; i++) {
-      const std::string *imgpath = book->GetInlineImagePath((u16)i);
-      if (!imgpath || imgpath->empty()) {
-        ok = false;
-        break;
-      }
-      if (!page_cache_utils::WriteLengthPrefixedString16(
-              fp, *imgpath, kPageCachePathMaxBytes, false)) {
-        ok = false;
-        break;
-      }
-      const u8 follow_lines = book->GetInlineImageFollowTextLines((u16)i);
-      if (fwrite(&follow_lines, 1, sizeof(follow_lines), fp) !=
-          sizeof(follow_lines)) {
-        ok = false;
-        break;
-      }
-    }
-  }
-
-  fclose(fp);
-  if (!ok)
-    remove(cache_path.c_str());
+  Text *ts = deps.ts;
+  std::string font = ts->GetFontFile(TEXT_STYLE_REGULAR);
+  mobi_page_cache::Save(
+      book, book_path,
+      (int)ts->GetPixelSize(), (int)ts->linespacing,
+      deps.paragraph_spacing, deps.paragraph_indent,
+      deps.orientation, (int)ts->margin.left, (int)ts->margin.right,
+      (int)ts->margin.top, (int)ts->margin.bottom,
+      font.c_str(),
+      line_wrap_fix_enabled);
 }
 
 static bool LooksLikeValidUtf8Bytes(const std::string &s) {

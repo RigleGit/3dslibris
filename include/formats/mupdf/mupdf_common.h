@@ -21,9 +21,6 @@ extern "C" {
 }
 
 struct App;
-class Text;
-
-extern App *app;
 extern fz_locks_context g_mupdf_locks_ctx;
 extern u16 g_gray_to_rgb565[256];
 
