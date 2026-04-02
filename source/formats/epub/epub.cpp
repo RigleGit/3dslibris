@@ -40,6 +40,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/epub/epub_cover.h"
 #include "formats/epub/epub_limits.h"
 #include "formats/epub/epub_ncx_parser.h"
+#include "formats/epub/epub_zip_utils.h"
 #include "main.h"
 #include "path_utils.h"
 #include "book/page.h"
@@ -74,11 +75,6 @@ struct EpubDeps {
   EpubDeps()
       : app(NULL), ts(NULL), prefs(NULL), paragraph_spacing(0),
         paragraph_indent(0), orientation(0) {}
-};
-
-struct ZipEntryIndex {
-  bool built = false;
-  std::unordered_map<std::string, uLong> offset_by_key;
 };
 
 static EpubDeps BuildEpubDeps(App *app) {
@@ -509,106 +505,24 @@ static void EpubDiag(App *app, const char *fmt, const char *arg) {
 
 static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path,
                                App *app, const char *tag,
-                               ZipEntryIndex *index = NULL) {
+epub_zip_utils::ZipEntryIndex *index = NULL) {
   if (!uf || entry_path.empty())
     return false;
-
   const char *t = (tag && *tag) ? tag : "ZIP";
-
-  if (index && !index->built) {
-    index->built = true;
-    int rc = unzGoToFirstFile(uf);
-    if (rc == UNZ_OK) {
-      do {
-        char fname[1024];
-        unz_file_info fi;
-        if (unzGetCurrentFileInfo(uf, &fi, fname, sizeof(fname), NULL, 0, NULL,
-                                  0) == UNZ_OK) {
-          std::string key = ToLowerAscii(NormalizeZipEntryName(fname));
-          if (!key.empty() && index->offset_by_key.find(key) ==
-                                  index->offset_by_key.end()) {
-            index->offset_by_key[key] = unzGetOffset(uf);
-          }
-        }
-        rc = unzGoToNextFile(uf);
-      } while (rc == UNZ_OK);
-      if (app) {
-        DBG_LOGF(app, "EPUB: ZIP index built entries=%u",
-                 (unsigned)index->offset_by_key.size());
-      }
-    } else if (app) {
-      DBG_LOGF(app, "EPUB: ZIP index build failed rc=%d", rc);
-    }
-  }
-
-  if (index && !index->offset_by_key.empty()) {
-    std::string wanted = ToLowerAscii(NormalizeZipEntryName(entry_path));
-    auto hit = index->offset_by_key.find(wanted);
-    if (hit != index->offset_by_key.end()) {
-      if (unzSetOffset(uf, hit->second) == UNZ_OK)
-        return true;
-    }
-  }
-
-  // Fast path: exact match first.
-  if (unzLocateFile(uf, entry_path.c_str(), 0) == UNZ_OK)
-    return true;
-
-  // Fallback: iterate entries and compare with ASCII-only case folding.
-  int rc = unzGoToFirstFile(uf);
-  if (rc != UNZ_OK) {
+  bool ok = epub_zip_utils::LocateSafe(uf, entry_path, index);
+  if (!ok && app) {
     char msg[128];
-    snprintf(msg, sizeof(msg), "EPUB: %s locate first fail rc=%d", t, rc);
-    if (app)
-      DBG_LOG(app, msg);
-    return false;
+    snprintf(msg, sizeof(msg), "EPUB: %s locate miss path=%s", t,
+             entry_path.c_str());
+    DBG_LOG(app, msg);
   }
-
-  std::string wanted = NormalizeZipEntryName(entry_path);
-  size_t scanned = 0;
-  do {
-    scanned++;
-    unz_file_info fi;
-    char fname[1024];
-    int info_rc =
-        unzGetCurrentFileInfo(uf, &fi, fname, sizeof(fname), NULL, 0, NULL, 0);
-    if (info_rc == UNZ_OK) {
-      std::string current = NormalizeZipEntryName(std::string(fname));
-      if (current == wanted || EqualsAsciiNoCase(current, wanted)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "EPUB: %s locate fallback hit scanned=%u", t,
-                 (unsigned)scanned);
-        if (app)
-          DBG_LOG(app, msg);
-        return true;
-      }
-    }
-
-    if (scanned > 32768) {
-      char msg[160];
-      snprintf(msg, sizeof(msg), "EPUB: %s locate fallback abort scanned=%u", t,
-               (unsigned)scanned);
-      if (app)
-        DBG_LOG(app, msg);
-      break;
-    }
-    rc = unzGoToNextFile(uf);
-  } while (rc == UNZ_OK);
-
-  {
-    char msg[160];
-    snprintf(msg, sizeof(msg), "EPUB: %s locate fallback miss scanned=%u rc=%d",
-             t, (unsigned)scanned, rc);
-    if (app)
-      DBG_LOG(app, msg);
-  }
-  return false;
+  return ok;
 }
 
 static bool ReadZipEntryText(unzFile uf, const std::string &path,
                              std::string &out, App *app = NULL,
                              const char *tag = NULL,
-                             ZipEntryIndex *index = NULL) {
+                             epub_zip_utils::ZipEntryIndex *index = NULL) {
   out.clear();
   const char *t = (tag && *tag) ? tag : "ZIP";
   {
@@ -619,48 +533,24 @@ static bool ReadZipEntryText(unzFile uf, const std::string &path,
   if (path.empty())
     return false;
   EpubDiag(app, "EPUB: %s locate begin", t);
-  if (!LocateZipEntrySafe(uf, path, app, t, index)) {
+  if (!epub_zip_utils::LocateSafe(uf, path, index)) {
     EpubDiag(app, "EPUB: %s locate fail", t);
     return false;
   }
   EpubDiag(app, "EPUB: %s locate ok", t);
-  unz_file_info fi;
-  if (unzGetCurrentFileInfo(uf, &fi, NULL, 0, NULL, 0, NULL, 0) == UNZ_OK) {
-    if (fi.uncompressed_size > epub_limits::kTocMaxBytes) {
-      EpubDiag(app, "EPUB: %s too big", t);
-      return false;
-    }
-  }
-  EpubDiag(app, "EPUB: %s open begin", t);
-  if (unzOpenCurrentFile(uf) != UNZ_OK) {
-    EpubDiag(app, "EPUB: %s open fail", t);
+  bool ok = epub_zip_utils::ReadText(uf, path, out, epub_limits::kTocMaxBytes,
+                                     index);
+  if (!ok) {
+    EpubDiag(app, "EPUB: %s read fail", t);
     return false;
   }
-  EpubDiag(app, "EPUB: %s open ok", t);
-
-  // 3DS stack is tight; avoid large BUFSIZE (128KB) on stack here.
-  char buf[8 * 1024];
-  int n = 0;
-  EpubDiag(app, "EPUB: %s read loop", t);
-  while ((n = unzReadCurrentFile(uf, buf, sizeof(buf))) > 0) {
-    if (out.size() + (size_t)n > epub_limits::kTocMaxBytes) {
-      unzCloseCurrentFile(uf);
-      out.clear();
-      EpubDiag(app, "EPUB: %s read overflow", t);
-      return false;
-    }
-    out.append(buf, n);
-  }
-  EpubDiag(app, "EPUB: %s close begin", t);
-  unzCloseCurrentFile(uf);
-  EpubDiag(app, "EPUB: %s close ok", t);
   {
     char msg[128];
-    snprintf(msg, sizeof(msg), "EPUB: %s read done bytes=%u", t,
+    snprintf(msg, sizeof(msg), "EPUB: %s read ok bytes=%u", t,
              (unsigned)out.size());
     EpubDiag(app, msg);
   }
-  return n >= 0;
+  return true;
 }
 
 static bool
@@ -2377,7 +2267,7 @@ static int ParseEpubSpineDocuments(
     return 1;
 
   App *app = deps.app;
-  ZipEntryIndex zip_index;
+  epub_zip_utils::ZipEntryIndex zip_index;
   int rc = 0;
   parsedata->ctx.clear();
   parsedata->book = book;
