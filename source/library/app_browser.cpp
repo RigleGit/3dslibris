@@ -36,7 +36,6 @@
 #include "debug_log.h"
 #include "formats/epub/epub.h"
 #include "formats/fb2/fb2.h"
-#include "main.h"
 #include "formats/mobi/mobi.h"
 #include "formats/pdf/pdf.h"
 #include "parse.h"

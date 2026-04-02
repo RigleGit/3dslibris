@@ -31,7 +31,6 @@
 #include "ui/button.h"
 #include "debug_log.h"
 #include "book/layout_reflow.h"
-#include "main.h"
 #include "book/page.h"
 #include "parse.h"
 #include "settings/prefs.h"
