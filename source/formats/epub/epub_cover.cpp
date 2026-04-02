@@ -11,7 +11,6 @@
 #include "formats/common/epub_image_utils.h"
 #include "formats/epub/epub.h"
 #include "formats/epub/epub_limits.h"
-#include "main.h"
 #include "minizip/unzip.h"
 #include "path_utils.h"
 #include "stb_image.h"

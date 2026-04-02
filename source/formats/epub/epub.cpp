@@ -41,9 +41,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/epub/epub_limits.h"
 #include "formats/epub/epub_ncx_parser.h"
 #include "formats/epub/epub_zip_utils.h"
-#include "main.h"
 #include "path_utils.h"
 #include "book/page.h"
+#include "shared/parser_limits.h"
 #include "shared/status_reporter.h"
 #include "shared/text_layout_utils.h"
 #include "parse.h"
@@ -749,7 +749,8 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
     return 0;
 
   xml_parse_utils::XmlParseResult parse_result =
-      xml_parse_utils::ParseXmlZipEntry(uf, options, BUFSIZE);
+      xml_parse_utils::ParseXmlZipEntry(uf, options,
+                                        parser_limits::kXmlStreamBufferSize);
 #ifdef DSLIBRIS_DEBUG
   if (log_content_layout) {
     const text_layout_utils::PerfStats layout_after =

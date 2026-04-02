@@ -45,7 +45,6 @@
 // Buffer allocated as PAGE_HEIGHT * PAGE_HEIGHT (square, like DS VRAM).
 #define PAGE_HEIGHT 400
 #define PAGE_WIDTH 240
-#define BUFSIZE 1024 * 128
 #define SPLASH_LEFT 28
 #define SPLASH_TOP 44
 

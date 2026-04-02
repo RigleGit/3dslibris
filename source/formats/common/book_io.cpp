@@ -19,7 +19,6 @@
 #include "formats/epub/epub.h"
 #include "formats/common/file_read_utils.h"
 #include "book/heading_layout.h"
-#include "main.h"
 #include "path_utils.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/mobi/mobi.h"
@@ -42,6 +41,7 @@
 #include "formats/common/text_helpers.h"
 #include "formats/rtf/rtf_loader.h"
 #include "formats/txt/txt_loader.h"
+#include "shared/parser_limits.h"
 #include "shared/text_layout_utils.h"
 #include "string_utils.h"
 #include "minizip/unzip.h"
@@ -4764,7 +4764,7 @@ u8 Book::Parse(bool fulltext) {
   }
   xml_parse_utils::XmlParseResult parse_result =
       xml_parse_utils::ParseXmlFileStream(
-          fp, options, BUFSIZE,
+          fp, options, parser_limits::kXmlStreamBufferSize,
           [](void *user_data) {
             parsedata_t *parsedata = static_cast<parsedata_t *>(user_data);
             return parsedata && parsedata->status;
