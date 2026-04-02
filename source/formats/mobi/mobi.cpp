@@ -9,12 +9,12 @@
 
 #include "formats/mobi/mobi.h"
 
-#include "app/app.h"
 #include "formats/common/book_error.h"
 #include "formats/mobi/mobi_cover_meta_cache.h"
 #include "formats/mobi/mobi_record_scan.h"
 #include "formats/mobi/mobi_cover_utils.h"
 #include "path_utils.h"
+#include "shared/status_reporter.h"
 #include "stb_image.h"
 #include "string_utils.h"
 
@@ -188,7 +188,7 @@ static bool ReadFileSlice(const std::string &path, u32 start, u32 end,
 
 static bool TryDecodeCachedCoverMeta(Book *book, const std::string &mobipath,
                                      const mobi_cover_meta_cache::CoverMeta &meta,
-                                     App *app) {
+                                     IStatusReporter *reporter) {
   if (!book || meta.kind != mobi_cover_meta_cache::kCandidate ||
       meta.record_end <= meta.record_start)
     return false;
@@ -204,13 +204,13 @@ static bool TryDecodeCachedCoverMeta(Book *book, const std::string &mobipath,
   if (!DecodeAndScaleToCover(book, image, image_len))
     return false;
 
-  if (app) {
+  if (reporter) {
     char msg[224];
     snprintf(msg, sizeof(msg),
              "MOBI: cover meta cache hit rec=%u off=%u dim=%ux%u",
              (unsigned)meta.record_index, (unsigned)meta.image_offset,
              (unsigned)meta.width, (unsigned)meta.height);
-    app->PrintStatus(msg);
+    reporter->PrintStatus(msg);
   }
   return true;
 }
@@ -558,7 +558,8 @@ static u32 FindFirstImageRecordIndex(MobiRecordReader *reader,
 
 static bool TryDecodeCoverCandidate(Book *book, MobiRecordReader *reader,
                                     const std::vector<u32> &offsets,
-                                    const MobiCoverCandidate &cand, App *app) {
+                                    const MobiCoverCandidate &cand,
+                                    IStatusReporter *reporter) {
   if (!book || !reader || cand.record_idx >= offsets.size() - 1)
     return false;
   const std::vector<u8> *record = NULL;
@@ -570,14 +571,14 @@ static bool TryDecodeCoverCandidate(Book *book, MobiRecordReader *reader,
   size_t image_len = record->size() - cand.image_off;
   if (!DecodeAndScaleToCover(book, image, image_len))
     return false;
-  if (app) {
+  if (reporter) {
     char msg[224];
     snprintf(msg, sizeof(msg),
              "MOBI: cover record=%u bytes=%u off=%u dim=%dx%d score=%d",
              (unsigned)cand.record_idx, (unsigned)image_len,
              (unsigned)cand.image_off, cand.width, cand.height,
              (int)cand.score);
-    app->PrintStatus(msg);
+    reporter->PrintStatus(msg);
   }
   return true;
 }
@@ -588,20 +589,20 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   if (!book || mobipath.empty())
     return 1;
 
-  App *app = book->GetApp();
-  if (app)
-    app->PrintStatus("MOBI: cover scan begin");
+  IStatusReporter *reporter = book->GetStatusReporter();
+  if (reporter)
+    reporter->PrintStatus("MOBI: cover scan begin");
 
   std::string meta_cache_path;
   if (BuildMobiCoverMetaCachePath(mobipath, &meta_cache_path)) {
     mobi_cover_meta_cache::CoverMeta cached_meta;
     if (mobi_cover_meta_cache::Load(meta_cache_path, &cached_meta)) {
       if (cached_meta.kind == mobi_cover_meta_cache::kNoCover) {
-        if (app)
-          app->PrintStatus("MOBI: cover meta cache none");
+        if (reporter)
+          reporter->PrintStatus("MOBI: cover meta cache none");
         return 5;
       }
-      if (TryDecodeCachedCoverMeta(book, mobipath, cached_meta, app))
+      if (TryDecodeCachedCoverMeta(book, mobipath, cached_meta, reporter))
         return 0;
       remove(meta_cache_path.c_str());
     }
@@ -672,7 +673,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   if (first_image_index == 0 && detected_first_image_index > 0)
     inferred_image_base = detected_first_image_index;
 
-  if (app) {
+  if (reporter) {
     char hint_msg[288];
     snprintf(hint_msg, sizeof(hint_msg),
              "MOBI: cover hints primary text=%u first_non_book=%u first_image=%u inferred_base=%u detected_image=%u cover_off=%d thumb_off=%d kf8=%d",
@@ -682,7 +683,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
              (cover_offset == UINT_MAX) ? -1 : (int)cover_offset,
              (thumb_offset == UINT_MAX) ? -1 : (int)thumb_offset,
              (kf8_boundary == UINT_MAX) ? -1 : (int)kf8_boundary);
-    app->PrintStatus(hint_msg);
+    reporter->PrintStatus(hint_msg);
   }
 
   // If this is a combo MOBI/KF8, parse hints from KF8 boundary header too.
@@ -705,7 +706,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
           kf8_rec, kf8_len, &kf8_text_rec_count, &kf8_first_non_book,
           &kf8_first_image, &kf8_cover_offset, &kf8_thumb_offset,
           &kf8_nested_boundary);
-      if (has_kf8_hints && app) {
+      if (has_kf8_hints && reporter) {
         u32 kf8_inferred = kf8_first_image;
         if (kf8_inferred == 0 && kf8_text_rec_count + 1 < rec_count)
           kf8_inferred = kf8_text_rec_count + 1;
@@ -716,7 +717,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
                  (unsigned)kf8_first_image, (unsigned)kf8_inferred,
                  (kf8_cover_offset == UINT_MAX) ? -1 : (int)kf8_cover_offset,
                  (kf8_thumb_offset == UINT_MAX) ? -1 : (int)kf8_thumb_offset);
-        app->PrintStatus(kf8_msg);
+        reporter->PrintStatus(kf8_msg);
       }
     }
   }
@@ -860,7 +861,7 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
                   return a.record_idx < b.record_idx;
                 return a.score > b.score;
               });
-    if (app) {
+    if (reporter) {
       const size_t preview = std::min((size_t)5, meta_ranked.size());
       for (size_t i = 0; i < preview; i++) {
         char meta_msg[224];
@@ -869,11 +870,12 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
                  (unsigned)i, (unsigned)meta_ranked[i].record_idx,
                  meta_ranked[i].width, meta_ranked[i].height,
                  (int)meta_ranked[i].score);
-        app->PrintStatus(meta_msg);
+        reporter->PrintStatus(meta_msg);
       }
     }
     for (size_t i = 0; i < meta_ranked.size(); i++) {
-      if (TryDecodeCoverCandidate(book, &reader, offsets, meta_ranked[i], app)) {
+      if (TryDecodeCoverCandidate(book, &reader, offsets, meta_ranked[i],
+                                  reporter)) {
         SaveMobiCoverMetaCandidate(meta_cache_path, offsets, meta_ranked[i]);
         return 0;
       }
@@ -915,7 +917,8 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
                 return a.score > b.score;
               });
     for (size_t i = 0; i < ranked.size(); i++) {
-      if (TryDecodeCoverCandidate(book, &reader, offsets, ranked[i], app)) {
+      if (TryDecodeCoverCandidate(book, &reader, offsets, ranked[i],
+                                  reporter)) {
         SaveMobiCoverMetaCandidate(meta_cache_path, offsets, ranked[i]);
         return 0;
       }
@@ -923,8 +926,8 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   }
 
   SaveMobiCoverMetaMiss(meta_cache_path);
-  if (app)
-    app->PrintStatus("MOBI: cover scan none");
+  if (reporter)
+    reporter->PrintStatus("MOBI: cover scan none");
   return 5;
 }
 
