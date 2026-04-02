@@ -138,4 +138,64 @@ inline std::string ExtractHtmlAttrValue(const std::string &tag,
   return "";
 }
 
+// --- Normalize ZIP entry names (backslash to forward slash) ---
+
+inline std::string NormalizeZipEntryName(const std::string &name) {
+  std::string n = name;
+  std::replace(n.begin(), n.end(), '\\', '/');
+  return n;
+}
+
+// --- ASCII-only case-insensitive string equality ---
+
+inline bool EqualsAsciiNoCase(const std::string &a, const std::string &b) {
+  if (a.size() != b.size())
+    return false;
+  for (size_t i = 0; i < a.size(); i++) {
+    unsigned char ca = (unsigned char)a[i];
+    unsigned char cb = (unsigned char)b[i];
+    if (ca >= 'A' && ca <= 'Z')
+      ca = (unsigned char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z')
+      cb = (unsigned char)(cb - 'A' + 'a');
+    if (ca != cb)
+      return false;
+  }
+  return true;
+}
+
+// --- Case-insensitive substring search ---
+
+inline bool ContainsNoCase(const std::string &haystack,
+                           const std::string &needle) {
+  if (needle.empty())
+    return true;
+  if (haystack.empty())
+    return false;
+  std::string h = haystack;
+  std::string n = needle;
+  std::transform(h.begin(), h.end(), h.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
+  std::transform(n.begin(), n.end(), n.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
+  return h.find(n) != std::string::npos;
+}
+
+// --- Token search in space-separated list ---
+
+inline bool ContainsToken(const std::string &list, const std::string &token) {
+  size_t start = 0;
+  while (start < list.size()) {
+    while (start < list.size() && isspace((unsigned char)list[start]))
+      start++;
+    size_t end = start;
+    while (end < list.size() && !isspace((unsigned char)list[end]))
+      end++;
+    if (end > start && list.substr(start, end - start) == token)
+      return true;
+    start = end;
+  }
+  return false;
+}
+
 #endif // STRING_UTILS_H
