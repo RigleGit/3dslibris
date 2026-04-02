@@ -29,15 +29,13 @@
 #include "app/app.h"
 #include "version.h"
 
-App *app;
-
-static void PresentCurrentFrameToBothBuffers() {
+static void PresentCurrentFrameToBothBuffers(Text *presenter) {
   // Re-blit before each swap so both physical backbuffers receive the same
   // software-rendered frame. Swapping twice without re-blitting would simply
   // alternate between a fresh fatal screen and a stale previous frame.
   for (int i = 0; i < 2; i++) {
-    if (app && app->ts)
-      app->ts->BlitToFramebuffer();
+    if (presenter)
+      presenter->BlitToFramebuffer();
     gfxFlushBuffers();
     gfxSwapBuffers();
     gspWaitForVBlank();
@@ -45,10 +43,10 @@ static void PresentCurrentFrameToBothBuffers() {
 }
 
 //! \param vblanks blanking intervals to wait, -1 for forever, default = -1
-int halt(int vblanks) {
+int halt(Text *presenter, int vblanks) {
   // Present the current frame to both buffers so we don't alternate between a
   // stale previous frame and the latest fatal/console screen.
-  PresentCurrentFrameToBothBuffers();
+  PresentCurrentFrameToBothBuffers(presenter);
 
   int timer = vblanks;
   while (aptMainLoop()) {
@@ -69,9 +67,9 @@ int halt(int vblanks) {
 }
 
 //! \param vblanks blanking intervals to wait, -1 for forever, default = -1
-int halt(const char *msg, int vblanks) {
+int halt(Text *presenter, const char *msg, int vblanks) {
   printf("%s\n", msg);
-  return halt(vblanks);
+  return halt(presenter, vblanks);
 }
 
 int main(int argc, char **argv) {
@@ -111,10 +109,11 @@ int main(int argc, char **argv) {
   mkdir(paths::kCacheBaseDir, 0777);
   mkdir(paths::kCoverCacheDir, 0777);
 
-  app = new App();
+  App *app = new App();
   int result = app->Run();
 
   delete app;
+  app = NULL;
 
   if (romfs_ready)
     romfsExit();
@@ -122,7 +121,7 @@ int main(int argc, char **argv) {
   // If Run() returned early (error), wait for user
   if (result != 0) {
     printf("\nPress START to exit.\n");
-    PresentCurrentFrameToBothBuffers();
+    PresentCurrentFrameToBothBuffers(NULL);
     while (aptMainLoop()) {
       hidScanInput();
       if (hidKeysDown() & KEY_START)

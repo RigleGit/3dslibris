@@ -468,7 +468,7 @@ int App::Run(void) {
   };
 
   auto haltOnFatalBootStatus = [&]() -> int {
-    halt(-1);
+    halt(ts, -1);
     return 0;
   };
 

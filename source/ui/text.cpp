@@ -506,7 +506,7 @@ int Text::GetGlyphBitmap(u32 ucs, FTC_SBit *sbit, FTC_Node *anode) {
 
 FT_GlyphSlot Text::GetGlyph(u32 ucs, int flags, FT_Face face) {
   if (ftc)
-    halt("error: GetGlyph() called with ftc enabled");
+    halt(this, "error: GetGlyph() called with ftc enabled");
 
   Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
   if (!face || !face_cache) {

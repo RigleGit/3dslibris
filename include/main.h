@@ -60,5 +60,7 @@
 #define FONTBOLDITALICFILE "LiberationSerif-BoldItalic.ttf"
 #define FONTBROWSERFILE "LiberationSans-Regular.ttf"
 
-int halt(int vblanks = -1);
-int halt(const char *msg, int vblanks = -1);
+class Text;
+
+int halt(Text *presenter, int vblanks = -1);
+int halt(Text *presenter, const char *msg, int vblanks = -1);
