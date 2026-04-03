@@ -7,14 +7,19 @@ High-level architecture of 3dslibris as of v2.0.3. This document describes the c
 ```
 source/
 ├── main.cpp                    # Entry point: 3DS bootstrap, service init, App lifecycle
-├── app/                        # Application state machine + orchestration
-│   ├── app.cpp                 # Main loop, mode routing, job queue, warmup
+├── app/                        # Application orchestration + lifecycle controllers
+│   ├── app.cpp                 # App wiring, shared state accessors, navigation helpers
+│   ├── startup_controller.cpp  # Boot sequence and runtime asset checks
+│   ├── main_loop_controller.cpp# Main loop dispatch (mode routing + frame present)
+│   ├── status_controller.cpp   # Status bar rendering/update cadence
 │   └── status_layout_utils.cpp # Status bar layout
 ├── library/                    # Library/browser screen
 │   ├── app_browser.cpp         # Book grid, cover cache, metadata jobs
+│   ├── library_controller.cpp  # Library scan + browser flow delegation target
 │   └── browser_*.h             # Cover cache, job queue, warmup utilities
 ├── reader/                     # Book reader screen
 │   ├── app_book.cpp            # Open/reopen flow, input routing, deferred relayout
+│   ├── reader_controller.cpp   # Reader flow delegation target
 │   └── deferred_relayout_utils.h
 ├── book/                       # Book domain model + page management
 │   ├── book.cpp                # Metadata, chapters, bookmarks, page vector
@@ -129,7 +134,8 @@ third_party/                    # External dependencies
 
 ```
 App::Run()
-  └─ main loop (input → mode dispatch → draw → frame swap)
+  ├─ StartupController::RunBootSequence()
+  └─ MainLoopController::RunMainLoop() (input → mode dispatch → draw → frame swap)
        │
        ├─ Browser mode
        │    ├─ FindBooks() → scan bookdir → create Book objects
@@ -169,12 +175,12 @@ Reflowable formats (EPUB, FB2, MOBI, TXT, RTF, ODT) produce `Page` objects with 
 
 ## Known design trade-offs
 
-### 1. App is a God Object
-`App` handles state machine, input routing, job queue, cover warmup, screen drawing, settings, and menu management. This is a legacy from dslibris that has grown organically.
+### 1. App monolith reduction in progress
+`App` no longer owns the full runtime loop implementation directly. `StartupController`, `MainLoopController`, `LibraryController`, `ReaderController`, `SettingsController`, and `StatusController` now host major flows, while `App` delegates via explicit methods.
 
-**Impact:** Every new screen or feature requires modifying App. Hard to test in isolation.
+**Impact:** Coupling was reduced (notably by removing controller `friend` access and introducing explicit `App` APIs), but `App` is still a broad facade and remains the central mutable state hub.
 
-**Future direction:** Extract controllers (LibraryController, ReaderController, SettingsController) and reduce App to a state machine that delegates.
+**Current direction:** Continue migrating mode-specific mutable state (`job_queue`, browser runtime details, reader deferred/opening state) behind controller-owned interfaces so `App` can converge toward orchestration-only responsibilities.
 
 ### 2. Book mixes model, parsing, and rendering
 `Book` contains metadata (good), but also parsing methods (`Open()`, `Parse()`, `Index()`) and rendering methods (`DrawCurrentView()`, `DrawCurrentMuPdfView()`). It also holds an `App*` pointer creating a circular dependency.
@@ -188,7 +194,7 @@ TXT/RTF parse flow, plain heading heuristics/callbacks, text normalization helpe
 
 **Impact:** Format/parser changes no longer touch `book_io.cpp` in practice, except when adding/removing dispatch routes.
 
-**Future direction:** Keep `book_io.cpp` as thin dispatch + shared plain-text helpers. In MOBI, continue with hook/callback extraction to reduce remaining glue code in `book_io.cpp`.
+**Future direction:** Keep `book_io.cpp` as a thin dispatch unit. Optional next step: a small dispatch table helper to simplify extension registration.
 
 ### 4. Formats extracted from book_io.cpp
 The following modules were extracted to improve testability and reduce monolith size:
@@ -271,7 +277,7 @@ Contains EPUB parsing, page cache management, inline image handling, TOC extract
 
 ### High: Zero tests on critical components
 
-App (1164 lines), Book (1658 lines), app_book.cpp (873 lines), epub.cpp (1328 lines), and parser modules still lack broad integration coverage. Existing tests mostly cover pure utilities.
+Core runtime units still lack broad integration coverage (`source/app/app.cpp` now 686 lines, `source/reader/app_book.cpp` 903 lines, `source/formats/epub/epub.cpp` 1328 lines). Existing tests mostly cover pure utilities.
 
 **Impact:** Every refactor is a leap of faith. No safety net for the most complex code.
 
@@ -279,7 +285,7 @@ App (1164 lines), Book (1658 lines), app_book.cpp (873 lines), epub.cpp (1328 li
 
 ### High: UI and business logic mixed across layers
 
-`Text` (1349 lines) mixes FreeType rendering, gradient generation, font path resolution, and UI label rendering. `App` (1164 lines) mixes state machine, job queue, cover warmup, screen drawing, and menu management.
+`Text` (1349 lines) mixes FreeType rendering, gradient generation, font path resolution, and UI label rendering. `App` is smaller than before but still mixes orchestration with shared runtime state and compatibility wrapper methods.
 
 **Impact:** Changing the renderer requires recompiling App. Changing UI requires understanding business logic.
 
@@ -311,6 +317,6 @@ Adding a format requires modifying `parse.cpp`, `book_io.cpp`, `app_flow_utils.c
 |------|-------------|
 | `plain_parser.cpp` | Plain text parse heuristics + callback wiring still complex and regression-prone without integration tests |
 | `book.h:237-291` | Public API mixes metadata, rendering, parsing, fixed-layout, async reflow, MOBI deferred |
-| `app.h:120-150` | Public fields (ts, prefs, buttons, books) allow any file to mutate App state directly |
+| `include/app/app.h` public section | Public fields (`ts`, `prefs`, `buttons`, `books`) still allow broad external mutation of App state |
 | `epub.cpp` | 1328 lines, zero tests, most-used format |
 | `main.cpp` global `app` | Undefined behavior if accessed before init or after destruction |
