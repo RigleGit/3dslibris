@@ -30,7 +30,7 @@
 #include "formats/mobi/mobi_position_map.h"
 #include "formats/mobi/mobi_structured_toc_parser.h"
 #include "formats/mobi/mobi_toc_finalize.h"
-#include "formats/mobi/mobi_toc_resolver.h"
+#include "formats/mobi/mobi_toc_prepare.h"
 #include "formats/mobi/mobi_text_cleanup.h"
 #include "formats/pdf/pdf.h"
 #include "formats/cbz/cbz.h"
@@ -1334,48 +1334,22 @@ static bool MobiInlineMostlyDigitsOrPunct(const std::string &text) {
   return IsMostlyDigitsOrPunctuation(text);
 }
 
-static bool PrepareMobiStructuredToc(const std::string &raw,
-                                     const std::vector<u32> &offsets,
-                                     u32 ncx_index, u32 encoding,
-                                     const std::string *markup_utf8,
-                                     u32 text_len,
-                                     std::vector<MobiStructuredTocEntry> *out,
-                                     bool *structured_from_filepos,
-                                     IStatusReporter *reporter) {
-  mobi_toc_resolver::PrepareCallbacks callbacks;
-  callbacks.structured.decode_bytes_to_utf8 = DecodeMobiStructuredTocBytes;
-  callbacks.structured.normalize_title = NormalizeMobiStructuredTocTitle;
-  callbacks.structured.reject_title = RejectMobiStructuredTocTitle;
-  callbacks.inline_title.looks_like_structured_title =
-      MobiInlineLooksLikeStructuredTitle;
-  callbacks.inline_title.fold_latin_for_match = MobiInlineFoldLatin;
-  callbacks.inline_title.count_ascii_words = MobiInlineCountWords;
-  callbacks.inline_title.is_mostly_digits_or_punctuation =
-      MobiInlineMostlyDigitsOrPunct;
+static mobi_toc_prepare::StructuredCallbacks
+MakeMobiStructuredTocCallbacks() {
+  mobi_toc_prepare::StructuredCallbacks callbacks;
   callbacks.decode_bytes_to_utf8 = DecodeMobiStructuredTocBytes;
-  return mobi_toc_resolver::PrepareStructuredToc(
-      raw, offsets, ncx_index, encoding, markup_utf8, text_len, callbacks, out,
-      structured_from_filepos, reporter);
+  callbacks.normalize_title = NormalizeMobiStructuredTocTitle;
+  callbacks.reject_title = RejectMobiStructuredTocTitle;
+  return callbacks;
 }
 
-static bool LoadDeferredMobiStructuredToc(
-    const MobiDeferredState &state, std::vector<MobiStructuredTocEntry> *out,
-    bool *structured_from_filepos, IStatusReporter *reporter) {
-  mobi_toc_resolver::PrepareCallbacks callbacks;
-  callbacks.structured.decode_bytes_to_utf8 = DecodeMobiStructuredTocBytes;
-  callbacks.structured.normalize_title = NormalizeMobiStructuredTocTitle;
-  callbacks.structured.reject_title = RejectMobiStructuredTocTitle;
-  callbacks.inline_title.looks_like_structured_title =
-      MobiInlineLooksLikeStructuredTitle;
-  callbacks.inline_title.fold_latin_for_match = MobiInlineFoldLatin;
-  callbacks.inline_title.count_ascii_words = MobiInlineCountWords;
-  callbacks.inline_title.is_mostly_digits_or_punctuation =
-      MobiInlineMostlyDigitsOrPunct;
-  callbacks.decode_bytes_to_utf8 = DecodeMobiStructuredTocBytes;
-  return mobi_toc_resolver::LoadDeferredStructuredToc(
-      &state.structured_toc, state.have_structured_toc, state.markup_utf8,
-      state.text_len_for_pos, state.source_path, callbacks, out,
-      structured_from_filepos, reporter);
+static mobi_toc_prepare::InlineTitleCallbacks MakeMobiInlineTitleCallbacks() {
+  mobi_toc_prepare::InlineTitleCallbacks callbacks;
+  callbacks.looks_like_structured_title = MobiInlineLooksLikeStructuredTitle;
+  callbacks.fold_latin_for_match = MobiInlineFoldLatin;
+  callbacks.count_ascii_words = MobiInlineCountWords;
+  callbacks.is_mostly_digits_or_punctuation = MobiInlineMostlyDigitsOrPunct;
+  return callbacks;
 }
 
 static bool DecodeHtmlEntity(const std::string &entity, std::string *out) {
@@ -2318,9 +2292,10 @@ static void FinalizeImmediateMobiParse(Book *book, const char *path,
   }
 
   if (!deferred->have_structured_toc) {
-    deferred->have_structured_toc = PrepareMobiStructuredToc(
+    deferred->have_structured_toc = mobi_toc_prepare::Prepare(
         raw, header.offsets, header.ncx_index, header.encoding, &utf8,
-        deferred->text_len_for_pos, &deferred->structured_toc,
+        deferred->text_len_for_pos, MakeMobiStructuredTocCallbacks(),
+        MakeMobiInlineTitleCallbacks(), &deferred->structured_toc,
         &deferred->structured_from_filepos, reporter);
   }
   mobi_toc_finalize::FinalizePreparedToc(
@@ -2451,10 +2426,11 @@ static u8 ParseMobiFile(Book *book, const char *path) {
                            t_after_markup, book->GetMobiLineWrapFix(),
                            decode_plan.retain_markup_utf8, &decoded,
                            &deferred);
-  deferred.have_structured_toc = PrepareMobiStructuredToc(
-      raw, header.offsets, header.ncx_index, header.encoding,
-      &decoded.utf8, deferred.text_len_for_pos,
-      &deferred.structured_toc, &deferred.structured_from_filepos, reporter);
+  deferred.have_structured_toc = mobi_toc_prepare::Prepare(
+      raw, header.offsets, header.ncx_index, header.encoding, &decoded.utf8,
+      deferred.text_len_for_pos, MakeMobiStructuredTocCallbacks(),
+      MakeMobiInlineTitleCallbacks(), &deferred.structured_toc,
+      &deferred.structured_from_filepos, reporter);
 
   bool pages_done_initial = false;
   if (!StartInitialMobiPagination(book, deps, &deferred, &pages_done_initial))
@@ -2578,8 +2554,11 @@ static bool FinalizeDeferredMobiState(Book *book, MobiDeferredState *state) {
   case mobi_deferred_finalize_utils::FinalizeStage::LoadStructuredToc:
     // Deferred TOC resolution runs only once we already have the full page
     // map, which keeps initial open responsive even for large MOBIs.
-    state->have_structured_toc = LoadDeferredMobiStructuredToc(
-        *state, &state->structured_toc, &state->structured_from_filepos, reporter);
+    state->have_structured_toc = mobi_toc_prepare::LoadDeferred(
+        state->structured_toc, state->have_structured_toc, state->markup_utf8,
+        state->text_len_for_pos, state->source_path,
+        MakeMobiStructuredTocCallbacks(), MakeMobiInlineTitleCallbacks(),
+        &state->structured_toc, &state->structured_from_filepos, reporter);
     state->structured_toc_loaded = true;
     return false;
   case mobi_deferred_finalize_utils::FinalizeStage::ApplyToc: {
