@@ -1587,11 +1587,14 @@ static void BuildDeferredMobiTocMetadata(Book *book, MobiDeferredState *state) {
     return;
   const BookIoDeps deps = BuildBookIoDeps(book);
   IStatusReporter *reporter = deps.reporter;
+#ifdef DSLIBRIS_DEBUG
   const u64 t_meta_begin = osGetTime();
+#endif
   BuildMobiTocMetadataFromUtf8(book, deps, state->markup_utf8,
                                state->line_wrap_fix_applied,
                                &state->heading_hints,
                                &state->html_to_text_map);
+#ifdef DSLIBRIS_DEBUG
   if (reporter) {
     DBG_LOGF(reporter,
              "MOBI: deferred toc metadata ready ms=%llu headings=%u map=%u",
@@ -1599,6 +1602,9 @@ static void BuildDeferredMobiTocMetadata(Book *book, MobiDeferredState *state) {
              (unsigned)state->heading_hints.size(),
              (unsigned)state->html_to_text_map.size());
   }
+#else
+  (void)reporter;
+#endif
 }
 
 static void LoadDeferredMobiStructuredToc(Book *book, MobiDeferredState *state) {
@@ -1735,8 +1741,10 @@ u8 Book::Parse(bool fulltext) {
   parsedata_t parsedata;
   InitParsedataWithBookIoDeps(&parsedata, this, deps);
   parsedata.fb2_mode = fulltext && HasExtCI(GetFileName(), ".fb2");
+#ifdef DSLIBRIS_DEBUG
   const u64 xml_parse_begin = osGetTime();
   const u16 xml_pages_before = GetPageCount();
+#endif
   PlainTextPerfBaseline xml_perf_baseline;
   CapturePlainTextPerfBaseline(parsedata, &xml_perf_baseline);
 
