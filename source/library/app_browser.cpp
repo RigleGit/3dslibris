@@ -885,20 +885,22 @@ void LibraryController::browser_handleevent() {
     if (!move)
       return false;
     if (!app_.orientation) {
-      if (key_down & KEY_LEFT) {
-        *move = BROWSER_NAV_LEFT;
-        return true;
-      }
-      if (key_down & KEY_RIGHT) {
+      // Turned Left (right-handed): rotate d-pad mapping so directional input
+      // follows the visual page orientation.
+      if (key_down & KEY_DOWN) {
         *move = BROWSER_NAV_RIGHT;
         return true;
       }
       if (key_down & KEY_UP) {
-        *move = BROWSER_NAV_UP;
+        *move = BROWSER_NAV_LEFT;
         return true;
       }
-      if (key_down & KEY_DOWN) {
+      if (key_down & KEY_LEFT) {
         *move = BROWSER_NAV_DOWN;
+        return true;
+      }
+      if (key_down & KEY_RIGHT) {
+        *move = BROWSER_NAV_UP;
         return true;
       }
       return false;
