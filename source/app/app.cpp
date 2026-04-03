@@ -14,7 +14,6 @@
 #include "app/app.h"
 
 #include <algorithm>
-#include <dirent.h>
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
@@ -31,20 +30,18 @@
 #include "ui/button.h"
 #include "menus/chapter_menu.h"
 #include "shared/app_flow_utils.h"
-#include "app/status_layout_utils.h"
-#include "library/browser_warmup_utils.h"
 #include "settings/font.h"
+#include "app/library_controller.h"
+#include "app/reader_controller.h"
+#include "app/settings_controller.h"
+#include "app/status_controller.h"
+#include "app/startup_controller.h"
+#include "app/main_loop_controller.h"
 #include "debug_log.h"
 #include "main.h"
 #include "parse.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
-#include "shared/utf8_utils.h"
-#include "version.h"
-
-#ifndef UTF8_FILENAME_DIAG
-#define UTF8_FILENAME_DIAG 0
-#endif
 
 #ifndef ORIENTATION_DIAG
 #define ORIENTATION_DIAG 0
@@ -54,143 +51,8 @@ namespace {} // end anonymous namespace
 #include "color_utils.h"
 namespace {
 
-struct RuntimeFileCheck {
-  const char *path;
-  bool directory;
-  const char *label;
-};
-
-static format_t ToBookFormat(app_flow_utils::BookFileFormat format) {
-  switch (format) {
-  case app_flow_utils::BookFileFormat::Epub:
-    return FORMAT_EPUB;
-  case app_flow_utils::BookFileFormat::MuPdf:
-    return FORMAT_PDF;
-  case app_flow_utils::BookFileFormat::Cbz:
-    return FORMAT_CBZ;
-  case app_flow_utils::BookFileFormat::XhtmlLike:
-    return FORMAT_XHTML;
-  case app_flow_utils::BookFileFormat::Unsupported:
-  default:
-    return FORMAT_UNDEF;
-  }
-}
-
-static bool PathExistsAndType(const char *path, bool want_dir) {
-  if (!path || !*path)
-    return false;
-  struct stat st;
-  if (stat(path, &st) != 0)
-    return false;
-  if (want_dir)
-    return S_ISDIR(st.st_mode);
-  return S_ISREG(st.st_mode);
-}
-
-static bool FileReadable(const char *path) {
-  if (!path || !*path)
-    return false;
-  FILE *fp = fopen(path, "rb");
-  if (!fp)
-    return false;
-  fclose(fp);
-  return true;
-}
-
-static bool RuntimePathExistsEither(const char *sdmc_path,
-                                    const char *romfs_path, bool want_dir) {
-  if (want_dir)
-    return PathExistsAndType(sdmc_path, true) || PathExistsAndType(romfs_path, true);
-  return FileReadable(sdmc_path) || FileReadable(romfs_path);
-}
-
-static bool FontDirLooksUsable(const std::string &dir) {
-  if (dir.empty())
-    return false;
-  static const char *kProbeFont = "LiberationSerif-Regular.ttf";
-  std::string probe = dir + "/" + kProbeFont;
-  return FileReadable(probe.c_str());
-}
-
-static bool UsesFixedLayoutMinimalHud(const Book *book) {
-  return book && (book->IsPdf() || book->IsCbz());
-}
-
 static std::string ResolveDefaultFontDir() {
-  static const char *kSdmcFontDir = paths::kFontDir;
-  static const char *kRomfsFontDir = "romfs:/3ds/3dslibris/font";
-  if (FontDirLooksUsable(kSdmcFontDir))
-    return std::string(kSdmcFontDir);
-  if (FontDirLooksUsable(kRomfsFontDir))
-    return std::string(kRomfsFontDir);
-
-  return std::string(kSdmcFontDir);
-}
-
-static void NormalizeRuntimeAssetPaths(App *app) {
-  if (!app)
-    return;
-  if (!FontDirLooksUsable(app->fontdir))
-    app->fontdir = ResolveDefaultFontDir();
-}
-
-static void CollectMissingRuntimeFiles(std::vector<std::string> *missing) {
-  if (!missing)
-    return;
-  missing->clear();
-
-  static const RuntimeFileCheck kRequired[] = {
-      {paths::kBookDir, true, "book/"},
-      {paths::kDefaultFonts[0][1], false, paths::kDefaultFonts[0][0]},
-      {paths::kDefaultFonts[1][1], false, paths::kDefaultFonts[1][0]},
-      {paths::kDefaultFonts[2][1], false, paths::kDefaultFonts[2][0]},
-      {paths::kDefaultFonts[3][1], false, paths::kDefaultFonts[3][0]},
-      {paths::kDefaultFonts[4][1], false, paths::kDefaultFonts[4][0]},
-  };
-
-  if (!PathExistsAndType(kRequired[0].path, kRequired[0].directory))
-    missing->push_back(kRequired[0].label);
-
-  struct RuntimeFallbackFile {
-    const char *sdmc_path;
-    const char *romfs_path;
-    const char *label;
-  };
-  static const RuntimeFallbackFile kBundled[] = {
-      {paths::kDefaultFonts[0][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Regular.ttf", paths::kDefaultFonts[0][0]},
-      {paths::kDefaultFonts[1][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Bold.ttf", paths::kDefaultFonts[1][0]},
-      {paths::kDefaultFonts[2][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Italic.ttf", paths::kDefaultFonts[2][0]},
-      {paths::kDefaultFonts[3][1], "romfs:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf", paths::kDefaultFonts[3][0]},
-      {paths::kDefaultFonts[4][1], "romfs:/3ds/3dslibris/font/LiberationSans-Regular.ttf", paths::kDefaultFonts[4][0]},
-  };
-
-  for (size_t i = 0; i < sizeof(kBundled) / sizeof(kBundled[0]); i++) {
-    if (!RuntimePathExistsEither(kBundled[i].sdmc_path, kBundled[i].romfs_path,
-                                 false))
-      missing->push_back(kBundled[i].label);
-  }
-}
-
-static void PrintInstallHelpToConsole(const std::vector<std::string> &missing) {
-  printf("\n[FAIL] Incomplete SD install for 3dslibris.\n\n");
-  printf("Download and extract:\n");
-  printf("  3dslibris-sdmc.zip\n");
-  printf("from GitHub Releases into the SD root:\n");
-  printf("  sdmc:/\n\n");
-  printf("Expected layout:\n");
-  printf("  sdmc:/3ds/3dslibris/3dslibris.3dsx\n");
-  printf("  sdmc:/3ds/3dslibris/book/\n");
-  printf("  sdmc:/3ds/3dslibris/font/\n");
-  printf("  sdmc:/3ds/3dslibris/resources/\n\n");
-  if (!missing.empty()) {
-    printf("Missing files:\n");
-    size_t shown = std::min<size_t>(missing.size(), 8);
-    for (size_t i = 0; i < shown; i++)
-      printf("  %s\n", missing[i].c_str());
-    if (missing.size() > shown)
-      printf("  ... and %u more\n", (unsigned)(missing.size() - shown));
-    printf("\n");
-  }
+  return std::string(paths::kFontDir);
 }
 
 #if ORIENTATION_DIAG
@@ -204,9 +66,9 @@ App::App() {
 
   fontdir = ResolveDefaultFontDir();
   bookdir = std::string(paths::kBookDir);
-  bookcurrent_ = NULL;
+  reader_state_.bookcurrent = NULL;
   reopen = true;
-  mode_ = AppMode::Browser;
+  nav_.mode = AppMode::Browser;
   cache = false;
   orientation = false;
   paraspacing = 1;
@@ -226,29 +88,30 @@ App::App() {
   key.x = KEY_X;
   key.y = KEY_Y;
 
-  browser_.selected_book = NULL;
-  browser_.page_start = 0;
-  browser_.view_dirty = false;
-  browser_.wait_input_release = false;
-  browser_.last_interaction_ms = 0;
+  nav_.browser.selected_book = NULL;
+  nav_.browser.page_start = 0;
+  nav_.browser.view_dirty = false;
+  nav_.browser.wait_input_release = false;
+  nav_.browser.last_interaction_ms = 0;
 
   prefs = new Prefs(this);
-  prefs_view_.selected_index = -1;
-  prefs_view_.view_dirty = false;
-  prefs_view_.from_book = false;
-  prefs_view_.layout_notice_pending = false;
-  status_.last_minute = -1;
-  status_.last_display_token = -1;
-  status_.progress_lock_book = NULL;
-  status_.progress_pagecount_lock = 0;
-  status_.force_redraw = true;
-  opening_ = OpeningState();
-  layout_revision = 0;
-  pdf_touch_drag_active_ = false;
-  pdf_touch_last_x_ = -1;
-  pdf_touch_last_y_ = -1;
-  pdf_deferred_ready_at_ms_ = 0;
-  mobi_deferred_ready_at_ms_ = 0;
+  library_controller_.reset(new LibraryController(*this));
+  reader_controller_.reset(new ReaderController(*this));
+  settings_controller_.reset(new SettingsController(*this));
+  status_controller_.reset(new StatusController(*this));
+  startup_controller_.reset(new StartupController(*this));
+  main_loop_controller_.reset(new MainLoopController(*this));
+  nav_.prefs.selected_index = -1;
+  nav_.prefs.view_dirty = false;
+  nav_.prefs.from_book = false;
+  nav_.prefs.layout_notice_pending = false;
+  reader_state_.opening = OpeningState();
+  reader_state_.layout_revision = 0;
+  reader_state_.pdf_touch_drag_active = false;
+  reader_state_.pdf_touch_last_x = -1;
+  reader_state_.pdf_touch_last_y = -1;
+  reader_state_.pdf_deferred_ready_at_ms = 0;
+  reader_state_.mobi_deferred_ready_at_ms = 0;
   status_log_file_ = NULL;
   status_log_write_count_ = 0;
   LightLock_Init(&status_log_lock_);
@@ -289,428 +152,250 @@ bool App::IsFontMode(AppMode mode) {
          mode == AppMode::PrefsFontBoldItalic;
 }
 
-AppMode App::GetMode() const { return mode_; }
+AppMode App::GetMode() const { return nav_.mode; }
 
-void App::SetMode(AppMode mode) { mode_ = mode; }
+void App::SetMode(AppMode mode) { nav_.mode = mode; }
 
-Book *App::GetSelectedBook() const { return browser_.selected_book; }
+Book *App::GetSelectedBook() const { return nav_.browser.selected_book; }
 
-void App::SetSelectedBook(Book *book) { browser_.selected_book = book; }
+void App::SetSelectedBook(Book *book) { nav_.browser.selected_book = book; }
 
-Book *App::GetCurrentBook() const { return bookcurrent_; }
+Book *App::GetCurrentBook() const { return reader_state_.bookcurrent; }
 
-void App::SetCurrentBook(Book *book) { bookcurrent_ = book; }
+void App::SetCurrentBook(Book *book) { reader_state_.bookcurrent = book; }
 
 int App::BookCount() const { return (int)books.size(); }
 
 int App::GetSelectedBookIndex() const {
-  if (!browser_.selected_book)
+  if (!nav_.browser.selected_book)
     return -1;
   for (size_t i = 0; i < books.size(); i++) {
-    if (books[i] == browser_.selected_book)
+    if (books[i] == nav_.browser.selected_book)
       return (int)i;
   }
   return -1;
 }
 
-int App::GetBrowserPageStart() const { return browser_.page_start; }
+int App::GetBrowserPageStart() const { return nav_.browser.page_start; }
 
 void App::SetBrowserPageStart(int page_start) {
   if (page_start < 0)
     page_start = 0;
-  browser_.page_start = page_start;
+  nav_.browser.page_start = page_start;
 }
 
-void App::MarkBrowserDirty() { browser_.view_dirty = true; }
-
-void App::MarkPrefsDirty() { prefs_view_.view_dirty = true; }
-
-bool App::IsPrefsDirty() const { return prefs_view_.view_dirty; }
-
-bool App::IsBrowserDirty() const { return browser_.view_dirty; }
-
-// std::sort comparator: books by title
-static bool book_title_lessthan(Book *a, Book *b) {
-  return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
+u64 App::GetBrowserLastInteractionMs() const {
+  return nav_.browser.last_interaction_ms;
 }
 
-#if UTF8_FILENAME_DIAG
-static bool looks_like_valid_utf8(const char *s) {
-  return utf8_utils::IsValidUtf8(s);
+void App::SetBrowserLastInteractionMs(u64 ms) {
+  nav_.browser.last_interaction_ms = ms;
 }
 
-static std::string hex_bytes_for_log(const char *s, size_t max_bytes = 32) {
-  static const char hex[] = "0123456789ABCDEF";
-  if (!s)
-    return "";
-  std::string out;
-  size_t n = strlen(s);
-  if (n > max_bytes)
-    n = max_bytes;
-  out.reserve(n * 3 + 8);
-  for (size_t i = 0; i < n; i++) {
-    unsigned char b = (unsigned char)s[i];
-    if (i)
-      out.push_back(' ');
-    out.push_back(hex[(b >> 4) & 0x0F]);
-    out.push_back(hex[b & 0x0F]);
+bool App::IsBrowserWaitingInputRelease() const {
+  return nav_.browser.wait_input_release;
+}
+
+void App::SetBrowserWaitingInputRelease(bool wait_input_release) {
+  nav_.browser.wait_input_release = wait_input_release;
+}
+
+void App::SetBrowserDirty(bool dirty) { nav_.browser.view_dirty = dirty; }
+
+void App::MarkBrowserDirty() { nav_.browser.view_dirty = true; }
+
+int App::GetPrefsSelectedIndex() const { return nav_.prefs.selected_index; }
+
+void App::SetPrefsSelectedIndex(int selected_index) {
+  nav_.prefs.selected_index = selected_index;
+}
+
+void App::SetBookSettingsContext(bool from_book) {
+  nav_.prefs.from_book = from_book;
+}
+
+bool App::IsPrefsLayoutNoticePending() const {
+  return nav_.prefs.layout_notice_pending;
+}
+
+void App::SetPrefsLayoutNoticePending(bool pending) {
+  nav_.prefs.layout_notice_pending = pending;
+}
+
+void App::SetPrefsDirty(bool dirty) { nav_.prefs.view_dirty = dirty; }
+
+void App::MarkPrefsDirty() { nav_.prefs.view_dirty = true; }
+
+bool App::IsPrefsDirty() const { return nav_.prefs.view_dirty; }
+
+bool App::IsBrowserDirty() const { return nav_.browser.view_dirty; }
+
+void App::PersistPrefs() { prefs->Write(); }
+
+void App::RunFontMenuFrame() {
+  fontmenu->handleInput();
+  if (fontmenu->isDirty())
+    fontmenu->draw();
+}
+
+void App::RunBookmarksMenuFrame(u32 keys) {
+  bookmarkmenu->HandleInput(keys);
+  if (bookmarkmenu->IsDirty())
+    bookmarkmenu->Draw();
+}
+
+void App::RunChaptersMenuFrame(u32 keys) {
+  chaptermenu->HandleInput(keys);
+  if (chaptermenu->IsDirty())
+    chaptermenu->Draw();
+}
+
+bool App::PresentIfDirty() {
+  if (ts->BlitToFramebuffer()) {
+    gfxFlushBuffers();
+    gfxSwapBuffers();
+    return true;
   }
-  if (strlen(s) > max_bytes)
-    out += " ...";
-  return out;
-}
-#endif
-
-static void log_filename_stage(App *app, const char *stage, const char *value) {
-#if !UTF8_FILENAME_DIAG
-  (void)app;
-  (void)stage;
-  (void)value;
-  return;
-#else
-  if (!app || !stage || !value)
-    return;
-  char msg[512];
-  std::string bytes = hex_bytes_for_log(value);
-  snprintf(msg, sizeof(msg),
-           "FindBooks %-20s len=%u valid=%d bytes=[%s] text=\"%s\"", stage,
-           (unsigned)strlen(value), looks_like_valid_utf8(value) ? 1 : 0,
-           bytes.c_str(), value);
-  DBG_LOG(app, msg);
-#endif
+  return false;
 }
 
-static std::string sdmc_to_archive_relpath(const std::string &path) {
-  return app_flow_utils::SdmcToArchiveRelPath(path);
+int App::StartupFindBooks() { return library_controller_->FindBooks(); }
+
+void App::StartupPrepareLibrary() { library_controller_->PrepareLibrary(); }
+
+void App::StartupInitUiAndBrowser() {
+  PrefsInit();
+  browser_init();
+  SetBrowserDirty(true);
 }
 
-static std::string normalize_fs_filename_for_io(const char *raw_name) {
-  if (!raw_name)
-    return "";
-  return utf8_utils::NormalizeFsFilenameForIo(raw_name);
+void App::StartupInitScreens() { InitScreens(); }
+
+bool App::IsOpeningPending() const { return reader_state_.opening.pending; }
+
+void App::SetOpeningPending(bool pending) { reader_state_.opening.pending = pending; }
+
+Book *App::GetOpeningBook() const { return reader_state_.opening.book; }
+
+void App::SetOpeningBook(Book *book) { reader_state_.opening.book = book; }
+
+bool App::IsOpeningNeedsRelayout() const {
+  return reader_state_.opening.needs_relayout;
 }
 
-static bool utf16_name_to_utf8(const u16 *name, std::string *out) {
-  return utf8_utils::Utf16NameToUtf8(reinterpret_cast<const uint16_t *>(name),
-                                     out);
+void App::SetOpeningNeedsRelayout(bool needs_relayout) {
+  reader_state_.opening.needs_relayout = needs_relayout;
 }
 
-static void append_book_from_filename(App *app, const char *filename) {
-  if (!app || !app_flow_utils::ShouldIndexBookFilename(filename))
-    return;
-  format_t format =
-      ToBookFormat(app_flow_utils::DetectBookFormat(filename));
-  if (format == FORMAT_UNDEF)
-    return;
+int App::GetOpeningOldPageCount() const { return reader_state_.opening.old_page_count; }
 
-  std::string raw_name(filename);
-  std::string io_name = normalize_fs_filename_for_io(filename);
-  log_filename_stage(app, "d_name", raw_name.c_str());
-  if (io_name != raw_name) {
-    log_filename_stage(app, "d_name_io_fix", io_name.c_str());
-  }
-  Book *book = new Book(app);
-  book->SetFolderName(app->bookdir.c_str());
-  book->SetFileName(io_name.c_str());
-  book->SetTitle(io_name.c_str());
-  log_filename_stage(app, "book.filename", book->GetFileName());
-  log_filename_stage(app, "book.title", book->GetTitle());
-  book->format = format;
-  app->books.push_back(book);
+void App::SetOpeningOldPageCount(int old_page_count) {
+  reader_state_.opening.old_page_count = old_page_count;
+}
+
+int App::GetOpeningOldPosition() const { return reader_state_.opening.old_position; }
+
+void App::SetOpeningOldPosition(int old_position) {
+  reader_state_.opening.old_position = old_position;
+}
+
+std::list<int> &App::MutableOpeningOldBookmarks() {
+  return reader_state_.opening.old_bookmarks;
+}
+
+u64 App::GetOpeningStartedAtMs() const { return reader_state_.opening.started_at_ms; }
+
+void App::SetOpeningStartedAtMs(u64 started_at_ms) {
+  reader_state_.opening.started_at_ms = started_at_ms;
+}
+
+bool App::IsDeferredRelayoutPending() const {
+  return reader_state_.deferred_relayout.pending;
+}
+
+void App::SetDeferredRelayoutPending(bool pending) {
+  reader_state_.deferred_relayout.pending = pending;
+}
+
+Book *App::GetDeferredRelayoutBook() const {
+  return reader_state_.deferred_relayout.book;
+}
+
+void App::SetDeferredRelayoutBook(Book *book) {
+  reader_state_.deferred_relayout.book = book;
+}
+
+int App::GetDeferredRelayoutOldPageCount() const {
+  return reader_state_.deferred_relayout.old_page_count;
+}
+
+void App::SetDeferredRelayoutOldPageCount(int old_page_count) {
+  reader_state_.deferred_relayout.old_page_count = old_page_count;
+}
+
+int App::GetDeferredRelayoutOldPosition() const {
+  return reader_state_.deferred_relayout.old_position;
+}
+
+void App::SetDeferredRelayoutOldPosition(int old_position) {
+  reader_state_.deferred_relayout.old_position = old_position;
+}
+
+std::list<int> &App::MutableDeferredRelayoutOldBookmarks() {
+  return reader_state_.deferred_relayout.old_bookmarks;
+}
+
+int App::GetDeferredRelayoutInitialPosition() const {
+  return reader_state_.deferred_relayout.initial_position;
+}
+
+void App::SetDeferredRelayoutInitialPosition(int initial_position) {
+  reader_state_.deferred_relayout.initial_position = initial_position;
+}
+
+unsigned int App::GetLayoutRevision() const { return reader_state_.layout_revision; }
+
+void App::SetLayoutRevision(unsigned int layout_revision) {
+  reader_state_.layout_revision = layout_revision;
+}
+
+bool App::IsPdfTouchDragActive() const { return reader_state_.pdf_touch_drag_active; }
+
+void App::SetPdfTouchDragActive(bool active) {
+  reader_state_.pdf_touch_drag_active = active;
+}
+
+int App::GetPdfTouchLastX() const { return reader_state_.pdf_touch_last_x; }
+
+void App::SetPdfTouchLastX(int x) { reader_state_.pdf_touch_last_x = x; }
+
+int App::GetPdfTouchLastY() const { return reader_state_.pdf_touch_last_y; }
+
+void App::SetPdfTouchLastY(int y) { reader_state_.pdf_touch_last_y = y; }
+
+u64 App::GetPdfDeferredReadyAtMs() const {
+  return reader_state_.pdf_deferred_ready_at_ms;
+}
+
+void App::SetPdfDeferredReadyAtMs(u64 ready_at_ms) {
+  reader_state_.pdf_deferred_ready_at_ms = ready_at_ms;
+}
+
+u64 App::GetMobiDeferredReadyAtMs() const {
+  return reader_state_.mobi_deferred_ready_at_ms;
+}
+
+void App::SetMobiDeferredReadyAtMs(u64 ready_at_ms) {
+  reader_state_.mobi_deferred_ready_at_ms = ready_at_ms;
 }
 
 int App::Run(void) {
-  const int ok = 0;
-  auto drawBootStatus = [&](const char *title, const std::vector<std::string> &lines,
-                            bool fatal) {
-    int savedStyle = ts->GetStyle();
-    int savedColorMode = ts->GetColorMode();
-    u16 *savedScreen = ts->GetScreen();
-    int savedPixelSize = ts->pixelsize;
-
-    ts->SetStyle(TEXT_STYLE_BROWSER);
-    ts->SetColorMode(0);
-    ts->SetPixelSize(10);
-
-    ts->SetScreen(ts->screenleft);
-    ts->PrintSplash(ts->screenleft);
-
-    ts->SetScreen(ts->screenright);
-    ts->ClearScreen();
-    DrawBottomGradientBackground();
-    ts->DrawRect(8, 10, 232, fatal ? 76 : 64, 0xC618);
-    ts->SetPixelSize(14);
-    ts->SetPen(14, 20);
-    ts->PrintString(title && *title ? title : "Booting");
-    ts->SetPixelSize(10);
-    for (size_t i = 0; i < lines.size(); i++) {
-      ts->SetPen(14, 84 + (int)i * 18);
-      ts->PrintString(lines[i].c_str());
-    }
-
-    // Simple progress rail (visual feedback while booting).
-    if (!fatal)
-      ts->DrawRect(14, 138, 226, 152, 0xBDF7);
-    else {
-      ts->SetPen(14, 216);
-      ts->PrintString("Press START to exit");
-    }
-
-    ts->SetStyle(savedStyle);
-    ts->SetColorMode(savedColorMode);
-    ts->SetScreen(savedScreen);
-    ts->SetPixelSize(savedPixelSize);
-
-    if (ts->BlitToFramebuffer()) {
-      gfxFlushBuffers();
-      gfxSwapBuffers();
-    }
-  };
-
-  auto haltOnFatalBootStatus = [&]() -> int {
-    halt(ts, -1);
-    return 0;
-  };
-
-  // Start up typesetter.
-  printf("Loading fonts...\n");
-  if (ts->Init() != ok) {
-    std::vector<std::string> missing;
-    CollectMissingRuntimeFiles(&missing);
-    PrintInstallHelpToConsole(missing);
+  const int startup = startup_controller_->RunBootSequence();
+  if (startup == 1)
     return 1;
-  }
-
-  // Initialize screens for 3DS.
-  InitScreens();
-  ts->SetStyle(TEXT_STYLE_BROWSER);
-  drawBootStatus("Booting", {"Searching for books..."}, false);
-
-  std::vector<std::string> missing_runtime;
-  CollectMissingRuntimeFiles(&missing_runtime);
-  if (!missing_runtime.empty()) {
-    PrintStatus("error: incomplete sdmc install");
-    std::vector<std::string> lines;
-    lines.push_back("Download 3dslibris-sdmc.zip");
-    lines.push_back("and extract it to sdmc:/");
-    lines.push_back("Expected path: sdmc:/3ds/3dslibris/");
-    lines.push_back("Missing files from the SD package");
-    lines.push_back(missing_runtime[0]);
-    if (missing_runtime.size() > 1) {
-      char extra[48];
-      snprintf(extra, sizeof(extra), "+%u more",
-               (unsigned)(missing_runtime.size() - 1));
-      lines.push_back(extra);
-    }
-    drawBootStatus("Incomplete installation", lines, true);
-    return haltOnFatalBootStatus();
-  }
-
-  // Construct library.
-  DBG_LOG(this, "Searching for books...");
-#ifdef DSLIBRIS_DEBUG
-  u64 t_scan_ms = osGetTime();
-#endif
-  if (FindBooks() != ok) {
-    PrintStatus("error: no book directory");
-    drawBootStatus("Incomplete installation",
-                   {"Download 3dslibris-sdmc.zip",
-                    "and extract it to sdmc:/",
-                    "Expected folder: sdmc:/3ds/3dslibris/book"},
-                   true);
-    return haltOnFatalBootStatus();
-  }
-  if (BookCount() == 0) {
-    PrintStatus("error: no epub files found");
-    drawBootStatus("No books found",
-                   {"Copy your EPUB/FB2/TXT/RTF/ODT files",
-                    "to sdmc:/3ds/3dslibris/book"},
-                   true);
-    return haltOnFatalBootStatus();
-  }
-#ifdef DSLIBRIS_DEBUG
-  DBG_LOGF(this, "TIMING: scan_books=%llums count=%u",
-           (unsigned long long)(osGetTime() - t_scan_ms),
-           (unsigned)BookCount());
-#endif
-
-  std::sort(books.begin(), books.end(), &book_title_lessthan);
-
-  prefs->Read();
-  NormalizeRuntimeAssetPaths(this);
-  drawBootStatus("Booting", {"Preparing library..."}, false);
-  // Apply key mapping/orientation loaded from prefs.
-  SetOrientation(orientation);
-  DBG_LOG(this, "Preparing library...");
-#ifdef DSLIBRIS_DEBUG
-  u64 t_prepare_ms = osGetTime();
-#endif
-  for (auto &book : books) {
-    book->GetBookmarks()->sort();
-  }
-#ifdef DSLIBRIS_DEBUG
-  DBG_LOGF(this, "TIMING: prepare_library=%llums",
-           (unsigned long long)(osGetTime() - t_prepare_ms));
-#endif
-  DBG_LOG(this, "Library ready.");
-
-  // Set up menus.
-  PrefsInit();
-  browser_init();
-  browser_.view_dirty = true;
-
-  DBG_LOG(this, VERSION);
-
-  // Resume reading from the last session.
-  if (reopen && bookcurrent_) {
-    browser_.selected_book = bookcurrent_;
-    const char *title = bookcurrent_->GetTitle();
-    drawBootStatus("Booting",
-                   {"Opening last book...",
-                    (title && *title) ? title : "(untitled)"},
-                   false);
-    OpenBook();
-  }
-
-  // Main loop - 3DS style
-  while (aptMainLoop()) {
-    gspWaitForVBlank();
-    hidScanInput();
-    // Keep reading mode responsive: avoid running heavy background jobs while
-    // the user is paging through a book.
-    if (mode_ != AppMode::Book && mode_ != AppMode::Opening) {
-      bool allow_jobs = true;
-      if (mode_ == AppMode::Browser) {
-        allow_jobs = browser_warmup_utils::IsBrowserWarmupIdle(
-            osGetTime(), browser_.last_interaction_ms,
-            browser_.wait_input_release);
-      }
-      if (allow_jobs)
-        ProcessJobs(3); // Cooperative budget per frame (ms).
-    }
-
-    switch (mode_) {
-    case AppMode::Book:
-      UpdateStatus();
-      HandleEventInBook();
-      break;
-
-    case AppMode::Opening:
-      UpdateStatus();
-      HandleEventInOpening();
-      break;
-
-    case AppMode::Browser:
-      browser_handleevent();
-      TickBrowserWarmup();
-      if (browser_.view_dirty)
-        browser_draw();
-      break;
-
-    case AppMode::Quit:
-      prefs->Write();
-      return 0;
-
-    case AppMode::Prefs:
-      PrefsHandleEvent();
-      if (prefs_view_.view_dirty)
-        PrefsDraw();
-      break;
-
-    case AppMode::PrefsFont:
-    case AppMode::PrefsFontBold:
-    case AppMode::PrefsFontItalic:
-    case AppMode::PrefsFontBoldItalic:
-      fontmenu->handleInput();
-      if (fontmenu->isDirty())
-        fontmenu->draw();
-      break;
-
-    case AppMode::Bookmarks:
-      bookmarkmenu->HandleInput(hidKeysDown());
-      if (bookmarkmenu->IsDirty())
-        bookmarkmenu->Draw();
-      break;
-
-    case AppMode::Chapters:
-      chaptermenu->HandleInput(hidKeysDown());
-      if (chaptermenu->IsDirty())
-        chaptermenu->Draw();
-      break;
-    }
-
-    // Copy software buffers to 3DS framebuffer only when something changed.
-    if (ts->BlitToFramebuffer()) {
-      gfxFlushBuffers();
-      gfxSwapBuffers();
-    }
-  }
-  return 0;
-}
-
-int App::FindBooks() {
-  auto scan_with_native_fs = [&](const std::string &dir) -> int {
-    FS_Archive sdmc_archive;
-    Result rc = FSUSER_OpenArchive(&sdmc_archive, ARCHIVE_SDMC,
-                                   fsMakePath(PATH_EMPTY, ""));
-    if (R_FAILED(rc))
-      return 1;
-
-    std::string rel_path = sdmc_to_archive_relpath(dir);
-    Handle dir_handle = 0;
-    rc = FSUSER_OpenDirectory(&dir_handle, sdmc_archive,
-                              fsMakePath(PATH_ASCII, rel_path.c_str()));
-    if (R_FAILED(rc)) {
-      FSUSER_CloseArchive(sdmc_archive);
-      return 1;
-    }
-
-    while (true) {
-      FS_DirectoryEntry entries[16];
-      u32 read_count = 0;
-      rc = FSDIR_Read(dir_handle, &read_count, 16, entries);
-      if (R_FAILED(rc) || read_count == 0)
-        break;
-
-      for (u32 i = 0; i < read_count; i++) {
-        if (entries[i].attributes & FS_ATTRIBUTE_DIRECTORY)
-          continue;
-
-        std::string filename;
-        if (!utf16_name_to_utf8(entries[i].name, &filename))
-          continue;
-        if (filename.empty())
-          continue;
-        append_book_from_filename(this, filename.c_str());
-      }
-    }
-
-    FSDIR_Close(dir_handle);
-    FSUSER_CloseArchive(sdmc_archive);
+  if (startup == 2)
     return 0;
-  };
-
-  auto scan_with_posix_fallback = [&](const std::string &dir) -> int {
-    DIR *dp = opendir(dir.c_str());
-    if (!dp)
-      return 1;
-
-    struct dirent *ent;
-    while ((ent = readdir(dp))) {
-      append_book_from_filename(this, ent->d_name);
-    }
-    closedir(dp);
-    return 0;
-  };
-
-  // Prefer native FS API (UTF-16 filenames), keep POSIX as safety fallback.
-  if (scan_with_native_fs(bookdir) == 0)
-    return 0;
-
-  if (scan_with_posix_fallback(bookdir) == 0)
-    return 0;
-
-  return 1;
+  return main_loop_controller_->RunMainLoop();
 }
 
 // 3DS touch input — map physical touch to our logical buffer coordinates.
@@ -816,7 +501,7 @@ void App::DrawBottomGradientBackground() {
 }
 
 void App::ShowFontView(AppMode app_font_mode) {
-  mode_ = AppMode::PrefsFont;
+  nav_.mode = AppMode::PrefsFont;
   ts->SetScreen(ts->screenright);
   fontmenu->Open(app_font_mode);
 }
@@ -832,42 +517,27 @@ void App::ShowLibraryView() {
   buttonprefs.Move(72, 296);
   buttonprefs.Resize(96, 22);
   buttonprefs.Label("settings");
-  mode_ = AppMode::Browser;
+  nav_.mode = AppMode::Browser;
   ts->SetScreen(ts->screenright);
-  browser_.wait_input_release = true;
-  browser_.last_interaction_ms = osGetTime();
-  browser_.view_dirty = true;
-  prefs_view_.layout_notice_pending = false;
+  nav_.browser.wait_input_release = true;
+  nav_.browser.last_interaction_ms = osGetTime();
+  nav_.browser.view_dirty = true;
+  nav_.prefs.layout_notice_pending = false;
 }
 
 void App::ShowSettingsView(bool from_book) {
-  prefs_view_.from_book = from_book;
-  // Surface the warning only when the current book was paginated with stale
-  // layout or per-book render settings.
-  prefs_view_.layout_notice_pending =
-      from_book && bookcurrent_ && BookNeedsRelayout(bookcurrent_);
-  PrefsRefreshButton(PREFS_BUTTON_INDEX);
-  PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
-  u8 visible_count = PrefsVisibleButtonCount();
-  if (visible_count == 0)
-    visible_count = 1;
-  if (prefs_view_.selected_index >= visible_count)
-    prefs_view_.selected_index = visible_count - 1;
-  mode_ = AppMode::Prefs;
-  buttonprefs.Label("library");
-  ts->SetScreen(ts->screenright);
-  prefs_view_.view_dirty = true;
+  settings_controller_->ShowSettingsView(from_book);
 }
 
 void App::MarkBookLayoutDirty() {
   // Bump the global layout generation so already-paginated books are reopened
   // before they are reused.
-  layout_revision++;
-  if (layout_revision == 0)
-    layout_revision = 1;
-  prefs_view_.view_dirty = true;
-  if (prefs_view_.from_book && bookcurrent_ && bookcurrent_->GetPageCount() > 0)
-    prefs_view_.layout_notice_pending = true;
+  reader_state_.layout_revision++;
+  if (reader_state_.layout_revision == 0)
+    reader_state_.layout_revision = 1;
+  nav_.prefs.view_dirty = true;
+  if (nav_.prefs.from_book && reader_state_.bookcurrent && reader_state_.bookcurrent->GetPageCount() > 0)
+    nav_.prefs.layout_notice_pending = true;
 }
 
 bool App::BookNeedsRelayout(Book *book) const {
@@ -875,17 +545,17 @@ bool App::BookNeedsRelayout(Book *book) const {
     return false;
   return book && app_flow_utils::NeedsBookRelayout(
                      book->GetPageCount(), book->GetLayoutRevision(),
-                     layout_revision, book->NeedsMobiRenderRefresh());
+                     reader_state_.layout_revision, book->NeedsMobiRenderRefresh());
 }
 
 void App::ShowBookmarksView() {
-  mode_ = AppMode::Bookmarks;
+  nav_.mode = AppMode::Bookmarks;
   ts->SetScreen(ts->screenright);
   bookmarkmenu->Init();
 }
 
 void App::ShowChaptersView() {
-  Book *book = bookcurrent_;
+  Book *book = reader_state_.bookcurrent;
   app_flow_utils::BookFileFormat format =
       app_flow_utils::BookFileFormat::Unsupported;
   bool toc_quality_known = false;
@@ -920,169 +590,21 @@ void App::ShowChaptersView() {
     ShowSettingsView(true);
     return;
   }
-  mode_ = AppMode::Chapters;
+  nav_.mode = AppMode::Chapters;
   ts->SetScreen(ts->screenright);
   chaptermenu->Init();
 }
 
 void App::ShowCurrentBookView() {
-  if (!bookcurrent_)
+  if (!reader_state_.bookcurrent)
     return;
-  mode_ = AppMode::Book;
+  nav_.mode = AppMode::Book;
   ts->SetScreen(ts->screenright);
 }
 
-void App::RequestStatusRedraw() { status_.force_redraw = true; }
+void App::RequestStatusRedraw() { status_controller_->RequestStatusRedraw(); }
 
-void App::UpdateStatus() {
-  if (mode_ != AppMode::Book && mode_ != AppMode::Opening)
-    return;
-  u16 *screen = ts->GetScreen();
-  time_t unixTime = time(NULL);
-  struct tm *timeStruct = localtime(&unixTime);
-  int minute_of_day = -1;
-  if (timeStruct) {
-    minute_of_day = timeStruct->tm_hour * 60 + timeStruct->tm_min;
-  }
-
-  app_flow_utils::StatusSnapshot snapshot = {};
-  if (mode_ == AppMode::Book) {
-    snapshot = app_flow_utils::ComputeStatusSnapshot(
-        {bookcurrent_, bookcurrent_ ? (int)bookcurrent_->GetPosition() : 0,
-         bookcurrent_ ? (int)bookcurrent_->GetPageCount() : 0,
-         bookcurrent_ ? bookcurrent_->HasDeferredMobiParse() : false,
-         status_.progress_lock_book, status_.progress_pagecount_lock});
-    status_.progress_lock_book = (Book *)snapshot.next_locked_book;
-    status_.progress_pagecount_lock = snapshot.next_locked_pagecount;
-  } else {
-    status_.progress_lock_book = NULL;
-    status_.progress_pagecount_lock = 0;
-    snapshot.percent_tenths = -1;
-    snapshot.percent_value = 0.0f;
-    snapshot.draw_page_count = 0;
-    snapshot.has_progress = false;
-    snapshot.next_locked_book = NULL;
-    snapshot.next_locked_pagecount = 0;
-  }
-
-  if (!status_.force_redraw && minute_of_day == status_.last_minute &&
-      ((mode_ == AppMode::Book && UsesFixedLayoutMinimalHud(bookcurrent_))
-           ? (bookcurrent_ ? (int)bookcurrent_->GetPosition() : -1)
-           : snapshot.percent_tenths) == status_.last_display_token) {
-    return;
-  }
-
-  char tmsg[24];
-  if (!timeStruct) {
-    snprintf(tmsg, sizeof(tmsg), "--:--");
-  } else if (prefs->time24h) {
-    snprintf(tmsg, sizeof(tmsg), "%02d:%02d", timeStruct->tm_hour,
-             timeStruct->tm_min);
-  } else {
-    int h = timeStruct->tm_hour % 12;
-    if (h == 0)
-      h = 12;
-    snprintf(tmsg, sizeof(tmsg), "%02d:%02d %s", h, timeStruct->tm_min,
-             timeStruct->tm_hour >= 12 ? "PM" : "AM");
-  }
-
-  int style = ts->GetStyle();
-  ts->SetStyle(TEXT_STYLE_BROWSER); // smaller, readable font
-
-  if (mode_ == AppMode::Book && UsesFixedLayoutMinimalHud(bookcurrent_)) {
-    const status_layout_utils::FixedLayoutBottomHudLayout hud_layout =
-        status_layout_utils::ComputeFixedLayoutBottomHudLayout(
-            320, ts->GetHeight());
-    const int time_width = ts->GetStringWidth(tmsg, TEXT_STYLE_BROWSER);
-    const int time_x = std::max(0, 240 - hud_layout.right_margin - time_width);
-
-    ts->SetScreen(ts->screenright);
-    ts->ClearRect((u16)std::max(0, time_x - 4), (u16)hud_layout.time_clear_top,
-                  240, (u16)hud_layout.time_clear_bottom);
-    ts->SetPen(time_x, hud_layout.time_y);
-    ts->PrintString(tmsg);
-
-    if (bookcurrent_ && bookcurrent_->GetPageCount() > 0) {
-      char page_msg[32];
-      snprintf(page_msg, sizeof(page_msg), "%d/%d",
-               (int)bookcurrent_->GetPosition() + 1,
-               (int)bookcurrent_->GetPageCount());
-      const int page_width = ts->GetStringWidth(page_msg, TEXT_STYLE_BROWSER);
-      const int page_x =
-          std::max(0, 240 - hud_layout.right_margin - page_width);
-      ts->ClearRect((u16)std::max(0, page_x - 4),
-                    (u16)hud_layout.page_clear_top, 240,
-                    (u16)hud_layout.page_clear_bottom);
-      ts->SetPen(page_x, hud_layout.page_y);
-      ts->PrintString(page_msg);
-    }
-  }
-  else {
-    // Draw on top screen (which is 240x400 in buffer)
-    ts->SetScreen(ts->screenleft);
-    int savedBottomMargin = ts->margin.bottom;
-    // Status HUD is outside the text area and should ignore page margins.
-    ts->margin.bottom = 0;
-    u16 fgColor = ts->GetFgColor();
-
-    const status_layout_utils::BookStatusHudLayout hud_layout =
-        status_layout_utils::ComputeBookStatusHudLayout(400, ts->GetHeight(),
-                                                        savedBottomMargin);
-    // Clear a taller band than the nominal footer because the browser font
-    // extends several pixels above the baseline and would otherwise leave
-    // minute-change artifacts behind.
-    ts->ClearRect(0, (u16)hud_layout.clear_top, 240,
-                  (u16)hud_layout.clear_bottom);
-    const int textY = hud_layout.text_y;
-    ts->SetPen(8, textY);
-    ts->PrintString(tmsg);
-    int clockWidth = ts->GetStringWidth(tmsg, TEXT_STYLE_BROWSER);
-
-    int pX = 232;
-    if (mode_ == AppMode::Opening) {
-      const char *opening_msg = "opening";
-      int pw = ts->GetStringWidth(opening_msg, TEXT_STYLE_BROWSER);
-      pX = 232 - pw;
-      ts->SetPen(pX, textY);
-      ts->PrintString(opening_msg);
-    } else if (snapshot.has_progress) {
-      char pmsg[32];
-      snprintf(pmsg, sizeof(pmsg), "%.1f%%", snapshot.percent_value);
-      int pw = ts->GetStringWidth(pmsg, TEXT_STYLE_BROWSER);
-      pX = 232 - pw;
-      ts->SetPen(pX, textY);
-      ts->PrintString(pmsg);
-
-      int barStart = 8 + clockWidth + 12;
-      int barEnd = pX - 12;
-      if (barEnd > barStart + 10) {
-        int barY = hud_layout.progress_bar_y;
-        int barHeight = hud_layout.progress_bar_height;
-        ts->DrawRect(barStart, barY, barEnd, barY + barHeight, fgColor);
-
-        if (snapshot.draw_page_count > 1 && bookcurrent_ &&
-            bookcurrent_->GetPosition() > 0) {
-          int fillW = (int)(((float)(barEnd - barStart - 4) *
-                             bookcurrent_->GetPosition()) /
-                            (snapshot.draw_page_count - 1));
-          if (fillW > 0) {
-            ts->FillRect(barStart + 2, barY + 2, barStart + 2 + fillW,
-                         barY + barHeight - 2, fgColor);
-          }
-        }
-      }
-    }
-    ts->margin.bottom = savedBottomMargin;
-  }
-  ts->SetStyle(style);
-  ts->SetScreen(screen);
-  status_.last_minute = minute_of_day;
-  status_.last_display_token =
-      (mode_ == AppMode::Book && UsesFixedLayoutMinimalHud(bookcurrent_))
-          ? (bookcurrent_ ? (int)bookcurrent_->GetPosition() : -1)
-          : snapshot.percent_tenths;
-  status_.force_redraw = false;
-}
+void App::UpdateStatus() { status_controller_->UpdateStatus(); }
 
 void App::SetOrientation(bool turned_right) {
   // Keep both input remap and software render orientation in sync.
@@ -1091,9 +613,9 @@ void App::SetOrientation(bool turned_right) {
     ts->SetOrientation(turned_right);
     ts->MarkAllScreensDirty();
   }
-  status_.force_redraw = true;
-  browser_.view_dirty = true;
-  prefs_view_.view_dirty = true;
+  RequestStatusRedraw();
+  nav_.browser.view_dirty = true;
+  nav_.prefs.view_dirty = true;
 
   if (turned_right) {
     key.down = KEY_UP;

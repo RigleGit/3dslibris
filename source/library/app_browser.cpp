@@ -12,6 +12,7 @@
 */
 
 #include "app/app.h"
+#include "app/library_controller.h"
 
 #include <algorithm>
 #include <dirent.h>
@@ -311,18 +312,18 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
 
 } // namespace
 
-void App::UnloadNonVisibleBrowserCoverCaches() {
-  if (BookCount() <= 0)
+void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
+  if (app_.BookCount() <= 0)
     return;
 
   const browser_cover_cache_utils::VisibleRange visible =
       browser_cover_cache_utils::ComputeVisibleRange(
-          browser_.page_start, BookCount(), APP_BROWSER_BUTTON_COUNT);
-  for (int i = 0; i < BookCount(); i++) {
+          app_.GetBrowserPageStart(), app_.BookCount(), APP_BROWSER_BUTTON_COUNT);
+  for (int i = 0; i < app_.BookCount(); i++) {
     if (browser_cover_cache_utils::RangeContains(visible, i))
       continue;
 
-    Book *book = books[i];
+    Book *book = app_.books[i];
     if (!book || !book->coverPixels)
       continue;
     delete[] book->coverPixels;
@@ -332,22 +333,22 @@ void App::UnloadNonVisibleBrowserCoverCaches() {
   }
 }
 
-void App::LoadVisibleBrowserCoverCaches() {
-  if (BookCount() <= 0)
+void LibraryController::LoadVisibleBrowserCoverCaches() {
+  if (app_.BookCount() <= 0)
     return;
 
   UnloadNonVisibleBrowserCoverCaches();
   const browser_cover_cache_utils::VisibleRange visible =
       browser_cover_cache_utils::ComputeVisibleRange(
-          browser_.page_start, BookCount(), APP_BROWSER_BUTTON_COUNT);
+          app_.GetBrowserPageStart(), app_.BookCount(), APP_BROWSER_BUTTON_COUNT);
   const int start = visible.start;
   const int end = visible.end;
   for (int i = start; i < end; i++) {
-    Book *book = books[i];
+    Book *book = app_.books[i];
     if (!book || book->coverPixels)
       continue;
 
-    std::string path = bookdir + "/" + book->GetFileName();
+    std::string path = app_.bookdir + "/" + book->GetFileName();
     if (TryLoadCoverCache(book, path)) {
       book->coverTried = true;
       if (book->format == FORMAT_EPUB) {
@@ -592,21 +593,23 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
 
 } // namespace
 
-bool App::HasQueuedJob(app_job_type_t type, Book *book) const {
-  for (const auto &job : job_queue) {
+bool LibraryController::HasQueuedJob(app_job_type_t type, Book *book) const {
+  for (const auto &job : job_queue_) {
     if (job.type == type && job.book == book)
       return true;
   }
   return false;
 }
 
-void App::PruneBrowserWarmupJobs(Book *selected_book) {
+void LibraryController::PruneBrowserWarmupJobs(Book *selected_book) {
   const size_t removed = browser_job_queue_utils::PruneWarmupJobsForOtherBooks(
-      &job_queue, selected_book, APP_JOB_INDEX_METADATA, APP_JOB_EXTRACT_COVER);
+      &job_queue_, selected_book, APP_JOB_INDEX_METADATA,
+      APP_JOB_EXTRACT_COVER);
 #ifdef DSLIBRIS_DEBUG
   if (removed > 0) {
-    DBG_LOGF(this, "BROWSER: pruned warmup jobs removed=%u queue=%u selected=%s",
-             (unsigned)removed, (unsigned)job_queue.size(),
+    DBG_LOGF(&app_,
+             "BROWSER: pruned warmup jobs removed=%u queue=%u selected=%s",
+             (unsigned)removed, (unsigned)job_queue_.size(),
              (selected_book && selected_book->GetFileName())
                  ? selected_book->GetFileName()
                  : "(null)");
@@ -614,7 +617,7 @@ void App::PruneBrowserWarmupJobs(Book *selected_book) {
 #endif
 }
 
-void App::EnqueueJob(app_job_type_t type, Book *book) {
+void LibraryController::EnqueueJob(app_job_type_t type, Book *book) {
   if (!book)
     return;
   if (HasQueuedJob(type, book))
@@ -622,18 +625,20 @@ void App::EnqueueJob(app_job_type_t type, Book *book) {
   app_job_t job;
   job.type = type;
   job.book = book;
-  job_queue.push_back(job);
+  job_queue_.push_back(job);
 }
 
-void App::QueueBookWarmup(Book *book) {
+void LibraryController::QueueBookWarmup(Book *book) {
   if (!book || book->coverPixels || book->coverTried)
     return;
-  const size_t queue_before = job_queue.size();
-  const bool is_selected_book = (book == browser_.selected_book);
+  const size_t queue_before = job_queue_.size();
+  const bool is_selected_book = (book == app_.GetSelectedBook());
   const bool warmup_idle = browser_warmup_utils::IsBrowserWarmupIdle(
-      osGetTime(), browser_.last_interaction_ms, browser_.wait_input_release);
+      osGetTime(), app_.GetBrowserLastInteractionMs(),
+      app_.IsBrowserWaitingInputRelease());
   const bool heavy_idle = browser_warmup_utils::IsBrowserHeavyWarmupIdle(
-      osGetTime(), browser_.last_interaction_ms, browser_.wait_input_release);
+      osGetTime(), app_.GetBrowserLastInteractionMs(),
+      app_.IsBrowserWaitingInputRelease());
   const bool should_queue_cover = browser_warmup_utils::ShouldQueueCoverWarmup(
       is_selected_book, warmup_idle, heavy_idle);
 
@@ -663,12 +668,12 @@ void App::QueueBookWarmup(Book *book) {
     }
   }
 #ifdef DSLIBRIS_DEBUG
-  if (job_queue.size() != queue_before) {
-    DBG_LOGF(this,
+  if (job_queue_.size() != queue_before) {
+    DBG_LOGF(&app_,
              "BROWSER: warmup queued added=%u queue=%u book=%s format=%d "
              "selected=%u warmup_idle=%u heavy_idle=%u cover=%u",
-             (unsigned)(job_queue.size() - queue_before),
-             (unsigned)job_queue.size(),
+             (unsigned)(job_queue_.size() - queue_before),
+             (unsigned)job_queue_.size(),
              book->GetFileName() ? book->GetFileName() : "(null)",
              (int)book->format, is_selected_book ? 1u : 0u,
              warmup_idle ? 1u : 0u, heavy_idle ? 1u : 0u,
@@ -677,25 +682,25 @@ void App::QueueBookWarmup(Book *book) {
 #endif
 }
 
-void App::TickBrowserWarmup() {
-  if (mode_ != AppMode::Browser || !browser_.selected_book)
+void LibraryController::TickBrowserWarmup() {
+  if (app_.GetMode() != AppMode::Browser || !app_.GetSelectedBook())
     return;
   if (!browser_warmup_utils::IsBrowserWarmupIdle(
-          osGetTime(), browser_.last_interaction_ms,
-          browser_.wait_input_release)) {
+          osGetTime(), app_.GetBrowserLastInteractionMs(),
+          app_.IsBrowserWaitingInputRelease())) {
     return;
   }
-  QueueBookWarmup(browser_.selected_book);
+  QueueBookWarmup(app_.GetSelectedBook());
 }
 
-void App::QueueTocResolve(Book *book) {
+void LibraryController::QueueTocResolve(Book *book) {
   if (!book || book->format != FORMAT_EPUB || book->tocResolveTried)
     return;
   EnqueueJob(APP_JOB_RESOLVE_TOC, book);
 }
 
-void App::ProcessJobs(u32 budget_ms) {
-  if (job_queue.empty())
+void LibraryController::ProcessJobs(u32 budget_ms) {
+  if (job_queue_.empty())
     return;
 
   auto job_name = [](app_job_type_t t) -> const char * {
@@ -712,25 +717,25 @@ void App::ProcessJobs(u32 budget_ms) {
   };
 
   u64 start_ms = osGetTime();
-  while (!job_queue.empty()) {
-    while (!job_queue.empty() && !job_queue.front().book)
-      job_queue.pop_front();
-    if (job_queue.empty())
+  while (!job_queue_.empty()) {
+    while (!job_queue_.empty() && !job_queue_.front().book)
+      job_queue_.pop_front();
+    if (job_queue_.empty())
       break;
 
     const bool allow_selected_browser_jobs =
-        mode_ != AppMode::Browser ||
+        app_.GetMode() != AppMode::Browser ||
         browser_warmup_utils::IsBrowserWarmupIdle(
-            osGetTime(), browser_.last_interaction_ms,
-            browser_.wait_input_release);
+            osGetTime(), app_.GetBrowserLastInteractionMs(),
+            app_.IsBrowserWaitingInputRelease());
     const bool allow_heavy_browser_jobs =
-        mode_ != AppMode::Browser ||
+        app_.GetMode() != AppMode::Browser ||
         browser_warmup_utils::IsBrowserHeavyWarmupIdle(
-            osGetTime(), browser_.last_interaction_ms,
-            browser_.wait_input_release);
+            osGetTime(), app_.GetBrowserLastInteractionMs(),
+            app_.IsBrowserWaitingInputRelease());
     app_job_t job = {};
     const bool got_job = browser_job_queue_utils::TakeFirstAllowedJob(
-        &job_queue, &job, [&](const app_job_t &candidate) {
+        &job_queue_, &job, [&](const app_job_t &candidate) {
           if (!candidate.book)
             return false;
           if (!browser_job_queue_utils::IsHeavyBrowserJobType(
@@ -738,9 +743,9 @@ void App::ProcessJobs(u32 budget_ms) {
                   APP_JOB_EXTRACT_COVER)) {
             return true;
           }
-          if (mode_ != AppMode::Browser)
+          if (app_.GetMode() != AppMode::Browser)
             return true;
-          if (candidate.book == browser_.selected_book)
+          if (candidate.book == app_.GetSelectedBook())
             return allow_selected_browser_jobs;
           return allow_heavy_browser_jobs;
         });
@@ -759,13 +764,13 @@ void App::ProcessJobs(u32 budget_ms) {
         rc = book->Index();
         if (rc != 0)
           book->coverTried = true;
-        browser_.view_dirty = true;
+        app_.SetBrowserDirty(true);
       }
     } else if (job.type == APP_JOB_EXTRACT_COVER) {
       if (!book->coverPixels && !book->coverTried) {
-        std::string path = bookdir + "/" + book->GetFileName();
+        std::string path = app_.bookdir + "/" + book->GetFileName();
 #ifdef DSLIBRIS_DEBUG
-        DBG_LOGF(this, "COVER: extract start book=%s format=%d",
+        DBG_LOGF(&app_, "COVER: extract start book=%s format=%d",
                  book->GetFileName() ? book->GetFileName() : "(null)",
                  (int)book->format);
 #endif
@@ -781,7 +786,7 @@ void App::ProcessJobs(u32 budget_ms) {
               }
             }
             book->coverTried = true;
-            browser_.view_dirty = true;
+            app_.SetBrowserDirty(true);
           }
         } else if (book->format == FORMAT_XHTML &&
                    HasExtCI(book->GetFileName(), ".fb2")) {
@@ -790,7 +795,7 @@ void App::ProcessJobs(u32 budget_ms) {
             SaveCoverCache(book, path);
           }
           book->coverTried = true;
-          browser_.view_dirty = true;
+          app_.SetBrowserDirty(true);
         } else if (book->format == FORMAT_XHTML &&
                    HasExtCI(book->GetFileName(), ".mobi")) {
           rc = mobi_extract_cover(book, path);
@@ -798,38 +803,38 @@ void App::ProcessJobs(u32 budget_ms) {
             SaveCoverCache(book, path);
           }
           book->coverTried = true;
-          browser_.view_dirty = true;
+          app_.SetBrowserDirty(true);
         } else if (book->format == FORMAT_PDF) {
           rc = pdf_extract_cover(book, path);
           if (rc == 0 && book->coverPixels) {
             SaveCoverCache(book, path);
           }
           book->coverTried = true;
-          browser_.view_dirty = true;
+          app_.SetBrowserDirty(true);
         } else if (book->format == FORMAT_CBZ) {
           rc = cbz_extract_cover(book, path);
           if (rc == 0 && book->coverPixels) {
             SaveCoverCache(book, path);
           }
           book->coverTried = true;
-          browser_.view_dirty = true;
+          app_.SetBrowserDirty(true);
         }
 #ifdef DSLIBRIS_DEBUG
-        DBG_LOGF(this, "COVER: extract end rc=%d book=%s pixels=%u tried=%u",
+        DBG_LOGF(&app_, "COVER: extract end rc=%d book=%s pixels=%u tried=%u",
                  rc, book->GetFileName() ? book->GetFileName() : "(null)",
                  book->coverPixels ? 1u : 0u, book->coverTried ? 1u : 0u);
 #endif
       }
     } else if (job.type == APP_JOB_RESOLVE_TOC) {
       if (book->format == FORMAT_EPUB && !book->tocResolveTried) {
-        std::string path = bookdir + "/" + book->GetFileName();
+        std::string path = app_.bookdir + "/" + book->GetFileName();
         rc = epub_resolve_toc(book, path);
         book->tocResolveTried = true;
         book->tocResolved = (rc == 0);
-        if (rc == 0 && mode_ == AppMode::Chapters && book == bookcurrent_ &&
-            chaptermenu) {
-          chaptermenu->Init();
-          chaptermenu->SetDirty(true);
+        if (rc == 0 && app_.GetMode() == AppMode::Chapters &&
+            book == app_.GetCurrentBook() && app_.chaptermenu) {
+          app_.chaptermenu->Init();
+          app_.chaptermenu->SetDirty(true);
         }
       }
     }
@@ -845,71 +850,71 @@ void App::ProcessJobs(u32 budget_ms) {
                job_name(job.type), rc, (unsigned long long)elapsed,
                book->GetFileName() ? book->GetFileName() : "(null)");
     }
-    DBG_LOG(this, msg);
+    DBG_LOG(&app_, msg);
 
     if (osGetTime() - start_ms >= budget_ms)
       break;
   }
 }
 
-void App::browser_handleevent() {
+void LibraryController::browser_handleevent() {
   // Re-apply browser layout in case another view reused/moved shared buttons.
-  LayoutBrowserNavButtons(this);
+  LayoutBrowserNavButtons(&app_);
 
   u32 keys = hidKeysDown();
   const u32 release_mask = KEY_TOUCH | KEY_A | KEY_B | KEY_X | KEY_Y |
                            KEY_START | KEY_SELECT | KEY_UP | KEY_DOWN |
                            KEY_LEFT | KEY_RIGHT | KEY_L | KEY_R | KEY_CPAD_UP |
                            KEY_CPAD_DOWN | KEY_CPAD_LEFT | KEY_CPAD_RIGHT;
-  if (browser_.wait_input_release) {
+  if (app_.IsBrowserWaitingInputRelease()) {
     if (hidKeysHeld() & release_mask)
       return;
-    browser_.wait_input_release = false;
+    app_.SetBrowserWaitingInputRelease(false);
     return;
   }
 
   auto navigateSelection = [&](BrowserNavMove move) {
-    if (BookCount() <= 0)
+    if (app_.BookCount() <= 0)
       return;
-    const int old_page_start = browser_.page_start;
-    Book *old_selected = browser_.selected_book;
-    BrowserNavState state = {GetBookIndex(browser_.selected_book),
-                             browser_.page_start};
-    state = BrowserNavMoveSelection(state, BookCount(), APP_BROWSER_BUTTON_COUNT,
+    const int old_page_start = app_.GetBrowserPageStart();
+    Book *old_selected = app_.GetSelectedBook();
+    BrowserNavState state = {app_.GetBookIndex(app_.GetSelectedBook()),
+                             app_.GetBrowserPageStart()};
+    state = BrowserNavMoveSelection(state, app_.BookCount(), APP_BROWSER_BUTTON_COUNT,
                                     kBrowserGridCols, move);
-    if (state.selected_index < 0 || state.selected_index >= BookCount())
+    if (state.selected_index < 0 || state.selected_index >= app_.BookCount())
       return;
-    browser_.page_start = state.page_start;
-    browser_.selected_book = books[state.selected_index];
-    if (browser_.page_start != old_page_start)
+    app_.SetBrowserPageStart(state.page_start);
+    app_.SetSelectedBook(app_.books[state.selected_index]);
+    if (app_.GetBrowserPageStart() != old_page_start)
       LoadVisibleBrowserCoverCaches();
-    if (browser_.selected_book != old_selected) {
-      PruneBrowserWarmupJobs(browser_.selected_book);
-      browser_.last_interaction_ms = osGetTime();
+    if (app_.GetSelectedBook() != old_selected) {
+      PruneBrowserWarmupJobs(app_.GetSelectedBook());
+      app_.SetBrowserLastInteractionMs(osGetTime());
     }
-    browser_.view_dirty = true;
+    app_.SetBrowserDirty(true);
   };
 
   if (keys & KEY_A) {
     // Open selected book with the primary confirm button.
-    OpenBook();
+    app_.OpenBook();
   }
-  else if (keys & key.left) {
+  else if (keys & app_.key.left) {
     navigateSelection(BROWSER_NAV_LEFT);
-  } else if (keys & key.right) {
+  } else if (keys & app_.key.right) {
     navigateSelection(BROWSER_NAV_RIGHT);
-  } else if (keys & key.up) {
+  } else if (keys & app_.key.up) {
     navigateSelection(BROWSER_NAV_UP);
-  } else if (keys & key.down) {
+  } else if (keys & app_.key.down) {
     navigateSelection(BROWSER_NAV_DOWN);
-  } else if (keys & key.l) {
+  } else if (keys & app_.key.l) {
     browser_prevpage();
-  } else if (keys & key.r) {
+  } else if (keys & app_.key.r) {
     browser_nextpage();
   }
 
   else if (keys & (KEY_SELECT | KEY_Y)) {
-    ShowSettingsView(false);
+    app_.ShowSettingsView(false);
   }
 
   else if (keys & KEY_TOUCH) {
@@ -933,16 +938,16 @@ void App::browser_handleevent() {
       if (x < 0 || y < 0 || x > 239 || y > 319)
         return false;
 
-      if (hitsButtonAt(buttonnext, x, y, 4)) {
+      if (hitsButtonAt(app_.buttonnext, x, y, 4)) {
         browser_nextpage();
         return true;
       }
-      if (hitsButtonAt(buttonprev, x, y, 4)) {
+      if (hitsButtonAt(app_.buttonprev, x, y, 4)) {
         browser_prevpage();
         return true;
       }
-      if (hitsButtonAt(buttonprefs, x, y, 4)) {
-        ShowSettingsView(false);
+      if (hitsButtonAt(app_.buttonprefs, x, y, 4)) {
+        app_.ShowSettingsView(false);
         return true;
       }
 
@@ -955,15 +960,15 @@ void App::browser_handleevent() {
             row < kBrowserGridRows) {
           int page_idx = row * kBrowserGridCols + col;
           if (page_idx >= 0 && page_idx < APP_BROWSER_BUTTON_COUNT) {
-            int book_idx = browser_.page_start + page_idx;
-            if (book_idx >= 0 && book_idx < BookCount()) {
-              if (browser_.selected_book == books[book_idx]) {
-                OpenBook();
+            int book_idx = app_.GetBrowserPageStart() + page_idx;
+            if (book_idx >= 0 && book_idx < app_.BookCount()) {
+              if (app_.GetSelectedBook() == app_.books[book_idx]) {
+                app_.OpenBook();
               } else {
-                browser_.selected_book = books[book_idx];
-                PruneBrowserWarmupJobs(browser_.selected_book);
-                browser_.last_interaction_ms = osGetTime();
-                browser_.view_dirty = true;
+                app_.SetSelectedBook(app_.books[book_idx]);
+                PruneBrowserWarmupJobs(app_.GetSelectedBook());
+                app_.SetBrowserLastInteractionMs(osGetTime());
+                app_.SetBrowserDirty(true);
               }
               return true;
             }
@@ -972,18 +977,18 @@ void App::browser_handleevent() {
       }
 
       // Fallback to original cover hitboxes.
-      for (int i = browser_.page_start;
-           (i < BookCount()) &&
-           (i < browser_.page_start + APP_BROWSER_BUTTON_COUNT);
+      for (int i = app_.GetBrowserPageStart();
+           (i < app_.BookCount()) &&
+           (i < app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT);
            i++) {
-        if (hitsButtonAt(*buttons[i], x, y, 4)) {
-          if (browser_.selected_book == books[i]) {
-            OpenBook();
+        if (hitsButtonAt(*app_.buttons[i], x, y, 4)) {
+          if (app_.GetSelectedBook() == app_.books[i]) {
+            app_.OpenBook();
           } else {
-            browser_.selected_book = books[i];
-            PruneBrowserWarmupJobs(browser_.selected_book);
-            browser_.last_interaction_ms = osGetTime();
-            browser_.view_dirty = true;
+            app_.SetSelectedBook(app_.books[i]);
+            PruneBrowserWarmupJobs(app_.GetSelectedBook());
+            app_.SetBrowserLastInteractionMs(osGetTime());
+            app_.SetBrowserDirty(true);
           }
           return true;
         }
@@ -991,108 +996,110 @@ void App::browser_handleevent() {
       return false;
     };
 
-    touchPosition mapped = TouchRead();
+    touchPosition mapped = app_.TouchRead();
     handleTouchAt((int)mapped.px, (int)mapped.py);
   }
 }
 
-void App::browser_init(void) {
-  for (int i = 0; i < BookCount(); i++) {
+void LibraryController::browser_init(void) {
+  for (int i = 0; i < app_.BookCount(); i++) {
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
     int col = page_idx % kBrowserGridCols;
     int row = page_idx / kBrowserGridCols;
 
-    buttons.push_back(new Button());
-    buttons[i]->Init(ts);
+    app_.buttons.push_back(new Button());
+    app_.buttons[i]->Init(app_.ts);
     // Button is the cover area - portrait orientation
-    buttons[i]->Resize(kBrowserCoverW + 4, kBrowserCoverH + 4);
-    buttons[i]->Move(kBrowserGridX0 + col * kBrowserCellW,
+    app_.buttons[i]->Resize(kBrowserCoverW + 4, kBrowserCoverH + 4);
+    app_.buttons[i]->Move(kBrowserGridX0 + col * kBrowserCellW,
                      kBrowserGridY0 + row * kBrowserCellH);
 
     // Cover extraction moved to browser_draw to avoid freezing at startup
 
     // In browser_draw we render fallback title manually for no-cover books.
-    buttons[i]->SetLabel1(std::string(""));
+    app_.buttons[i]->SetLabel1(std::string(""));
 
   }
 
-  buttonprev.Init(ts);
-  buttonnext.Init(ts);
-  buttonprefs.Init(ts);
-  LayoutBrowserNavButtons(this);
+  app_.buttonprev.Init(app_.ts);
+  app_.buttonnext.Init(app_.ts);
+  app_.buttonprefs.Init(app_.ts);
+  LayoutBrowserNavButtons(&app_);
 
-  if (!browser_.selected_book) {
-    browser_.page_start = 0;
-    browser_.selected_book = books[0];
+  if (!app_.GetSelectedBook()) {
+    app_.SetBrowserPageStart(0);
+    app_.SetSelectedBook(app_.books[0]);
   } else {
-    browser_.page_start =
-        (GetBookIndex(browser_.selected_book) / APP_BROWSER_BUTTON_COUNT) *
-        APP_BROWSER_BUTTON_COUNT;
+    app_.SetBrowserPageStart(
+        (app_.GetBookIndex(app_.GetSelectedBook()) / APP_BROWSER_BUTTON_COUNT) *
+        APP_BROWSER_BUTTON_COUNT);
   }
-  PruneBrowserWarmupJobs(browser_.selected_book);
-  browser_.last_interaction_ms = osGetTime();
+  PruneBrowserWarmupJobs(app_.GetSelectedBook());
+  app_.SetBrowserLastInteractionMs(osGetTime());
   LoadVisibleBrowserCoverCaches();
 }
 
-void App::browser_nextpage() {
-  if (browser_.page_start + APP_BROWSER_BUTTON_COUNT < BookCount()) {
-    browser_.page_start += APP_BROWSER_BUTTON_COUNT;
-    browser_.selected_book = books[browser_.page_start];
-    PruneBrowserWarmupJobs(browser_.selected_book);
-    browser_.last_interaction_ms = osGetTime();
+void LibraryController::browser_nextpage() {
+  if (app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT < app_.BookCount()) {
+    app_.SetBrowserPageStart(app_.GetBrowserPageStart() +
+                             APP_BROWSER_BUTTON_COUNT);
+    app_.SetSelectedBook(app_.books[app_.GetBrowserPageStart()]);
+    PruneBrowserWarmupJobs(app_.GetSelectedBook());
+    app_.SetBrowserLastInteractionMs(osGetTime());
     LoadVisibleBrowserCoverCaches();
-    browser_.view_dirty = true;
+    app_.SetBrowserDirty(true);
   }
 }
 
-void App::browser_prevpage() {
-  if (browser_.page_start >= APP_BROWSER_BUTTON_COUNT) {
-    browser_.page_start -= APP_BROWSER_BUTTON_COUNT;
-    browser_.selected_book =
-        books[browser_.page_start + APP_BROWSER_BUTTON_COUNT - 1];
-    PruneBrowserWarmupJobs(browser_.selected_book);
-    browser_.last_interaction_ms = osGetTime();
+void LibraryController::browser_prevpage() {
+  if (app_.GetBrowserPageStart() >= APP_BROWSER_BUTTON_COUNT) {
+    app_.SetBrowserPageStart(app_.GetBrowserPageStart() -
+                             APP_BROWSER_BUTTON_COUNT);
+    app_.SetSelectedBook(
+        app_.books[app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT - 1]);
+    PruneBrowserWarmupJobs(app_.GetSelectedBook());
+    app_.SetBrowserLastInteractionMs(osGetTime());
     LoadVisibleBrowserCoverCaches();
-    browser_.view_dirty = true;
+    app_.SetBrowserDirty(true);
   }
 }
 
-void App::browser_draw(void) {
+void LibraryController::browser_draw(void) {
   // Keep footer controls stable after view switches.
-  LayoutBrowserNavButtons(this);
+  LayoutBrowserNavButtons(&app_);
 
   // save state
-  int colorMode = ts->GetColorMode();
-  u16 *screen = ts->GetScreen();
-  int style = ts->GetStyle();
-  int savedPixelSize = ts->pixelsize;
+  int colorMode = app_.ts->GetColorMode();
+  u16 *screen = app_.ts->GetScreen();
+  int style = app_.ts->GetStyle();
+  int savedPixelSize = app_.ts->pixelsize;
 
-  ts->SetScreen(ts->screenleft);
-  ts->SetColorMode(0);
-  ts->SetStyle(TEXT_STYLE_BROWSER);
-  ts->PrintSplash(ts->screenleft);
-  ts->SetPixelSize(8);
+  app_.ts->SetScreen(app_.ts->screenleft);
+  app_.ts->SetColorMode(0);
+  app_.ts->SetStyle(TEXT_STYLE_BROWSER);
+  app_.ts->PrintSplash(app_.ts->screenleft);
+  app_.ts->SetPixelSize(8);
   {
     char versionMsg[16];
     snprintf(versionMsg, sizeof(versionMsg), "v%s", VERSION);
     const int versionWidth =
-        ts->GetStringWidth(versionMsg, TEXT_STYLE_BROWSER);
+        app_.ts->GetStringWidth(versionMsg, TEXT_STYLE_BROWSER);
     int versionX = (240 - versionWidth) / 2;
     if (versionX < 0)
       versionX = 0;
-    ts->SetPen(versionX, 397);
-    ts->PrintString(versionMsg);
+    app_.ts->SetPen(versionX, 397);
+    app_.ts->PrintString(versionMsg);
   }
 
-  ts->SetScreen(ts->screenright);
-  ts->SetColorMode(0); // Normal for browser text
-  ts->ClearScreen();
-  DrawBottomGradientBackground();
+  app_.ts->SetScreen(app_.ts->screenright);
+  app_.ts->SetColorMode(0); // Normal for browser text
+  app_.ts->ClearScreen();
+  app_.DrawBottomGradientBackground();
 
-  for (int i = browser_.page_start;
-       (i < BookCount()) &&
-       (i < browser_.page_start + APP_BROWSER_BUTTON_COUNT); i++) {
-    buttons[i]->Draw(ts->screenright, books[i] == browser_.selected_book);
+  for (int i = app_.GetBrowserPageStart();
+       (i < app_.BookCount()) &&
+       (i < app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT); i++) {
+    app_.buttons[i]->Draw(app_.ts->screenright, app_.books[i] == app_.GetSelectedBook());
 
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
     int col = page_idx % kBrowserGridCols;
@@ -1100,39 +1107,39 @@ void App::browser_draw(void) {
     int btnX = kBrowserGridX0 + col * kBrowserCellW;
     int btnY = kBrowserGridY0 + row * kBrowserCellH;
 
-    if (books[i]->coverPixels) {
-      int cx = btnX + 2 + (kBrowserCoverW - books[i]->coverWidth) / 2;
-      int cy = btnY + 2 + (kBrowserCoverH - books[i]->coverHeight) / 2;
-      int w = ts->display.height; // buffer stride
-      ts->MarkScreenDirtyRect(ts->screenright, cx, cy,
-                              cx + books[i]->coverWidth,
-                              cy + books[i]->coverHeight);
-      for (int py = 0; py < books[i]->coverHeight && (cy + py) < 320; py++) {
-        for (int px = 0; px < books[i]->coverWidth && (cx + px) < 240; px++) {
-          ts->screenright[(cy + py) * w + (cx + px)] =
-              books[i]->coverPixels[py * books[i]->coverWidth + px];
+    if (app_.books[i]->coverPixels) {
+      int cx = btnX + 2 + (kBrowserCoverW - app_.books[i]->coverWidth) / 2;
+      int cy = btnY + 2 + (kBrowserCoverH - app_.books[i]->coverHeight) / 2;
+      int w = app_.ts->display.height; // buffer stride
+      app_.ts->MarkScreenDirtyRect(app_.ts->screenright, cx, cy,
+                              cx + app_.books[i]->coverWidth,
+                              cy + app_.books[i]->coverHeight);
+      for (int py = 0; py < app_.books[i]->coverHeight && (cy + py) < 320; py++) {
+        for (int px = 0; px < app_.books[i]->coverWidth && (cx + px) < 240; px++) {
+          app_.ts->screenright[(cy + py) * w + (cx + px)] =
+              app_.books[i]->coverPixels[py * app_.books[i]->coverWidth + px];
         }
       }
     }
 
-    if (books[i] == browser_.selected_book) {
-      ts->DrawRect(btnX - 2, btnY - 2, btnX + kBrowserCellW + 2,
+    if (app_.books[i] == app_.GetSelectedBook()) {
+      app_.ts->DrawRect(btnX - 2, btnY - 2, btnX + kBrowserCellW + 2,
                    btnY + kBrowserCellH + 2,
                    0xF800); // Red thick outer bounding box
-      ts->DrawRect(btnX - 3, btnY - 3, btnX + kBrowserCellW + 3,
+      app_.ts->DrawRect(btnX - 3, btnY - 3, btnX + kBrowserCellW + 3,
                    btnY + kBrowserCellH + 3, 0xF800);
-      ts->SetStyle(TEXT_STYLE_BOLD);
+      app_.ts->SetStyle(TEXT_STYLE_BOLD);
     } else {
-      ts->SetStyle(TEXT_STYLE_REGULAR);
+      app_.ts->SetStyle(TEXT_STYLE_REGULAR);
     }
 
     // Draw filename (not EPUB metadata title):
     //  - with cover: below thumbnail (single line)
     //  - without cover: wrapped inside thumbnail rectangle
-    ts->SetPixelSize(10);
-    std::string display_name = BuildBrowserDisplayName(books[i]);
-    LogUtf8StageOnce(books[i], "draw_label", display_name);
-    if (books[i]->coverPixels) {
+    app_.ts->SetPixelSize(10);
+    std::string display_name = BuildBrowserDisplayName(app_.books[i]);
+    LogUtf8StageOnce(app_.books[i], "draw_label", display_name);
+    if (app_.books[i]->coverPixels) {
       if (!display_name.empty()) {
         char truncTitle[20];
         size_t bytes = Utf8BytesForCharCount(display_name.c_str(), 19);
@@ -1141,55 +1148,55 @@ void App::browser_draw(void) {
         memcpy(truncTitle, display_name.c_str(), bytes);
         truncTitle[bytes] = '\0';
         truncTitle[19] = '\0';
-        LogUtf8StageOnce(books[i], "draw_label_cut", std::string(truncTitle));
-        ts->SetPen(btnX, btnY + kBrowserTitleOffsetY);
-        ts->PrintString(truncTitle);
+        LogUtf8StageOnce(app_.books[i], "draw_label_cut", std::string(truncTitle));
+        app_.ts->SetPen(btnX, btnY + kBrowserTitleOffsetY);
+        app_.ts->PrintString(truncTitle);
       }
     } else {
-      LogUtf8StageOnce(books[i], "draw_label_wrap", display_name);
-      DrawWrappedTitleInsideCover(ts, display_name, btnX + 2, btnY + 2,
+      LogUtf8StageOnce(app_.books[i], "draw_label_wrap", display_name);
+      DrawWrappedTitleInsideCover(app_.ts, display_name, btnX + 2, btnY + 2,
                                   kBrowserCoverW, kBrowserCoverH,
                                   TEXT_STYLE_BROWSER);
     }
 
     // Draw progress indicator
-    int pos = books[i]->GetPosition();
+    int pos = app_.books[i]->GetPosition();
     char msg[16];
     if (pos > 0)
       snprintf(msg, sizeof(msg), "Pg %d", pos + 1);
     else
       snprintf(msg, sizeof(msg), "NEW");
-    ts->SetPen(btnX, btnY + kBrowserProgressOffsetY);
-    ts->PrintString(msg);
+    app_.ts->SetPen(btnX, btnY + kBrowserProgressOffsetY);
+    app_.ts->PrintString(msg);
   }
 
-  ts->SetPixelSize(savedPixelSize);
+  app_.ts->SetPixelSize(savedPixelSize);
 
   // Navigation buttons at the bottom
-  if (browser_.page_start >= APP_BROWSER_BUTTON_COUNT)
-    buttonprev.Draw(ts->screenright, false);
-  if (BookCount() > browser_.page_start + APP_BROWSER_BUTTON_COUNT)
-    buttonnext.Draw(ts->screenright, false);
+  if (app_.GetBrowserPageStart() >= APP_BROWSER_BUTTON_COUNT)
+    app_.buttonprev.Draw(app_.ts->screenright, false);
+  if (app_.BookCount() > app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT)
+    app_.buttonnext.Draw(app_.ts->screenright, false);
 
-  buttonprefs.Draw(ts->screenright, false);
+  app_.buttonprefs.Draw(app_.ts->screenright, false);
 
   // Pagination indicator
-  if (BookCount() > APP_BROWSER_BUTTON_COUNT) {
-    int currentPage = (browser_.page_start / APP_BROWSER_BUTTON_COUNT) + 1;
+  if (app_.BookCount() > APP_BROWSER_BUTTON_COUNT) {
+    int currentPage = (app_.GetBrowserPageStart() / APP_BROWSER_BUTTON_COUNT) + 1;
     int totalPages =
-        (BookCount() + APP_BROWSER_BUTTON_COUNT - 1) / APP_BROWSER_BUTTON_COUNT;
+        (app_.BookCount() + APP_BROWSER_BUTTON_COUNT - 1) / APP_BROWSER_BUTTON_COUNT;
     char pageMsg[32];
     snprintf(pageMsg, sizeof(pageMsg), "%d/%d", currentPage, totalPages);
-    ts->SetPixelSize(8);
-    ts->SetPen(112, kBrowserFooterY + 3);
-    ts->PrintString(pageMsg);
-    ts->SetPixelSize(savedPixelSize);
+    app_.ts->SetPixelSize(8);
+    app_.ts->SetPen(112, kBrowserFooterY + 3);
+    app_.ts->PrintString(pageMsg);
+    app_.ts->SetPixelSize(savedPixelSize);
   }
 
   // restore state
-  ts->SetColorMode(colorMode);
-  ts->SetScreen(screen);
-  ts->SetStyle(style);
+  app_.ts->SetColorMode(colorMode);
+  app_.ts->SetScreen(screen);
+  app_.ts->SetStyle(style);
 
-  browser_.view_dirty = false;
+  app_.SetBrowserDirty(false);
 }

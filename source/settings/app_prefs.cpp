@@ -23,6 +23,7 @@
 
 #include <3ds.h>
 
+#include "app/settings_controller.h"
 #include "book/book.h"
 #include "ui/button.h"
 #include "color_utils.h"
@@ -98,25 +99,45 @@ static bool CurrentBookUsesTextLayoutSettings(App *app) {
          book->UsesTextLayoutSettings();
 }
 
-void App::ToggleCurrentBookMobiLineWrapFix() {
-  if (!CurrentBookUsesLineWrapFixSlot(this))
+SettingsController::SettingsController(App &app) : app_(app) {}
+
+void SettingsController::ShowSettingsView(bool from_book) {
+  app_.SetBookSettingsContext(from_book);
+  app_.SetPrefsLayoutNoticePending(
+      from_book && app_.GetCurrentBook() &&
+      app_.BookNeedsRelayout(app_.GetCurrentBook()));
+  PrefsRefreshButton(PREFS_BUTTON_INDEX);
+  PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
+  u8 visible_count = PrefsVisibleButtonCount();
+  if (visible_count == 0)
+    visible_count = 1;
+  if (app_.GetPrefsSelectedIndex() >= visible_count)
+    app_.SetPrefsSelectedIndex(visible_count - 1);
+  app_.SetMode(AppMode::Prefs);
+  app_.buttonprefs.Label("library");
+  app_.ts->SetScreen(app_.ts->screenright);
+  app_.MarkPrefsDirty();
+}
+
+void SettingsController::ToggleCurrentBookMobiLineWrapFix() {
+  App *app = &app_;
+  if (!CurrentBookUsesLineWrapFixSlot(app))
     return;
-  Book *book = bookcurrent_;
+  Book *book = app->GetCurrentBook();
   book->SetMobiLineWrapFix(!book->GetMobiLineWrapFix());
-  // The new cleanup changes pagination, but only for this book.
   if (book->GetPageCount() > 0)
-    prefs_view_.layout_notice_pending = true;
+    app->SetPrefsLayoutNoticePending(true);
   PrefsRefreshButton(PREFS_BUTTON_TIME24H);
-  prefs->Write();
-  prefs_view_.view_dirty = true;
+  app->prefs->Write();
+  app->MarkPrefsDirty();
 }
 
-u8 App::PrefsVisibleButtonCount() const {
-  // General settings hide per-book actions like index/bookmarks.
-  return prefs_view_.from_book ? PREFS_BUTTON_COUNT : PREFS_BUTTON_INDEX;
+u8 SettingsController::PrefsVisibleButtonCount() const {
+  return app_.IsBookSettingsContext() ? PREFS_BUTTON_COUNT : PREFS_BUTTON_INDEX;
 }
 
-void App::PrefsInit() {
+void SettingsController::PrefsInit() {
+  App *app = &app_;
   const std::vector<std::string> labels{
       "font configuration", "font size",    "paragraph spacing",
       "screen orientation", "clock format", "color mode",
@@ -124,63 +145,60 @@ void App::PrefsInit() {
       "bookmarks"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
-    prefsButtons[i].Init(ts);
-    prefsButtons[i].SetStyle(BUTTON_STYLE_SETTING);
-    prefsButtons[i].Resize(230, 36);
-    prefsButtons[i].SetLabel1(labels[i]);
+    app->prefsButtons[i].Init(app->ts);
+    app->prefsButtons[i].SetStyle(BUTTON_STYLE_SETTING);
+    app->prefsButtons[i].Resize(230, 36);
+    app->prefsButtons[i].SetLabel1(labels[i]);
     PrefsRefreshButton(i);
-    prefsButtons[i].Move(5, i * 38);
+    app->prefsButtons[i].Move(5, i * 38);
   }
 
-  prefs_view_.selected_index = PREFS_BUTTON_FONT_CONFIG;
+  app->SetPrefsSelectedIndex(PREFS_BUTTON_FONT_CONFIG);
 }
 
-void App::PrefsDraw() {
-  // save state
-  int colorMode = ts->GetColorMode();
-  u16 *screen = ts->GetScreen();
-  int style = ts->GetStyle();
-  int savedBottomMargin = ts->margin.bottom;
+void SettingsController::PrefsDraw() {
+  App *app = &app_;
+  int colorMode = app->ts->GetColorMode();
+  u16 *screen = app->ts->GetScreen();
+  int style = app->ts->GetStyle();
+  int savedBottomMargin = app->ts->margin.bottom;
 
-  // Settings UI uses full-screen layout; page margins should not clip text.
-  ts->margin.bottom = 0;
+  app->ts->margin.bottom = 0;
 
-  ts->SetScreen(ts->screenright);
-  ts->SetColorMode(0); // Normal for prefs menu
-  ts->ClearScreen();
-  DrawBottomGradientBackground();
+  app->ts->SetScreen(app->ts->screenright);
+  app->ts->SetColorMode(0);
+  app->ts->ClearScreen();
+  app->DrawBottomGradientBackground();
 
   u8 visibleCount = NormalizeVisibleCount(PrefsVisibleButtonCount());
-  ClampSelectedIndex(&prefs_view_.selected_index, visibleCount);
+  int selected_index = app->GetPrefsSelectedIndex();
+  ClampSelectedIndex(&selected_index, visibleCount);
+  app->SetPrefsSelectedIndex(selected_index);
 
-  // Dynamic rows depend on current context/book; refresh before drawing.
   PrefsRefreshButton(PREFS_BUTTON_TIME24H);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
 
   for (int i = 0; i < visibleCount; i++)
-    prefsButtons[i].Draw(ts->screenright, i == prefs_view_.selected_index);
+    app->prefsButtons[i].Draw(app->ts->screenright,
+                              i == app->GetPrefsSelectedIndex());
 
-  // Draw library button below settings list (without overlapping list rows).
-  SyncLibraryButtonLayout(&buttonprefs);
-  buttonprefs.Draw(ts->screenright);
+  SyncLibraryButtonLayout(&app->buttonprefs);
+  app->buttonprefs.Draw(app->ts->screenright);
 
-  ts->PrintSplash(ts->screenleft);
-  if (prefs_view_.from_book && prefs_view_.layout_notice_pending &&
-      bookcurrent_ && BookNeedsRelayout(bookcurrent_)) {
-    // Settings are saved immediately, but the active book is repaginated only
-    // after it is reopened.
-    const u8 savedPixelSize = ts->GetPixelSize();
-    static const u16 kLayoutNoticeColor =
-        RGB565FromU8(188.0f, 36.0f, 36.0f);
+  app->ts->PrintSplash(app->ts->screenleft);
+  if (app->IsBookSettingsContext() && app->IsPrefsLayoutNoticePending() &&
+      app->GetCurrentBook() && app->BookNeedsRelayout(app->GetCurrentBook())) {
+    const u8 savedPixelSize = app->ts->GetPixelSize();
+    static const u16 kLayoutNoticeColor = RGB565FromU8(188.0f, 36.0f, 36.0f);
     static const u16 kLayoutNoticeBg = RGB565FromU8(255.0f, 255.0f, 255.0f);
     const char *line1 = "reopen book to";
     const char *line2 = "apply changes";
-    ts->SetScreen(ts->screenleft);
-    ts->SetPixelSize(11);
-    const int line1w = ts->GetStringAdvance(line1);
-    const int line2w = ts->GetStringAdvance(line2);
-    const int line_h = ts->GetHeight();
+    app->ts->SetScreen(app->ts->screenleft);
+    app->ts->SetPixelSize(11);
+    const int line1w = app->ts->GetStringAdvance(line1);
+    const int line2w = app->ts->GetStringAdvance(line2);
+    const int line_h = app->ts->GetHeight();
     const int text_w = std::max(line1w, line2w);
     const int pad_x = 8;
     const int pad_y = 5;
@@ -195,71 +213,73 @@ void App::PrefsDraw() {
     const int content_top = box_y + (box_h - content_h) / 2;
     const int line1y = content_top + line_h;
     const int line2y = line1y + line_h + line_gap;
-    ts->FillRect((u16)box_x, (u16)box_y, (u16)(box_x + box_w),
-                 (u16)(box_y + box_h), kLayoutNoticeBg);
-    ts->DrawRect((u16)box_x, (u16)box_y, (u16)(box_x + box_w),
-                 (u16)(box_y + box_h), kLayoutNoticeColor);
-    ts->SetTextColorOverride(kLayoutNoticeColor);
-    ts->SetPen((u16)line1x, (u16)line1y);
-    ts->PrintString(line1);
-    ts->SetPen((u16)line2x, (u16)line2y);
-    ts->PrintString(line2);
-    ts->ClearTextColorOverride();
-    ts->SetPixelSize(savedPixelSize);
+    app->ts->FillRect((u16)box_x, (u16)box_y, (u16)(box_x + box_w),
+                      (u16)(box_y + box_h), kLayoutNoticeBg);
+    app->ts->DrawRect((u16)box_x, (u16)box_y, (u16)(box_x + box_w),
+                      (u16)(box_y + box_h), kLayoutNoticeColor);
+    app->ts->SetTextColorOverride(kLayoutNoticeColor);
+    app->ts->SetPen((u16)line1x, (u16)line1y);
+    app->ts->PrintString(line1);
+    app->ts->SetPen((u16)line2x, (u16)line2y);
+    app->ts->PrintString(line2);
+    app->ts->ClearTextColorOverride();
+    app->ts->SetPixelSize(savedPixelSize);
   }
 
-  // restore state
-  ts->SetStyle(style);
-  ts->SetColorMode(colorMode);
-  ts->margin.bottom = savedBottomMargin;
-  ts->SetScreen(screen);
+  app->ts->SetStyle(style);
+  app->ts->SetColorMode(colorMode);
+  app->ts->margin.bottom = savedBottomMargin;
+  app->ts->SetScreen(screen);
 
-  prefs_view_.view_dirty = false;
+  app->SetPrefsDirty(false);
 }
 
-void App::PrefsHandleEvent() {
+void SettingsController::PrefsHandleEvent() {
+  App *app = &app_;
   u32 keys = hidKeysDown();
   u8 visibleCount = NormalizeVisibleCount(PrefsVisibleButtonCount());
-  ClampSelectedIndex(&prefs_view_.selected_index, visibleCount);
+  int selected_index = app->GetPrefsSelectedIndex();
+  ClampSelectedIndex(&selected_index, visibleCount);
+  app->SetPrefsSelectedIndex(selected_index);
 
   if (keys & KEY_A) {
     PrefsHandlePress();
   } else if (keys & (KEY_SELECT | KEY_START | KEY_B | KEY_Y)) {
-    ShowLibraryView();
-  } else if (keys & (key.left | key.l)) {
-    if (prefs_view_.selected_index > 0) {
-      prefs_view_.selected_index--;
-      prefs_view_.view_dirty = true;
+    app->ShowLibraryView();
+  } else if (keys & (app->key.left | app->key.l)) {
+    if (app->GetPrefsSelectedIndex() > 0) {
+      app->SetPrefsSelectedIndex(app->GetPrefsSelectedIndex() - 1);
+      app->MarkPrefsDirty();
     }
-  } else if (keys & (key.right | key.r)) {
-    if (prefs_view_.selected_index < visibleCount - 1) {
-      prefs_view_.selected_index++;
-      prefs_view_.view_dirty = true;
+  } else if (keys & (app->key.right | app->key.r)) {
+    if (app->GetPrefsSelectedIndex() < visibleCount - 1) {
+      app->SetPrefsSelectedIndex(app->GetPrefsSelectedIndex() + 1);
+      app->MarkPrefsDirty();
     }
-  } else if (prefs_view_.selected_index == PREFS_BUTTON_FONTSIZE &&
-             (keys & key.up)) {
+  } else if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_FONTSIZE &&
+             (keys & app->key.up)) {
     PrefsDecreasePixelSize();
-  } else if (prefs_view_.selected_index == PREFS_BUTTON_FONTSIZE &&
-             (keys & key.down)) {
+  } else if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_FONTSIZE &&
+             (keys & app->key.down)) {
     PrefsIncreasePixelSize();
-  } else if (prefs_view_.selected_index == PREFS_BUTTON_PARASPACING &&
-             (keys & key.up)) {
+  } else if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_PARASPACING &&
+             (keys & app->key.up)) {
     PrefsDecreaseParaspacing();
-  } else if (prefs_view_.selected_index == PREFS_BUTTON_PARASPACING &&
-             (keys & key.down)) {
+  } else if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_PARASPACING &&
+             (keys & app->key.down)) {
     PrefsIncreaseParaspacing();
   } else if (keys & KEY_TOUCH) {
     PrefsHandleTouch();
   }
 }
 
-void App::PrefsHandleTouch() {
-  touchPosition coord = TouchRead();
+void SettingsController::PrefsHandleTouch() {
+  App *app = &app_;
+  touchPosition coord = app->TouchRead();
   const int footerX = (int)coord.px;
   const int footerY = (int)coord.py;
 
-  // Keep touch hitbox synced with drawing geometry.
-  SyncLibraryButtonLayout(&buttonprefs);
+  SyncLibraryButtonLayout(&app->buttonprefs);
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
     for (int dy = -8; dy <= 8; dy += 4) {
       for (int dx = -8; dx <= 8; dx += 4) {
@@ -274,18 +294,19 @@ void App::PrefsHandleTouch() {
     return false;
   };
 
-  // Strict priority for visible library button area.
-  if (enclosesWithSlack(buttonprefs, footerX, footerY)) {
-    ShowLibraryView();
+  if (enclosesWithSlack(app->buttonprefs, footerX, footerY)) {
+    app->ShowLibraryView();
     return;
   }
 
   u8 visibleCount = NormalizeVisibleCount(PrefsVisibleButtonCount());
-  ClampSelectedIndex(&prefs_view_.selected_index, visibleCount);
+  int selected_index = app->GetPrefsSelectedIndex();
+  ClampSelectedIndex(&selected_index, visibleCount);
+  app->SetPrefsSelectedIndex(selected_index);
   for (u8 i = 0; i < visibleCount; i++) {
-    if (prefsButtons[i].EnclosesPoint(coord.px, coord.py)) {
-      if (i != prefs_view_.selected_index)
-        prefs_view_.selected_index = i;
+    if (app->prefsButtons[i].EnclosesPoint(coord.px, coord.py)) {
+      if (i != app->GetPrefsSelectedIndex())
+        app->SetPrefsSelectedIndex(i);
 
       if (i == PREFS_BUTTON_FONTSIZE) {
         int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
@@ -309,200 +330,240 @@ void App::PrefsHandleTouch() {
     }
   }
 
-  if (prefs_view_.view_dirty)
+  if (app->IsPrefsDirty())
     PrefsDraw();
 }
 
-void App::PrefsIncreasePixelSize() {
-  if (prefs_view_.from_book && !CurrentBookUsesTextLayoutSettings(this))
+void SettingsController::PrefsIncreasePixelSize() {
+  App *app = &app_;
+  if (app->IsBookSettingsContext() && !CurrentBookUsesTextLayoutSettings(app))
     return;
-  if (ts->pixelsize < kTextPixelSizeMax) {
-    ts->SetPixelSize(ts->pixelsize + 1);
-    MarkBookLayoutDirty();
+  if (app->ts->pixelsize < kTextPixelSizeMax) {
+    app->ts->SetPixelSize(app->ts->pixelsize + 1);
+    app->MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
-    prefs->Write();
+    app->prefs->Write();
   }
 }
 
-void App::PrefsDecreasePixelSize() {
-  if (prefs_view_.from_book && !CurrentBookUsesTextLayoutSettings(this))
+void SettingsController::PrefsDecreasePixelSize() {
+  App *app = &app_;
+  if (app->IsBookSettingsContext() && !CurrentBookUsesTextLayoutSettings(app))
     return;
-  if (ts->pixelsize > kTextPixelSizeMin) {
-    ts->SetPixelSize(ts->pixelsize - 1);
-    MarkBookLayoutDirty();
+  if (app->ts->pixelsize > kTextPixelSizeMin) {
+    app->ts->SetPixelSize(app->ts->pixelsize - 1);
+    app->MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
-    prefs->Write();
+    app->prefs->Write();
   }
 }
 
-void App::PrefsIncreaseParaspacing() {
-  if (prefs_view_.from_book && !CurrentBookUsesTextLayoutSettings(this))
+void SettingsController::PrefsIncreaseParaspacing() {
+  App *app = &app_;
+  if (app->IsBookSettingsContext() && !CurrentBookUsesTextLayoutSettings(app))
     return;
-  if (paraspacing < 2) {
-    paraspacing++;
-    MarkBookLayoutDirty();
+  if (app->paraspacing < 2) {
+    app->paraspacing++;
+    app->MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
-    prefs->Write();
+    app->prefs->Write();
   }
 }
 
-void App::PrefsDecreaseParaspacing() {
-  if (prefs_view_.from_book && !CurrentBookUsesTextLayoutSettings(this))
+void SettingsController::PrefsDecreaseParaspacing() {
+  App *app = &app_;
+  if (app->IsBookSettingsContext() && !CurrentBookUsesTextLayoutSettings(app))
     return;
-  if (paraspacing > 0) {
-    paraspacing--;
-    MarkBookLayoutDirty();
+  if (app->paraspacing > 0) {
+    app->paraspacing--;
+    app->MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
-    prefs->Write();
+    app->prefs->Write();
   }
 }
 
-void App::PrefsFlipOrientation() {
-  SetOrientation(!orientation);
-  MarkBookLayoutDirty();
+void SettingsController::PrefsFlipOrientation() {
+  App *app = &app_;
+  app->SetOrientation(!app->orientation);
+  app->MarkBookLayoutDirty();
   PrefsRefreshButton(PREFS_BUTTON_ORIENTATION);
-  prefs->Write();
-  // Keep settings view synchronized immediately after rotation toggle.
-  if (mode_ == AppMode::Prefs)
+  app->prefs->Write();
+  if (app->GetMode() == AppMode::Prefs)
     PrefsDraw();
 }
 
-void App::PrefsRefreshButton(int index) {
+void SettingsController::PrefsRefreshButton(int index) {
+  App *app = &app_;
   char msg[64];
   switch (index) {
   case PREFS_BUTTON_FONT_CONFIG:
-    prefsButtons[PREFS_BUTTON_FONT_CONFIG].SetLabel2(
+    app->prefsButtons[PREFS_BUTTON_FONT_CONFIG].SetLabel2(
         std::string("open menu >"));
     break;
   case PREFS_BUTTON_FONTSIZE:
-    if (prefs_view_.from_book && bookcurrent_ &&
-        !bookcurrent_->UsesTextLayoutSettings()) {
-      prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string("(PDF fixed)"));
+    if (app->IsBookSettingsContext() && app->GetCurrentBook() &&
+        !app->GetCurrentBook()->UsesTextLayoutSettings()) {
+      app->prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string("(PDF fixed)"));
     } else {
       snprintf(msg, sizeof(msg), "                        < %d >  ",
-               ts->GetPixelSize());
-      prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string(msg));
+               app->ts->GetPixelSize());
+      app->prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string(msg));
     }
     break;
   case PREFS_BUTTON_PARASPACING:
-    if (prefs_view_.from_book && bookcurrent_ &&
-        !bookcurrent_->UsesTextLayoutSettings()) {
-      prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(
+    if (app->IsBookSettingsContext() && app->GetCurrentBook() &&
+        !app->GetCurrentBook()->UsesTextLayoutSettings()) {
+      app->prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(
           std::string("(PDF fixed)"));
     } else {
-      snprintf(msg, sizeof(msg), "                         < %d >  ", paraspacing);
-      prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
+      snprintf(msg, sizeof(msg), "                         < %d >  ", app->paraspacing);
+      app->prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
     }
     break;
   case PREFS_BUTTON_ORIENTATION:
-    prefsButtons[PREFS_BUTTON_ORIENTATION].SetLabel2(
-        orientation ? std::string("Turned Right") : std::string("Turned Left"));
+    app->prefsButtons[PREFS_BUTTON_ORIENTATION].SetLabel2(
+        app->orientation ? std::string("Turned Right") : std::string("Turned Left"));
     break;
   case PREFS_BUTTON_TIME24H:
-    if (CurrentBookUsesLineWrapFixSlot(this)) {
-      // Reuse this slot in per-book MOBI settings so we avoid adding a ninth
-      // row to an already full settings screen.
-      prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("line wrap fix"));
-      prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
-          bookcurrent_->GetMobiLineWrapFix() ? std::string("on")
-                                            : std::string("off"));
+    if (CurrentBookUsesLineWrapFixSlot(app)) {
+      app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("line wrap fix"));
+      app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
+          app->GetCurrentBook()->GetMobiLineWrapFix() ? std::string("on")
+                                                      : std::string("off"));
     } else {
-      prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("clock format"));
-      prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
-          prefs->time24h ? std::string("24h Format")
-                         : std::string("12h Format"));
+      app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("clock format"));
+      app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
+          app->prefs->time24h ? std::string("24h Format")
+                              : std::string("12h Format"));
     }
     break;
   case PREFS_BUTTON_COLORMODE: {
-    int mode = ts->GetColorMode();
+    int mode = app->ts->GetColorMode();
     if (mode == 0)
-      prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Normal"));
+      app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Normal"));
     else if (mode == 1)
-      prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Dark"));
+      app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Dark"));
     else
-      prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Sepia"));
+      app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Sepia"));
     break;
   }
   case PREFS_BUTTON_INDEX:
-    if (CanOpenBookIndexInCurrentContext(this)) {
-      prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
-    } else if (CanOpenSelectedBookIndex(this)) {
-      prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(
+    if (CanOpenBookIndexInCurrentContext(app)) {
+      app->prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
+    } else if (CanOpenSelectedBookIndex(app)) {
+      app->prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(
           std::string("(open selected book)"));
     } else {
-      prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string("(not available)"));
+      app->prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string("(not available)"));
     }
     break;
   case PREFS_BUTTON_BOOKMARKS:
-    if (prefs_view_.from_book && bookcurrent_ &&
-        !bookcurrent_->SupportsBookmarks()) {
-      prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
+    if (app->IsBookSettingsContext() && app->GetCurrentBook() &&
+        !app->GetCurrentBook()->SupportsBookmarks()) {
+      app->prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
           std::string("(PDF disabled)"));
     } else {
-      prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
-          (prefs_view_.from_book && bookcurrent_) ? std::string(">")
-                                                  : std::string("(open selected book)"));
+      app->prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
+          (app->IsBookSettingsContext() && app->GetCurrentBook())
+              ? std::string(">")
+              : std::string("(open selected book)"));
     }
     break;
   }
-  prefs_view_.view_dirty = true;
+  app->MarkPrefsDirty();
 }
 
-void App::PrefsHandlePress() {
-  //! Go to font view or flip orientation.
+void SettingsController::PrefsHandlePress() {
+  App *app = &app_;
 
-  if (prefs_view_.selected_index == PREFS_BUTTON_ORIENTATION) {
+  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_ORIENTATION) {
     PrefsFlipOrientation();
-    prefs_view_.view_dirty = true;
+    app->MarkPrefsDirty();
     return;
   }
 
-  if (prefs_view_.selected_index == PREFS_BUTTON_TIME24H) {
-    if (CurrentBookUsesLineWrapFixSlot(this)) {
+  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_TIME24H) {
+    if (CurrentBookUsesLineWrapFixSlot(app)) {
       ToggleCurrentBookMobiLineWrapFix();
     } else {
-      ToggleClockFormatSetting(prefs);
+      ToggleClockFormatSetting(app->prefs);
       PrefsRefreshButton(PREFS_BUTTON_TIME24H);
-      prefs_view_.view_dirty = true;
+      app->MarkPrefsDirty();
     }
     return;
   }
 
-  if (prefs_view_.selected_index == PREFS_BUTTON_COLORMODE) {
-    CycleColorMode(ts);
+  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_COLORMODE) {
+    CycleColorMode(app->ts);
     PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
-    prefs->Write();
-    prefs_view_.view_dirty = true;
+    app->prefs->Write();
+    app->MarkPrefsDirty();
     return;
   }
 
-  if (prefs_view_.selected_index == PREFS_BUTTON_INDEX) {
-    if (CanOpenBookIndexInCurrentContext(this)) {
-      ShowChaptersView();
-    } else if (CanOpenSelectedBookIndex(this)) {
-      OpenBook();
+  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_INDEX) {
+    if (CanOpenBookIndexInCurrentContext(app)) {
+      app->ShowChaptersView();
+    } else if (CanOpenSelectedBookIndex(app)) {
+      app->OpenBook();
     } else {
-      PrintStatus("Index unavailable for this book");
+      app->PrintStatus("Index unavailable for this book");
       PrefsRefreshButton(PREFS_BUTTON_INDEX);
-      prefs_view_.view_dirty = true;
+      app->MarkPrefsDirty();
     }
     return;
   }
 
-  if (prefs_view_.selected_index == PREFS_BUTTON_BOOKMARKS) {
-    if (prefs_view_.from_book && bookcurrent_ &&
-        !bookcurrent_->SupportsBookmarks()) {
-      PrintStatus("Bookmarks unavailable for PDF");
-    } else if (prefs_view_.from_book && bookcurrent_) {
-      ShowBookmarksView();
-    } else if (!prefs_view_.from_book && browser_.selected_book) {
-      OpenBook();
+  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_BOOKMARKS) {
+    if (app->IsBookSettingsContext() && app->GetCurrentBook() &&
+        !app->GetCurrentBook()->SupportsBookmarks()) {
+      app->PrintStatus("Bookmarks unavailable for PDF");
+    } else if (app->IsBookSettingsContext() && app->GetCurrentBook()) {
+      app->ShowBookmarksView();
+    } else if (!app->IsBookSettingsContext() && app->GetSelectedBook()) {
+      app->OpenBook();
     }
     return;
   }
 
-  if (prefs_view_.selected_index == PREFS_BUTTON_FONT_CONFIG) {
-    ShowFontView(AppMode::PrefsFont);
+  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_FONT_CONFIG) {
+    app->ShowFontView(AppMode::PrefsFont);
     return;
   }
 }
+
+void App::ToggleCurrentBookMobiLineWrapFix() {
+  settings_controller_->ToggleCurrentBookMobiLineWrapFix();
+}
+
+u8 App::PrefsVisibleButtonCount() const {
+  return settings_controller_->PrefsVisibleButtonCount();
+}
+
+void App::PrefsInit() { settings_controller_->PrefsInit(); }
+
+void App::PrefsDraw() { settings_controller_->PrefsDraw(); }
+
+void App::PrefsHandleEvent() { settings_controller_->PrefsHandleEvent(); }
+
+void App::PrefsHandleTouch() { settings_controller_->PrefsHandleTouch(); }
+
+void App::PrefsIncreasePixelSize() { settings_controller_->PrefsIncreasePixelSize(); }
+
+void App::PrefsDecreasePixelSize() { settings_controller_->PrefsDecreasePixelSize(); }
+
+void App::PrefsIncreaseParaspacing() {
+  settings_controller_->PrefsIncreaseParaspacing();
+}
+
+void App::PrefsDecreaseParaspacing() {
+  settings_controller_->PrefsDecreaseParaspacing();
+}
+
+void App::PrefsFlipOrientation() { settings_controller_->PrefsFlipOrientation(); }
+
+void App::PrefsRefreshButton(int index) {
+  settings_controller_->PrefsRefreshButton(index);
+}
+
+void App::PrefsHandlePress() { settings_controller_->PrefsHandlePress(); }

@@ -49,8 +49,8 @@ https://github.com/rhaleblian/dslibris
 
 */
 
-#include <deque>
 #include <list>
+#include <memory>
 #include <sstream>
 #include <stdio.h>
 #include <unistd.h>
@@ -66,6 +66,12 @@ https://github.com/rhaleblian/dslibris
 
 class Book;
 class Prefs;
+class LibraryController;
+class ReaderController;
+class SettingsController;
+class StatusController;
+class StartupController;
+class MainLoopController;
 
 #define APP_BROWSER_BUTTON_COUNT 4
 #define APP_URL "http://github.com/rhaleblian/dslibris"
@@ -167,10 +173,37 @@ public:
   int GetSelectedBookIndex() const;
   int GetBrowserPageStart() const;
   void SetBrowserPageStart(int page_start);
+  u64 GetBrowserLastInteractionMs() const;
+  void SetBrowserLastInteractionMs(u64 ms);
+  bool IsBrowserWaitingInputRelease() const;
+  void SetBrowserWaitingInputRelease(bool wait_input_release);
+  void SetBrowserDirty(bool dirty);
   void MarkBrowserDirty();
+  int GetPrefsSelectedIndex() const;
+  void SetPrefsSelectedIndex(int selected_index);
+  void SetBookSettingsContext(bool from_book);
+  bool IsPrefsLayoutNoticePending() const;
+  void SetPrefsLayoutNoticePending(bool pending);
+  void SetPrefsDirty(bool dirty);
   void MarkPrefsDirty();
   bool IsPrefsDirty() const;
   bool IsBrowserDirty() const;
+  void ProcessJobs(u32 budget_ms);
+  void browser_draw();
+  void browser_handleevent();
+  void browser_init();
+  void TickBrowserWarmup();
+  void PrefsDraw();
+  void PrefsHandleEvent();
+  void PersistPrefs();
+  void RunFontMenuFrame();
+  void RunBookmarksMenuFrame(u32 keys);
+  void RunChaptersMenuFrame(u32 keys);
+  bool PresentIfDirty();
+  int StartupFindBooks();
+  void StartupPrepareLibrary();
+  void StartupInitUiAndBrowser();
+  void StartupInitScreens();
 
   // app_book.cpp
   void CloseBook();
@@ -181,6 +214,42 @@ public:
   void ToggleBookmark();
   void MarkBookLayoutDirty();
   void ShowCurrentBookView();
+  bool IsOpeningPending() const;
+  void SetOpeningPending(bool pending);
+  Book *GetOpeningBook() const;
+  void SetOpeningBook(Book *book);
+  bool IsOpeningNeedsRelayout() const;
+  void SetOpeningNeedsRelayout(bool needs_relayout);
+  int GetOpeningOldPageCount() const;
+  void SetOpeningOldPageCount(int old_page_count);
+  int GetOpeningOldPosition() const;
+  void SetOpeningOldPosition(int old_position);
+  std::list<int> &MutableOpeningOldBookmarks();
+  u64 GetOpeningStartedAtMs() const;
+  void SetOpeningStartedAtMs(u64 started_at_ms);
+  bool IsDeferredRelayoutPending() const;
+  void SetDeferredRelayoutPending(bool pending);
+  Book *GetDeferredRelayoutBook() const;
+  void SetDeferredRelayoutBook(Book *book);
+  int GetDeferredRelayoutOldPageCount() const;
+  void SetDeferredRelayoutOldPageCount(int old_page_count);
+  int GetDeferredRelayoutOldPosition() const;
+  void SetDeferredRelayoutOldPosition(int old_position);
+  std::list<int> &MutableDeferredRelayoutOldBookmarks();
+  int GetDeferredRelayoutInitialPosition() const;
+  void SetDeferredRelayoutInitialPosition(int initial_position);
+  unsigned int GetLayoutRevision() const;
+  void SetLayoutRevision(unsigned int layout_revision);
+  bool IsPdfTouchDragActive() const;
+  void SetPdfTouchDragActive(bool active);
+  int GetPdfTouchLastX() const;
+  void SetPdfTouchLastX(int x);
+  int GetPdfTouchLastY() const;
+  void SetPdfTouchLastY(int y);
+  u64 GetPdfDeferredReadyAtMs() const;
+  void SetPdfDeferredReadyAtMs(u64 ready_at_ms);
+  u64 GetMobiDeferredReadyAtMs() const;
+  void SetMobiDeferredReadyAtMs(u64 ready_at_ms);
 
   void PrefsRefreshButton(int index);
   void PrefsRefreshButtonFont();
@@ -188,13 +257,16 @@ public:
   void PrefsRefreshButtonFontItalic();
   void PrefsRefreshButtonFontBoldItalic();
   void ShowSettingsView(bool from_book = false);
-  inline bool IsBookSettingsContext() const { return prefs_view_.from_book; }
+  inline bool IsBookSettingsContext() const { return nav_.prefs.from_book; }
   void DrawBottomGradientBackground();
+  void SetOrientation(bool flipped);
+  void ShowFontView(AppMode app_mode);
+  void ShowLibraryView();
+  void ShowBookmarksView();
+  void ShowChaptersView();
+  bool BookNeedsRelayout(Book *book) const;
 
 private:
-  void ClearDeferredRelayoutState();
-  bool MaybeFinalizeDeferredRelayout(Book *book, int page_count);
-
   struct BrowserState {
     Book *selected_book;
     int page_start;
@@ -208,14 +280,6 @@ private:
     bool view_dirty;
     bool from_book;
     bool layout_notice_pending;
-  };
-
-  struct StatusState {
-    int last_minute;
-    int last_display_token;
-    Book *progress_lock_book;
-    int progress_pagecount_lock;
-    bool force_redraw;
   };
 
   struct OpeningState {
@@ -248,36 +312,48 @@ private:
 
   static bool IsFontMode(AppMode mode);
 
-  AppMode mode_;
-  BrowserState browser_;
-  PrefsViewState prefs_view_;
-  StatusState status_;
-  OpeningState opening_;
-  DeferredRelayoutState deferred_relayout_;
-  Book *bookcurrent_;
+  struct NavigationState {
+    AppMode mode;
+    BrowserState browser;
+    PrefsViewState prefs;
+
+    NavigationState()
+        : mode(AppMode::Browser), browser(), prefs() {}
+  };
+
+  struct ReaderRuntimeState {
+    OpeningState opening;
+    DeferredRelayoutState deferred_relayout;
+    Book *bookcurrent;
+    unsigned int layout_revision;
+    bool pdf_touch_drag_active;
+    int pdf_touch_last_x;
+    int pdf_touch_last_y;
+    u64 pdf_deferred_ready_at_ms;
+    u64 mobi_deferred_ready_at_ms;
+
+    ReaderRuntimeState()
+        : opening(), deferred_relayout(), bookcurrent(NULL), layout_revision(0),
+          pdf_touch_drag_active(false), pdf_touch_last_x(-1),
+          pdf_touch_last_y(-1), pdf_deferred_ready_at_ms(0),
+          mobi_deferred_ready_at_ms(0) {}
+  };
+
+  NavigationState nav_;
+  std::unique_ptr<LibraryController> library_controller_;
+  std::unique_ptr<ReaderController> reader_controller_;
+  std::unique_ptr<SettingsController> settings_controller_;
+  std::unique_ptr<StatusController> status_controller_;
+  std::unique_ptr<StartupController> startup_controller_;
+  std::unique_ptr<MainLoopController> main_loop_controller_;
+  ReaderRuntimeState reader_state_;
   FILE *status_log_file_;
   unsigned int status_log_write_count_;
   LightLock status_log_lock_;
-  std::deque<app_job_t> job_queue;
-  unsigned int layout_revision;
-  bool pdf_touch_drag_active_;
-  int pdf_touch_last_x_;
-  int pdf_touch_last_y_;
-  u64 pdf_deferred_ready_at_ms_;
-  u64 mobi_deferred_ready_at_ms_;
 
-  int FindBooks();
   void InitScreens();
-  void SetOrientation(bool flipped);
-  void ShowFontView(AppMode app_mode);
-  void ShowLibraryView();
-  void ShowBookmarksView();
-  void ShowChaptersView();
 
   // app_Browser.cpp
-  void browser_draw();
-  void browser_handleevent();
-  void browser_init();
   void UnloadNonVisibleBrowserCoverCaches();
   void browser_nextpage();
   void browser_prevpage();
@@ -285,14 +361,10 @@ private:
   void PruneBrowserWarmupJobs(Book *selected_book);
   bool HasQueuedJob(app_job_type_t type, Book *book) const;
   void EnqueueJob(app_job_type_t type, Book *book);
-  void TickBrowserWarmup();
   void QueueBookWarmup(Book *book);
   void QueueTocResolve(Book *book);
-  void ProcessJobs(u32 budget_ms);
 
   // app_prefs.cpp
-  void PrefsDraw();
-  void PrefsHandleEvent();
   void PrefsHandlePress();
   void PrefsHandleTouch();
   void PrefsInit();
@@ -303,5 +375,4 @@ private:
   void PrefsFlipOrientation();
   void ToggleCurrentBookMobiLineWrapFix();
   u8 PrefsVisibleButtonCount() const;
-  bool BookNeedsRelayout(Book *book) const;
 };

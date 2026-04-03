@@ -12,6 +12,7 @@
 */
 
 #include "app/app.h"
+#include "app/reader_controller.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -350,99 +351,105 @@ void EnsureBookMode(App *app, const char *log_message) {
 
 } // namespace
 
-void App::ClearDeferredRelayoutState() {
-  deferred_relayout_.pending = false;
-  deferred_relayout_.book = NULL;
-  deferred_relayout_.old_page_count = 0;
-  deferred_relayout_.old_position = 0;
-  deferred_relayout_.old_bookmarks.clear();
-  deferred_relayout_.initial_position = 0;
+void ReaderController::ClearDeferredRelayoutState() {
+  app_.SetDeferredRelayoutPending(false);
+  app_.SetDeferredRelayoutBook(NULL);
+  app_.SetDeferredRelayoutOldPageCount(0);
+  app_.SetDeferredRelayoutOldPosition(0);
+  app_.MutableDeferredRelayoutOldBookmarks().clear();
+  app_.SetDeferredRelayoutInitialPosition(0);
 }
 
-bool App::MaybeFinalizeDeferredRelayout(Book *book, int page_count) {
-  if (!book || !deferred_relayout_.pending || deferred_relayout_.book != book)
+bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count) {
+  if (!book || !app_.IsDeferredRelayoutPending() ||
+      app_.GetDeferredRelayoutBook() != book)
     return false;
 
   if (deferred_relayout_utils::ShouldCancelFinalDeferredRelayout(
-          deferred_relayout_.pending, book->GetPosition(),
-          deferred_relayout_.initial_position)) {
+          app_.IsDeferredRelayoutPending(), book->GetPosition(),
+          app_.GetDeferredRelayoutInitialPosition())) {
     ClearDeferredRelayoutState();
     return false;
   }
 
   if (!deferred_relayout_utils::ShouldApplyFinalDeferredRelayout(
-          deferred_relayout_.pending, book->HasDeferredMobiParse(),
-          book->GetPosition(), deferred_relayout_.initial_position)) {
+          app_.IsDeferredRelayoutPending(), book->HasDeferredMobiParse(),
+          book->GetPosition(), app_.GetDeferredRelayoutInitialPosition())) {
     return false;
   }
 
   book->SetPosition(layout_reflow::RemapPageIndexApprox(
-      deferred_relayout_.old_position, deferred_relayout_.old_page_count,
+      app_.GetDeferredRelayoutOldPosition(),
+      app_.GetDeferredRelayoutOldPageCount(),
       page_count));
   ApplyRemappedBookmarks(
       book, layout_reflow::RemapBookmarksApprox(
-                deferred_relayout_.old_bookmarks,
-                deferred_relayout_.old_page_count, page_count));
+                app_.MutableDeferredRelayoutOldBookmarks(),
+                app_.GetDeferredRelayoutOldPageCount(), page_count));
   ClearDeferredRelayoutState();
   return true;
 }
 
-void App::HandleEventInOpening() {
-  if (!opening_.pending || !opening_.book) {
-    mode_ = AppMode::Browser;
-    browser_.view_dirty = true;
+void ReaderController::HandleEventInOpening() {
+  Prefs *prefs = app_.prefs;
+  Text *ts = app_.ts;
+
+  if (!app_.IsOpeningPending() || !app_.GetOpeningBook()) {
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
     return;
   }
 
-  Book *opening_book = opening_.book;
+  Book *opening_book = app_.GetOpeningBook();
   if (!opening_book->PumpAsyncReflowOpen())
     return;
 
   const u8 err = opening_book->ConsumeAsyncReflowOpenResult();
   const u64 elapsed_ms =
-      opening_.started_at_ms ? (osGetTime() - opening_.started_at_ms) : 0;
-  DBG_LOGF(this, "REFLOW: async open complete rc=%u ms=%llu book=%s",
+      app_.GetOpeningStartedAtMs() ? (osGetTime() - app_.GetOpeningStartedAtMs()) : 0;
+  DBG_LOGF(&app_, "REFLOW: async open complete rc=%u ms=%llu book=%s",
            (unsigned)err, (unsigned long long)elapsed_ms,
            opening_book->GetFileName() ? opening_book->GetFileName() : "");
 
   OpenBookRelayoutState relayout_state = {
-      opening_.needs_relayout, opening_.old_page_count, opening_.old_position,
-      opening_.old_bookmarks};
+      app_.IsOpeningNeedsRelayout(), app_.GetOpeningOldPageCount(),
+      app_.GetOpeningOldPosition(), app_.MutableOpeningOldBookmarks()};
 
-  opening_.pending = false;
-  opening_.book = NULL;
-  opening_.needs_relayout = false;
-  opening_.old_page_count = 0;
-  opening_.old_position = 0;
-  opening_.old_bookmarks.clear();
-  opening_.started_at_ms = 0;
+  app_.SetOpeningPending(false);
+  app_.SetOpeningBook(NULL);
+  app_.SetOpeningNeedsRelayout(false);
+  app_.SetOpeningOldPageCount(0);
+  app_.SetOpeningOldPosition(0);
+  app_.MutableOpeningOldBookmarks().clear();
+  app_.SetOpeningStartedAtMs(0);
 
   if (err) {
     ClearDeferredRelayoutState();
     if (const char *desc = DescribeBookOpenError(err)) {
-      PrintStatus(desc);
+      app_.PrintStatus(desc);
     } else {
       char msg[64];
       snprintf(msg, sizeof(msg), "error (%d)", err);
-      PrintStatus(msg);
+      app_.PrintStatus(msg);
     }
-    mode_ = AppMode::Browser;
-    browser_.view_dirty = true;
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
     return;
   }
 
-  bookcurrent_ = opening_book;
-  bookcurrent_->SetLayoutRevision(layout_revision);
+  app_.SetCurrentBook(opening_book);
+  Book *bookcurrent_ = app_.GetCurrentBook();
+  bookcurrent_->SetLayoutRevision(app_.GetLayoutRevision());
 
   int pageCount = bookcurrent_->GetPageCount();
-  DBG_LOGF(this, "Generated %d pages", pageCount);
+  DBG_LOGF(&app_, "Generated %d pages", pageCount);
 
   if (pageCount <= 0) {
-    PrintStatus("error: book has no parsed pages");
+    app_.PrintStatus("error: book has no parsed pages");
     bookcurrent_->Close();
-    bookcurrent_ = nullptr;
-    mode_ = AppMode::Browser;
-    browser_.view_dirty = true;
+    app_.SetCurrentBook(nullptr);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
     return;
   }
 
@@ -456,36 +463,45 @@ void App::HandleEventInOpening() {
     ApplyRemappedBookmarks(bookcurrent_, open_plan.mapped_bookmarks);
   }
   if (open_plan.defer_final_remap) {
-    deferred_relayout_.pending = true;
-    deferred_relayout_.book = bookcurrent_;
-    deferred_relayout_.old_page_count = relayout_state.old_page_count;
-    deferred_relayout_.old_position = relayout_state.old_position;
-    deferred_relayout_.old_bookmarks = relayout_state.old_bookmarks;
-    deferred_relayout_.initial_position = open_plan.mapped_position;
+    app_.SetDeferredRelayoutPending(true);
+    app_.SetDeferredRelayoutBook(bookcurrent_);
+    app_.SetDeferredRelayoutOldPageCount(relayout_state.old_page_count);
+    app_.SetDeferredRelayoutOldPosition(relayout_state.old_position);
+    app_.MutableDeferredRelayoutOldBookmarks() = relayout_state.old_bookmarks;
+    app_.SetDeferredRelayoutInitialPosition(open_plan.mapped_position);
   } else {
     ClearDeferredRelayoutState();
   }
-  ShowCurrentBookView();
-  DBG_LOG(this, "OpenBook: switched mode to APP_MODE_BOOK");
+  app_.ShowCurrentBookView();
+  DBG_LOG(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
 
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   DrawBookPage(bookcurrent_, ts);
   if (bookcurrent_ && bookcurrent_->IsFixedLayout())
-    pdf_deferred_ready_at_ms_ =
+    app_.SetPdfDeferredReadyAtMs(
         bookcurrent_->HasPendingFixedLayoutDeferredWork()
             ? (osGetTime() + bookcurrent_->GetFixedLayoutDeferredDelayMs())
-            : 0;
-  mobi_deferred_ready_at_ms_ =
+            : 0);
+  app_.SetMobiDeferredReadyAtMs(
       (bookcurrent_ && bookcurrent_->HasDeferredMobiParse())
           ? (osGetTime() + kMobiDeferredIdleDelayMs)
-          : 0;
-  RequestStatusRedraw();
-  prefs_view_.layout_notice_pending = false;
+          : 0);
+  app_.RequestStatusRedraw();
+  app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
 }
 
-void App::HandleEventInBook() {
+void ReaderController::HandleEventInBook() {
+  Book *bookcurrent_ = app_.GetCurrentBook();
+  Prefs *prefs = app_.prefs;
+  Text *ts = app_.ts;
+  decltype(App::key) &key = app_.key;
+  auto touch_read = [&]() { return app_.TouchRead(); };
+  auto request_status_redraw = [&]() { app_.RequestStatusRedraw(); };
+  auto show_library_view = [&]() { app_.ShowLibraryView(); };
+  auto show_settings_view = [&](bool from_book) { app_.ShowSettingsView(from_book); };
+
   u16 pagecurrent = bookcurrent_->GetPosition();
   u16 pagecount = bookcurrent_->GetPageCount();
   bool status_dirty = false;
@@ -499,7 +515,7 @@ void App::HandleEventInBook() {
   if (bookcurrent_ && bookcurrent_->IsFixedLayout()) {
     const auto delay_fixed_layout_deferred = [&]() {
       const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
-      pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
+      app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
     };
     if (keys & KEY_A) {
       if (bookcurrent_->ChangeFixedLayoutZoom(1)) {
@@ -546,11 +562,11 @@ void App::HandleEventInBook() {
         delay_fixed_layout_deferred();
       }
     } else if (keys & KEY_TOUCH) {
-      touchPosition mapped = TouchRead();
-      pdf_touch_drag_active_ = true;
+      touchPosition mapped = touch_read();
+      app_.SetPdfTouchDragActive(true);
       bookcurrent_->SetFixedLayoutViewportInteraction(true);
-      pdf_touch_last_x_ = (int)mapped.px;
-      pdf_touch_last_y_ = (int)mapped.py;
+      app_.SetPdfTouchLastX((int)mapped.px);
+      app_.SetPdfTouchLastY((int)mapped.py);
       if (bookcurrent_->MoveFixedLayoutViewportToPreview((int)mapped.px,
                                                          (int)mapped.py)) {
         DrawBookPage(bookcurrent_, ts);
@@ -558,15 +574,15 @@ void App::HandleEventInBook() {
         delay_fixed_layout_deferred();
       }
     } else if (held & KEY_TOUCH) {
-      touchPosition mapped = TouchRead();
-      if (!pdf_touch_drag_active_ ||
+      touchPosition mapped = touch_read();
+      if (!app_.IsPdfTouchDragActive() ||
           pdf_view_utils::TouchMovementExceedsThreshold(
-              pdf_touch_last_x_, pdf_touch_last_y_, (int)mapped.px,
+              app_.GetPdfTouchLastX(), app_.GetPdfTouchLastY(), (int)mapped.px,
               (int)mapped.py, kPdfTouchRerenderDelta)) {
-        pdf_touch_drag_active_ = true;
+        app_.SetPdfTouchDragActive(true);
         bookcurrent_->SetFixedLayoutViewportInteraction(true);
-        pdf_touch_last_x_ = (int)mapped.px;
-        pdf_touch_last_y_ = (int)mapped.py;
+        app_.SetPdfTouchLastX((int)mapped.px);
+        app_.SetPdfTouchLastY((int)mapped.py);
         if (bookcurrent_->MoveFixedLayoutViewportToPreview((int)mapped.px,
                                                            (int)mapped.py)) {
           // DrawCurrentView now uses the full-page zoom cache for viewport
@@ -579,38 +595,38 @@ void App::HandleEventInBook() {
     } else if (keys & KEY_START) {
       ts->SetStyle(TEXT_STYLE_BROWSER);
       ts->PrintSplash(ts->screenleft);
-      ShowLibraryView();
+      show_library_view();
       prefs->Write();
     } else if (keys & KEY_SELECT) {
-      ShowSettingsView(true);
+      show_settings_view(true);
       prefs->Write();
     }
 
     if (!(held & KEY_TOUCH)) {
-      if (pdf_touch_drag_active_) {
+      if (app_.IsPdfTouchDragActive()) {
         bookcurrent_->SetFixedLayoutViewportInteraction(false);
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
       bookcurrent_->SetFixedLayoutViewportInteraction(false);
-      pdf_touch_drag_active_ = false;
-      pdf_touch_last_x_ = -1;
-      pdf_touch_last_y_ = -1;
+      app_.SetPdfTouchDragActive(false);
+      app_.SetPdfTouchLastX(-1);
+      app_.SetPdfTouchLastY(-1);
     }
 
     if (status_dirty) {
-      RequestStatusRedraw();
+      request_status_redraw();
     } else if (!(held & KEY_TOUCH) && keys == 0 &&
                bookcurrent_->HasPendingFixedLayoutDeferredWork() &&
-               osGetTime() >= pdf_deferred_ready_at_ms_) {
+               osGetTime() >= app_.GetPdfDeferredReadyAtMs()) {
       const u32 budget_ms = 4;
       const bool worked = bookcurrent_->PumpDeferredFixedLayoutWork(budget_ms);
       const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
-      pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
+      app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
       if (worked) {
         DrawBookPage(bookcurrent_, ts);
-        RequestStatusRedraw();
+        request_status_redraw();
       }
     }
     return;
@@ -635,7 +651,7 @@ void App::HandleEventInBook() {
   } else if (keys & KEY_TOUCH) {
     // Page turn split follows visual horizontal axis (left/right) in both
     // orientations after central touch un-mirroring.
-    touchPosition mapped = TouchRead();
+    touchPosition mapped = touch_read();
     const bool forward_zone = ((int)mapped.px >= 120);
     if (!forward_zone) {
       if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
@@ -649,11 +665,11 @@ void App::HandleEventInBook() {
     // Keep one parsed book resident in memory for fast reopen.
     ts->SetStyle(TEXT_STYLE_BROWSER);
     ts->PrintSplash(ts->screenleft);
-    ShowLibraryView();
+    show_library_view();
     prefs->Write();
   } else if (keys & KEY_SELECT) {
     // Go directly to settings from book.
-    ShowSettingsView(true);
+    show_settings_view(true);
     prefs->Write();
   } else if (keys & (key.right | key.left)) {
     // Navigate bookmarks.
@@ -672,17 +688,17 @@ void App::HandleEventInBook() {
   if (!deferred_pumped) {
     if (bookcurrent_->HasDeferredMobiParse()) {
       const u64 now = osGetTime();
-      if (now >= mobi_deferred_ready_at_ms_) {
+      if (now >= app_.GetMobiDeferredReadyAtMs()) {
         PumpDeferredMobi(bookcurrent_, kMobiDeferredIdleBudgetMs,
                          kMobiDeferredIdlePageBudget, &pagecount,
                          &status_dirty, &deferred_pumped);
-        mobi_deferred_ready_at_ms_ =
+        app_.SetMobiDeferredReadyAtMs(
             bookcurrent_->HasDeferredMobiParse()
                 ? (osGetTime() + kMobiDeferredIdleDelayMs)
-                : 0;
+                : 0);
       }
     } else {
-      mobi_deferred_ready_at_ms_ = 0;
+      app_.SetMobiDeferredReadyAtMs(0);
     }
   }
 
@@ -692,10 +708,13 @@ void App::HandleEventInBook() {
   }
 
   if (status_dirty)
-    RequestStatusRedraw();
+    request_status_redraw();
 }
 
-void App::ToggleBookmark() {
+void ReaderController::ToggleBookmark() {
+  Book *bookcurrent_ = app_.GetCurrentBook();
+  Text *ts = app_.ts;
+
   if (!bookcurrent_ || !bookcurrent_->SupportsBookmarks())
     return;
   // Toggle bookmark for the current page.
@@ -720,21 +739,25 @@ void App::ToggleBookmark() {
   DrawBookPage(bookcurrent_, ts);
   const u32 delay_ms =
       bookcurrent_ ? bookcurrent_->GetFixedLayoutDeferredDelayMs() : 0;
-  pdf_deferred_ready_at_ms_ = delay_ms ? (osGetTime() + delay_ms) : 0;
-  RequestStatusRedraw();
+  app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
+  app_.RequestStatusRedraw();
 }
 
-void App::CloseBook() {
+void ReaderController::CloseBook() {
+  Book *bookcurrent_ = app_.GetCurrentBook();
+
   if (bookcurrent_) {
     bookcurrent_->Close();
-    bookcurrent_ = NULL;
+    app_.SetCurrentBook(NULL);
   }
-  pdf_deferred_ready_at_ms_ = 0;
-  mobi_deferred_ready_at_ms_ = 0;
+  app_.SetPdfDeferredReadyAtMs(0);
+  app_.SetMobiDeferredReadyAtMs(0);
   ClearDeferredRelayoutState();
 }
 
-int App::GetBookIndex(Book *b) {
+int ReaderController::GetBookIndex(Book *b) {
+  std::vector<Book *> &books = app_.books;
+
   if (!b)
     return -1;
   std::vector<Book *>::iterator it;
@@ -746,79 +769,86 @@ int App::GetBookIndex(Book *b) {
   return -1;
 }
 
-u8 App::OpenBook(void) {
+u8 ReaderController::OpenBook() {
+  Prefs *prefs = app_.prefs;
+  Text *ts = app_.ts;
+  Book *selected_book = app_.GetSelectedBook();
+  Book *bookcurrent_ = app_.GetCurrentBook();
+
   //! Attempt to open book indicated by bookselected.
 
-  if (!browser_.selected_book)
+  if (!selected_book)
     return 254;
 
-  DBG_LOG(this, "opening book ...");
-  if (browser_.selected_book->GetTitle())
-    DBG_LOG(this, browser_.selected_book->GetTitle());
+  DBG_LOG(&app_, "opening book ...");
+  if (selected_book->GetTitle())
+    DBG_LOG(&app_, selected_book->GetTitle());
 
-  const bool needs_relayout = BookNeedsRelayout(browser_.selected_book);
+  const bool needs_relayout = app_.BookNeedsRelayout(selected_book);
 
   // Fast path: selected book is already parsed and resident.
-  if (browser_.selected_book->GetPageCount() > 0 && !needs_relayout) {
-    ReuseParsedBook(this);
-    if (deferred_relayout_.book != bookcurrent_)
+  if (selected_book->GetPageCount() > 0 && !needs_relayout) {
+    ReuseParsedBook(&app_);
+    if (app_.GetDeferredRelayoutBook() != app_.GetCurrentBook())
       ClearDeferredRelayoutState();
-    mobi_deferred_ready_at_ms_ =
+    bookcurrent_ = app_.GetCurrentBook();
+    app_.SetMobiDeferredReadyAtMs(
         (bookcurrent_ && bookcurrent_->HasDeferredMobiParse())
             ? (osGetTime() + kMobiDeferredIdleDelayMs)
-            : 0;
-    RequestStatusRedraw();
-    prefs_view_.layout_notice_pending = false;
+            : 0);
+    app_.RequestStatusRedraw();
+    app_.SetPrefsLayoutNoticePending(false);
     prefs->Write();
     return 0;
   }
 
   OpenBookRelayoutState relayout_state =
-      CaptureRelayoutState(browser_.selected_book, needs_relayout);
+      CaptureRelayoutState(selected_book, needs_relayout);
   ClearDeferredRelayoutState();
 
   // While parsing a new book, avoid displaying stale browser highlight state.
-  DrawOpeningSplash(this);
+  DrawOpeningSplash(&app_);
 
-  if (browser_.selected_book->SupportsAsyncReflowOpen()) {
-    if (GetCurrentBook() && GetCurrentBook() != browser_.selected_book)
-      GetCurrentBook()->Close();
-    if (browser_.selected_book->StartAsyncReflowOpen()) {
-      opening_.pending = true;
-      opening_.book = browser_.selected_book;
-      opening_.needs_relayout = relayout_state.needs_relayout;
-      opening_.old_page_count = relayout_state.old_page_count;
-      opening_.old_position = relayout_state.old_position;
-      opening_.old_bookmarks = relayout_state.old_bookmarks;
-      opening_.started_at_ms = osGetTime();
-      DBG_LOGF(this, "REFLOW: async open submitted book=%s",
-               browser_.selected_book->GetFileName()
-                   ? browser_.selected_book->GetFileName()
+  if (selected_book->SupportsAsyncReflowOpen()) {
+    if (app_.GetCurrentBook() && app_.GetCurrentBook() != selected_book)
+      app_.GetCurrentBook()->Close();
+    if (selected_book->StartAsyncReflowOpen()) {
+      app_.SetOpeningPending(true);
+      app_.SetOpeningBook(selected_book);
+      app_.SetOpeningNeedsRelayout(relayout_state.needs_relayout);
+      app_.SetOpeningOldPageCount(relayout_state.old_page_count);
+      app_.SetOpeningOldPosition(relayout_state.old_position);
+      app_.MutableOpeningOldBookmarks() = relayout_state.old_bookmarks;
+      app_.SetOpeningStartedAtMs(osGetTime());
+      DBG_LOGF(&app_, "REFLOW: async open submitted book=%s",
+               selected_book->GetFileName()
+                   ? selected_book->GetFileName()
                    : "");
-      mode_ = AppMode::Opening;
+      app_.SetMode(AppMode::Opening);
       return 0;
     }
-    DBG_LOGF(this, "REFLOW: async open fallback book=%s",
-             browser_.selected_book->GetFileName()
-                 ? browser_.selected_book->GetFileName()
+    DBG_LOGF(&app_, "REFLOW: async open fallback book=%s",
+             selected_book->GetFileName()
+                 ? selected_book->GetFileName()
                  : "");
   }
 
-  if (u8 err = OpenSelectedBook(this))
+  if (u8 err = OpenSelectedBook(&app_))
     return err;
-  bookcurrent_ = browser_.selected_book;
+  app_.SetCurrentBook(selected_book);
+  bookcurrent_ = app_.GetCurrentBook();
   // Remember which layout generation produced these pages.
-  bookcurrent_->SetLayoutRevision(layout_revision);
+  bookcurrent_->SetLayoutRevision(app_.GetLayoutRevision());
 
   int pageCount = bookcurrent_->GetPageCount();
-  DBG_LOGF(this, "Generated %d pages", pageCount);
+  DBG_LOGF(&app_, "Generated %d pages", pageCount);
 
   if (pageCount <= 0) {
-    PrintStatus("error: book has no parsed pages");
+    app_.PrintStatus("error: book has no parsed pages");
     bookcurrent_->Close();
-    bookcurrent_ = nullptr;
-    mode_ = AppMode::Browser;
-    browser_.view_dirty = true;
+    app_.SetCurrentBook(nullptr);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
     return 253;
   }
 
@@ -833,32 +863,32 @@ u8 App::OpenBook(void) {
     ApplyRemappedBookmarks(bookcurrent_, open_plan.mapped_bookmarks);
   }
   if (open_plan.defer_final_remap) {
-    deferred_relayout_.pending = true;
-    deferred_relayout_.book = bookcurrent_;
-    deferred_relayout_.old_page_count = relayout_state.old_page_count;
-    deferred_relayout_.old_position = relayout_state.old_position;
-    deferred_relayout_.old_bookmarks = relayout_state.old_bookmarks;
-    deferred_relayout_.initial_position = open_plan.mapped_position;
+    app_.SetDeferredRelayoutPending(true);
+    app_.SetDeferredRelayoutBook(bookcurrent_);
+    app_.SetDeferredRelayoutOldPageCount(relayout_state.old_page_count);
+    app_.SetDeferredRelayoutOldPosition(relayout_state.old_position);
+    app_.MutableDeferredRelayoutOldBookmarks() = relayout_state.old_bookmarks;
+    app_.SetDeferredRelayoutInitialPosition(open_plan.mapped_position);
   } else {
     ClearDeferredRelayoutState();
   }
 
-  EnsureBookMode(this, "OpenBook: switched mode to APP_MODE_BOOK");
+  EnsureBookMode(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
 
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   DrawBookPage(bookcurrent_, ts);
   if (bookcurrent_ && bookcurrent_->IsFixedLayout())
-    pdf_deferred_ready_at_ms_ =
+    app_.SetPdfDeferredReadyAtMs(
         bookcurrent_->HasPendingFixedLayoutDeferredWork()
             ? (osGetTime() + bookcurrent_->GetFixedLayoutDeferredDelayMs())
-            : 0;
-  mobi_deferred_ready_at_ms_ =
+            : 0);
+  app_.SetMobiDeferredReadyAtMs(
       (bookcurrent_ && bookcurrent_->HasDeferredMobiParse())
           ? (osGetTime() + kMobiDeferredIdleDelayMs)
-          : 0;
-  RequestStatusRedraw();
-  prefs_view_.layout_notice_pending = false;
+          : 0);
+  app_.RequestStatusRedraw();
+  app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
   return 0;
 }
