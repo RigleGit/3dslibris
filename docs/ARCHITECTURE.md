@@ -29,7 +29,7 @@ source/
 │   └── reflow_cache_save_utils.h
 ├── formats/                    # Format-specific parsers
 │   ├── common/                 # Shared format utilities
-│   │   ├── book_io.cpp         # MOBI dispatch + ODT parsing (TXT/RTF extracted)
+│   │   ├── book_io.cpp         # Shared XML/plain parsing + dispatch (MOBI parser extracted)
 │   │   ├── buffered_status_log.cpp
 │   │   ├── epub_image_utils.cpp
 │   │   ├── file_read_utils.cpp
@@ -56,6 +56,7 @@ source/
 │   │   ├── mobi_parser_core.cpp # Source load/header parse/text record merge
 │   │   ├── mobi_deferred_runtime.cpp # Deferred parse state machine runtime
 │   │   ├── mobi_markup_extract.cpp # MOBI markup -> text extraction pipeline
+│   │   ├── mobi_parser.cpp      # MOBI parse orchestration (open + deferred finalize)
 │   │   ├── mobi_markup_tag.cpp
 │   │   ├── mobi_position_map.cpp
 │   │   ├── mobi_record_decode.cpp
@@ -152,7 +153,7 @@ Book::Open()
        │
        ├─ EPUB  → epub.cpp (minizip + expat XML → pages)
        ├─ FB2   → fb2.cpp (expat XML → pages)
-       ├─ MOBI  → book_io.cpp + mobi/*.cpp (PDB records → pages)
+       ├─ MOBI  → mobi_parser.cpp + mobi/*.cpp (PDB records → pages)
        ├─ TXT   → txt_loader.cpp (raw text → pages)
        ├─ RTF   → rtf_loader.cpp (RTF control words → pages)
        ├─ ODT   → book_io.cpp (minizip + expat → pages)
@@ -179,12 +180,12 @@ Reflowable formats (EPUB, FB2, MOBI, TXT, RTF, ODT) produce `Page` objects with 
 
 **Future direction:** Separate Book (pure model) from BookParser (format-specific) and BookRenderer (format-specific).
 
-### 3. book_io.cpp reduced (1811 lines, down from 5369)
-TXT and RTF loaders, text normalization helpers, MOBI page cache, MOBI parser core helpers (source/header/merge), MOBI deferred runtime state machine, MOBI markup extraction pipeline, MOBI text decode/title extraction, MOBI structured TOC INDX/TAGX/CNCX parsing, MOBI TOC finalization, MOBI TOC prepare/deferred-load wrappers, and MOBI TOC resolver (inline/deferred) were extracted to separate modules. Remaining content: MOBI parse orchestration callbacks and XML/shared parsing helpers.
+### 3. book_io.cpp reduced (1167 lines, down from 5369)
+TXT and RTF loaders, text normalization helpers, MOBI page cache, MOBI parser core helpers (source/header/merge), MOBI deferred runtime state machine, MOBI markup extraction pipeline, MOBI text decode/title extraction, MOBI structured TOC INDX/TAGX/CNCX parsing, MOBI TOC finalization, MOBI TOC prepare/deferred-load wrappers, MOBI TOC resolver (inline/deferred), and MOBI parse orchestration were extracted to separate modules. Remaining content: MOBI callback wiring/hooks and XML/shared parsing helpers.
 
-**Impact:** TXT and RTF changes no longer touch book_io.cpp. MOBI and ODT still require navigating a large file.
+**Impact:** TXT/RTF and core MOBI parser changes no longer touch book_io.cpp. ODT and shared XML/plain parser glue still live there.
 
-**Future direction:** Keep `book_io.cpp` as thin dispatch + shared plain-text helpers. In MOBI, continue with parser split (`mobi_parser.cpp`) and deferred-open lifecycle split (state machine + finalize stages).
+**Future direction:** Keep `book_io.cpp` as thin dispatch + shared plain-text helpers. In MOBI, continue with hook/callback extraction to reduce remaining glue code in `book_io.cpp`.
 
 ### 4. Formats extracted from book_io.cpp
 The following modules were extracted to improve testability and reduce monolith size:
@@ -200,6 +201,7 @@ The following modules were extracted to improve testability and reduce monolith 
 | `mobi_deferred_runtime` | book_io.cpp | `Continue()`, `Finalize()`, deferred state map lifecycle |
 | `mobi_markup_extract` | book_io.cpp | `ExtractToText()` — markup parsing, heading hints, inline image contexts |
 | `mobi_text_decode` | book_io.cpp | `DecodeBytesToUtf8()`, `ApplyEmbeddedTitle()` |
+| `mobi_parser` | book_io.cpp | `ParseFile()`, `ContinueDeferredParse()` — MOBI open/deferred orchestration |
 | `mobi_structured_toc_parser` | book_io.cpp | `ParseStructuredToc()` — INDX/TAGX/CNCX parser with callback-based decoding/filtering |
 | `mobi_toc_finalize` | book_io.cpp | `BuildChaptersFromHints()`, `FinalizePreparedToc()` — TOC finalization + confidence |
 | `mobi_toc_apply` | book_io.cpp | `HtmlPosToPage()`, `BuildChaptersFromStructuredToc()` |
@@ -247,11 +249,11 @@ Format parsers (`book_io.cpp`, `epub.cpp`, `mobi.cpp`) include `app/app.h` and c
 
 ### Critical: book_io.cpp remains a monolith (1811 lines)
 
-Despite recent extractions (txt_loader, rtf_loader, text_helpers, plain_text_stream, mobi_page_cache, mobi_parser_core, mobi_deferred_runtime, mobi_markup_extract, mobi_text_decode, mobi_structured_toc_parser, mobi_toc_finalize, mobi_toc_prepare, mobi_toc_resolver), the file still contains MOBI parsing dispatch and shared XML/plain parsing helpers in a single large translation unit.
+Despite recent extractions (txt_loader, rtf_loader, text_helpers, plain_text_stream, mobi_page_cache, mobi_parser_core, mobi_deferred_runtime, mobi_markup_extract, mobi_text_decode, mobi_parser, mobi_structured_toc_parser, mobi_toc_finalize, mobi_toc_prepare, mobi_toc_resolver), the file still contains shared XML/plain parsing helpers and MOBI callback glue in a single large translation unit.
 
 **Impact:** High risk of accidental breakage. Difficult to navigate. Every format change touches the same massive file.
 
-**Future direction:** Extract `mobi_parser.cpp` and `odt_parser.cpp`. Leave book_io.cpp as a thin dispatcher (~200 lines).
+**Future direction:** Extract `odt_parser.cpp` and MOBI callback glue modules. Leave book_io.cpp as a thin dispatcher (~200 lines).
 
 ### High: epub.cpp remains a large critical parser (1328 lines)
 
