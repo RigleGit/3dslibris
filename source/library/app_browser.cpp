@@ -102,6 +102,15 @@ static std::string TrimSpaces(const std::string &s) {
   return s.substr(start, end - start);
 }
 
+static std::string BuildBookPath(Book *book) {
+  if (!book || !book->GetFolderName() || !book->GetFileName())
+    return "";
+  std::string path = book->GetFolderName();
+  path.push_back('/');
+  path.append(book->GetFileName());
+  return path;
+}
+
 struct CoverCacheEntry {
   std::string path;
   long long mtime;
@@ -348,7 +357,9 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
     if (!book || book->coverPixels)
       continue;
 
-    std::string path = app_.bookdir + "/" + book->GetFileName();
+    std::string path = BuildBookPath(book);
+    if (path.empty())
+      continue;
     if (TryLoadCoverCache(book, path)) {
       book->coverTried = true;
       if (book->format == FORMAT_EPUB) {
@@ -768,7 +779,12 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
       }
     } else if (job.type == APP_JOB_EXTRACT_COVER) {
       if (!book->coverPixels && !book->coverTried) {
-        std::string path = app_.bookdir + "/" + book->GetFileName();
+        std::string path = BuildBookPath(book);
+        if (path.empty()) {
+          rc = 1;
+          book->coverTried = true;
+          app_.SetBrowserDirty(true);
+        } else {
 #ifdef DSLIBRIS_DEBUG
         DBG_LOGF(&app_, "COVER: extract start book=%s format=%d",
                  book->GetFileName() ? book->GetFileName() : "(null)",
@@ -824,10 +840,13 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
                  rc, book->GetFileName() ? book->GetFileName() : "(null)",
                  book->coverPixels ? 1u : 0u, book->coverTried ? 1u : 0u);
 #endif
+        }
       }
     } else if (job.type == APP_JOB_RESOLVE_TOC) {
       if (book->format == FORMAT_EPUB && !book->tocResolveTried) {
-        std::string path = app_.bookdir + "/" + book->GetFileName();
+        std::string path = BuildBookPath(book);
+        if (path.empty())
+          continue;
         rc = epub_resolve_toc(book, path);
         book->tocResolveTried = true;
         book->tocResolved = (rc == 0);

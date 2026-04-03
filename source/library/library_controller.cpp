@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <dirent.h>
 #include <strings.h>
+#include <vector>
 
 #include <3ds.h>
 
@@ -97,7 +98,20 @@ static bool Utf16NameToUtf8(const u16 *name, std::string *out) {
                                      out);
 }
 
-static void AppendBookFromFilename(App *app, const char *filename) {
+static bool HasBookWithFileName(const App *app, const char *filename) {
+  if (!app || !filename || !*filename)
+    return false;
+  for (size_t i = 0; i < app->books.size(); i++) {
+    if (!app->books[i] || !app->books[i]->GetFileName())
+      continue;
+    if (strcasecmp(app->books[i]->GetFileName(), filename) == 0)
+      return true;
+  }
+  return false;
+}
+
+static void AppendBookFromFilename(App *app, const std::string &source_dir,
+                                   const char *filename) {
   if (!app || !app_flow_utils::ShouldIndexBookFilename(filename))
     return;
   format_t format = ToBookFormat(app_flow_utils::DetectBookFormat(filename));
@@ -106,11 +120,13 @@ static void AppendBookFromFilename(App *app, const char *filename) {
 
   std::string raw_name(filename);
   std::string io_name = NormalizeFsFilenameForIo(filename);
+  if (HasBookWithFileName(app, io_name.c_str()))
+    return;
   LogFilenameStage(app, "d_name", raw_name.c_str());
   if (io_name != raw_name)
     LogFilenameStage(app, "d_name_io_fix", io_name.c_str());
   Book *book = new Book(app);
-  book->SetFolderName(app->bookdir.c_str());
+  book->SetFolderName(source_dir.c_str());
   book->SetFileName(io_name.c_str());
   book->SetTitle(io_name.c_str());
   LogFilenameStage(app, "book.filename", book->GetFileName());
@@ -155,7 +171,7 @@ int LibraryController::FindBooks() {
           continue;
         if (filename.empty())
           continue;
-        AppendBookFromFilename(&app_, filename.c_str());
+        AppendBookFromFilename(&app_, dir, filename.c_str());
       }
     }
 
@@ -170,16 +186,32 @@ int LibraryController::FindBooks() {
       return 1;
     struct dirent *ent;
     while ((ent = readdir(dp)))
-      AppendBookFromFilename(&app_, ent->d_name);
+      AppendBookFromFilename(&app_, dir, ent->d_name);
     closedir(dp);
     return 0;
   };
 
-  if (scan_with_native_fs(app_.bookdir) == 0)
-    return 0;
-  if (scan_with_posix_fallback(app_.bookdir) == 0)
-    return 0;
-  return 1;
+  bool found_any_source = false;
+  std::vector<std::string> scan_dirs;
+  scan_dirs.push_back(app_.bookdir);
+  if (app_.bookdir != paths::kRomfsBookDir)
+    scan_dirs.push_back(paths::kRomfsBookDir);
+
+  for (size_t i = 0; i < scan_dirs.size(); i++) {
+    const std::string &dir = scan_dirs[i];
+    bool scanned = false;
+
+    // Native FS path only supports SDMC archive.
+    if (dir.find("sdmc:/") == 0)
+      scanned = (scan_with_native_fs(dir) == 0);
+    if (!scanned)
+      scanned = (scan_with_posix_fallback(dir) == 0);
+
+    if (scanned)
+      found_any_source = true;
+  }
+
+  return found_any_source ? 0 : 1;
 }
 
 void LibraryController::PrepareLibrary() {

@@ -15,12 +15,6 @@
 
 namespace {
 
-struct RuntimeFileCheck {
-  const char *path;
-  bool directory;
-  const char *label;
-};
-
 static bool PathExistsAndType(const char *path, bool want_dir) {
   if (!path || !*path)
     return false;
@@ -79,17 +73,8 @@ static void CollectMissingRuntimeFiles(std::vector<std::string> *missing) {
     return;
   missing->clear();
 
-  static const RuntimeFileCheck kRequired[] = {
-      {paths::kBookDir, true, "book/"},
-      {paths::kDefaultFonts[0][1], false, paths::kDefaultFonts[0][0]},
-      {paths::kDefaultFonts[1][1], false, paths::kDefaultFonts[1][0]},
-      {paths::kDefaultFonts[2][1], false, paths::kDefaultFonts[2][0]},
-      {paths::kDefaultFonts[3][1], false, paths::kDefaultFonts[3][0]},
-      {paths::kDefaultFonts[4][1], false, paths::kDefaultFonts[4][0]},
-  };
-
-  if (!PathExistsAndType(kRequired[0].path, kRequired[0].directory))
-    missing->push_back(kRequired[0].label);
+  if (!RuntimePathExistsEither(paths::kBookDir, paths::kRomfsBookDir, true))
+    missing->push_back("book/ (sdmc or romfs)");
 
   struct RuntimeFallbackFile {
     const char *sdmc_path;
@@ -232,7 +217,8 @@ int StartupController::RunBootSequence() {
     DrawBootStatus("Incomplete installation",
                    {"Download 3dslibris-sdmc.zip",
                     "and extract it to sdmc:/",
-                    "Expected folder: sdmc:/3ds/3dslibris/book"},
+                    "Expected folder: sdmc:/3ds/3dslibris/book",
+                    "or include books in romfs:/3ds/3dslibris/book"},
                    true);
     return HaltOnFatalBootStatus();
   }
