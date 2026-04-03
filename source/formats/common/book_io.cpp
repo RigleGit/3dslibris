@@ -30,6 +30,7 @@
 #include "formats/mobi/mobi_record_decode.h"
 #include "formats/mobi/mobi_record_scan.h"
 #include "formats/mobi/mobi_structured_toc_parser.h"
+#include "formats/mobi/mobi_toc_apply.h"
 #include "formats/mobi/mobi_toc_resolver.h"
 #include "formats/mobi/mobi_text_cleanup.h"
 #include "formats/pdf/pdf.h"
@@ -1318,266 +1319,19 @@ BuildMobiChaptersFromHints(Book *book,
   return mapped;
 }
 
-static int
-FindMobiHeadingNearPage(const std::vector<std::vector<std::string>> &page_lines,
-                        const std::string &needle, u16 guess_page, u16 radius) {
-  if (needle.size() < 3 || page_lines.empty())
-    return -1;
-  const u16 page_count = (u16)page_lines.size();
-  if (guess_page >= page_count)
-    guess_page = page_count - 1;
-
-  for (u16 delta = 0; delta <= radius; delta++) {
-    int lo = (int)guess_page - (int)delta;
-    if (lo >= 0 && PageHasHeadingNeedle(page_lines[(size_t)lo], needle))
-      return lo;
-    if (delta == 0)
-      continue;
-    u16 hi = (u16)(guess_page + delta);
-    if (hi < page_count && PageHasHeadingNeedle(page_lines[(size_t)hi], needle))
-      return (int)hi;
-  }
-  return -1;
+static std::string MobiTocApplyNormalizeNeedle(const std::string &text) {
+  return NormalizeHeadingNeedle(text);
 }
 
-// Convert a MOBI TOC pos (byte offset into decompressed HTML) to a page index.
-//
-// The old approach used a simple linear ratio (pos / text_len * page_count)
-// which assumed uniform tag density.  In practice HTML tags, scripts, styles
-// and entities are stripped non-uniformly by ExtractMobiMarkupToText, so the
-// ratio drifted by 66-436 pages on large books (e.g. Obama's "A Promised
-// Land", 1336 pages, 31 chapters).
-//
-// This function does two piecewise-linear lookups instead:
-//   1. html_to_text_map: html_pos → text_pos  (sampled every ~4KB in HTML)
-//   2. text_cursor_per_page: text_pos → page   (recorded during pagination)
-static int MobiHtmlPosToPage(
-    u32 html_pos,
-    const std::vector<std::pair<u32, u32>> &html_to_text_map,
-    const std::vector<u32> &text_cursor_per_page,
-    u32 *text_pos_out = nullptr) {
-  if (text_pos_out)
-    *text_pos_out = 0;
-  if (html_to_text_map.size() < 2 || text_cursor_per_page.empty())
-    return -1;
-
-  // html_pos → text_pos via piecewise-linear interpolation on the sampling
-  // table.  Each sample is (html_byte_offset, text_byte_offset).
-  size_t lo = 0, hi = html_to_text_map.size() - 1;
-  while (lo + 1 < hi) {
-    size_t mid = (lo + hi) / 2;
-    if (html_to_text_map[mid].first <= html_pos)
-      lo = mid;
-    else
-      hi = mid;
-  }
-  const u32 h0 = html_to_text_map[lo].first;
-  const u32 t0 = html_to_text_map[lo].second;
-  const u32 h1 = html_to_text_map[hi].first;
-  const u32 t1 = html_to_text_map[hi].second;
-  u32 text_pos;
-  if (h1 == h0)
-    text_pos = t0;
-  else {
-    double frac = (double)(html_pos - h0) / (double)(h1 - h0);
-    if (frac < 0.0)
-      frac = 0.0;
-    if (frac > 1.0)
-      frac = 1.0;
-    text_pos = t0 + (u32)(frac * (double)(t1 - t0));
-  }
-
-  if (text_pos_out)
-    *text_pos_out = text_pos;
-
-  // text_pos → page via binary search on text_cursor_per_page.
-  // text_cursor_per_page[i] = text byte offset at the start of page i.
-  // We want the last page whose start offset <= text_pos.
-  lo = 0;
-  hi = text_cursor_per_page.size();
-  while (lo + 1 < hi) {
-    size_t mid = (lo + hi) / 2;
-    if (text_cursor_per_page[mid] <= text_pos)
-      lo = mid;
-    else
-      hi = mid;
-  }
-  return (int)lo;
+static bool MobiTocApplyPageHasNeedle(const std::vector<std::string> &lines,
+                                      const std::string &needle) {
+  return PageHasHeadingNeedle(lines, needle);
 }
 
-static size_t BuildMobiChaptersFromStructuredToc(
-    Book *book, const std::vector<MobiStructuredTocEntry> &entries,
-    u32 text_len, size_t *direct_out, bool refine_with_heading_search,
-    const std::vector<std::pair<u32, u32>> &html_to_text_map,
-    const std::vector<u32> &text_cursor_per_page,
-    IStatusReporter *reporter) {
-  if (direct_out)
-    *direct_out = 0;
-  if (!book || entries.empty() || book->GetPageCount() == 0)
-    return 0;
-
-  const u16 page_count = book->GetPageCount();
-  const bool have_precise_map =
-      mobi_position_map::LooksUsableForToc(html_to_text_map,
-                                           text_cursor_per_page);
-
-  // Heading search is used to verify/correct page estimates.  When loading
-  // from page cache, both mapping tables are empty (pagination was skipped),
-  // so we fall through to the linear ratio and rely on the wider heading
-  // search or runtime remap in ResolveTargetPage (chapter_menu.cpp).
-
-  if (reporter) {
-    u32 map_last_html = 0, map_last_text = 0;
-    if (!html_to_text_map.empty()) {
-      map_last_html = html_to_text_map.back().first;
-      map_last_text = html_to_text_map.back().second;
-    }
-    u32 pages_last_cursor = 0;
-    if (!text_cursor_per_page.empty())
-      pages_last_cursor = text_cursor_per_page.back();
-    char dbg[320];
-    snprintf(dbg, sizeof(dbg),
-             "TOC-MAP: precise=%d entries=%u html_map=%u text_pages=%u "
-             "pages=%u text_len=%u map_end=(%u,%u) pages_end=%u",
-             have_precise_map ? 1 : 0, (unsigned)entries.size(),
-             (unsigned)html_to_text_map.size(),
-             (unsigned)text_cursor_per_page.size(),
-             (unsigned)page_count, (unsigned)text_len,
-             (unsigned)map_last_html, (unsigned)map_last_text,
-             (unsigned)pages_last_cursor);
-    DBG_LOG(reporter, dbg);
-  }
-
-  bool needs_heading_search = refine_with_heading_search;
-  // When the precise dual-lookup map is available, always do heading search:
-  // the filepos byte offset lands at the section boundary (before decorative
-  // whitespace), while the heading text may render 1-3 pages later.  The ±4
-  // radius in FindMobiHeadingNearPage catches this safely.
-  if (!needs_heading_search && have_precise_map)
-    needs_heading_search = true;
-  if (!needs_heading_search) {
-    for (size_t i = 0; i < entries.size(); i++) {
-      if (entries[i].pos == kMobiNullIndex) {
-        needs_heading_search = true;
-        break;
-      }
-    }
-  }
-
-  std::vector<std::vector<std::string>> page_lines;
-  if (needs_heading_search) {
-    page_lines.resize(page_count);
-    for (u16 p = 0; p < page_count; p++)
-      page_lines[p] =
-          page_text_extract_utils::ExtractTextLinesFromPage(book->GetPage(p));
-  }
-
-  std::set<u16> used_pages;
-  size_t mapped = 0;
-  size_t direct_used = 0;
-  u16 scan_start = 0;
-  const u32 denom = (text_len > 0) ? text_len : 1;
-
-  for (size_t i = 0; i < entries.size(); i++) {
-    std::string clean =
-        CollapseAsciiWhitespace(TrimAsciiWhitespace(entries[i].title));
-    if (clean.empty())
-      continue;
-
-    const std::string needle = NormalizeHeadingNeedle(clean);
-    bool has_pos = (entries[i].pos != kMobiNullIndex);
-    int best_page = -1;
-
-    if (has_pos) {
-      // Prefer the precise dual-lookup when mapping tables are available
-      // (fresh parse).  Fall back to the linear ratio for page-cache loads
-      // where the tables were never built.
-      if (have_precise_map) {
-        u32 text_pos = 0;
-        int precise = MobiHtmlPosToPage(entries[i].pos, html_to_text_map,
-                                        text_cursor_per_page, &text_pos);
-        if (precise >= 0 && precise < page_count)
-          best_page = precise;
-        if (reporter) {
-          int linear_page = -1;
-          {
-            double r = (double)entries[i].pos / (double)denom;
-            if (r > 1.0) r = 1.0;
-            linear_page = (int)((u16)(r * (double)(page_count - 1)));
-          }
-          char dbg[256];
-          snprintf(dbg, sizeof(dbg),
-                   "TOC[%u] pos=%u tpos=%u precise=%d linear=%d title=%.40s",
-                   (unsigned)i, (unsigned)entries[i].pos, (unsigned)text_pos,
-                   precise, linear_page, clean.c_str());
-          DBG_LOG(reporter, dbg);
-        }
-      }
-      if (best_page < 0) {
-        double ratio = (double)entries[i].pos / (double)denom;
-        if (ratio < 0.0)
-          ratio = 0.0;
-        if (ratio > 1.0)
-          ratio = 1.0;
-        best_page = (int)((u16)(ratio * (double)(page_count - 1)));
-      }
-
-      if (needs_heading_search) {
-        // Radius reduced from ±32 to ±4: with the precise mapping the initial
-        // estimate is close enough that a wide scan would risk matching a
-        // wrong heading further away.
-        int refined = FindMobiHeadingNearPage(page_lines, needle,
-                                              (u16)best_page, 4);
-        if (refined >= 0 && refined != best_page) {
-          if (reporter) {
-            char rdbg[192];
-            snprintf(rdbg, sizeof(rdbg),
-                     "TOC[%u] heading refine %d -> %d",
-                     (unsigned)i, best_page, refined);
-            DBG_LOG(reporter, rdbg);
-          }
-          best_page = refined;
-        } else if (refined >= 0) {
-          best_page = refined;
-        }
-      }
-    } else {
-      if (!needs_heading_search)
-        continue;
-      for (u16 p = scan_start; p < page_count; p++) {
-        if (PageHasHeadingNeedle(page_lines[p], needle)) {
-          best_page = (int)p;
-          break;
-        }
-      }
-      if (best_page < 0 && scan_start > 0) {
-        for (u16 p = 0; p < scan_start; p++) {
-          if (PageHasHeadingNeedle(page_lines[p], needle)) {
-            best_page = (int)p;
-            break;
-          }
-        }
-      }
-    }
-
-    if (best_page < 0 || best_page >= page_count)
-      continue;
-
-    const u16 page = (u16)best_page;
-    if (used_pages.find(page) != used_pages.end())
-      continue;
-
-    AddChapterAtPageIfUnique(book, page, clean, entries[i].level);
-    used_pages.insert(page);
-    mapped++;
-    scan_start = page;
-    if (has_pos)
-      direct_used++;
-  }
-
-  if (direct_out)
-    *direct_out = direct_used;
-  return mapped;
+static void MobiTocApplyAddChapterAtPageIfUnique(Book *book, u16 page,
+                                                 const std::string &title,
+                                                 u8 level) {
+  AddChapterAtPageIfUnique(book, page, title, level);
 }
 
 struct MobiTocFinalizeResult {
@@ -1613,10 +1367,15 @@ static void FinalizeMobiPreparedToc(
   if (have_structured_toc) {
     const std::vector<ChapterEntry> fallback = book->GetChapters();
     book->ClearChapters();
-    mapped_structured = BuildMobiChaptersFromStructuredToc(
+    mobi_toc_apply::BuildCallbacks toc_callbacks;
+    toc_callbacks.normalize_heading_needle = MobiTocApplyNormalizeNeedle;
+    toc_callbacks.page_has_heading_needle = MobiTocApplyPageHasNeedle;
+    toc_callbacks.add_chapter_at_page_if_unique =
+        MobiTocApplyAddChapterAtPageIfUnique;
+    mapped_structured = mobi_toc_apply::BuildChaptersFromStructuredToc(
         book, structured_toc, text_len_for_pos, &structured_direct,
         !structured_from_filepos, html_to_text_map, text_cursor_per_page,
-        reporter);
+        toc_callbacks, reporter);
     if (mapped_structured >= 2) {
       structured_used = true;
       PruneMobiFrontMatterTocCluster(book, reporter);
