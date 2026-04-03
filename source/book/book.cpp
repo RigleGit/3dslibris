@@ -238,6 +238,136 @@ static void RestoreParsedStyleMarkers(parsedata_t *p) {
     AppendParsedByte(p, TEXT_BOLD_ON);
 }
 
+static void SyncParsedTextStyle(Text *ts, bool bold, bool italic) {
+  if (!ts)
+    return;
+  if (bold && italic)
+    ts->SetStyle(TEXT_STYLE_BOLDITALIC);
+  else if (bold)
+    ts->SetStyle(TEXT_STYLE_BOLD);
+  else if (italic)
+    ts->SetStyle(TEXT_STYLE_ITALIC);
+  else
+    ts->SetStyle(TEXT_STYLE_REGULAR);
+}
+
+static bool ContainsAsciiNoCase(const std::string &haystack,
+                                const char *needle) {
+  if (!needle || !needle[0])
+    return false;
+  const std::string haystack_lc = ToLowerAsciiLocal(haystack);
+  const std::string needle_lc = ToLowerAsciiLocal(needle);
+  return haystack_lc.find(needle_lc) != std::string::npos;
+}
+
+static bool AttrNameEquals(const char *name, const char *needle) {
+  if (!name || !needle)
+    return false;
+  if (!strcmp(name, needle) || EqualsAsciiNoCase(name, needle))
+    return true;
+  const char *colon = strrchr(name, ':');
+  return (colon && (strcmp(colon + 1, needle) == 0 ||
+                    EqualsAsciiNoCase(colon + 1, needle)));
+}
+
+static void ParseInlineStyleFlags(const char *style, bool *bold_out,
+                                  bool *italic_out) {
+  if (!style || (!bold_out && !italic_out))
+    return;
+  const std::string value(style);
+  const std::string style_lc = ToLowerAsciiLocal(value);
+
+  if (italic_out) {
+    if (ContainsAsciiNoCase(style_lc, "font-style:italic") ||
+        ContainsAsciiNoCase(style_lc, "font-style: italic") ||
+        ContainsAsciiNoCase(style_lc, "font-style:oblique") ||
+        ContainsAsciiNoCase(style_lc, "font-style: oblique") ||
+        ContainsAsciiNoCase(style_lc, "font:italic") ||
+        ContainsAsciiNoCase(style_lc, "font: italic") ||
+        ContainsAsciiNoCase(style_lc, "font:oblique") ||
+        ContainsAsciiNoCase(style_lc, "font: oblique")) {
+      *italic_out = true;
+    }
+  }
+
+  if (bold_out) {
+    if (ContainsAsciiNoCase(style_lc, "font-weight:bold") ||
+        ContainsAsciiNoCase(style_lc, "font-weight: bold") ||
+        ContainsAsciiNoCase(style_lc, "font-weight:bolder") ||
+        ContainsAsciiNoCase(style_lc, "font-weight: bolder") ||
+        ContainsAsciiNoCase(style_lc, "font-weight:600") ||
+        ContainsAsciiNoCase(style_lc, "font-weight: 600") ||
+        ContainsAsciiNoCase(style_lc, "font-weight:700") ||
+        ContainsAsciiNoCase(style_lc, "font-weight: 700") ||
+        ContainsAsciiNoCase(style_lc, "font-weight:800") ||
+        ContainsAsciiNoCase(style_lc, "font-weight: 800") ||
+        ContainsAsciiNoCase(style_lc, "font-weight:900") ||
+        ContainsAsciiNoCase(style_lc, "font-weight: 900") ||
+        ContainsAsciiNoCase(style_lc, "font:bold") ||
+        ContainsAsciiNoCase(style_lc, "font: bold")) {
+      *bold_out = true;
+    }
+  }
+}
+
+static void ParseClassStyleFlags(const char *class_name, bool *bold_out,
+                                 bool *italic_out) {
+  if (!class_name || (!bold_out && !italic_out))
+    return;
+  const std::string class_lc = ToLowerAsciiLocal(class_name);
+
+  if (italic_out) {
+    if (ContainsAsciiNoCase(class_lc, "italic") ||
+        ContainsAsciiNoCase(class_lc, "oblique") ||
+        ContainsAsciiNoCase(class_lc, "emphasis")) {
+      *italic_out = true;
+    }
+  }
+
+  if (bold_out) {
+    if (ContainsAsciiNoCase(class_lc, "bold") ||
+        ContainsAsciiNoCase(class_lc, "semibold") ||
+        ContainsAsciiNoCase(class_lc, "font-weight")) {
+      *bold_out = true;
+    }
+  }
+}
+
+static void ParseElementStyleFlags(const char **attr, bool *bold_out,
+                                   bool *italic_out) {
+  if ((!bold_out && !italic_out) || !attr)
+    return;
+  for (int i = 0; attr[i]; i += 2) {
+    if (!attr[i + 1] || !attr[i + 1][0])
+      continue;
+    if (AttrNameEquals(attr[i], "style")) {
+      ParseInlineStyleFlags(attr[i + 1], bold_out, italic_out);
+    } else if (AttrNameEquals(attr[i], "class")) {
+      ParseClassStyleFlags(attr[i + 1], bold_out, italic_out);
+    }
+  }
+}
+
+static bool HasActiveStackBoldStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_bold_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackItalicStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_italic_stack[i])
+      return true;
+  }
+  return false;
+}
+
 static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
   if (!p || !p->book || !p->ts)
     return;
@@ -622,20 +752,12 @@ void start(void *data, const char *el, const char **attr) {
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
-    if (p->italic) {
-      ts->SetStyle(TEXT_STYLE_BOLDITALIC);
-    } else {
-      ts->SetStyle(TEXT_STYLE_BOLD);
-    }
+    SyncParsedTextStyle(ts, p->bold, p->italic);
   } else if (!strcmp(el, "em") || !strcmp(el, "i")) {
     parse_push(p, TAG_EM);
     AppendParsedByte(p, TEXT_ITALIC_ON);
     p->italic = true;
-    if (p->bold) {
-      ts->SetStyle(TEXT_STYLE_BOLDITALIC);
-    } else {
-      ts->SetStyle(TEXT_STYLE_ITALIC);
-    }
+    SyncParsedTextStyle(ts, p->bold, p->italic);
   } else if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
     parse_push(p, TAG_UNKNOWN);
 
@@ -747,6 +869,32 @@ void start(void *data, const char *el, const char **attr) {
     }
   } else
     parse_push(p, TAG_UNKNOWN);
+
+  // CSS-based emphasis fallback for EPUBs that do not use semantic tags.
+  if (parse_in(p, TAG_BODY) && p->stacksize > 0) {
+    bool style_bold = false;
+    bool style_italic = false;
+    ParseElementStyleFlags(attr, &style_bold, &style_italic);
+
+    const u8 current = (u8)(p->stacksize - 1);
+    p->style_bold_stack[current] = style_bold;
+    p->style_italic_stack[current] = style_italic;
+
+    bool style_changed = false;
+    if (style_bold && !p->bold) {
+      AppendParsedByte(p, TEXT_BOLD_ON);
+      p->pos++;
+      p->bold = true;
+      style_changed = true;
+    }
+    if (style_italic && !p->italic) {
+      AppendParsedByte(p, TEXT_ITALIC_ON);
+      p->italic = true;
+      style_changed = true;
+    }
+    if (style_changed)
+      SyncParsedTextStyle(ts, p->bold, p->italic);
+  }
 }
 
 void chardata(void *data, const XML_Char *txt, int txtlen) {
@@ -1098,30 +1246,10 @@ void end(void *data, const char *el) {
     p->in_paragraph = false;
     p->paragraph_has_content = false;
   } else if (!strcmp(el, "div")) {
-  } else if (!strcmp(el, "strong") || !strcmp(el, "b")) {
-    AppendParsedByte(p, TEXT_BOLD_OFF);
-    p->bold = false;
-    if (p->italic) {
-      ts->SetStyle(TEXT_STYLE_ITALIC);
-    } else {
-      ts->SetStyle(TEXT_STYLE_REGULAR);
-    }
-  } else if (!strcmp(el, "em") || !strcmp(el, "i")) {
-    AppendParsedByte(p, TEXT_ITALIC_OFF);
-    p->italic = false;
-    if (p->bold) {
-      ts->SetStyle(TEXT_STYLE_BOLD);
-    } else {
-      ts->SetStyle(TEXT_STYLE_REGULAR);
-    }
   } else if (!strcmp(el, "h1")) {
-    AppendParsedByte(p, TEXT_BOLD_OFF);
-    p->bold = false;
     linefeed(p);
     linefeed(p);
   } else if (!strcmp(el, "h2")) {
-    AppendParsedByte(p, TEXT_BOLD_OFF);
-    p->bold = false;
     linefeed(p);
   } else if (!strcmp(el, "h3") || !strcmp(el, "h4") || !strcmp(el, "h5") ||
              !strcmp(el, "h6") || !strcmp(el, "hr") || !strcmp(el, "pre")) {
@@ -1136,6 +1264,27 @@ void end(void *data, const char *el) {
   }
 
   parse_pop(p);
+
+  const bool want_bold = parse_in(p, TAG_STRONG) || parse_in(p, TAG_H1) ||
+                         parse_in(p, TAG_H2) || HasActiveStackBoldStyle(p);
+  const bool want_italic =
+      parse_in(p, TAG_EM) || HasActiveStackItalicStyle(p);
+
+  bool style_changed = false;
+  if (p->bold != want_bold) {
+    AppendParsedByte(p, want_bold ? TEXT_BOLD_ON : TEXT_BOLD_OFF);
+    if (want_bold)
+      p->pos++;
+    p->bold = want_bold;
+    style_changed = true;
+  }
+  if (p->italic != want_italic) {
+    AppendParsedByte(p, want_italic ? TEXT_ITALIC_ON : TEXT_ITALIC_OFF);
+    p->italic = want_italic;
+    style_changed = true;
+  }
+  if (style_changed)
+    SyncParsedTextStyle(ts, p->bold, p->italic);
 
   int maxHeight = (p->screen == 1) ? 320 : 400;
   int bottomMargin =

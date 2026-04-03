@@ -70,6 +70,8 @@ struct parsedata_t {
 	bool paragraph_has_content;
 	bool bold;
 	bool italic;
+	bool style_bold_stack[32];
+	bool style_italic_stack[32];
 	std::string docpath; //! Current XHTML document path inside EPUB.
 	std::string doc_title;   //! Current XHTML <title> text (best chapter label).
 	std::string doc_heading; //! Fallback heading text from h1/h2/h3.
