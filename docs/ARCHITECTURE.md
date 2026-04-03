@@ -53,6 +53,7 @@ source/
 │   │   ├── mobi_cover_meta_cache.cpp
 │   │   ├── mobi_heading_markers.cpp
 │   │   ├── mobi_page_cache.cpp  # Persistent page cache serialization
+│   │   ├── mobi_parser_core.cpp # Source load/header parse/text record merge
 │   │   ├── mobi_markup_tag.cpp
 │   │   ├── mobi_position_map.cpp
 │   │   ├── mobi_record_decode.cpp
@@ -173,8 +174,8 @@ Reflowable formats (EPUB, FB2, MOBI, TXT, RTF, ODT) produce `Page` objects with 
 
 **Future direction:** Separate Book (pure model) from BookParser (format-specific) and BookRenderer (format-specific).
 
-### 3. book_io.cpp reduced (3069 lines, down from 5369)
-TXT and RTF loaders, text normalization helpers, MOBI page cache, MOBI structured TOC INDX/TAGX/CNCX parsing, and MOBI TOC resolver (inline/deferred) were extracted to separate modules. Remaining content: MOBI parsing dispatch and ODT parsing.
+### 3. book_io.cpp reduced (2967 lines, down from 5369)
+TXT and RTF loaders, text normalization helpers, MOBI page cache, MOBI parser core helpers (source/header/merge), MOBI structured TOC INDX/TAGX/CNCX parsing, and MOBI TOC resolver (inline/deferred) were extracted to separate modules. Remaining content: MOBI parse orchestration/finalization and ODT parsing.
 
 **Impact:** TXT and RTF changes no longer touch book_io.cpp. MOBI and ODT still require navigating a large file.
 
@@ -190,6 +191,7 @@ The following modules were extracted to improve testability and reduce monolith 
 | `text_helpers` | book_io.cpp | `NormalizeNewlines`, `NormalizeTextUtf8`, `DecodeRtfToUtf8`, `LooksLikeValidUtf8Bytes` |
 | `plain_text_stream` | book_io.cpp | `InitState()`, `ContinueState()` — incremental pagination for plain/reflow text |
 | `mobi_page_cache` | book_io.cpp | `TryLoad()`, `Save()` — persistent page cache for MOBI |
+| `mobi_parser_core` | book_io.cpp | `LoadMobiSource()`, `ParseMobiHeader()`, `BuildMobiMergedText()` |
 | `mobi_structured_toc_parser` | book_io.cpp | `ParseStructuredToc()` — INDX/TAGX/CNCX parser with callback-based decoding/filtering |
 | `mobi_toc_apply` | book_io.cpp | `HtmlPosToPage()`, `BuildChaptersFromStructuredToc()` |
 | `mobi_toc_resolver` | book_io.cpp | `ParseInlineFileposToc()`, `PrepareStructuredToc()`, `LoadDeferredStructuredToc()` |
@@ -233,9 +235,9 @@ Format parsers (`book_io.cpp`, `epub.cpp`, `mobi.cpp`) include `app/app.h` and c
 
 **Future direction:** Define pure interfaces (`IStatusLogger`, `ParseContext`) that parsers receive instead of `App*`. App implements these interfaces.
 
-### Critical: book_io.cpp remains a monolith (3069 lines)
+### Critical: book_io.cpp remains a monolith (2967 lines)
 
-Despite recent extractions (txt_loader, rtf_loader, text_helpers, plain_text_stream, mobi_page_cache, mobi_structured_toc_parser, mobi_toc_resolver), the file still contains MOBI parsing and ODT parsing in a single large translation unit.
+Despite recent extractions (txt_loader, rtf_loader, text_helpers, plain_text_stream, mobi_page_cache, mobi_parser_core, mobi_structured_toc_parser, mobi_toc_resolver), the file still contains MOBI parsing and ODT parsing in a single large translation unit.
 
 **Impact:** High risk of accidental breakage. Difficult to navigate. Every format change touches the same massive file.
 
