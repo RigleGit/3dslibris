@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "formats/epub/epub.h"
+#include "formats/epub/epub_cache.h"
 #include "formats/epub/epub_manifest.h"
 
 #include "base64_utils.h"
@@ -345,37 +346,6 @@ static void ResolveEpubTocFromPackageData(
     DBG_LOG(reporter, msg);
     DBG_LOG(reporter, "EPUB: TOC resolve end");
   }
-}
-
-static int FinalizeEpubParse(unzFile uf, epub_data_t *parsedata, Book *book,
-                             const std::string &name, const EpubDeps &deps,
-                             int rc, bool save_cache) {
-  if (save_cache) {
-    if (reflow_cache_save_utils::ShouldDeferAsyncOpenCacheSave(
-            true, book && book->IsAsyncReflowOpenPending())) {
-      book->SetPendingEpubPageCacheSave(true);
-    } else {
-      epub_page_cache::Save(book, name.c_str(),
-                            deps.ts ? (int)deps.ts->GetPixelSize() : 0,
-                            deps.ts ? (int)deps.ts->linespacing : 0,
-                            deps.paragraph_spacing, deps.paragraph_indent,
-                            deps.orientation,
-                            deps.ts ? (int)deps.ts->margin.left : 0,
-                            deps.ts ? (int)deps.ts->margin.right : 0,
-                            deps.ts ? (int)deps.ts->margin.top : 0,
-                            deps.ts ? (int)deps.ts->margin.bottom : 0,
-                            deps.ts ? deps.ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : NULL);
-      if (book)
-        book->SetPendingEpubPageCacheSave(false);
-    }
-  }
-  if (uf)
-    unzClose(uf);
-  if (parsedata)
-    epub_data_delete(parsedata);
-  if (deps.reporter)
-    DBG_LOG(deps.reporter, "EPUB: parse end");
-  return rc;
 }
 
 int epub(Book *book, std::string name, bool metadataonly) {
