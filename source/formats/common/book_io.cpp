@@ -23,12 +23,6 @@
 #include <stdio.h>
 #include <sys/param.h>
 
-namespace {
-typedef BookParseDeps BookIoDeps;
-static BookIoDeps BuildBookIoDeps(Book *book) { return BuildBookParseDeps(book); }
-
-} // namespace
-
 u8 Book::Parse(bool fulltext) {
   //! Parse full text (true) or titles only (false).
   //! Expat callback handlers do the heavy work.
@@ -53,7 +47,7 @@ u8 Book::Parse(bool fulltext) {
   if (fulltext && HasExtCI(GetFileName(), ".cbz"))
     return ParseCbzFile(this, path);
 
-  const BookIoDeps deps = BuildBookIoDeps(this);
+  const BookParseDeps deps = BuildBookParseDeps(this);
   rc = xml_book_parser::ParseXmlBookFile(
       this, path, fulltext, deps, plain_parser::BuildFb2FallbackChapters,
       plain_parser::SetNonEpubTocConfidence);
