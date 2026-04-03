@@ -1,8 +1,10 @@
 #pragma once
 
 #include "formats/epub/epub.h"
+#include "minizip/unzip.h"
 #include "shared/status_reporter.h"
 #include <map>
+#include <string>
 #include <3ds.h>
 
 void ResolveEpubTocFromPackageData(

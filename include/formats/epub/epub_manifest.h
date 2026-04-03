@@ -1,7 +1,11 @@
 #pragma once
 #include "formats/epub/epub.h"
 #include "book/book_parse_deps.h"
+#include "expat.h"
 #include "minizip/unzip.h"
+#include <3ds.h>
+#include <string>
+#include <vector>
 typedef BookParseDeps EpubDeps;
 
 void epub_data_init(epub_data_t *d);

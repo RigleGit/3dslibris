@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/epub/epub_manifest.h"
 #include "formats/epub/epub_page_cache.h"
 #include "shared/status_reporter.h"
+#include "ui/text.h"
 #include <3ds.h>
 
 typedef BookParseDeps EpubDeps;
