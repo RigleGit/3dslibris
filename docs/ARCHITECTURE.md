@@ -55,6 +55,7 @@ source/
 │   │   ├── mobi_page_cache.cpp  # Persistent page cache serialization
 │   │   ├── mobi_parser_core.cpp # Source load/header parse/text record merge
 │   │   ├── mobi_deferred_runtime.cpp # Deferred parse state machine runtime
+│   │   ├── mobi_markup_extract.cpp # MOBI markup -> text extraction pipeline
 │   │   ├── mobi_markup_tag.cpp
 │   │   ├── mobi_position_map.cpp
 │   │   ├── mobi_record_decode.cpp
@@ -64,6 +65,7 @@ source/
 │   │   ├── mobi_toc_apply.cpp    # Structured TOC mapping/apply (html_pos -> page)
 │   │   ├── mobi_toc_prepare.cpp  # Structured TOC prepare/deferred-load wrapper
 │   │   ├── mobi_toc_resolver.cpp # TOC resolver + inline filepos/deferred fallback
+│   │   ├── mobi_text_decode.cpp  # Encoding decode + embedded title extraction
 │   │   ├── mobi_text_cleanup.cpp
 │   │   └── mobi_*.h            # Cover utils, deferred finalize
 │   ├── pdf/                    # PDF entry point
@@ -177,8 +179,8 @@ Reflowable formats (EPUB, FB2, MOBI, TXT, RTF, ODT) produce `Page` objects with 
 
 **Future direction:** Separate Book (pure model) from BookParser (format-specific) and BookRenderer (format-specific).
 
-### 3. book_io.cpp reduced (2754 lines, down from 5369)
-TXT and RTF loaders, text normalization helpers, MOBI page cache, MOBI parser core helpers (source/header/merge), MOBI deferred runtime state machine, MOBI structured TOC INDX/TAGX/CNCX parsing, MOBI TOC finalization, MOBI TOC prepare/deferred-load wrappers, and MOBI TOC resolver (inline/deferred) were extracted to separate modules. Remaining content: MOBI parse orchestration callbacks and XML/shared parsing helpers.
+### 3. book_io.cpp reduced (1811 lines, down from 5369)
+TXT and RTF loaders, text normalization helpers, MOBI page cache, MOBI parser core helpers (source/header/merge), MOBI deferred runtime state machine, MOBI markup extraction pipeline, MOBI text decode/title extraction, MOBI structured TOC INDX/TAGX/CNCX parsing, MOBI TOC finalization, MOBI TOC prepare/deferred-load wrappers, and MOBI TOC resolver (inline/deferred) were extracted to separate modules. Remaining content: MOBI parse orchestration callbacks and XML/shared parsing helpers.
 
 **Impact:** TXT and RTF changes no longer touch book_io.cpp. MOBI and ODT still require navigating a large file.
 
@@ -196,6 +198,8 @@ The following modules were extracted to improve testability and reduce monolith 
 | `mobi_page_cache` | book_io.cpp | `TryLoad()`, `Save()` — persistent page cache for MOBI |
 | `mobi_parser_core` | book_io.cpp | `LoadMobiSource()`, `ParseMobiHeader()`, `BuildMobiMergedText()` |
 | `mobi_deferred_runtime` | book_io.cpp | `Continue()`, `Finalize()`, deferred state map lifecycle |
+| `mobi_markup_extract` | book_io.cpp | `ExtractToText()` — markup parsing, heading hints, inline image contexts |
+| `mobi_text_decode` | book_io.cpp | `DecodeBytesToUtf8()`, `ApplyEmbeddedTitle()` |
 | `mobi_structured_toc_parser` | book_io.cpp | `ParseStructuredToc()` — INDX/TAGX/CNCX parser with callback-based decoding/filtering |
 | `mobi_toc_finalize` | book_io.cpp | `BuildChaptersFromHints()`, `FinalizePreparedToc()` — TOC finalization + confidence |
 | `mobi_toc_apply` | book_io.cpp | `HtmlPosToPage()`, `BuildChaptersFromStructuredToc()` |
@@ -241,9 +245,9 @@ Format parsers (`book_io.cpp`, `epub.cpp`, `mobi.cpp`) include `app/app.h` and c
 
 **Future direction:** Define pure interfaces (`IStatusLogger`, `ParseContext`) that parsers receive instead of `App*`. App implements these interfaces.
 
-### Critical: book_io.cpp remains a monolith (2754 lines)
+### Critical: book_io.cpp remains a monolith (1811 lines)
 
-Despite recent extractions (txt_loader, rtf_loader, text_helpers, plain_text_stream, mobi_page_cache, mobi_parser_core, mobi_deferred_runtime, mobi_structured_toc_parser, mobi_toc_finalize, mobi_toc_prepare, mobi_toc_resolver), the file still contains MOBI parsing dispatch and shared XML/plain parsing helpers in a single large translation unit.
+Despite recent extractions (txt_loader, rtf_loader, text_helpers, plain_text_stream, mobi_page_cache, mobi_parser_core, mobi_deferred_runtime, mobi_markup_extract, mobi_text_decode, mobi_structured_toc_parser, mobi_toc_finalize, mobi_toc_prepare, mobi_toc_resolver), the file still contains MOBI parsing dispatch and shared XML/plain parsing helpers in a single large translation unit.
 
 **Impact:** High risk of accidental breakage. Difficult to navigate. Every format change touches the same massive file.
 
