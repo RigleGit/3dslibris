@@ -180,7 +180,7 @@ Reflowable formats (EPUB, FB2, MOBI, TXT, RTF, ODT) produce `Page` objects with 
 
 **Future direction:** Separate Book (pure model) from BookParser (format-specific) and BookRenderer (format-specific).
 
-### 3. book_io.cpp reduced (1167 lines, down from 5369)
+### 3. book_io.cpp reduced (1107 lines, down from 5369)
 TXT and RTF loaders, text normalization helpers, MOBI page cache, MOBI parser core helpers (source/header/merge), MOBI deferred runtime state machine, MOBI markup extraction pipeline, MOBI text decode/title extraction, MOBI structured TOC INDX/TAGX/CNCX parsing, MOBI TOC finalization, MOBI TOC prepare/deferred-load wrappers, MOBI TOC resolver (inline/deferred), and MOBI parse orchestration were extracted to separate modules. Remaining content: MOBI callback wiring/hooks and XML/shared parsing helpers.
 
 **Impact:** TXT/RTF and core MOBI parser changes no longer touch book_io.cpp. ODT and shared XML/plain parser glue still live there.
