@@ -236,7 +236,13 @@ int StartupController::RunBootSequence() {
            (unsigned)app_.BookCount());
 #endif
 
-  app_.prefs->Read();
+  const int prefs_read_err = app_.prefs->Read();
+  if (prefs_read_err != 0) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "warning: prefs read failed (err=%d)",
+             prefs_read_err);
+    app_.PrintStatus(msg);
+  }
   NormalizeRuntimeAssetPaths(&app_);
   DrawBootStatus("Booting", {"Preparing library..."}, false);
   app_.SetOrientation(app_.orientation);

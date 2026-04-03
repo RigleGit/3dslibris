@@ -24,6 +24,7 @@
 #include "ui/text_limits.h"
 #include <stdio.h>
 #include <sys/param.h>
+#include <string>
 #include <vector>
 
 #define PARSEBUFSIZE 1024 * 64
@@ -101,7 +102,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     bool mobi_line_wrap_fix = false;
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "file"))
-        strcpy(filename, attr[i + 1]);
+        snprintf(filename, sizeof(filename), "%s", attr[i + 1]);
       if (!strcmp(attr[i], "page"))
         position = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "mobiLineWrapFix"))
@@ -180,6 +181,42 @@ void end(void *data, const char *name) {
 
 } // namespace xml::prefs
 
+namespace {
+
+static std::string XmlEscapeAttr(const char *value) {
+  if (!value)
+    return std::string();
+  std::string out;
+  const size_t len = strlen(value);
+  out.reserve(len + (len / 4));
+  for (size_t i = 0; i < len; i++) {
+    const char c = value[i];
+    switch (c) {
+    case '&':
+      out += "&amp;";
+      break;
+    case '<':
+      out += "&lt;";
+      break;
+    case '>':
+      out += "&gt;";
+      break;
+    case '"':
+      out += "&quot;";
+      break;
+    case '\'':
+      out += "&apos;";
+      break;
+    default:
+      out.push_back(c);
+      break;
+    }
+  }
+  return out;
+}
+
+} // namespace
+
 Prefs::Prefs(App *_app) {
   app = _app;
   Init();
@@ -250,15 +287,22 @@ int Prefs::Write() {
           "\t<margin top=\"%d\" left=\"%d\" bottom=\"%d\" right=\"%d\" />\n",
           app->ts->margin.top, app->ts->margin.left, app->ts->margin.bottom,
           app->ts->margin.right);
+  const std::string font_regular =
+      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_REGULAR).c_str());
+  const std::string font_bold =
+      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BOLD).c_str());
+  const std::string font_italic =
+      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_ITALIC).c_str());
+  const std::string font_bolditalic =
+      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BOLDITALIC).c_str());
+  const std::string font_browser =
+      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BROWSER).c_str());
+
   fprintf(fp,
           "\t<font size=\"%d\" normal=\"%s\" bold=\"%s\" italic=\"%s\" "
           "bolditalic=\"%s\" browser=\"%s\" />\n",
-          app->ts->GetPixelSize(),
-          app->ts->GetFontFile(TEXT_STYLE_REGULAR).c_str(),
-          app->ts->GetFontFile(TEXT_STYLE_BOLD).c_str(),
-          app->ts->GetFontFile(TEXT_STYLE_ITALIC).c_str(),
-          app->ts->GetFontFile(TEXT_STYLE_BOLDITALIC).c_str(),
-          app->ts->GetFontFile(TEXT_STYLE_BROWSER).c_str());
+          app->ts->GetPixelSize(), font_regular.c_str(), font_bold.c_str(),
+          font_italic.c_str(), font_bolditalic.c_str(), font_browser.c_str());
   fprintf(fp, "\t<paragraph indent=\"%d\" spacing=\"%d\" />\n", app->paraindent,
           app->paraspacing);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);
@@ -266,7 +310,8 @@ int Prefs::Write() {
   // Persist all known books so last page and bookmarks survive restarts.
   for (int i = 0; i < app->BookCount(); i++) {
     Book *book = app->books[i];
-    fprintf(fp, "\t\t<book file=\"%s\" page=\"%d\"", book->GetFileName(),
+    const std::string escaped_filename = XmlEscapeAttr(book->GetFileName());
+    fprintf(fp, "\t\t<book file=\"%s\" page=\"%d\"", escaped_filename.c_str(),
             book->GetPosition() + 1);
     // Only persist the override when enabled so old prefs stay readable.
     if (book->GetMobiLineWrapFix())
