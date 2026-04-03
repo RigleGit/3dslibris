@@ -438,16 +438,6 @@ static bool IsMostlyDigitsOrPunctuation(const std::string &s) {
   return alpha <= 1;
 }
 
-struct MobiChapterQualityStats {
-  size_t chapters;
-  size_t unique_pages;
-  size_t early_hits;
-  size_t tiny_titles;
-  size_t noisy_titles;
-  size_t structured_titles;
-  u16 early_window;
-};
-
 static size_t PruneMobiFrontMatterTocCluster(Book *book, IStatusReporter *reporter) {
   if (!book)
     return 0;
@@ -539,7 +529,7 @@ static bool LooksLikeStructuredMobiChapterTitle(const std::string &title) {
 }
 
 static bool IsMobiHeuristicChapterSetNoisy(Book *book,
-                                           MobiChapterQualityStats *stats_out) {
+                                           mobi_toc_finalize::MobiChapterQualityStats *stats_out) {
   if (!book)
     return false;
   const std::vector<ChapterEntry> &chapters = book->GetChapters();
@@ -932,59 +922,14 @@ static bool PageHasHeadingNeedle(const std::vector<std::string> &lines,
   return false;
 }
 
-static std::string MobiTocApplyNormalizeNeedle(const std::string &text) {
-  return NormalizeHeadingNeedle(text);
-}
-
-static bool MobiTocApplyPageHasNeedle(const std::vector<std::string> &lines,
-                                      const std::string &needle) {
-  return PageHasHeadingNeedle(lines, needle);
-}
-
-static void MobiTocApplyAddChapterAtPageIfUnique(Book *book, u16 page,
-                                                 const std::string &title,
-                                                 u8 level) {
-  AddChapterAtPageIfUnique(book, page, title, level);
-}
-
-static size_t MobiTocFinalizePruneFrontMatter(Book *book,
-                                               IStatusReporter *reporter) {
-  return PruneMobiFrontMatterTocCluster(book, reporter);
-}
-
-static bool MobiTocFinalizeIsHeuristicNoisy(
-    Book *book, mobi_toc_finalize::MobiChapterQualityStats *stats_out) {
-  MobiChapterQualityStats local_stats;
-  if (!IsMobiHeuristicChapterSetNoisy(book, stats_out ? &local_stats : NULL))
-    return false;
-  if (stats_out) {
-    stats_out->chapters = local_stats.chapters;
-    stats_out->unique_pages = local_stats.unique_pages;
-    stats_out->early_hits = local_stats.early_hits;
-    stats_out->tiny_titles = local_stats.tiny_titles;
-    stats_out->noisy_titles = local_stats.noisy_titles;
-    stats_out->structured_titles = local_stats.structured_titles;
-    stats_out->early_window = local_stats.early_window;
-  }
-  return true;
-}
-
 static mobi_toc_finalize::FinalizeCallbacks MakeMobiTocFinalizeCallbacks() {
   mobi_toc_finalize::FinalizeCallbacks callbacks;
-  callbacks.normalize_heading_needle = MobiTocApplyNormalizeNeedle;
-  callbacks.page_has_heading_needle = MobiTocApplyPageHasNeedle;
-  callbacks.add_chapter_at_page_if_unique = MobiTocApplyAddChapterAtPageIfUnique;
-  callbacks.prune_front_matter_toc_cluster = MobiTocFinalizePruneFrontMatter;
-  callbacks.is_heuristic_chapter_set_noisy = MobiTocFinalizeIsHeuristicNoisy;
+  callbacks.normalize_heading_needle = NormalizeHeadingNeedle;
+  callbacks.page_has_heading_needle = PageHasHeadingNeedle;
+  callbacks.add_chapter_at_page_if_unique = AddChapterAtPageIfUnique;
+  callbacks.prune_front_matter_toc_cluster = PruneMobiFrontMatterTocCluster;
+  callbacks.is_heuristic_chapter_set_noisy = IsMobiHeuristicChapterSetNoisy;
   return callbacks;
-}
-
-static bool MobiInlineLooksLikeStructuredTitle(const std::string &title) {
-  return LooksLikeStructuredMobiChapterTitle(title);
-}
-
-static std::string MobiInlineFoldLatin(const std::string &text) {
-  return FoldLatinForMatch(text);
 }
 
 static size_t MobiInlineCountWords(const std::string &text) {
@@ -1006,8 +951,8 @@ MakeMobiStructuredTocCallbacks() {
 
 static mobi_toc_prepare::InlineTitleCallbacks MakeMobiInlineTitleCallbacks() {
   mobi_toc_prepare::InlineTitleCallbacks callbacks;
-  callbacks.looks_like_structured_title = MobiInlineLooksLikeStructuredTitle;
-  callbacks.fold_latin_for_match = MobiInlineFoldLatin;
+  callbacks.looks_like_structured_title = LooksLikeStructuredMobiChapterTitle;
+  callbacks.fold_latin_for_match = FoldLatinForMatch;
   callbacks.count_ascii_words = MobiInlineCountWords;
   callbacks.is_mostly_digits_or_punctuation = MobiInlineMostlyDigitsOrPunct;
   return callbacks;
