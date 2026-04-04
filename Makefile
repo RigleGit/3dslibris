@@ -37,7 +37,7 @@ DEBUG_BUILD	:=	build-debug
 TARGET		?=	$(BASE_TARGET)
 BUILD		?=	build
 SOURCES		:=	source source/core source/app source/shared source/ui source/menus \
-			source/library source/reader source/settings source/book \
+			source/library source/reader source/settings source/book source/book/book_xml_parser.cpp \
 			source/formats/common source/formats/epub source/formats/fb2 \
 			source/formats/mobi source/formats/pdf source/formats/cbz \
 	source/formats/txt source/formats/rtf source/formats/odt \
@@ -164,7 +164,8 @@ export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
 export DEPSDIR	:=	$(CURDIR)/$(BUILD)
 
 CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
-CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
+CPPFILES	:=	$(sort $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp))) \
+			$(notdir $(filter %.cpp,$(SOURCES))))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 PICAFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.v.pica)))
 SHLISTFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.shlist)))
