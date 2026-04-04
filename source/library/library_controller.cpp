@@ -9,6 +9,7 @@
 
 #include "app/app.h"
 #include "book/book.h"
+#include "book/book_context.h"
 #include "debug_log.h"
 #include "shared/app_flow_utils.h"
 #include "shared/utf8_utils.h"
@@ -110,6 +111,12 @@ static bool HasBookWithFileName(const App *app, const char *filename) {
   return false;
 }
 
+static void DrawBottomGradientFromApp(void *user_data) {
+  App *app = static_cast<App *>(user_data);
+  if (app)
+    app->DrawBottomGradientBackground();
+}
+
 static void AppendBookFromFilename(App *app, const std::string &source_dir,
                                    const char *filename) {
   if (!app || !app_flow_utils::ShouldIndexBookFilename(filename))
@@ -125,7 +132,16 @@ static void AppendBookFromFilename(App *app, const std::string &source_dir,
   LogFilenameStage(app, "d_name", raw_name.c_str());
   if (io_name != raw_name)
     LogFilenameStage(app, "d_name_io_fix", io_name.c_str());
-  Book *book = new Book(app);
+  BookContext ctx;
+  ctx.text = app->ts;
+  ctx.prefs = app->prefs;
+  ctx.paragraph_spacing = &app->paraspacing;
+  ctx.paragraph_indent = &app->paraindent;
+  ctx.orientation = &app->orientation;
+  ctx.status_reporter = app;
+  ctx.draw_background = &DrawBottomGradientFromApp;
+  ctx.draw_background_user_data = app;
+  Book *book = new Book(ctx);
   book->SetFolderName(source_dir.c_str());
   book->SetFileName(io_name.c_str());
   book->SetTitle(io_name.c_str());

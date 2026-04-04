@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "book/book_context.h"
 #include "book/inline_image_layout.h"
 #include "shared/app_flow_utils.h"
 #include <3ds.h>
@@ -32,7 +33,6 @@ typedef enum {
   FORMAT_CBZ
 } format_t;
 
-class App;
 class IStatusReporter;
 class Page;
 class Text;
@@ -121,7 +121,7 @@ private:
   MuPdfState *mupdf_state;
   CbzState *cbz_state;
   ReflowWorkerState *reflow_worker_state;
-  App *app; //! pointer to the App instance.
+  BookContext ctx;
   unsigned int layout_revision;
 
   void ClearInlineImageCache();
@@ -149,7 +149,7 @@ public:
   //! Remembers which wrap-fix state produced the currently cached pages.
   bool parsed_with_mobi_line_wrap_fix;
 
-  Book(App *app);
+  Book(const BookContext &ctx);
   ~Book();
   format_t format;
   IStatusReporter *GetStatusReporter();

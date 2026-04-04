@@ -2,9 +2,9 @@
 
 #include <3ds.h>
 
-#include "app/app.h"
 #include "debug_log.h"
 #include "formats/epub/epub.h"
+#include "ui/text.h"
 
 namespace {
 
@@ -96,8 +96,9 @@ void ReflowWorkerThreadFunc(void *arg) {
 } // namespace
 
 void Book::PrepareForOpen() {
-  if (app && app->ts)
-    app->ts->SetStyle(TEXT_STYLE_REGULAR);
+  Text *text = GetText();
+  if (text)
+    text->SetStyle(TEXT_STYLE_REGULAR);
   tocResolveTried = false;
   tocResolved = false;
   ClearTocConfidence();
@@ -112,7 +113,7 @@ u8 Book::OpenPrepared() {
 
   char logmsg[256];
   snprintf(logmsg, sizeof(logmsg), "Opening: %s", path.c_str());
-  DBG_LOG(app, logmsg);
+  DBG_LOG(GetStatusReporter(), logmsg);
 
   u8 err = 1;
   if (format == FORMAT_EPUB) {

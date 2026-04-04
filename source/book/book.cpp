@@ -13,7 +13,7 @@
 
 #include "book/book.h"
 
-#include "app/app.h"
+#include "book/book_context.h"
 #include "book/book_xml.h"
 #include "book/heading_layout.h"
 #include "formats/epub/epub.h"
@@ -1368,7 +1368,7 @@ void fallback(void *data, const XML_Char *s, int len) {
 
 } // namespace xml::book
 
-Book::Book(App *a) {
+Book::Book(const BookContext &c) : ctx(c) {
   foldername.clear();
   filename.clear();
   title.clear();
@@ -1381,7 +1381,6 @@ Book::Book(App *a) {
   reflow_worker_state = NULL;
   position = 0;
   format = FORMAT_UNDEF;
-  app = a;
   coverPixels = nullptr;
   coverWidth = 0;
   coverHeight = 0;
@@ -1412,21 +1411,25 @@ Book::~Book() {
   }
 }
 
-IStatusReporter *Book::GetStatusReporter() { return app; }
+IStatusReporter *Book::GetStatusReporter() { return ctx.status_reporter; }
 
-Text *Book::GetText() { return app ? app->ts : NULL; }
+Text *Book::GetText() { return ctx.text; }
 
-Prefs *Book::GetPrefs() { return app ? app->prefs : NULL; }
+Prefs *Book::GetPrefs() { return ctx.prefs; }
 
-int Book::GetParagraphSpacing() { return app ? app->paraspacing : 0; }
+int Book::GetParagraphSpacing() {
+  return ctx.paragraph_spacing ? *ctx.paragraph_spacing : 0;
+}
 
-int Book::GetParagraphIndent() { return app ? app->paraindent : 0; }
+int Book::GetParagraphIndent() {
+  return ctx.paragraph_indent ? *ctx.paragraph_indent : 0;
+}
 
-int Book::GetOrientation() { return app ? app->orientation : 0; }
+int Book::GetOrientation() { return ctx.orientation ? *ctx.orientation : 0; }
 
 void Book::DrawBottomGradientBackground() {
-  if (app)
-    app->DrawBottomGradientBackground();
+  if (ctx.draw_background)
+    ctx.draw_background(ctx.draw_background_user_data);
 }
 
 void Book::SetFolderName(const char *name) {
