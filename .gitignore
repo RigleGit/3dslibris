@@ -36,3 +36,6 @@
 *.log
 *.bak
 .worktrees/
+
+# Local AI assistant context (not for repository)
+CLAUDE.md
