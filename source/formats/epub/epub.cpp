@@ -56,7 +56,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "parse.h"
 #include "book/reflow_cache_save_utils.h"
 #include "stb_image.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 #include "minizip/unzip.h"
 #include "zlib.h"
 #include <3ds.h>

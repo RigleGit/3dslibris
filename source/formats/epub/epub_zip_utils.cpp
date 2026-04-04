@@ -7,7 +7,7 @@
 #include "formats/epub/epub_zip_utils.h"
 
 #include "minizip/unzip.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 #include <string.h>
 
 namespace epub_zip_utils {

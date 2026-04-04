@@ -34,7 +34,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/epub/epub_zip_utils.h"
 #include "minizip/unzip.h"
 #include "path_utils.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 #include <3ds.h>
 #include <algorithm>
 #include <map>

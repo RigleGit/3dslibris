@@ -6,7 +6,7 @@
 #include "formats/common/xml_parse_utils.h"
 #include "parse.h"
 #include "shared/parser_limits.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 
 #include <stdio.h>
 

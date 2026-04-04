@@ -1,5 +1,5 @@
 #include "formats/common/epub_image_utils.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 
 #include <cstdlib>
 #include <string>

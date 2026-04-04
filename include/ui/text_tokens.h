@@ -1,18 +1,5 @@
 #pragma once
 
-#include <3ds.h>
-
-#define TEXT_BOLD_ON 2
-#define TEXT_BOLD_OFF 3
-#define TEXT_ITALIC_ON 4
-#define TEXT_ITALIC_OFF 5
-#define TEXT_IMAGE 6
-#define TEXT_IMAGE_LEADING_PARAGRAPH 7
-#define TEXT_IMAGE_FIGURE_WITH_CAPTION 8
-#define TEXT_IMAGE_CONTEXT_DEFAULT 14
-
-#define TEXT_STYLE_REGULAR (u8)0
-#define TEXT_STYLE_BOLD (u8)1
-#define TEXT_STYLE_ITALIC (u8)2
-#define TEXT_STYLE_BOLDITALIC (u8)3
-#define TEXT_STYLE_BROWSER (u8)4
+// Re-export from shared layer for backward compatibility.
+// New code should #include "shared/text_token_constants.h" directly.
+#include "shared/text_token_constants.h"

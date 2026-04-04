@@ -17,7 +17,7 @@
 #include "formats/epub/epub_limits.h"
 #include "path_utils.h"
 #include "shared/status_reporter.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 
 namespace {
 

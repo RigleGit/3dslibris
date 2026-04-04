@@ -19,7 +19,7 @@
 #include "formats/pdf/pdf.h"
 #include "formats/cbz/cbz.h"
 #include "formats/odt/odt_loader.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 #include <stdio.h>
 #include <sys/param.h>
 

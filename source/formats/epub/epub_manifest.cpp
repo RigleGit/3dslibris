@@ -41,7 +41,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "shared/parser_limits.h"
 #include "shared/status_reporter.h"
 #include "shared/text_layout_utils.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 #include "minizip/unzip.h"
 #include <3ds.h>
 #include <algorithm>

@@ -16,7 +16,7 @@
 #include "formats/epub/epub_toc_diag_utils.h"
 #include "path_utils.h"
 #include "shared/status_reporter.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 
 namespace {
 

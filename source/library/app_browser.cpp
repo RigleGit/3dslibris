@@ -44,7 +44,7 @@
 #include "library/browser_cover_cache_utils.h"
 #include "library/browser_job_queue_utils.h"
 #include "library/browser_warmup_utils.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 #include "ui/text.h"
 #include "shared/utf8_utils.h"
 #include "version.h"

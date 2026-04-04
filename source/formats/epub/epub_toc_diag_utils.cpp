@@ -12,7 +12,7 @@
 
 #include "debug_log.h"
 #include "shared/status_reporter.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 
 namespace epub_toc_diag_utils {
 

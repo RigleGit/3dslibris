@@ -1,7 +1,7 @@
 #include "formats/mobi/mobi_cover_meta_cache.h"
 
 #include "path_utils.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 
 #include <stdio.h>
 #include <string.h>

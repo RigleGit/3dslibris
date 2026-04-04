@@ -11,14 +11,17 @@ Versions of all third-party components used in 3dslibris. Update this file when 
 | libunibreak | 6.1 | `third_party/libunibreak/` | zlib | Line breaking algorithm |
 | stb_image | 2.27 (2021-07-11) | `third_party/stb/stb_image.h` | MIT-0 | Image decoding (covers, inline images) |
 | MuPDF | 1.27.2 | `third_party/mupdf/` | AGPL-3.0+ | PDF/CBZ/XPS rendering |
+| minizip | 1.1 (2010-02-14) | `third_party/minizip/` | zlib | ZIP archive access (EPUB, ODT) |
 
 ## System (devkitPro portlibs)
+
+Versions determined by devkitPro portlibs release channel; no pinned version in repo. Check `$DEVKITPRO/portlibs/3ds/` for installed versions.
 
 | Dependency | Location | License | Purpose |
 |------------|----------|---------|---------|
 | FreeType 2 | devkitPro portlib | FTL / GPLv2+ | Font rasterization |
 | libpng | devkitPro portlib | zlib | PNG decoding |
-| zlib | devkitPro portlib | zlib | Compression |
+| zlib | devkitPro portlib | zlib | Compression (minizip dependency) |
 | libctru | devkitPro SDK | zlib | 3DS system library |
 | bzip2 | devkitPro portlib | BSD-4 | BZ2 decompression |
 

@@ -14,7 +14,7 @@
 #include "minizip/unzip.h"
 #include "path_utils.h"
 #include "stb_image.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 #include <3ds.h>
 #include <algorithm>
 #include <ctype.h>

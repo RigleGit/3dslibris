@@ -11,8 +11,8 @@
 
 #include "book/page.h"
 #include "formats/epub/epub_toc_diag_utils.h"
-#include "string_utils.h"
-#include "ui/text_tokens.h"
+#include "shared/string_utils.h"
+#include "shared/text_token_constants.h"
 
 namespace {
 

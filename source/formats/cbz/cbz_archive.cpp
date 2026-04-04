@@ -1,7 +1,7 @@
 #include "formats/cbz/cbz_archive.h"
 
 #include "minizip/unzip.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 
 #include <algorithm>
 #include <climits>

@@ -15,7 +15,7 @@
 #include "formats/common/xml_parse_utils.h"
 #include "minizip/unzip.h"
 #include "parse.h"
-#include "string_utils.h"
+#include "shared/string_utils.h"
 
 namespace {
 

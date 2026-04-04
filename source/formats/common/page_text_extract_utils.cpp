@@ -8,7 +8,7 @@
 
 #include "book/page.h"
 #include "formats/mobi/mobi_heading_markers.h"
-#include "ui/text_tokens.h"
+#include "shared/text_token_constants.h"
 
 namespace page_text_extract_utils {
 
