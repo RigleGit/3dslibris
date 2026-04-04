@@ -6,7 +6,8 @@
 #include <string.h>
 
 #include "app/app.h"
-#include "main.h"
+#include "font_constants.h"
+#include "screen_constants.h"
 #include "ui/text.h"
 #include "ui/text_cache_utils.h"
 #include "ui/text_limits.h"

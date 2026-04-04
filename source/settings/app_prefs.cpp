@@ -27,7 +27,6 @@
 #include "book/book.h"
 #include "ui/button.h"
 #include "color_utils.h"
-#include "main.h"
 #include "parse.h"
 #include "settings/prefs.h"
 #include "ui/text.h"

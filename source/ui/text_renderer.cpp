@@ -7,7 +7,6 @@
 #include "3ds.h"
 #include "app/app.h"
 #include "color_utils.h"
-#include "main.h"
 #include "stb_image.h"
 #include "string.h"
 #include "ui/text.h"

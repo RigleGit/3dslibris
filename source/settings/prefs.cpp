@@ -18,7 +18,7 @@
 #include "book/book.h"
 #include "book/book_xml.h"
 #include "formats/common/xml_parse_utils.h"
-#include "main.h"
+#include "path_utils.h"
 #include "sys/stat.h"
 #include "sys/time.h"
 #include "ui/text_limits.h"
@@ -233,7 +233,7 @@ Prefs::~Prefs() {}
 int Prefs::Read() {
   int err = 0;
 
-  FILE *fp = fopen(PREFSPATH, "r");
+  FILE *fp = fopen(paths::kPrefsFile, "r");
   if (!fp) {
     err = 255;
     return err;
@@ -267,7 +267,7 @@ void Prefs::Apply() {
   }
 }
 
-//! Write settings to PREFSPATH.
+//! Write settings to prefs file.
 //! \return Error code.
 int Prefs::Write() {
   if (app->melonds)
@@ -279,7 +279,7 @@ int Prefs::Write() {
   if (app)
     colorMode = app->ts->GetColorMode();
 
-  FILE *fp = fopen(PREFSPATH, "w");
+  FILE *fp = fopen(paths::kPrefsFile, "w");
   if (!fp)
     return 255;
 

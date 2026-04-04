@@ -23,6 +23,7 @@
 #include "book/page_buffer_utils.h"
 #include "parse.h"
 #include "book/reflow_cache_save_utils.h"
+#include "screen_constants.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
 #include <algorithm>

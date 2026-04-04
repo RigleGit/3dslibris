@@ -20,8 +20,7 @@
 
 /*
   3DS port modifications by Rigle (summary):
-  - Added 3DS-specific constants for framebuffer layout and app paths.
-  - Declared startup helpers and splash hooks used by the 3DS main loop.
+  - Declares halt() functions used by the 3DS main loop.
 */
 
 #pragma once
@@ -29,35 +28,6 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include "3ds.h"
-
-#define MARGINLEFT 12
-#define MARGINRIGHT 12
-#define MARGINTOP 10
-#define MARGINBOTTOM 36
-#define LINESPACING 0
-// 3DS screen dimensions in landscape mode:
-//   Bottom screen: 320 x 240 physical pixels
-//   Top screen:    400 x 240 physical pixels
-//
-// Software buffer uses: screen[sy * PAGE_HEIGHT + sx]
-//   sx = horizontal (pen.x), 0 to PAGE_HEIGHT-1
-//   sy = vertical   (pen.y), 0 to PAGE_WIDTH-1
-// Buffer allocated as PAGE_HEIGHT * PAGE_HEIGHT (square, like DS VRAM).
-#define PAGE_HEIGHT 400
-#define PAGE_WIDTH 240
-#define SPLASH_LEFT 28
-#define SPLASH_TOP 44
-
-#include "path_utils.h"
-
-#define LOGFILEPATH paths::kLogFile
-#define PREFSPATH paths::kPrefsFile
-
-#define FONTREGULARFILE "LiberationSerif-Regular.ttf"
-#define FONTBOLDFILE "LiberationSerif-Bold.ttf"
-#define FONTITALICFILE "LiberationSerif-Italic.ttf"
-#define FONTBOLDITALICFILE "LiberationSerif-BoldItalic.ttf"
-#define FONTBROWSERFILE "LiberationSans-Regular.ttf"
 
 class Text;
 

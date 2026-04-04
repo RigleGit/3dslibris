@@ -38,7 +38,7 @@
 #include "app/startup_controller.h"
 #include "app/main_loop_controller.h"
 #include "debug_log.h"
-#include "main.h"
+#include "path_utils.h"
 #include "parse.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
@@ -661,7 +661,7 @@ void App::PrintStatus(const char *msg) {
   LightLock_Lock(&status_log_lock_);
 
   if (!status_log_file_) {
-    status_log_file_ = fopen(LOGFILEPATH, "a");
+    status_log_file_ = fopen(paths::kLogFile, "a");
     if (status_log_file_)
       setvbuf(status_log_file_, NULL, _IOFBF, 4096);
   }

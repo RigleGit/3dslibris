@@ -3,7 +3,7 @@
 #include <string.h>
 #include <vector>
 
-#include "main.h"
+#include "screen_constants.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
 
