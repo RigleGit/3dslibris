@@ -15,16 +15,12 @@
 
 #include <cstddef>
 #include <3ds.h>
-#include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "ui/framebuffer_blit_utils.h"
-#include "ui/glyph_cache_lru.h"
-#include "ft2build.h"
-#include FT_FREETYPE_H
-#include FT_CACHE_H
+#include "ui/font_manager.h"
+#include "ui/text_renderer.h"
 
 //! Reference: FreeType2 online documentation
 #define EMTOPIXEL (float)(POINTSIZE * DPI / 72.0)
@@ -52,34 +48,6 @@
 #define CACHESIZE 512
 
 class App;
-
-typedef struct TextFaceRec_ {
-  char file_path[128];
-  int face_index;
-} TextFaceRec, *TextFace;
-
-typedef struct TextCache_ {
-  FTC_Manager manager;
-  FTC_CMapCache cmap;
-  FTC_ImageCache image;
-  FTC_SBitCache sbit;
-} TextCache;
-
-//! Homemade glyph cache.
-
-//! Fetches from FreeType can be expensive,
-//! so keep advance and gylphs handy,
-//! keyed by UCS codepoint.
-
-class Cache {
-public:
-  //! Associates each glyph cache index (value)
-  //! with its Unicode code point (key).
-  std::map<u32, FT_GlyphSlot> cacheMap;
-  glyph_cache_lru::GlyphCacheLru lru;
-
-  Cache() : lru(CACHESIZE) {}
-};
 
 //! Typesetter singleton that provides all text rendering services.
 
@@ -128,15 +96,13 @@ public:
   int Init();
   void InitPen(void);
 
-  inline u8 GetAdvance(u32 ucs) { return GetAdvance(ucs, GetFace(style)); };
-  inline u8 GetAdvance(u32 ucs, u8 astyle) {
-    return GetAdvance(ucs, GetFace(astyle));
-  };
+  inline u8 GetAdvance(u32 ucs) { return GetAdvance(ucs, GetFace(GetStyle())); };
+  inline u8 GetAdvance(u32 ucs, u8 astyle) { return GetAdvance(ucs, GetFace(astyle)); };
   u8 GetCharCode(const char *txt, u32 *code);
   u8 GetCharCode(const char *txt, size_t remaining, u32 *code);
   u8 GetCharCountInsideWidth(const char *txt, u8 style, u8 pixels);
-  FT_Face GetFace() { return faces[style]; }
-  FT_Face GetFace(u8 astyle) { return faces[astyle]; }
+  FT_Face GetFace();
+  FT_Face GetFace(u8 astyle);
   std::string GetFontFile(u8 style);
   std::string GetFontName(u8 style);
   bool GetFontName(std::string &s);
@@ -150,7 +116,7 @@ public:
   u16 *GetScreen();
   int GetStringAdvance(const char *txt);
   u8 GetStringWidth(const char *txt, u8 style);
-  inline int GetStyle() { return style; }
+  int GetStyle();
 
   void SetColorMode(int mode);
   int GetColorMode();
@@ -160,27 +126,16 @@ public:
   void SetPixelSize(u8 size);
   void SetTextColorOverride(u16 color);
   void ClearTextColorOverride();
-  inline void SetFace(u8 astyle) { style = astyle; };
+  void SetFace(u8 astyle);
   void SetFontFile(const char *path, u8 style);
   void SetScreen(u16 *s);
-  inline void SetStyle(int astyle) { style = astyle; }
+  void SetStyle(int astyle);
   void MarkScreenDirty(u16 *target);
   void MarkScreenDirtyRect(u16 *target, int x0, int y0, int x1, int y1);
-  inline void MarkCurrentScreenDirty() { MarkScreenDirty(screen); }
-  inline void MarkCurrentScreenDirtyRect(int x0, int y0, int x1, int y1) {
-    MarkScreenDirtyRect(screen, x0, y0, x1, y1);
-  }
-  inline void MarkAllScreensDirty() {
-    screenleft_dirty = true;
-    screenright_dirty = true;
-    screenleft_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
-        0, 0, display.width, framebuffer_blit_utils::LogicalTextScreenHeight(true));
-    screenright_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
-        0, 0, display.width, framebuffer_blit_utils::LogicalTextScreenHeight(false));
-  }
-  inline bool HasDirtyScreens() const {
-    return screenleft_dirty || screenright_dirty;
-  }
+  void MarkCurrentScreenDirty();
+  void MarkCurrentScreenDirtyRect(int x0, int y0, int x1, int y1);
+  void MarkAllScreensDirty();
+  bool HasDirtyScreens() const;
 
   void ClearCache();
   void ClearCache(u8 style);
@@ -203,61 +158,19 @@ public:
   void PrintSplash(u16 *screen);
 
 private:
-  FT_Library library;
-  FT_Error error;
+  friend class FontManager;
+  friend class TextRenderer;
+  FontManager *fm;
+  TextRenderer *tr;
 
-  //! Use the FreeType cache?
-  bool ftc;
-
-  // A: Homemade cache
-  std::map<FT_Face, Cache *> textCache;
-  std::map<FT_Face, std::unordered_map<u32, u8>> advanceCache;
-
-  // B: FreeType cache subsystem
-  TextCache cache;
-  TextFaceRec face_id;
-  FTC_SBitRec sbit;
-  FTC_ImageTypeRec imagetype;
-  FT_Int charmap_index;
-
-  std::map<u8, FT_Face> faces;
-  std::map<u8, std::string> filenames;
-
-  //! Current style, as in TEXT_STYLE_*.
-  int style;
-  //! Current draw position.
-  FT_Vector pen;
-  //! Color mode: 0=normal, 1=invert, 2=sepia
-  int colorMode;
-  //! False: default "turned left" render mapping, true: opposite rotation.
-  bool turned_right;
-  //! Last printed char code.
-  u32 codeprev;
-  //! Was the last glyph lookup a cache hit?
-  bool hit;
-
-  //! It would fully justify, if it worked.
-  bool justify;
-  bool splash_attempted;
-  bool splash_loaded;
-  u16 *splash_pixels;
-
-  // Keep stats to check efficiency of caching.
-
-  //! Total glyph cache hits.
-  int stats_hits;
-  //! Total glyph cache misses.
-  int stats_misses;
-
-  inline int CacheGlyph(u32 ucs) { return CacheGlyph(ucs, style); }
+  inline int CacheGlyph(u32 ucs) { return CacheGlyph(ucs, (u8)GetStyle()); }
   inline int CacheGlyph(u32 ucs, u8 style) {
     return CacheGlyph(ucs, GetFace(style));
   }
   int CacheGlyph(u32 ucs, FT_Face face);
   void ClearCache(FT_Face face);
-  FT_Error CreateFace(int style);
   inline FT_GlyphSlot GetGlyph(u32 ucs, int flags) {
-    return GetGlyph(ucs, flags, GetFace(style));
+    return GetGlyph(ucs, flags, GetFace((u8)GetStyle()));
   };
   inline FT_GlyphSlot GetGlyph(u32 ucs, int flags, u8 astyle) {
     return GetGlyph(ucs, flags, GetFace(astyle));
@@ -267,11 +180,6 @@ private:
   FT_UInt GetGlyphIndex(u32 ucs);
   u8 GetAdvance(u32 ucs, FT_Face face);
   u8 GetStringWidth(const char *txt, FT_Face face);
-
-  int InitCache();
-  FT_Error InitFreeTypeCache();
-  bool EnsureSplashLoaded();
-  void DrawFallbackSplash();
 
   void PrintChar(u32 ucs, FT_Face face);
   void PrintString(const char *string, FT_Face face);
