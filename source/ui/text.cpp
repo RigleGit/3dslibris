@@ -1,8 +1,8 @@
 #include "ui/text.h"
 
+#include <string.h>
 #include <vector>
 
-#include "app/app.h"
 #include "main.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
