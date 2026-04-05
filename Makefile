@@ -138,7 +138,7 @@ CXXFLAGS	+=	-DDSLIBRIS_DEBUG
 endif
 
 ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=3dsx.specs $(ARCH) -Wl,-Map,$(notdir $*.map)
+LDFLAGS	=	-specs=3dsx.specs $(ARCH) -Wl,-Map,$(notdir $*.map) -Wl,--gc-sections
 
 LIBS	:= -lmupdf -lmupdf-third -lfreetype -lpng -lbz2 -lminizip -lz -lm -lctru
 
@@ -276,6 +276,12 @@ stage-romfs:
 	@cp LICENSES/GPL-2.0-or-later.txt "$(ROMFS_RUNTIME_APPDIR)/licenses/GPL-2.0-or-later.txt"
 	@cp LICENSES/AGPL-3.0-or-later.txt "$(ROMFS_RUNTIME_APPDIR)/licenses/AGPL-3.0-or-later.txt"
 mupdf-minimal: $(MUPDF_STAMP)
+
+# mupdf's internal build has a race condition with parallel compilation.
+.NOTPARALLEL: mupdf-minimal
+
+# mupdf's internal build has a race condition with parallel compilation.
+.NOTPARALLEL: mupdf-minimal
 
 $(MUPDF_STAMP): $(CURDIR)/scripts/build_mupdf_minimal.sh
 	@echo building mupdf minimal ...

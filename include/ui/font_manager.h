@@ -28,7 +28,7 @@ typedef struct TextCache_ {
 
 class Cache {
 public:
-  std::map<u32, FT_GlyphSlot> cacheMap;
+  std::unordered_map<u32, FT_GlyphSlot> cacheMap;
   glyph_cache_lru::GlyphCacheLru lru;
   Cache() : lru(512) {}
 };

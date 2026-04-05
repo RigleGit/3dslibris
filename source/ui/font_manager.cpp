@@ -243,7 +243,7 @@ int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
     return -1;
   uint32_t evicted_ucs = 0;
   if (face_cache->lru.Insert(ucs, &evicted_ucs)) {
-    std::map<u32, FT_GlyphSlot>::iterator evicted =
+    auto evicted =
         face_cache->cacheMap.find(evicted_ucs);
     if (evicted != face_cache->cacheMap.end()) {
       delete[] evicted->second->bitmap.buffer;
@@ -303,7 +303,7 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     FT_Load_Char(face, ucs, flags);
     return face->glyph;
   }
-  std::map<u32, FT_GlyphSlot>::iterator iter = face_cache->cacheMap.find(ucs);
+  auto iter = face_cache->cacheMap.find(ucs);
   if (iter != face_cache->cacheMap.end()) {
     if (parent->tr)
       parent->tr->SetHit(true);
@@ -338,8 +338,7 @@ void FontManager::ClearCache(FT_Face face) {
     return;
   }
 
-  for (std::map<u32, FT_GlyphSlot>::iterator iter =
-           face_cache->cacheMap.begin();
+  for (auto iter = face_cache->cacheMap.begin();
        iter != face_cache->cacheMap.end(); iter++) {
     delete[] iter->second->bitmap.buffer;
     delete iter->second;

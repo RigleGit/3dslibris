@@ -104,6 +104,7 @@ private:
   std::vector<u32> mobi_record_offsets;
   size_t fb2_inline_images_bytes;
   std::list<InlineImageCacheEntry> inline_image_cache;
+  std::unordered_map<u64, std::list<InlineImageCacheEntry>::iterator> inline_image_cache_index;
   size_t inline_image_cache_bytes;
   TocQuality toc_quality;
   u16 toc_direct_count;

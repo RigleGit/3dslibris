@@ -97,14 +97,6 @@ void Page::Draw(Text *ts) {
   u16 *first_screen = turned_right ? ts->screenright : ts->screenleft;
   u16 *second_screen = turned_right ? ts->screenleft : ts->screenright;
 
-  auto screen_bottom_margin = [&](u16 *screen) -> int {
-    return (screen == ts->screenleft) ? leftBottomMargin : rightBottomMargin;
-  };
-
-  auto screen_max_height = [&](u16 *screen) -> int {
-    return (screen == ts->screenleft) ? 400 : 320;
-  };
-
   //! Write to offscreen buffer, then blit to video memory, for both screens.
   ts->InitPen();
   ts->linebegan = false;
@@ -119,6 +111,15 @@ void Page::Draw(Text *ts) {
   ts->SetScreen(first_screen);
 #endif
 
+  // Cache screen-dependent values to avoid repeated comparisons in the hot loop.
+  // first_screen == screenleft → leftBottomMargin, maxHeight=400
+  // first_screen == screenright → rightBottomMargin, maxHeight=320
+  const bool first_is_left = (first_screen == ts->screenleft);
+  int first_max_height = first_is_left ? 400 : 320;
+  int first_bottom_margin = first_is_left ? leftBottomMargin : rightBottomMargin;
+  int second_bottom_margin = first_is_left ? rightBottomMargin : leftBottomMargin;
+  bool on_first_screen = true;
+
   auto advance_to_next_screen = [&]() -> bool {
     if (ts->GetScreen() == first_screen) {
 #ifdef OFFSCREEN
@@ -128,7 +129,8 @@ void Page::Draw(Text *ts) {
 #else
       ts->SetScreen(second_screen);
 #endif
-      ts->margin.bottom = screen_bottom_margin(second_screen);
+      on_first_screen = false;
+      ts->margin.bottom = second_bottom_margin;
       ts->ClearScreen();
       ts->InitPen();
       ts->linebegan = false;
@@ -136,7 +138,7 @@ void Page::Draw(Text *ts) {
     }
     return false;
   };
-  ts->margin.bottom = screen_bottom_margin(first_screen);
+  ts->margin.bottom = first_bottom_margin;
   // Clear both page buffers through Text API so dirty flags stay coherent.
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
@@ -153,8 +155,8 @@ void Page::Draw(Text *ts) {
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
-      int maxHeight = screen_max_height(ts->GetScreen());
-      int currentBottomMargin = screen_bottom_margin(ts->GetScreen());
+      int maxHeight = first_max_height;
+      int currentBottomMargin = first_bottom_margin;
       ts->margin.bottom = currentBottomMargin;
       if (ts->GetPenY() + ts->GetHeight() + ts->linespacing >
           maxHeight - currentBottomMargin) {
@@ -167,7 +169,8 @@ void Page::Draw(Text *ts) {
 #else
           ts->SetScreen(second_screen);
 #endif
-          ts->margin.bottom = screen_bottom_margin(second_screen);
+          on_first_screen = false;
+          ts->margin.bottom = second_bottom_margin;
           ts->ClearScreen();
           ts->InitPen();
           ts->linebegan = false;
@@ -256,7 +259,7 @@ void Page::Draw(Text *ts) {
         i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
-      ts->margin.bottom = (ts->GetScreen() == ts->screenleft)
+      ts->margin.bottom = (on_first_screen == first_is_left)
                               ? leftBottomMargin
                               : rightBottomMargin;
 
