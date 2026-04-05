@@ -63,16 +63,28 @@ static std::string ToLowerAsciiLocal(const std::string &s) {
 static bool ParsedBufferEndsWithWhitespace(const parsedata_t *p) {
   if (!p || p->buflen == 0)
     return false;
-  const char c = p->buf[p->buflen - 1];
+  const u32 c = p->buf[p->buflen - 1];
   return c == ' ' || c == '\n' || c == '\t';
 }
 
-static void AppendParsedByte(parsedata_t *p, char c) {
-  parse_append_page_byte(p, (u8)c);
+static void AppendParsedByte(parsedata_t *p, u32 c) {
+  parse_append_page_byte(p, c);
 }
 
-static void AppendParsedBytes(parsedata_t *p, const char *data, size_t len) {
-  parse_append_page_bytes(p, data, len);
+static void AppendParsedCodepoints(parsedata_t *p, const char *utf8,
+                                   size_t utf8_len) {
+  size_t offset = 0;
+  while (offset < utf8_len) {
+    uint32_t cp = 0;
+    size_t consumed = text_unicode_utils::DecodeNextDisplayCodepoint(
+        utf8 + offset, utf8_len - offset, &cp);
+    if (consumed == 0) {
+      offset++;
+      continue;
+    }
+    parse_append_page_byte(p, (u32)cp);
+    offset += consumed;
+  }
 }
 
 static void RestoreParsedStyleMarkers(parsedata_t *p) {
@@ -575,8 +587,8 @@ void start(void *data, const char *el, const char **attr) {
     if (parse_in(p, TAG_UL) && !parse_in(p, TAG_OL)) {
       if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
         linefeed(p);
-      static const char kBulletUtf8[] = "\xE2\x80\xA2 ";
-      AppendParsedBytes(p, kBulletUtf8, sizeof(kBulletUtf8) - 1);
+      AppendParsedByte(p, 0x2022); // bullet '•'
+      AppendParsedByte(p, ' ');
       p->pen.x += ts->GetAdvance(0x2022) + ts->GetAdvance(' ');
       p->linebegan = true;
       p->strip_leading_list_marker = true;
@@ -648,8 +660,7 @@ void start(void *data, const char *el, const char **attr) {
       if (leading_paragraph_image)
         AppendParsedByte(p, TEXT_IMAGE_LEADING_PARAGRAPH);
       AppendParsedByte(p, TEXT_IMAGE);
-      AppendParsedByte(p, (u8)((image_id >> 8) & 0xFF));
-      AppendParsedByte(p, (u8)(image_id & 0xFF));
+      AppendParsedByte(p, (u32)image_id);
 
       switch (image_plan.mode) {
       case INLINE_IMAGE_LAYOUT_INLINE:
@@ -819,7 +830,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
           continue;
         }
 
-        if (iswhitespace((u8)txt[i])) {
+        if (iswhitespace((u32)(u8)txt[i])) {
           if (txt[i] == '\n') {
             AppendParsedByte(p, '\n');
             p->pen.x = ts->margin.left;
@@ -827,7 +838,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
             p->linebegan = false;
             AdvanceParsedPageOnOverflow(p, lineheight);
           } else if (p->linebegan && p->buflen &&
-                     !iswhitespace((u8)p->buf[p->buflen - 1])) {
+                     !iswhitespace(p->buf[p->buflen - 1])) {
             AppendParsedByte(p, ' ');
             p->pen.x += spaceadvance;
           }
@@ -838,7 +849,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
         int j = i;
         int advance = 0;
         u8 bytes = 1;
-        for (j = i; (j < txtlen) && (!iswhitespace((u8)txt[j])); j += bytes) {
+        for (j = i; (j < txtlen) && (!iswhitespace((u32)(u8)txt[j])); j += bytes) {
           u32 code = (u8)txt[j];
           bytes = 1;
           if (code >> 7)
@@ -861,15 +872,9 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
 
         AdvanceParsedPageOnOverflow(p, lineheight);
 
-        for (; i < j; i++) {
-          if (iswhitespace((u8)txt[i])) {
-            if (p->linebegan)
-              AppendParsedByte(p, ' ');
-          } else {
-            p->linebegan = true;
-            AppendParsedByte(p, txt[i]);
-          }
-        }
+        AppendParsedCodepoints(p, txt + i, (size_t)(j - i));
+        p->linebegan = true;
+        i = j;
         p->pen.x += advance;
       }
       return;
@@ -924,7 +929,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
         AdvanceParsedPageOnOverflow(p, lineheight);
       }
 
-      AppendParsedBytes(p, txt + segment_start, segment_end - segment_start);
+      AppendParsedCodepoints(p, txt + segment_start, segment_end - segment_start);
       p->pen.x += advance;
       p->linebegan = true;
       unit_index = segment_end_index;
@@ -969,7 +974,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
           p->linebegan = false;
         }
         AdvanceParsedPageOnOverflow(p, lineheight);
-        AppendParsedBytes(p, txt + unit.text.byte_offset, unit.text.byte_length);
+        AppendParsedCodepoints(p, txt + unit.text.byte_offset, unit.text.byte_length);
         p->pen.x += unit_advance;
         p->linebegan = true;
       }
@@ -999,7 +1004,7 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     }
 
     AdvanceParsedPageOnOverflow(p, lineheight);
-    AppendParsedBytes(p, txt + segment_start, segment_end - segment_start);
+    AppendParsedCodepoints(p, txt + segment_start, segment_end - segment_start);
     p->linebegan = true;
     p->pen.x += advance;
     unit_index = segment_end_index;
@@ -1159,30 +1164,17 @@ int unknown(void *encodingHandlerData, const XML_Char *name,
 }
 
 void fallback(void *data, const XML_Char *s, int len) {
-  // Handles HTML entities in body text.
-
   parsedata_t *p = (parsedata_t *)data;
   int advancespace = p->ts->GetAdvance(' ');
   if (s[0] == '&') {
-    /** if it's decimal, convert the UTF-16 to UTF-8. */
     int code = 0;
     sscanf(s, "&#%d;", &code);
     if (code) {
-      if (code >= 128 && code <= 2047) {
-        AppendParsedByte(p, 192 + (code / 64));
-        AppendParsedByte(p, 128 + (code % 64));
-      } else if (code >= 2048 && code <= 65535) {
-        AppendParsedByte(p, 224 + (code / 4096));
-        AppendParsedByte(p, 128 + ((code / 64) % 64));
-        AppendParsedByte(p, 128 + (code % 64));
-      }
-      // TODO - support 4-byte codes
-
+      AppendParsedByte(p, (u32)code);
       p->pen.x += p->ts->GetAdvance(code);
       return;
     }
 
-    /** otherwise, handle only common HTML named entities. */
     if (!strncmp(s, "&nbsp;", 5)) {
       AppendParsedByte(p, ' ');
       p->pen.x += advancespace;

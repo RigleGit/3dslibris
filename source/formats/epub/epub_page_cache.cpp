@@ -21,7 +21,7 @@ namespace {
 static const char *kEpubCacheBaseDir = paths::kCacheBaseDir;
 static const char *kEpubCacheDir = paths::kEpubCacheDir;
 static const u32 kEpubPageCacheMagic = 0x45504347U;
-static const u16 kEpubPageCacheVersion = 2;
+static const u16 kEpubPageCacheVersion = 3;
 static const u16 kPageCacheTitleMaxBytes = 1000;
 static const u16 kPageCachePageMaxBytes = 4096;
 static const u16 kPageCacheChapterTitleMaxBytes = 2048;
@@ -123,7 +123,7 @@ CollectPages(Book *book) {
     const int length = page ? page->GetLength() : 0;
     page_cache_utils::CachedPage cached_page;
     if (page && length > 0) {
-      const u8 *buffer = page->GetBuffer();
+      const u32 *buffer = page->GetBuffer();
       if (!buffer)
         return std::vector<page_cache_utils::CachedPage>();
       cached_page.assign(buffer, buffer + length);

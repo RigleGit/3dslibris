@@ -15,7 +15,7 @@ namespace mobi_page_cache {
 namespace {
 
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-static const u16 kMobiPageCacheVersion = 16;
+static const u16 kMobiPageCacheVersion = 17;
 static const u16 kPageCacheTitleMaxBytes = 1000;
 static const u16 kPageCachePageMaxBytes = 4096;
 static const u16 kPageCacheChapterTitleMaxBytes = 2048;
@@ -90,7 +90,7 @@ CollectCachedPages(Book *book) {
     const int length = page ? page->GetLength() : 0;
     page_cache_utils::CachedPage cached_page;
     if (page && length > 0) {
-      const u8 *buffer = page->GetBuffer();
+      const u32 *buffer = page->GetBuffer();
       if (!buffer)
         return std::vector<page_cache_utils::CachedPage>();
       cached_page.assign(buffer, buffer + length);

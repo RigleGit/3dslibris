@@ -40,13 +40,13 @@ class Book;
 
 class Page {
 	class Book *book;
-	std::vector<u8> storage;
+	std::vector<u32> storage;
 	void DrawNumber(Text *ts, u16 *number_screen);
 	void SyncBufferAlias();
 
  public:
-	//! UTF-8 chars, allocated per-page at parse time, to exact length.
-	u8 *buf;
+	//! Pre-decoded Unicode codepoints, allocated per-page at parse time.
+	u32 *buf;
 	//! Length of buf.
 	int length;
 	//! Allocated capacity of buf.
@@ -58,10 +58,10 @@ class Page {
 	Page(Book *b);
 	Page(Book *b, Text *t);
 	~Page();
-	u8*  GetBuffer() { return buf; }
+	u32* GetBuffer() { return buf; }
 	int  GetLength() { return length; }
-	//! Copy src to buf for len bytes.
-	u8   SetBuffer(u8 *src, u16 len); 
+	//! Copy src to buf for len codepoints.
+	void SetBuffer(const u32 *src, int len); 
 	void AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned);
 	//	void Draw();
 	void Draw(Text *ts);

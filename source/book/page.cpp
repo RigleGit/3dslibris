@@ -50,24 +50,23 @@ void Page::SyncBufferAlias() {
   capacity = (int)storage.capacity();
 }
 
-u8 Page::SetBuffer(u8 *src, u16 len) {
-  const size_t required_capacity =
-      page_buffer_utils::RequiredPageBufferCapacity((size_t)capacity,
-                                                    (size_t)len);
-  if (required_capacity == 0) {
-    std::vector<u8>().swap(storage);
+void Page::SetBuffer(const u32 *src, int len) {
+  if (len <= 0) {
+    std::vector<u32>().swap(storage);
     SyncBufferAlias();
-    return 0;
+    return;
   }
 
+  const size_t required_capacity =
+      page_buffer_utils::RequiredPageBufferCodepoints((size_t)capacity,
+                                                      (size_t)len);
   if ((size_t)capacity < required_capacity)
     storage.reserve(required_capacity);
 
   storage.resize(len);
-  if (len > 0 && src)
-    memcpy(storage.data(), src, len);
+  if (src)
+    memcpy(storage.data(), src, len * sizeof(u32));
   SyncBufferAlias();
-  return 0;
 }
 
 void Page::AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned) {
@@ -76,14 +75,14 @@ void Page::AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned) {
     return;
   }
 
-  const size_t len = owned->bytes.size();
+  const size_t len = owned->codepoints.size();
   if (len == 0) {
     SetBuffer(NULL, 0);
-    owned->bytes.clear();
+    owned->codepoints.clear();
     return;
   }
 
-  storage.swap(owned->bytes);
+  storage.swap(owned->codepoints);
   SyncBufferAlias();
 }
 
@@ -201,9 +200,9 @@ void Page::Draw(Text *ts) {
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION;
     } else if (c == TEXT_IMAGE) {
-      if (i + 2 < length) {
-        u16 image_id = ((u16)buf[i + 1] << 8) | (u16)buf[i + 2];
-        i += 3;
+      if (i + 1 < length) {
+        u16 image_id = (u16)buf[i + 1];
+        i += 2;
 
         InlineImageLayoutPlan image_plan{};
         int current_screen = (ts->GetScreen() == first_screen) ? 0 : 1;
@@ -253,10 +252,7 @@ void Page::Draw(Text *ts) {
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
       }
     } else {
-      if (c > 127)
-        i += ts->GetCharCode((char *)&(buf[i]), (size_t)(length - i), &c);
-      else
-        i++;
+      i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
       ts->margin.bottom = (on_first_screen == first_is_left)

@@ -32,7 +32,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <stdio.h>
 #include <string.h>
 
-bool iswhitespace(u8 c) {
+bool iswhitespace(u32 c) {
   switch (c) {
   case ' ':
   case '\t':
@@ -46,7 +46,7 @@ bool iswhitespace(u8 c) {
 void parse_reset_page_buffer(parsedata_t *data) {
   if (!data)
     return;
-  memset(data->buf, 0, sizeof(data->buf));
+  memset(data->buf, 0, PAGEBUFSIZE * sizeof(u32));
   data->buflen = 0;
   data->pagebuf_overflowed = false;
   data->pagebuf_overflow_bytes = 0;
@@ -59,7 +59,7 @@ static void parse_note_page_buffer_overflow(parsedata_t *data, size_t bytes) {
   data->pagebuf_overflow_bytes += bytes;
 }
 
-bool parse_append_page_byte(parsedata_t *data, u8 c) {
+bool parse_append_page_byte(parsedata_t *data, u32 c) {
   if (!data)
     return false;
   if (data->buflen >= PAGEBUFSIZE) {
@@ -70,7 +70,7 @@ bool parse_append_page_byte(parsedata_t *data, u8 c) {
   return true;
 }
 
-bool parse_append_page_byte_soft(parsedata_t *data, u8 c,
+bool parse_append_page_byte_soft(parsedata_t *data, u32 c,
                                  parse_page_flush_fn flush_page, void *ctx) {
   if (!data)
     return false;
@@ -83,7 +83,7 @@ bool parse_append_page_byte_soft(parsedata_t *data, u8 c,
   return parse_append_page_byte(data, c);
 }
 
-size_t parse_append_page_bytes(parsedata_t *data, const void *src, size_t len) {
+size_t parse_append_page_bytes(parsedata_t *data, const u32 *src, size_t len) {
   if (!data || !src || len == 0)
     return 0;
   if (data->buflen >= PAGEBUFSIZE) {
@@ -93,14 +93,14 @@ size_t parse_append_page_bytes(parsedata_t *data, const void *src, size_t len) {
 
   const size_t available = (size_t)PAGEBUFSIZE - (size_t)data->buflen;
   const size_t written = (len < available) ? len : available;
-  memcpy(data->buf + data->buflen, src, written);
+  memcpy(data->buf + data->buflen, src, written * sizeof(u32));
   data->buflen += (int)written;
   if (written < len)
     parse_note_page_buffer_overflow(data, len - written);
   return written;
 }
 
-size_t parse_append_page_bytes_soft(parsedata_t *data, const void *src,
+size_t parse_append_page_bytes_soft(parsedata_t *data, const u32 *src,
                                     size_t len,
                                     parse_page_flush_fn flush_page, void *ctx) {
   if (!data || !src || len == 0)

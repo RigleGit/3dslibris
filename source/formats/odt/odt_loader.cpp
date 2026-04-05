@@ -108,7 +108,7 @@ struct OdtParseState {
 static bool ParsedataEndsWhitespace(parsedata_t *p) {
   if (!p || p->buflen <= 0)
     return true;
-  unsigned char c = p->buf[p->buflen - 1];
+  u32 c = p->buf[p->buflen - 1];
   return c == ' ' || c == '\n' || c == '\r' || c == '\t';
 }
 

@@ -245,7 +245,7 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
   if (!p || !p->ts || !p->book)
     return;
 
-  const size_t token_len = 4;
+  const size_t token_len = 3;
   if (p->buflen > 0 && ((size_t)p->buflen + token_len) > PAGEBUFSIZE)
     PlainForceAdvancePageForBufferLimit(p, NULL);
 
@@ -266,8 +266,7 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
   else
     parse_append_page_byte(p, TEXT_IMAGE_CONTEXT_DEFAULT);
   parse_append_page_byte(p, TEXT_IMAGE);
-  parse_append_page_byte(p, (u8)((image_id >> 8) & 0xFF));
-  parse_append_page_byte(p, (u8)(image_id & 0xFF));
+  parse_append_page_byte(p, (u32)image_id);
   p->perf_inline_images++;
 
   switch (image_plan.mode) {

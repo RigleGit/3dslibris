@@ -7,11 +7,11 @@
 namespace page_buffer_utils {
 
 struct OwnedPageBuffer {
-  std::vector<uint8_t> bytes;
+  std::vector<uint32_t> codepoints;
 };
 
-inline size_t RequiredPageBufferCapacity(size_t current_capacity,
-                                         size_t required_length) {
+inline size_t RequiredPageBufferCodepoints(size_t current_capacity,
+                                           size_t required_length) {
   if (required_length == 0)
     return 0;
   if (current_capacity >= required_length)
@@ -28,10 +28,10 @@ inline size_t RequiredPageVectorCapacity(size_t current_count,
   return required_count;
 }
 
-inline OwnedPageBuffer AdoptPageBuffer(std::vector<uint8_t> *src) {
+inline OwnedPageBuffer AdoptPageBuffer(std::vector<uint32_t> *src) {
   OwnedPageBuffer out;
   if (src)
-    out.bytes.swap(*src);
+    out.codepoints.swap(*src);
   return out;
 }
 

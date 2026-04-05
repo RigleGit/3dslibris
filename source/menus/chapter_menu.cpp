@@ -162,7 +162,7 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 3072) {
   if (!page || !page->GetBuffer() || page->GetLength() <= 0)
     return "";
 
-  const u8 *buf = page->GetBuffer();
+  const u32 *buf = page->GetBuffer();
   const int len = page->GetLength();
   std::string out;
   out.reserve((size_t)len);
@@ -170,7 +170,7 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 3072) {
 
   int i = 0;
   while (i < len) {
-    unsigned char c = (unsigned char)buf[i];
+    u32 c = buf[i];
     if (c == TEXT_IMAGE_CONTEXT_DEFAULT ||
         c == TEXT_IMAGE_LEADING_PARAGRAPH ||
         c == TEXT_IMAGE_FIGURE_WITH_CAPTION) {
@@ -178,7 +178,7 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 3072) {
       continue;
     }
     if (c == TEXT_IMAGE) {
-      i += (i + 2 < len) ? 3 : 1;
+      i += (i + 1 < len) ? 2 : 1;
       if (!prev_space) {
         out.push_back(' ');
         prev_space = true;
@@ -200,8 +200,8 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 3072) {
     }
 
     if (c < 0x80) {
-      if (isalnum(c)) {
-        out.push_back((char)tolower(c));
+      if (isalnum((int)c)) {
+        out.push_back((char)tolower((int)c));
         prev_space = false;
       } else if (!prev_space) {
         out.push_back(' ');
@@ -209,19 +209,28 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 3072) {
       }
       i++;
     } else {
-      int step = 1;
-      if ((c & 0xE0) == 0xC0)
-        step = 2;
-      else if ((c & 0xF0) == 0xE0)
-        step = 3;
-      else if ((c & 0xF8) == 0xF0)
-        step = 4;
-      if (i + step > len)
-        step = 1;
-      for (int j = 0; j < step; j++)
-        out.push_back((char)buf[i + j]);
+      char utf8_buf[4];
+      int utf8_len = 0;
+      if (c < 0x800) {
+        utf8_buf[0] = (char)(0xC0 | (c >> 6));
+        utf8_buf[1] = (char)(0x80 | (c & 0x3F));
+        utf8_len = 2;
+      } else if (c < 0x10000) {
+        utf8_buf[0] = (char)(0xE0 | (c >> 12));
+        utf8_buf[1] = (char)(0x80 | ((c >> 6) & 0x3F));
+        utf8_buf[2] = (char)(0x80 | (c & 0x3F));
+        utf8_len = 3;
+      } else {
+        utf8_buf[0] = (char)(0xF0 | (c >> 18));
+        utf8_buf[1] = (char)(0x80 | ((c >> 12) & 0x3F));
+        utf8_buf[2] = (char)(0x80 | ((c >> 6) & 0x3F));
+        utf8_buf[3] = (char)(0x80 | (c & 0x3F));
+        utf8_len = 4;
+      }
+      for (int j = 0; j < utf8_len; j++)
+        out.push_back(utf8_buf[j]);
       prev_space = false;
-      i += step;
+      i++;
     }
 
     if (max_out > 0 && out.size() >= max_out)
@@ -237,7 +246,7 @@ static std::vector<std::string> BuildPageHeadingLines(Page *page,
   if (!page || !page->GetBuffer() || page->GetLength() <= 0 || max_lines == 0)
     return lines;
 
-  const u8 *buf = page->GetBuffer();
+  const u32 *buf = page->GetBuffer();
   const int len = page->GetLength();
   std::string cur;
   cur.reserve(96);
@@ -250,14 +259,14 @@ static std::vector<std::string> BuildPageHeadingLines(Page *page,
   };
 
   for (int i = 0; i < len; i++) {
-    unsigned char c = (unsigned char)buf[i];
+    u32 c = buf[i];
     if (c == TEXT_IMAGE_CONTEXT_DEFAULT ||
         c == TEXT_IMAGE_LEADING_PARAGRAPH ||
         c == TEXT_IMAGE_FIGURE_WITH_CAPTION) {
       continue;
     }
     if (c == TEXT_IMAGE) {
-      i += (i + 2 < len) ? 2 : 0;
+      i += (i + 1 < len) ? 1 : 0;
       if (!cur.empty() && cur.back() != ' ')
         cur.push_back(' ');
       continue;
@@ -283,18 +292,26 @@ static std::vector<std::string> BuildPageHeadingLines(Page *page,
       cur.push_back((char)c);
       continue;
     }
-    int step = 1;
-    if ((c & 0xE0) == 0xC0)
-      step = 2;
-    else if ((c & 0xF0) == 0xE0)
-      step = 3;
-    else if ((c & 0xF8) == 0xF0)
-      step = 4;
-    if (i + step > len)
-      step = 1;
-    for (int j = 0; j < step; j++)
-      cur.push_back((char)buf[i + j]);
-    i += (step - 1);
+    char utf8_buf[4];
+    int utf8_len = 0;
+    if (c < 0x800) {
+      utf8_buf[0] = (char)(0xC0 | (c >> 6));
+      utf8_buf[1] = (char)(0x80 | (c & 0x3F));
+      utf8_len = 2;
+    } else if (c < 0x10000) {
+      utf8_buf[0] = (char)(0xE0 | (c >> 12));
+      utf8_buf[1] = (char)(0x80 | ((c >> 6) & 0x3F));
+      utf8_buf[2] = (char)(0x80 | (c & 0x3F));
+      utf8_len = 3;
+    } else {
+      utf8_buf[0] = (char)(0xF0 | (c >> 18));
+      utf8_buf[1] = (char)(0x80 | ((c >> 12) & 0x3F));
+      utf8_buf[2] = (char)(0x80 | ((c >> 6) & 0x3F));
+      utf8_buf[3] = (char)(0x80 | (c & 0x3F));
+      utf8_len = 4;
+    }
+    for (int j = 0; j < utf8_len; j++)
+      cur.push_back(utf8_buf[j]);
   }
 
   if (lines.size() < max_lines)

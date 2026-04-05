@@ -57,7 +57,7 @@ struct parsedata_t {
 	class Prefs *prefs;
 	int screen;
 	parse_pen_t pen;
-	u8 buf[PAGEBUFSIZE];
+	u32 buf[PAGEBUFSIZE];
 	int buflen;
 	bool pagebuf_overflowed;
 	size_t pagebuf_overflow_bytes;
@@ -94,15 +94,15 @@ struct parsedata_t {
 	int pagecount;
 };
 
-bool iswhitespace(u8 c);
+bool iswhitespace(u32 c);
 
 void parse_error(XML_ParserStruct *ps);
 void parse_init(parsedata_t *data);
-bool parse_append_page_byte(parsedata_t *data, u8 c);
-bool parse_append_page_byte_soft(parsedata_t *data, u8 c,
+bool parse_append_page_byte(parsedata_t *data, u32 c);
+bool parse_append_page_byte_soft(parsedata_t *data, u32 c,
                                  parse_page_flush_fn flush_page, void *ctx);
-size_t parse_append_page_bytes(parsedata_t *data, const void *src, size_t len);
-size_t parse_append_page_bytes_soft(parsedata_t *data, const void *src,
+size_t parse_append_page_bytes(parsedata_t *data, const u32 *src, size_t len);
+size_t parse_append_page_bytes_soft(parsedata_t *data, const u32 *src,
                                     size_t len,
                                     parse_page_flush_fn flush_page, void *ctx);
 bool parse_in(parsedata_t *data, context_t context);

@@ -28,7 +28,7 @@ struct PageCacheLayoutParams {
         margin_left(0), margin_right(0), margin_top(0), margin_bottom(0) {}
 };
 
-typedef std::vector<uint8_t> CachedPage;
+typedef std::vector<uint32_t> CachedPage;
 
 struct CachedChapter {
   uint16_t page;
@@ -55,8 +55,8 @@ bool ReadLengthPrefixedString16(FILE *fp, uint16_t max_bytes, bool allow_empty,
                                 std::string *out);
 
 bool WritePages(FILE *fp, const std::vector<CachedPage> &pages,
-                uint16_t max_page_bytes);
-bool ReadPages(FILE *fp, uint32_t count, uint16_t max_page_bytes,
+                uint16_t max_page_codepoints);
+bool ReadPages(FILE *fp, uint32_t count, uint16_t max_page_codepoints,
                std::vector<CachedPage> *pages);
 
 bool WriteChapters(FILE *fp, const std::vector<CachedChapter> &chapters,

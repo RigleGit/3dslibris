@@ -113,27 +113,28 @@ bool ReadLengthPrefixedString16(FILE *fp, uint16_t max_bytes, bool allow_empty,
 }
 
 bool WritePages(FILE *fp, const std::vector<CachedPage> &pages,
-                uint16_t max_page_bytes) {
+                uint16_t max_page_codepoints) {
   if (!fp)
     return false;
 
   std::vector<uint8_t> buffer;
   size_t total_size = 0;
   for (size_t i = 0; i < pages.size(); i++) {
-    total_size += sizeof(uint16_t) + pages[i].size();
+    total_size += sizeof(uint16_t) + pages[i].size() * sizeof(uint32_t);
   }
   buffer.reserve(total_size);
 
   for (size_t i = 0; i < pages.size(); i++) {
     const CachedPage &page = pages[i];
-    if (page.size() > max_page_bytes)
+    if (page.size() > max_page_codepoints)
       return false;
     const uint16_t length = (uint16_t)page.size();
     const uint8_t *ptr = reinterpret_cast<const uint8_t *>(&length);
     buffer.push_back(ptr[0]);
     buffer.push_back(ptr[1]);
     if (!page.empty()) {
-      buffer.insert(buffer.end(), page.data(), page.data() + page.size());
+      const uint8_t *data = reinterpret_cast<const uint8_t *>(page.data());
+      buffer.insert(buffer.end(), data, data + page.size() * sizeof(uint32_t));
     }
   }
 
@@ -144,7 +145,7 @@ bool WritePages(FILE *fp, const std::vector<CachedPage> &pages,
   return true;
 }
 
-bool ReadPages(FILE *fp, uint32_t count, uint16_t max_page_bytes,
+bool ReadPages(FILE *fp, uint32_t count, uint16_t max_page_codepoints,
                std::vector<CachedPage> *pages) {
   if (!fp || !pages)
     return false;
@@ -154,12 +155,13 @@ bool ReadPages(FILE *fp, uint32_t count, uint16_t max_page_bytes,
   for (uint32_t i = 0; i < count; i++) {
     uint16_t length = 0;
     if (fread(&length, 1, sizeof(length), fp) != sizeof(length) ||
-        length > max_page_bytes) {
+        length > max_page_codepoints) {
       return false;
     }
 
     CachedPage page(length);
-    if (length > 0 && fread(page.data(), 1, length, fp) != length)
+    const size_t byte_count = (size_t)length * sizeof(uint32_t);
+    if (length > 0 && fread(page.data(), 1, byte_count, fp) != byte_count)
       return false;
     pages->push_back(page);
   }

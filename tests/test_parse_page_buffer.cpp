@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
 extern "C" {
 
@@ -60,10 +61,12 @@ void TestAppendByteAndBytes() {
   ExpectEq("buflen after one byte", p.buflen, 1);
   ExpectFalse("no overflow after one byte", parse_page_buffer_overflowed(&p));
 
-  const char *rest = "BCD";
+  const u32 rest[] = {'B', 'C', 'D'};
   ExpectEq("append bytes", parse_append_page_bytes(&p, rest, 3), (size_t)3);
   ExpectEq("buflen after bytes", p.buflen, 4);
-  ExpectTrue("content preserved", std::memcmp(p.buf, "ABCD", 4) == 0);
+  ExpectTrue("content preserved",
+             p.buf[0] == 'A' && p.buf[1] == 'B' && p.buf[2] == 'C' &&
+                 p.buf[3] == 'D');
 }
 
 void TestOverflowTracking() {
@@ -80,7 +83,7 @@ void TestOverflowTracking() {
   ExpectTrue("overflow flagged", parse_page_buffer_overflowed(&p));
   ExpectEq("overflow bytes counted", p.pagebuf_overflow_bytes, (size_t)1);
 
-  const char *extra = "tail";
+  const u32 extra[] = {'t', 'a', 'i', 'l'};
   ExpectEq("append bytes when full appends nothing",
            parse_append_page_bytes(&p, extra, 4), (size_t)0);
   ExpectEq("overflow bytes accumulate", p.pagebuf_overflow_bytes, (size_t)5);
@@ -106,14 +109,15 @@ void TestSoftBreakForSmallPendingWrite() {
     ExpectTrue("fill full page", parse_append_page_byte(&p, 'x'));
 
   int flush_count = 0;
-  const char *tail = "YZ";
+  const u32 tail[] = {'Y', 'Z'};
   ExpectEq("soft append writes full tail",
            parse_append_page_bytes_soft(&p, tail, 2, MockFlushPage,
                                         &flush_count),
            (size_t)2);
   ExpectEq("flush called once", flush_count, 1);
   ExpectEq("buflen after soft break", p.buflen, 2);
-  ExpectTrue("tail copied after flush", std::memcmp(p.buf, "YZ", 2) == 0);
+  ExpectTrue("tail copied after flush",
+             p.buf[0] == 'Y' && p.buf[1] == 'Z');
   ExpectFalse("overflow cleared on soft break", parse_page_buffer_overflowed(&p));
 }
 
@@ -125,7 +129,7 @@ void TestSoftBreakDoesNotSplitOversizedWrite() {
     ExpectTrue("fill full page oversized", parse_append_page_byte(&p, 'x'));
 
   int flush_count = 0;
-  std::string huge(PAGEBUFSIZE + 1, 'z');
+  std::vector<u32> huge(PAGEBUFSIZE + 1, (u32)'z');
   ExpectEq("oversized write remains capped",
            parse_append_page_bytes_soft(&p, huge.data(), huge.size(),
                                         MockFlushPage, &flush_count),

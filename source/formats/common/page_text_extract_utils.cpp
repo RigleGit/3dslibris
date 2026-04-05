@@ -16,7 +16,7 @@ std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
   std::vector<std::string> lines;
   if (!page)
     return lines;
-  const u8 *buf = page->GetBuffer();
+  const u32 *buf = page->GetBuffer();
   const int len = page->GetLength();
   if (!buf || len <= 0)
     return lines;
@@ -25,7 +25,7 @@ std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
   line.reserve((size_t)len);
   int i = 0;
   while (i < len) {
-    u8 c = buf[i];
+    u32 c = buf[i];
     if (c == '\r' || c == '\n') {
       lines.push_back(line);
       line.clear();
@@ -53,13 +53,36 @@ std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
         line.clear();
       }
       lines.push_back(std::string());
-      if (i + 2 < len)
-        i += 3;
+      if (i + 1 < len)
+        i += 2;
       else
         i++;
       continue;
     }
-    line.push_back((char)c);
+    if (c < 0x80) {
+      line.push_back((char)c);
+    } else {
+      char utf8_buf[4];
+      int utf8_len = 0;
+      if (c < 0x800) {
+        utf8_buf[0] = (char)(0xC0 | (c >> 6));
+        utf8_buf[1] = (char)(0x80 | (c & 0x3F));
+        utf8_len = 2;
+      } else if (c < 0x10000) {
+        utf8_buf[0] = (char)(0xE0 | (c >> 12));
+        utf8_buf[1] = (char)(0x80 | ((c >> 6) & 0x3F));
+        utf8_buf[2] = (char)(0x80 | (c & 0x3F));
+        utf8_len = 3;
+      } else {
+        utf8_buf[0] = (char)(0xF0 | (c >> 18));
+        utf8_buf[1] = (char)(0x80 | ((c >> 12) & 0x3F));
+        utf8_buf[2] = (char)(0x80 | ((c >> 6) & 0x3F));
+        utf8_buf[3] = (char)(0x80 | (c & 0x3F));
+        utf8_len = 4;
+      }
+      for (int j = 0; j < utf8_len; j++)
+        line.push_back(utf8_buf[j]);
+    }
     i++;
   }
 
