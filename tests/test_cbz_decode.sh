@@ -9,7 +9,7 @@ c++ -std=c++11 \
   "$ROOT/tests/test_cbz_decode.cpp" \
   "$ROOT/source/formats/cbz/cbz_decode.cpp" \
   "$ROOT/source/core/stb_image_impl.cpp" \
-  "$ROOT/source/shared/pdf_view_utils.cpp" \
+  "$ROOT/source/formats/common/pdf_view_utils.cpp" \
   -I"$ROOT/include" \
   -I"$ROOT/third_party/stb" \
   -o "$OUTDIR/test_cbz_decode"

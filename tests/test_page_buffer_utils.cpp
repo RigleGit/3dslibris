@@ -21,23 +21,23 @@ void ExpectEq(const char *label, size_t actual, size_t expected) {
 
 void TestReusesExistingCapacity() {
   ExpectEq("reuse equal capacity",
-           page_buffer_utils::RequiredPageBufferCapacity(128, 128),
+           page_buffer_utils::RequiredPageBufferCodepoints(128, 128),
            (size_t)128);
   ExpectEq("reuse larger capacity",
-           page_buffer_utils::RequiredPageBufferCapacity(256, 128),
+           page_buffer_utils::RequiredPageBufferCodepoints(256, 128),
            (size_t)256);
 }
 
 void TestGrowsWhenNeeded() {
   ExpectEq("grow empty buffer",
-           page_buffer_utils::RequiredPageBufferCapacity(0, 64), (size_t)64);
+           page_buffer_utils::RequiredPageBufferCodepoints(0, 64), (size_t)64);
   ExpectEq("grow undersized buffer",
-           page_buffer_utils::RequiredPageBufferCapacity(63, 64), (size_t)64);
+           page_buffer_utils::RequiredPageBufferCodepoints(63, 64), (size_t)64);
 }
 
 void TestEmptyPayloadNeedsNoCapacity() {
   ExpectEq("zero length stays zero",
-           page_buffer_utils::RequiredPageBufferCapacity(512, 0), (size_t)0);
+           page_buffer_utils::RequiredPageBufferCodepoints(512, 0), (size_t)0);
 }
 
 void TestPageVectorReserveCapacity() {
@@ -50,14 +50,14 @@ void TestPageVectorReserveCapacity() {
 }
 
 void TestAdoptPageBufferMove() {
-  std::vector<unsigned char> src;
+  std::vector<uint32_t> src;
   src.push_back(1);
   src.push_back(2);
   src.push_back(3);
 
   page_buffer_utils::OwnedPageBuffer adopted =
       page_buffer_utils::AdoptPageBuffer(&src);
-  ExpectEq("adopted size", adopted.bytes.size(), (size_t)3);
+  ExpectEq("adopted size", adopted.codepoints.size(), (size_t)3);
   ExpectEq("source drained", src.size(), (size_t)0);
 }
 

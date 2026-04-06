@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <math.h>
 #include <stdio.h>
 
 #include "3ds.h"

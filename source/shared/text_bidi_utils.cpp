@@ -14,8 +14,6 @@ extern "C" {
 #include "mupdf/fitz/system.h"
 }
 
-extern "C" void fz_register_document_handlers(fz_context *ctx);
-
 namespace text_bidi_utils {
 
 namespace {
