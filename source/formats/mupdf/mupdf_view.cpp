@@ -635,23 +635,29 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
                                   0.0f, 0.0f, 1.0f, 1.0f, viewport);
     }
     if (split_y < kPdfZoomScreenHeight) {
+      // Cascade through available sources for the unrendered portion.
+      // Each blit can fail if the cached bitmap doesn't cover the region
+      // (e.g. stale interactive tile after viewport change on o3DS), so
+      // check return values and fall through to the next source.
+      bool bottom_ok = false;
       if (has_interactive_tile) {
-        BlitBitmapCacheViewportRegion(ts, ts->screenleft, kPdfZoomScreenHeight,
-                                      kPdfZoomScreenWidth, kPdfZoomScreenHeight,
-                                      split_y, kPdfZoomScreenHeight,
-                                      mupdf_state->current_interactive_tile,
-                                      viewport, high_quality_viewport);
-      } else if (BitmapCacheValid(mupdf_state->current_preview, page_index)) {
-        BlitBitmapCacheViewportRegion(ts, ts->screenleft, kPdfZoomScreenHeight,
-                                      kPdfZoomScreenWidth, kPdfZoomScreenHeight,
-                                      split_y, kPdfZoomScreenHeight,
-                                      mupdf_state->current_preview, viewport,
-                                      high_quality_viewport);
-      } else {
-        // No tile or preview available yet (e.g. original 3DS low-memory).
-        // Blit the partial buffer for the unrendered region too — strips not
-        // yet rendered are initialised to kPdfPaper (white), so the lower
-        // portion shows paper colour instead of the black left by ClearScreen.
+        bottom_ok = BlitBitmapCacheViewportRegion(
+            ts, ts->screenleft, kPdfZoomScreenHeight, kPdfZoomScreenWidth,
+            kPdfZoomScreenHeight, split_y, kPdfZoomScreenHeight,
+            mupdf_state->current_interactive_tile, viewport,
+            high_quality_viewport);
+      }
+      if (!bottom_ok &&
+          BitmapCacheValid(mupdf_state->current_preview, page_index)) {
+        bottom_ok = BlitBitmapCacheViewportRegion(
+            ts, ts->screenleft, kPdfZoomScreenHeight, kPdfZoomScreenWidth,
+            kPdfZoomScreenHeight, split_y, kPdfZoomScreenHeight,
+            mupdf_state->current_preview, viewport, high_quality_viewport);
+      }
+      if (!bottom_ok) {
+        // Final fallback: blit the partial buffer itself — unrendered strips
+        // are initialised to kPdfPaper (white), so the lower portion shows
+        // paper colour instead of the background left by ClearScreen.
         BlitRawBitmapViewportRegion(ts, ts->screenleft, kPdfZoomScreenHeight,
                                     kPdfZoomScreenWidth, kPdfZoomScreenHeight,
                                     split_y, kPdfZoomScreenHeight,
@@ -660,19 +666,25 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
                                     0.0f, 0.0f, 1.0f, 1.0f, viewport);
       }
     }
-  } else if (has_interactive_tile) {
-    BlitBitmapCacheViewport(ts, ts->screenleft, kPdfZoomScreenHeight,
-                            kPdfZoomScreenWidth, kPdfZoomScreenHeight,
-                            mupdf_state->current_interactive_tile, viewport,
-                            high_quality_viewport);
-  } else if (BitmapCacheValid(mupdf_state->current_preview, page_index)) {
-    BlitBitmapCacheViewport(ts, ts->screenleft, kPdfZoomScreenHeight,
-                            kPdfZoomScreenWidth, kPdfZoomScreenHeight,
-                            mupdf_state->current_preview, viewport,
-                            high_quality_viewport);
   } else {
-    ts->SetPen(18, 28);
-    ts->PrintString("MuPDF render unavailable");
+    // No incremental render in progress — use best available full-page source.
+    bool ok = false;
+    if (has_interactive_tile) {
+      ok = BlitBitmapCacheViewport(ts, ts->screenleft, kPdfZoomScreenHeight,
+                                   kPdfZoomScreenWidth, kPdfZoomScreenHeight,
+                                   mupdf_state->current_interactive_tile,
+                                   viewport, high_quality_viewport);
+    }
+    if (!ok && BitmapCacheValid(mupdf_state->current_preview, page_index)) {
+      ok = BlitBitmapCacheViewport(ts, ts->screenleft, kPdfZoomScreenHeight,
+                                   kPdfZoomScreenWidth, kPdfZoomScreenHeight,
+                                   mupdf_state->current_preview, viewport,
+                                   high_quality_viewport);
+    }
+    if (!ok) {
+      ts->SetPen(18, 28);
+      ts->PrintString("MuPDF render unavailable");
+    }
   }
   ts->SetScreen(ts->screenright);
   ts->ClearScreen();
