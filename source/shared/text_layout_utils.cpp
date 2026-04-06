@@ -6,6 +6,7 @@
 
 #include <time.h>
 
+#include "shared/text_arabic_shaping.h"
 #include "shared/text_bidi_utils.h"
 
 namespace text_layout_utils {
@@ -166,6 +167,11 @@ bool ShapeTextRunBidi(const char *s, size_t len, const char *lang,
     return false;
   if (!out || out->empty())
     return true;
+
+  // Apply Arabic contextual shaping before BiDi so the analyser sees
+  // presentation-form codepoints (still in RTL ranges, no BiDi change).
+  text_arabic_shaping::ApplyContextualShaping(out, measure_codepoint,
+                                               measure_ctx);
 
   std::vector<uint32_t> cps;
   cps.reserve(out->size());
