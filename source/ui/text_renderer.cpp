@@ -304,7 +304,6 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   buffer = bitmap.buffer;
 
   int maxY = (parent->screen == parent->screenleft) ? 400 : 320;
-  int maxX = parent->display.width - parent->margin.right;
   int bottomClip = parent->margin.bottom;
   if (face == parent->GetFace(TEXT_STYLE_BROWSER))
     bottomClip = 0;
@@ -332,7 +331,7 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
         continue;
       u16 sx = (pen.x + gx + bx);
       u16 sy = (pen.y + gy - by);
-      if (sy >= (u16)maxY || sx >= (u16)maxX)
+      if (sy >= (u16)maxY || sx >= parent->display.width)
         continue;
       const size_t dst_index =
           (size_t)sy * (size_t)parent->display.height + (size_t)sx;

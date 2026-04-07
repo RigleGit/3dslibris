@@ -511,12 +511,6 @@ void FontManager::SetPixelSize(u8 size) {
       ClearCache(it.second);
     }
   }
-  for (int i = 0; i < fallback_count_; i++) {
-    if (fallback_faces_[i]) {
-      FT_Set_Pixel_Sizes(fallback_faces_[i], 0, pixelsize);
-      ClearCache(fallback_faces_[i]);
-    }
-  }
 }
 
 int FontManager::GetPixelSize() const { return pixelsize; }
