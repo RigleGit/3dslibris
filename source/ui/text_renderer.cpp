@@ -288,7 +288,8 @@ void TextRenderer::PrintChar(u32 ucs) { PrintChar(ucs, parent->GetFace((u8)style
 void TextRenderer::PrintChar(u32 ucs, u8 astyle) { PrintChar(ucs, parent->GetFace(astyle)); }
 
 void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
-  u16 bx, by, width, height = 0;
+  int bx, by;
+  u16 width, height = 0;
   FT_Byte *buffer = NULL;
   FT_UInt advance = 0;
 
