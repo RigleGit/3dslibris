@@ -58,7 +58,7 @@ namespace {
 
 static const char *kCoverCacheBaseDir = paths::kCacheBaseDir;
 static const char *kCoverCacheDir = paths::kCoverCacheDir;
-static const char *kCoverCacheMagic = "CVR2";
+static const char *kCoverCacheMagic = "CVR3";
 static const size_t kCoverCacheMaxFiles = 512;
 static const size_t kCoverCacheMaxBytes = 16 * 1024 * 1024;
 // Max extraction attempts per session before a book is skipped.
@@ -171,11 +171,13 @@ static void PruneCoverCache(bool force) {
   entries.sort(CoverCacheEntryOlderFirst);
 
   size_t remaining_count = entries.size();
+  bool removed_any = false;
   while ((remaining_count > kCoverCacheMaxFiles ||
           total_bytes > kCoverCacheMaxBytes) &&
          !entries.empty()) {
     const CoverCacheEntry &oldest = entries.front();
     remove(oldest.path.c_str());
+    removed_any = true;
     if (remaining_count > 0)
       remaining_count--;
     if (oldest.size <= total_bytes)
@@ -183,6 +185,37 @@ static void PruneCoverCache(bool force) {
     else
       total_bytes = 0;
     entries.pop_front();
+  }
+
+  // Rewrite the manifest to drop entries for pruned files.
+  if (removed_any) {
+    std::set<std::string> alive;
+    for (std::list<CoverCacheEntry>::const_iterator it = entries.begin();
+         it != entries.end(); ++it) {
+      alive.insert(BasenamePath(it->path));
+    }
+    std::vector<std::string> kept;
+    FILE *rf = fopen(paths::kCoverCacheManifest, "r");
+    if (rf) {
+      char line[1024];
+      while (fgets(line, sizeof(line), rf)) {
+        std::string l = line;
+        size_t tab = l.find('\t');
+        std::string fname = (tab != std::string::npos) ? l.substr(0, tab) : l;
+        // Trim trailing newline from fname if no tab found.
+        while (!fname.empty() && (fname.back() == '\n' || fname.back() == '\r'))
+          fname.pop_back();
+        if (alive.count(fname))
+          kept.push_back(l);
+      }
+      fclose(rf);
+    }
+    FILE *wf = fopen(paths::kCoverCacheManifest, "w");
+    if (wf) {
+      for (size_t i = 0; i < kept.size(); i++)
+        fputs(kept[i].c_str(), wf);
+      fclose(wf);
+    }
   }
 }
 
@@ -192,11 +225,36 @@ static void EnsureCoverCacheDirs() {
     return;
   mkdir(kCoverCacheBaseDir, 0777);
   mkdir(kCoverCacheDir, 0777);
+
+  // One-time cleanup: remove legacy CVR2 cache files whose names are bare
+  // 16-hex-digit hashes (e.g., "a1b2c3d4e5f6g7h8.cvr").
+  DIR *legacy_dp = opendir(kCoverCacheDir);
+  if (legacy_dp) {
+    struct dirent *ent;
+    while ((ent = readdir(legacy_dp)) != NULL) {
+      if (!HasExtCI(ent->d_name, ".cvr"))
+        continue;
+      size_t nlen = strlen(ent->d_name);
+      if (nlen == 20) { // 16 hex digits + ".cvr"
+        bool all_hex = true;
+        for (int i = 0; i < 16 && all_hex; i++)
+          all_hex = isxdigit((unsigned char)ent->d_name[i]);
+        if (all_hex) {
+          char full[512];
+          snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir, ent->d_name);
+          remove(full);
+        }
+      }
+    }
+    closedir(legacy_dp);
+  }
+
   PruneCoverCache(true);
   initialized = true;
 }
 
-static std::string BuildCoverCachePath(const std::string &book_path) {
+static std::string BuildCoverCachePath(Book *book,
+                                       const std::string &book_path) {
   struct stat st;
   long long fsize = 0;
   long long fmtime = 0;
@@ -212,9 +270,22 @@ static std::string BuildCoverCachePath(const std::string &book_path) {
   key += std::to_string(fmtime);
   uint64_t h = Fnv1a64(key);
 
-  char out[160];
-  snprintf(out, sizeof(out), "%s/%016llx.cvr", kCoverCacheDir,
-           (unsigned long long)h);
+  // Use the book filename (sans extension) as a human-readable label.
+  // Title is not used because it may not be available at cache-load time.
+  std::string label;
+  if (book && book->GetFileName() && book->GetFileName()[0] != '\0') {
+    label = book->GetFileName();
+    size_t dot = label.rfind('.');
+    if (dot != std::string::npos && dot > 0)
+      label = label.substr(0, dot);
+  }
+  if (label.empty())
+    label = "book";
+  label = SanitizeFat32Name(label, 80);
+
+  char out[512];
+  snprintf(out, sizeof(out), "%s/%s_%08llx.cvr", kCoverCacheDir, label.c_str(),
+           (unsigned long long)(h & 0xFFFFFFFFULL));
   return std::string(out);
 }
 
@@ -223,7 +294,7 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
     return false;
   EnsureCoverCacheDirs();
 
-  std::string cache_path = BuildCoverCachePath(book_path);
+  std::string cache_path = BuildCoverCachePath(book, book_path);
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp) {
 #ifdef DSLIBRIS_DEBUG
@@ -290,7 +361,7 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
     return false;
 
   EnsureCoverCacheDirs();
-  std::string cache_path = BuildCoverCachePath(book_path);
+  std::string cache_path = BuildCoverCachePath(book, book_path);
   FILE *fp = fopen(cache_path.c_str(), "wb");
   if (!fp)
     return false;
@@ -309,8 +380,19 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
     ok = fwrite(book->coverPixels, sizeof(u16), count, fp) == count;
   }
   fclose(fp);
-  if (ok)
+  if (ok) {
+    // Append entry to the cover cache manifest for human inspection.
+    FILE *mf = fopen(paths::kCoverCacheManifest, "a");
+    if (mf) {
+      const char *t = book->GetTitle();
+      const char *f = book->GetFileName();
+      const char *display = (t && t[0] != '\0') ? t : (f ? f : "");
+      std::string cache_base = BasenamePath(cache_path);
+      fprintf(mf, "%s\t%s\t%s\n", cache_base.c_str(), display, book_path.c_str());
+      fclose(mf);
+    }
     PruneCoverCache(false);
+  }
 #ifdef DSLIBRIS_DEBUG
   if (book->GetStatusReporter()) {
     DBG_LOGF(book->GetStatusReporter(),

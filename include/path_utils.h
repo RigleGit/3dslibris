@@ -31,6 +31,7 @@ static const char *kCacheBaseDir    = "sdmc:/3ds/3dslibris/cache";
 
 // Cache subdirectories
 static const char *kCoverCacheDir   = "sdmc:/3ds/3dslibris/cache/covers";
+static const char *kCoverCacheManifest = "sdmc:/3ds/3dslibris/cache/covers/manifest.txt";
 static const char *kEpubCacheDir    = "sdmc:/3ds/3dslibris/cache/epub";
 static const char *kMobiCacheDir    = "sdmc:/3ds/3dslibris/cache/mobi";
 static const char *kMobiCoverMetaCacheDir = "sdmc:/3ds/3dslibris/cache/mobi-cover";

@@ -181,6 +181,55 @@ inline bool ContainsNoCase(const std::string &haystack,
   return h.find(n) != std::string::npos;
 }
 
+// --- Sanitize a string for use as a FAT32 filename component ---
+
+inline std::string SanitizeFat32Name(const std::string &input,
+                                     size_t max_len = 80) {
+  std::string out;
+  out.reserve(input.size());
+  for (size_t i = 0; i < input.size(); i++) {
+    unsigned char c = (unsigned char)input[i];
+    if (c < 0x20 || c >= 0x80) {
+      out.push_back('_');
+      continue;
+    }
+    if (c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' ||
+        c == '"' || c == '<' || c == '>' || c == '|') {
+      out.push_back('_');
+      continue;
+    }
+    out.push_back((char)c);
+  }
+  // Collapse runs of underscores/spaces into a single underscore.
+  std::string collapsed;
+  bool last_sep = false;
+  for (size_t i = 0; i < out.size(); i++) {
+    bool sep = (out[i] == '_' || out[i] == ' ');
+    if (sep) {
+      if (!last_sep)
+        collapsed.push_back('_');
+      last_sep = true;
+    } else {
+      collapsed.push_back(out[i]);
+      last_sep = false;
+    }
+  }
+  // Trim leading/trailing underscores and dots.
+  size_t s = 0, e = collapsed.size();
+  while (s < e && (collapsed[s] == '_' || collapsed[s] == '.'))
+    s++;
+  while (e > s && (collapsed[e - 1] == '_' || collapsed[e - 1] == '.'))
+    e--;
+  std::string result = collapsed.substr(s, e - s);
+  if (result.size() > max_len)
+    result.resize(max_len);
+  while (!result.empty() && (result.back() == '_' || result.back() == '.'))
+    result.pop_back();
+  if (result.empty())
+    result = "book";
+  return result;
+}
+
 // --- Token search in space-separated list ---
 
 inline bool ContainsToken(const std::string &list, const std::string &token) {

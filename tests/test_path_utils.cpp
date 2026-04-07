@@ -32,6 +32,7 @@ int main() {
   ExpectNonEmpty("kFontDir exists", paths::kFontDir);
   ExpectNonEmpty("kCacheBaseDir exists", paths::kCacheBaseDir);
   ExpectNonEmpty("kCoverCacheDir exists", paths::kCoverCacheDir);
+  ExpectNonEmpty("kCoverCacheManifest exists", paths::kCoverCacheManifest);
   ExpectNonEmpty("kEpubCacheDir exists", paths::kEpubCacheDir);
   ExpectNonEmpty("kMobiCacheDir exists", paths::kMobiCacheDir);
   ExpectNonEmpty("kMobiCoverMetaCacheDir exists", paths::kMobiCoverMetaCacheDir);
