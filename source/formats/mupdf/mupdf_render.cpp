@@ -225,6 +225,9 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     fz_drop_page(ctx, page);
   }
   fz_catch(ctx) {
+#ifdef DSLIBRIS_DEBUG
+    printf("[MUPDF] render error: %s\n", fz_caught_message(ctx));
+#endif
     out->width = 0;
     out->height = 0;
     out->pixels.clear();

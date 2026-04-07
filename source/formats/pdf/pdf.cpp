@@ -63,7 +63,7 @@ int pdf_extract_cover(Book *book, const std::string &pdfpath) {
   if (!book || pdfpath.empty())
     return 1;
 
-  fz_context *ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
+  fz_context *ctx = fz_new_context(NULL, NULL, 4u * 1024u * 1024u);
   fz_document *doc = NULL;
   int rc = 0;
 

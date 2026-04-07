@@ -130,7 +130,7 @@ uint8_t IndexMuPdfMetadata(Book *book, const char *path) {
   if (!book || !path)
     return 255;
 
-  fz_context *ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT);
+  fz_context *ctx = fz_new_context(NULL, NULL, 4u * 1024u * 1024u);
   fz_document *doc = NULL;
   uint8_t rc = 0;
 
