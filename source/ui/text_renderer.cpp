@@ -9,6 +9,7 @@
 #include "color_utils.h"
 #include "debug_log.h"
 #include "shared/bugfix_utils.h"
+#include "shared/text_render_layout_utils.h"
 #include "path_utils.h"
 #include "stb_image.h"
 #include "string.h"
@@ -83,7 +84,9 @@ static int grad400w = 0;
 static int g_text_clip_right_budget = 32;
 static int g_text_margin_diag_budget = 12;
 static int g_blit_geometry_diag_budget = 12;
-static int g_blit_page_diag_budget = 64;
+// Hot-path framebuffer copy logs are too noisy for layout debugging.
+// Raise this manually when debugging the blit stage itself.
+static int g_blit_page_diag_budget = 0;
 #endif
 
 static void FillSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
@@ -125,7 +128,7 @@ TextRenderer::TextRenderer(Text *owner)
     : parent(owner), turned_right(false), style(TEXT_STYLE_REGULAR), codeprev(0),
       hit(false), justify(false), colorMode(0), splash_attempted(false),
       splash_loaded(false), splash_pixels(nullptr), stats_hits(0),
-      stats_misses(0) {
+      stats_misses(0), auto_wrap_enabled(true), clip_to_content_enabled(false) {
   pen.x = 0;
   pen.y = 0;
 }
@@ -334,16 +337,22 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
 
   const int screenWidth = (int)parent->display.width;
   const int contentRight = screenWidth - (int)parent->margin.right;
-  // Keep hard clipping at physical screen edge so status/HUD elements that
-  // intentionally render near the right boundary are not cut.
-  const int clipRight = screenWidth;
+  int clipRight = text_render_layout_utils::ResolveClipRight(
+      screenWidth, contentRight, clip_to_content_enabled);
+  if (clip_to_content_enabled) {
+    // Allow tiny glyph overhang past advance-based layout width.
+    const int kGlyphRightBleedPx = 2;
+    clipRight = std::min(screenWidth, clipRight + kGlyphRightBleedPx);
+  }
 
   // For wide glyphs (CJK/RTL), line-breaking can land exactly at the right
   // boundary and overflow visually. Wrap before drawing when possible.
-  if (face != parent->GetFace(TEXT_STYLE_BROWSER) && width > 0 &&
-      pen.x > parent->margin.left) {
+  const bool is_browser_style = (face == parent->GetFace(TEXT_STYLE_BROWSER));
+  if (width > 0) {
     const int glyph_right = (int)pen.x + bx + (int)width;
-    if (glyph_right > contentRight) {
+    if (text_render_layout_utils::ShouldAutoWrapGlyph(
+            auto_wrap_enabled, is_browser_style, (int)pen.x,
+            (int)parent->margin.left, glyph_right, contentRight)) {
       if (PrintNewLine()) {
         // Recompute line clip reference after wrap.
       } else {
@@ -361,11 +370,11 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   if (parent->app && g_text_margin_diag_budget > 0 &&
       (contentRight <= 0 || contentRight > screenWidth ||
        contentRight < screenWidth - 32)) {
-    DBG_LOGF(parent->app,
-             "TXT margin side=%s sw=%d mr=%d content_right=%d pen=%d,%d style=%d",
-             on_left_screen ? "left" : "right", screenWidth,
-             (int)parent->margin.right, contentRight, pen_x_before, (int)pen.y,
-             (int)style);
+    DBG_LOGF_CAT(parent->app, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
+                 "TXT margin side=%s sw=%d mr=%d content_right=%d pen=%d,%d style=%d",
+                 on_left_screen ? "left" : "right", screenWidth,
+                 (int)parent->margin.right, contentRight, pen_x_before,
+                 (int)pen.y, (int)style);
     g_text_margin_diag_budget--;
   }
 #endif
@@ -406,11 +415,12 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   if (parent->app &&
       (clipped_right_pixels > 0 || layout_overflow_pixels > 0) &&
       g_text_clip_right_budget > 0) {
-    DBG_LOGF(parent->app,
-             "TXT clipR side=%s ucs=%lu pen=%d bx=%d w=%u overflow_px=%d clip_px=%d layout_right=%d clip_right=%d mr=%d style=%d",
-             on_left_screen ? "left" : "right", (unsigned long)ucs, pen_x_before,
-             bx, (unsigned)width, layout_overflow_pixels, clipped_right_pixels,
-             contentRight, clipRight, (int)parent->margin.right, (int)style);
+    DBG_LOGF_CAT(parent->app, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
+                 "TXT clipR side=%s ucs=%lu pen=%d bx=%d w=%u overflow=%d clip=%d layout_right=%d clip_right=%d mr=%d style=%d",
+                 on_left_screen ? "left" : "right", (unsigned long)ucs,
+                 pen_x_before, bx, (unsigned)width, layout_overflow_pixels,
+                 clipped_right_pixels, contentRight, clipRight,
+                 (int)parent->margin.right, (int)style);
     g_text_clip_right_budget--;
   }
 #endif
@@ -805,6 +815,20 @@ void TextRenderer::SetItalic(bool b) { parent->italic = b; }
 bool TextRenderer::IsJustify() const { return justify; }
 
 int TextRenderer::GetLinespacing() const { return parent->linespacing; }
+
+bool TextRenderer::IsAutoWrapEnabled() const { return auto_wrap_enabled; }
+
+void TextRenderer::SetAutoWrapEnabled(bool enabled) {
+  auto_wrap_enabled = enabled;
+}
+
+bool TextRenderer::IsClipToContentEnabled() const {
+  return clip_to_content_enabled;
+}
+
+void TextRenderer::SetClipToContentEnabled(bool enabled) {
+  clip_to_content_enabled = enabled;
+}
 
 void TextRenderer::InitPen() {
   pen.x = parent->margin.left;

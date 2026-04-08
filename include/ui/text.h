@@ -105,6 +105,10 @@ public:
 
   void SetColorMode(int mode);
   int GetColorMode();
+  bool IsAutoWrapEnabled() const;
+  void SetAutoWrapEnabled(bool enabled);
+  bool IsClipToContentEnabled() const;
+  void SetClipToContentEnabled(bool enabled);
   void SetOrientation(bool turned_right);
   bool GetOrientation() const;
   void SetPen(u16 x, u16 y);

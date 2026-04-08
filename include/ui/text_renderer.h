@@ -82,6 +82,10 @@ public:
   void SetItalic(bool b);
   bool IsJustify() const;
   int GetLinespacing() const;
+  bool IsAutoWrapEnabled() const;
+  void SetAutoWrapEnabled(bool enabled);
+  bool IsClipToContentEnabled() const;
+  void SetClipToContentEnabled(bool enabled);
 
 private:
   Text *parent;
@@ -100,6 +104,8 @@ private:
 
   int stats_hits;
   int stats_misses;
+  bool auto_wrap_enabled;
+  bool clip_to_content_enabled;
 
   bool EnsureSplashLoaded();
   void DrawFallbackSplash();

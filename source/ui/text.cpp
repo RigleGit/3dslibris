@@ -142,6 +142,20 @@ void Text::SetColorMode(int mode) { tr->SetColorMode(mode); }
 
 int Text::GetColorMode() { return tr->GetColorMode(); }
 
+bool Text::IsAutoWrapEnabled() const { return tr->IsAutoWrapEnabled(); }
+
+void Text::SetAutoWrapEnabled(bool enabled) {
+  tr->SetAutoWrapEnabled(enabled);
+}
+
+bool Text::IsClipToContentEnabled() const {
+  return tr->IsClipToContentEnabled();
+}
+
+void Text::SetClipToContentEnabled(bool enabled) {
+  tr->SetClipToContentEnabled(enabled);
+}
+
 void Text::SetOrientation(bool turned_right) { tr->SetOrientation(turned_right); }
 
 bool Text::GetOrientation() const { return tr->GetOrientation(); }
