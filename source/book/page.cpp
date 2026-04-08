@@ -27,8 +27,11 @@
 
 #include "book/page.h"
 
+#include "app/app.h"
 #include "book/book.h"
 #include "book/page_buffer_utils.h"
+#include "debug_log.h"
+#include "shared/text_render_layout_utils.h"
 #include <algorithm>
 #include <list>
 #include <string.h>
@@ -88,6 +91,13 @@ void Page::AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned) {
 }
 
 void Page::Draw(Text *ts) {
+  const bool saved_auto_wrap = ts->IsAutoWrapEnabled();
+  const bool saved_clip_to_content = ts->IsClipToContentEnabled();
+  // Reflowed page buffers already carry explicit line breaks/wrap decisions.
+  // Runtime per-glyph wrapping in TextRenderer breaks RTL line anchoring.
+  ts->SetAutoWrapEnabled(false);
+  ts->SetClipToContentEnabled(true);
+
   int savedBottomMargin = ts->margin.bottom;
   int leftBottomMargin = savedBottomMargin;
   // On the 320px screen we only need a small footer for page number.
@@ -119,9 +129,8 @@ void Page::Draw(Text *ts) {
   // first_screen == screenleft → leftBottomMargin, maxHeight=400
   // first_screen == screenright → rightBottomMargin, maxHeight=320
   const bool first_is_left = (first_screen == ts->screenleft);
-  int first_max_height = first_is_left ? 400 : 320;
-  int first_bottom_margin = first_is_left ? leftBottomMargin : rightBottomMargin;
-  int second_bottom_margin = first_is_left ? rightBottomMargin : leftBottomMargin;
+  const int first_bottom_margin = first_is_left ? leftBottomMargin : rightBottomMargin;
+  const int second_bottom_margin = first_is_left ? rightBottomMargin : leftBottomMargin;
   bool on_first_screen = true;
 
   auto advance_to_next_screen = [&]() -> bool {
@@ -142,7 +151,10 @@ void Page::Draw(Text *ts) {
     }
     return false;
   };
-  ts->margin.bottom = first_bottom_margin;
+  ts->margin.bottom =
+      text_render_layout_utils::ResolveReadingScreenMetrics(
+          true, first_is_left, leftBottomMargin, rightBottomMargin)
+          .bottom_margin;
   // Clear both page buffers through Text API so dirty flags stay coherent.
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
@@ -153,6 +165,14 @@ void Page::Draw(Text *ts) {
   u16 i = 0;
   InlineImageContext next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
   bool rtl_paragraph = false;
+  u32 rtl_line_px = 0;  // parse-time line width stashed by TEXT_RTL_LINE_PX
+  bool stopped_on_render_break = false;
+  const char *render_break_reason = "complete";
+  int render_break_index = -1;
+  int newline_count_first = 0;
+  int newline_count_second = 0;
+  bool first_screen_had_content = false;
+  bool second_screen_had_content = false;
   while (i < length) {
     u32 c = buf[i];
     if (c == TEXT_PARAGRAPH_RTL) {
@@ -161,15 +181,40 @@ void Page::Draw(Text *ts) {
       continue;
     } else if (c == TEXT_PARAGRAPH_LTR) {
       rtl_paragraph = false;
+      rtl_line_px = 0;
       i++;
+      continue;
+    } else if (c == TEXT_RTL_LINE_PX) {
+      if (i + 1 < length)
+        rtl_line_px = buf[i + 1];
+      // TEXT_RTL_LINE_PX is only ever emitted for RTL content, so its presence
+      // implies RTL paragraph mode even when TEXT_PARAGRAPH_RTL is absent
+      // (e.g. a paragraph that spans page boundaries: the continuation page
+      // has RTL_LINE_PX tokens but no leading PARAGRAPH_RTL token).
+      rtl_paragraph = true;
+      // This token always begins a new RTL line. Reset linebegan so the
+      // RTL_ALIGN check fires for the first glyph of this line, even when
+      // ts->linebegan was left true by the previous page's draw loop.
+      ts->linebegan = false;
+#ifdef DSLIBRIS_DEBUG
+      DBG_LOGF_CAT(ts->app, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
+                   "RTL token px=%u i=%u linebegan=%d rtl=%d",
+                   (unsigned)rtl_line_px, (unsigned)i,
+                   ts->linebegan ? 1 : 0, rtl_paragraph ? 1 : 0);
+#endif
+      i += 2;
       continue;
     } else if (c == '\n') {
       // line break, page breaking if necessary
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
-      int maxHeight = first_max_height;
-      int currentBottomMargin = first_bottom_margin;
+      const text_render_layout_utils::ReadingScreenMetrics metrics =
+          text_render_layout_utils::ResolveReadingScreenMetrics(
+              on_first_screen, first_is_left, leftBottomMargin,
+              rightBottomMargin);
+      int maxHeight = metrics.max_height;
+      int currentBottomMargin = metrics.bottom_margin;
       ts->margin.bottom = currentBottomMargin;
       if (ts->GetPenY() + ts->GetHeight() + ts->linespacing >
           maxHeight - currentBottomMargin) {
@@ -188,9 +233,18 @@ void Page::Draw(Text *ts) {
           ts->InitPen();
           ts->linebegan = false;
         } else
+        {
+          stopped_on_render_break = true;
+          render_break_reason = "newline-overflow-second-screen";
+          render_break_index = (int)i;
           break;
+        }
       } else if (ts->linebegan) {
         ts->PrintNewLine();
+        if (on_first_screen)
+          newline_count_first++;
+        else
+          newline_count_second++;
       }
     } else if (c == TEXT_BOLD_ON) {
       i++;
@@ -252,16 +306,32 @@ void Page::Draw(Text *ts) {
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
         if (image_plan.advance_before) {
-          if (!advance_to_next_screen())
+          if (!advance_to_next_screen()) {
+            stopped_on_render_break = true;
+            render_break_reason = "image-advance-before-no-next-screen";
+            render_break_index = (int)i;
             break;
+          }
         }
         if (image_plan.line_break_before && ts->linebegan) {
-          if (!ts->PrintNewLine())
+          if (!ts->PrintNewLine()) {
+            stopped_on_render_break = true;
+            render_break_reason = "image-line-break-before-failed";
+            render_break_index = (int)i;
             break;
+          }
+          if (on_first_screen)
+            newline_count_first++;
+          else
+            newline_count_second++;
           ts->linebegan = false;
         }
 
         book->DrawInlineImage(ts, image_id, &image_plan);
+        if (on_first_screen)
+          first_screen_had_content = true;
+        else
+          second_screen_had_content = true;
 
         bool stop_page_draw = false;
         switch (image_plan.mode) {
@@ -280,8 +350,12 @@ void Page::Draw(Text *ts) {
 
         case INLINE_IMAGE_LAYOUT_PAGE:
         default:
-          if (!advance_to_next_screen())
+          if (!advance_to_next_screen()) {
             stop_page_draw = true;
+            stopped_on_render_break = true;
+            render_break_reason = "page-image-no-next-screen";
+            render_break_index = (int)i;
+          }
           ts->linebegan = false;
           break;
         }
@@ -300,18 +374,35 @@ void Page::Draw(Text *ts) {
                               : rightBottomMargin;
 
       if (rtl_paragraph && !ts->linebegan) {
-        int line_width = 0;
-        for (u16 scan = (u16)(i - 1); scan < length; scan++) {
-          u32 sc = buf[scan];
-          if (sc == '\n' || sc < 32)
-            break;
-          line_width += ts->GetAdvance((u16)sc);
+        int line_width;
+        if (rtl_line_px > 0) {
+          // Use the parse-time pixel width stored by TEXT_RTL_LINE_PX. This
+          // avoids render-time font measurement for Arabic presentation forms,
+          // which can return notdef advances when fallback fonts are involved.
+          line_width = (int)rtl_line_px;
+          rtl_line_px = 0;
+        } else {
+          // Fallback: re-measure by scanning forward (used for LTR text in
+          // mixed paragraphs or legacy page buffers without the token).
+          line_width = 0;
+          for (u16 scan = (u16)(i - 1); scan < length; scan++) {
+            u32 sc = buf[scan];
+            if (sc == '\n' || sc < 32)
+              break;
+            line_width += ts->GetAdvance((u16)sc);
+          }
         }
         int right_edge = ts->display.width - ts->margin.right;
-        int rtl_x = right_edge - line_width;
-        if (rtl_x < ts->margin.left)
-          rtl_x = ts->margin.left;
-        ts->SetPen((u8)rtl_x, ts->GetPenY());
+        int rtl_x = text_render_layout_utils::ComputeRtlLineStartX(
+            ts->margin.left, right_edge, line_width);
+#ifdef DSLIBRIS_DEBUG
+        DBG_LOGF_CAT(
+            ts->app, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
+            "RTL line anchor width=%d right=%d start_x=%d clip=[%d,%d) y=%d side=%s",
+            line_width, right_edge, rtl_x, (int)ts->margin.left, right_edge,
+            (int)ts->GetPenY(), on_first_screen ? "first" : "second");
+#endif
+        ts->SetPen((u16)rtl_x, ts->GetPenY());
       }
 
       const int glyph_x0 = (int)ts->GetPenX();
@@ -353,8 +444,29 @@ void Page::Draw(Text *ts) {
       }
 
       ts->linebegan = true;
+      if (on_first_screen)
+        first_screen_had_content = true;
+      else
+        second_screen_had_content = true;
     }
   }
+
+#ifdef DSLIBRIS_DEBUG
+  static int s_page_draw_diag_budget = 48;
+  if (ts->app && s_page_draw_diag_budget > 0) {
+    DBG_LOGF_CAT(
+        ts->app, DBG_LEVEL_INFO, DBG_CAT_LAYOUT,
+        "PAGE draw pos=%u len=%u consumed=%u stop=%d reason=%s idx=%d first_content=%d second_content=%d nl_first=%d nl_second=%d final_screen=%s pen=%u,%u",
+        (unsigned)(book ? book->GetPosition() : 0), (unsigned)length,
+        (unsigned)i, stopped_on_render_break ? 1 : 0, render_break_reason,
+        render_break_index, first_screen_had_content ? 1 : 0,
+        second_screen_had_content ? 1 : 0, newline_count_first,
+        newline_count_second,
+        (ts->GetScreen() == second_screen) ? "second" : "first",
+        (unsigned)ts->GetPenX(), (unsigned)ts->GetPenY());
+    s_page_draw_diag_budget--;
+  }
+#endif
 
   DrawNumber(ts, second_screen);
 #ifdef OFFSCREEN
@@ -362,6 +474,8 @@ void Page::Draw(Text *ts) {
   ts->CopyScreen(ts->offscreen, ts->screen);
   ts->SetScreen(pushscreen);
 #endif
+  ts->SetAutoWrapEnabled(saved_auto_wrap);
+  ts->SetClipToContentEnabled(saved_clip_to_content);
   ts->margin.bottom = savedBottomMargin;
 }
 
