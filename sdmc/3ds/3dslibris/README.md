@@ -3,7 +3,7 @@
 This directory mirrors the expected install path on the SD card:
 
 - `3dslibris.3dsx` goes here after build/package
-- `book/` is still supported for per-app ebook storage
+- `book/` is still supported for per-app ebook storage and includes `QuickStart.txt`
 - `font/` ships with bundled Liberation `.ttf` files plus the font license text
 - `resources/` contains versioned UI assets from this repository
 - `licenses/` is added by `make package-sdmc` and includes the public notices

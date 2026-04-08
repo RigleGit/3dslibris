@@ -2,6 +2,9 @@
 
 Place your ebooks in this directory.
 
+Bundled with template/releases:
+- `QuickStart.txt` (basic controls and feature overview)
+
 Supported extensions:
 - `.epub`
 - `.fb2`
@@ -9,5 +12,7 @@ Supported extensions:
 - `.rtf`
 - `.odt`
 - `.mobi`
-
-This folder is intentionally kept empty in git.
+- `.pdf`
+- `.xps`
+- `.oxps`
+- `.cbz`

@@ -266,7 +266,9 @@ stage-romfs:
 	@echo staging romfs runtime ...
 	@[ -d "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/font" ] || (echo "Missing $(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/font"; exit 1)
 	@[ -d "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/resources" ] || (echo "Missing $(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/resources"; exit 1)
+	@[ -d "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/book" ] || (echo "Missing $(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/book"; exit 1)
 	@mkdir -p "$(ROMFS_RUNTIME_APPDIR)"
+	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/book/" "$(ROMFS_RUNTIME_APPDIR)/book/"
 	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/font/" "$(ROMFS_RUNTIME_APPDIR)/font/"
 	@rsync -a --delete "$(SDMC_TEMPLATE)/3ds/$(BASE_TARGET)/resources/" "$(ROMFS_RUNTIME_APPDIR)/resources/"
 	@mkdir -p "$(ROMFS_RUNTIME_APPDIR)/licenses"
