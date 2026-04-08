@@ -66,6 +66,17 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         app->paraindent = atoi(attr[i + 1]);
     }
   } else if (!strcmp(name, "font")) {
+    bool has_fallback_attrs = false;
+    for (i = 0; attr[i]; i += 2) {
+      if (!strcmp(attr[i], "fallback1") || !strcmp(attr[i], "fallback2") ||
+          !strcmp(attr[i], "fallback3") || !strcmp(attr[i], "fallback4")) {
+        has_fallback_attrs = true;
+        break;
+      }
+    }
+    if (has_fallback_attrs)
+      app->ts->ClearFallbackFonts();
+
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "size"))
         app->ts->SetPixelSize((u8)ClampTextPixelSize(atoi(attr[i + 1])));
@@ -79,6 +90,14 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         app->ts->SetFontFile((char *)attr[i + 1], TEXT_STYLE_BOLDITALIC);
       else if (!strcmp(attr[i], "browser"))
         app->ts->SetFontFile((char *)attr[i + 1], TEXT_STYLE_BROWSER);
+      else if (!strcmp(attr[i], "fallback1") && strlen(attr[i + 1]))
+        app->ts->SetFallbackFontFile(0, attr[i + 1]);
+      else if (!strcmp(attr[i], "fallback2") && strlen(attr[i + 1]))
+        app->ts->SetFallbackFontFile(1, attr[i + 1]);
+      else if (!strcmp(attr[i], "fallback3") && strlen(attr[i + 1]))
+        app->ts->SetFallbackFontFile(2, attr[i + 1]);
+      else if (!strcmp(attr[i], "fallback4") && strlen(attr[i + 1]))
+        app->ts->SetFallbackFontFile(3, attr[i + 1]);
       else if (!strcmp(attr[i], "path")) {
         if (strlen(attr[i + 1]))
           app->fontdir = std::string(attr[i + 1]);
@@ -223,7 +242,7 @@ static std::string XmlEscapeAttr(const char *value) {
 } // namespace
 
 Prefs::Prefs(App *_app) {
-  app = App::GetInstance();
+  app = _app ? _app : App::GetInstance();
   Init();
 }
 Prefs::~Prefs() {}
@@ -302,12 +321,23 @@ int Prefs::Write() {
       XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BOLDITALIC).c_str());
   const std::string font_browser =
       XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BROWSER).c_str());
+  const std::string fallback1 =
+      XmlEscapeAttr(app->ts->GetFallbackFontFile(0).c_str());
+  const std::string fallback2 =
+      XmlEscapeAttr(app->ts->GetFallbackFontFile(1).c_str());
+  const std::string fallback3 =
+      XmlEscapeAttr(app->ts->GetFallbackFontFile(2).c_str());
+  const std::string fallback4 =
+      XmlEscapeAttr(app->ts->GetFallbackFontFile(3).c_str());
 
   fprintf(fp,
           "\t<font size=\"%d\" normal=\"%s\" bold=\"%s\" italic=\"%s\" "
-          "bolditalic=\"%s\" browser=\"%s\" />\n",
+          "bolditalic=\"%s\" browser=\"%s\" fallback1=\"%s\" "
+          "fallback2=\"%s\" fallback3=\"%s\" fallback4=\"%s\" />\n",
           app->ts->GetPixelSize(), font_regular.c_str(), font_bold.c_str(),
-          font_italic.c_str(), font_bolditalic.c_str(), font_browser.c_str());
+          font_italic.c_str(), font_bolditalic.c_str(), font_browser.c_str(),
+          fallback1.c_str(), fallback2.c_str(), fallback3.c_str(),
+          fallback4.c_str());
   fprintf(fp, "\t<paragraph indent=\"%d\" spacing=\"%d\" />\n", app->paraindent,
           app->paraspacing);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);

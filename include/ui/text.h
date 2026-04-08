@@ -88,6 +88,7 @@ public:
   FT_Face GetFace();
   FT_Face GetFace(u8 astyle);
   std::string GetFontFile(u8 style);
+  std::string GetFallbackFontFile(int index) const;
   std::string GetFontName(u8 style);
   bool GetFontName(std::string &s);
   u8 GetHeight(void);
@@ -112,6 +113,8 @@ public:
   void ClearTextColorOverride();
   void SetFace(u8 astyle);
   void SetFontFile(const char *path, u8 style);
+  bool SetFallbackFontFile(int index, const char *path);
+  void ClearFallbackFonts();
   void SetScreen(u16 *s);
   void SetStyle(int astyle);
   void MarkScreenDirty(u16 *target);

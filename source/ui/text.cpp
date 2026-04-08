@@ -89,6 +89,12 @@ FT_Face Text::GetFace(u8 astyle) { return fm->GetFace(astyle); }
 
 std::string Text::GetFontFile(u8 style) { return fm->GetFontFile(style); }
 
+std::string Text::GetFallbackFontFile(int index) const {
+  if (!fm)
+    return std::string();
+  return fm->GetFallbackFile(index);
+}
+
 std::string Text::GetFontName(u8 style) { return fm->GetFontName(style); }
 
 bool Text::GetFontName(std::string &s) { return fm->GetFontName(s); }
@@ -151,6 +157,18 @@ void Text::ClearTextColorOverride() { tr->ClearTextColorOverride(); }
 void Text::SetFace(u8 astyle) { tr->SetStyle((int)astyle); }
 
 void Text::SetFontFile(const char *path, u8 style) { fm->SetFontFile(path, style); }
+
+bool Text::SetFallbackFontFile(int index, const char *path) {
+  if (!fm)
+    return false;
+  return fm->SetFallbackFile(index, path);
+}
+
+void Text::ClearFallbackFonts() {
+  if (!fm)
+    return;
+  fm->UnloadFallbackFonts();
+}
 
 void Text::SetScreen(u16 *s) { tr->SetScreen(s); }
 
