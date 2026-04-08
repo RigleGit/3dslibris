@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -97,6 +98,26 @@ void TestMeasureCombinedBreaks() {
   ExpectEq("combined preformatted width", pre.width, 5);
 }
 
+void TestPrepareDisplayUtf8_RtlDetection() {
+  const char *arabic = "\xD9\x85\xD8\xB1\xD8\xAD\xD8\xA8\xD8\xA7"; // "مرحبا"
+  std::string display;
+  bool is_rtl = false;
+  bool transformed = text_layout_utils::PrepareDisplayUtf8(
+      arabic, strlen(arabic), &display, &is_rtl);
+  ExpectTrue("prepare rtl marks paragraph", is_rtl);
+  ExpectTrue("prepare rtl emits display text", !display.empty());
+  ExpectTrue("prepare rtl reports transform", transformed);
+
+  const char *latin = "hello";
+  display.clear();
+  is_rtl = true;
+  transformed = text_layout_utils::PrepareDisplayUtf8(
+      latin, strlen(latin), &display, &is_rtl);
+  ExpectTrue("prepare ltr keeps text", display == "hello");
+  ExpectTrue("prepare ltr clears rtl flag", !is_rtl);
+  ExpectTrue("prepare ltr no transform", !transformed);
+}
+
 } // namespace
 
 int main() {
@@ -104,5 +125,6 @@ int main() {
   TestFindLineBreaks();
   TestFindPreformattedBreaks();
   TestMeasureCombinedBreaks();
+  TestPrepareDisplayUtf8_RtlDetection();
   return 0;
 }

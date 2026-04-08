@@ -10,7 +10,7 @@ mkdir -p "$TEST_OUTDIR"
 
 # Compile third-party C dependencies once
 _build_third_party_objs() {
-  local objs=""
+  local -a objs
 
   # utf8proc
   if [ -f "$TEST_ROOT/third_party/utf8proc/utf8proc.c" ]; then
@@ -19,7 +19,7 @@ _build_third_party_objs() {
         -I"$TEST_ROOT/third_party/utf8proc" \
         -o "$TEST_OUTDIR/utf8proc.o"
     fi
-    objs="$objs $TEST_OUTDIR/utf8proc.o"
+    objs+=("$TEST_OUTDIR/utf8proc.o")
   fi
 
   # libunibreak
@@ -30,48 +30,78 @@ _build_third_party_objs() {
         cc -std=c99 -c "$src" -I"$TEST_ROOT/third_party/libunibreak/src" -o "$TEST_OUTDIR/${f}.o"
       fi
       if [ -f "$TEST_OUTDIR/${f}.o" ]; then
-        objs="$objs $TEST_OUTDIR/${f}.o"
+        objs+=("$TEST_OUTDIR/${f}.o")
       fi
     done
   fi
 
-  echo "$objs"
+  printf '%s\n' "${objs[@]}"
 }
 
-THIRD_PARTY_OBJS="$(_build_third_party_objs)"
+THIRD_PARTY_OBJS=()
+while IFS= read -r obj; do
+  [ -n "$obj" ] || continue
+  THIRD_PARTY_OBJS+=("$obj")
+done <<EOF
+$(_build_third_party_objs)
+EOF
 
 build_test() {
   local name="$1"
   shift
 
-  local sources=""
-  local libs=""
-  local includes="-I$TEST_ROOT/include -I$TEST_ROOT/third_party/utf8proc -I$TEST_ROOT/third_party/libunibreak/src"
-  local stubs=""
+  local -a sources
+  local -a libs
+  local -a includes
+  local -a stubs
+  sources=()
+  libs=()
+  stubs=()
+  includes=(
+    "-I$TEST_ROOT/include"
+    "-I$TEST_ROOT/third_party/utf8proc"
+    "-I$TEST_ROOT/third_party/libunibreak/src"
+  )
 
   while [ $# -gt 0 ]; do
     case "$1" in
       -l*)
-        libs="$libs $1"
+        libs+=("$1")
         ;;
       -I*)
-        includes="$includes $1"
+        includes+=("$1")
         ;;
       --stubs)
         shift
-        stubs="$TEST_ROOT/tests/stubs/$1"
+        stubs+=("$TEST_ROOT/tests/stubs/$1")
         ;;
       *)
-        sources="$sources $1"
+        sources+=("$1")
         ;;
     esac
     shift
   done
 
-  c++ -std=c++11 \
-    $sources $stubs $THIRD_PARTY_OBJS \
-    $includes $libs \
-    -o "$TEST_OUTDIR/$name"
+  local -a cmd
+  cmd=(c++ -std=c++11)
+  if [ ${#sources[@]} -gt 0 ]; then
+    cmd+=("${sources[@]}")
+  fi
+  if [ ${#stubs[@]} -gt 0 ]; then
+    cmd+=("${stubs[@]}")
+  fi
+  if [ ${#THIRD_PARTY_OBJS[@]} -gt 0 ]; then
+    cmd+=("${THIRD_PARTY_OBJS[@]}")
+  fi
+  if [ ${#includes[@]} -gt 0 ]; then
+    cmd+=("${includes[@]}")
+  fi
+  if [ ${#libs[@]} -gt 0 ]; then
+    cmd+=("${libs[@]}")
+  fi
+  cmd+=(-o "$TEST_OUTDIR/$name")
+
+  "${cmd[@]}"
 
   "$TEST_OUTDIR/$name"
 }

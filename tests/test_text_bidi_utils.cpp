@@ -173,6 +173,32 @@ void TestReorderLineForDisplay_MixedLine() {
   ExpectEqU32("Mixed reorder [5] D", cps[5], 'D');
 }
 
+void TestReorderLineForDisplay_RtlWithNumbers() {
+  // Visual expectation: Arabic run reversed, ASCII digits keep internal order.
+  std::vector<uint32_t> cps = {0x0633, 0x0644, 0x0627, 0x0645, ' ', '1', '2',
+                               '3'};
+  std::vector<text_bidi_utils::BidiRun> runs;
+
+  text_bidi_utils::BidiRun rtl;
+  rtl.start = 0;
+  rtl.length = 5;
+  rtl.bidi_level = 1;
+  runs.push_back(rtl);
+
+  text_bidi_utils::BidiRun ltr_num;
+  ltr_num.start = 5;
+  ltr_num.length = 3;
+  ltr_num.bidi_level = 2;
+  runs.push_back(ltr_num);
+
+  text_bidi_utils::ReorderLineForDisplay(cps, 0, cps.size(), runs);
+  ExpectEqU32("RTL+num [0]", cps[0], '1');
+  ExpectEqU32("RTL+num [1]", cps[1], '2');
+  ExpectEqU32("RTL+num [2]", cps[2], '3');
+  ExpectEqU32("RTL+num [3]", cps[3], ' ');
+  ExpectEqU32("RTL+num [4]", cps[4], 0x0645);
+}
+
 } // namespace
 
 int main() {
@@ -186,6 +212,7 @@ int main() {
   TestReorderLineForDisplay_NoRTL();
   TestReorderLineForDisplay_RTLSegment();
   TestReorderLineForDisplay_MixedLine();
+  TestReorderLineForDisplay_RtlWithNumbers();
   printf("All text_bidi_utils tests passed.\n");
   return 0;
 }

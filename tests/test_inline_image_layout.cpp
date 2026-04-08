@@ -31,10 +31,12 @@ InlineImageLayoutRequest BaseRequest() {
   InlineImageLayoutRequest req{};
   req.screen_width = 240;
   req.screen_height = 400;
+  req.next_screen_height = 320;
   req.margin_left = 12;
   req.margin_right = 12;
   req.margin_top = 10;
   req.margin_bottom = 36;
+  req.next_margin_bottom = 16;
   req.line_height = 16;
   req.linespacing = 1;
   req.pen_x = 12;
@@ -244,6 +246,9 @@ int main() {
     InlineImageLayoutRequest req = BaseRequest();
     req.current_screen = 1;
     req.screen_height = 320;
+    req.next_screen_height = 400;
+    req.margin_bottom = 16;
+    req.next_margin_bottom = 36;
     req.pen_x = 12;
     req.pen_y = 26;
     req.line_began = false;
@@ -262,6 +267,9 @@ int main() {
     InlineImageLayoutRequest req = BaseRequest();
     req.current_screen = 1;
     req.screen_height = 320;
+    req.next_screen_height = 400;
+    req.margin_bottom = 16;
+    req.next_margin_bottom = 36;
     req.pen_x = 80;
     req.pen_y = 150;
     req.line_began = true;
@@ -280,6 +288,9 @@ int main() {
     InlineImageLayoutRequest req = BaseRequest();
     req.current_screen = 1;
     req.screen_height = 320;
+    req.next_screen_height = 400;
+    req.margin_bottom = 16;
+    req.next_margin_bottom = 36;
     req.pen_x = 12;
     req.pen_y = 280;
     req.line_began = true;
