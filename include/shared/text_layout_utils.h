@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "shared/text_unicode_utils.h"
@@ -61,5 +62,13 @@ FindLineBreakAndMeasure(const std::vector<ShapedGlyph> &run, size_t start,
                         int max_width);
 LineBreakMeasureResult FindPreformattedLineBreakAndMeasure(
     const std::vector<ShapedGlyph> &run, size_t start, int max_width);
+
+// Apply Arabic contextual shaping and BIDI reordering to a UTF-8 string,
+// producing a display-ready UTF-8 string.  Returns true if any RTL content
+// was found.  *out_is_rtl is set to true when the paragraph base direction
+// is RTL (first strong character heuristic).  Safe to call with a NULL
+// measure function (uses a no-op so advances are not needed).
+bool PrepareDisplayUtf8(const char *s, size_t len,
+                        std::string *out_utf8, bool *out_is_rtl);
 
 } // namespace text_layout_utils

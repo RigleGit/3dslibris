@@ -4,6 +4,7 @@
 #include <3ds.h>
 #endif
 
+#include <string>
 #include <time.h>
 
 #include "shared/text_arabic_shaping.h"
@@ -196,6 +197,117 @@ bool ShapeTextRunBidi(const char *s, size_t len, const char *lang,
     }
   }
 
+  return true;
+}
+
+namespace {
+
+// No-op measurement used when only shaping/BIDI reorder is needed.
+static int NoopMeasure(uint32_t /*cp*/, void * /*ctx*/) { return 1; }
+
+// Encode a single Unicode codepoint to UTF-8; returns byte count (1-4).
+static int EncodeUtf8Cp(uint32_t cp, char out[4]) {
+  if (cp < 0x80) {
+    out[0] = (char)cp;
+    return 1;
+  } else if (cp < 0x800) {
+    out[0] = (char)(0xC0 | (cp >> 6));
+    out[1] = (char)(0x80 | (cp & 0x3F));
+    return 2;
+  } else if (cp < 0x10000) {
+    out[0] = (char)(0xE0 | (cp >> 12));
+    out[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[2] = (char)(0x80 | (cp & 0x3F));
+    return 3;
+  } else {
+    out[0] = (char)(0xF0 | (cp >> 18));
+    out[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+    out[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+    out[3] = (char)(0x80 | (cp & 0x3F));
+    return 4;
+  }
+}
+
+// First-strong-character paragraph direction heuristic (UAX#9 P2/P3).
+static bool DetectRtlParagraph(const std::vector<ShapedGlyph> &run) {
+  for (size_t i = 0; i < run.size(); i++) {
+    uint32_t cp = run[i].text.codepoint;
+    if ((cp >= 0x0041 && cp <= 0x005A) || (cp >= 0x0061 && cp <= 0x007A) ||
+        (cp >= 0x00C0 && cp <= 0x024F))
+      return false;
+    if ((cp >= 0x0590 && cp <= 0x05FF) || (cp >= 0x0600 && cp <= 0x06FF) ||
+        (cp >= 0x08A0 && cp <= 0x08FF) || (cp >= 0xFB50 && cp <= 0xFDFF) ||
+        (cp >= 0xFE70 && cp <= 0xFEFF))
+      return true;
+  }
+  return false;
+}
+
+} // namespace
+
+bool PrepareDisplayUtf8(const char *s, size_t len,
+                        std::string *out_utf8, bool *out_is_rtl) {
+  if (out_is_rtl) *out_is_rtl = false;
+  if (!s || len == 0) {
+    if (out_utf8) out_utf8->clear();
+    return false;
+  }
+
+  std::vector<ShapedGlyph> run;
+  bool has_rtl = false;
+  if (!ShapeTextRunBidi(s, len, NULL, NoopMeasure, NULL, &run, &has_rtl)) {
+    if (out_utf8) *out_utf8 = std::string(s, len);
+    return false;
+  }
+
+  const bool is_rtl = has_rtl && DetectRtlParagraph(run);
+  if (out_is_rtl) *out_is_rtl = is_rtl;
+
+  if (!has_rtl) {
+    // No RTL content: return original string (already correctly ordered).
+    if (out_utf8) *out_utf8 = std::string(s, len);
+    return false;
+  }
+
+  // Collect codepoints (already have Arabic presentation forms from shaping).
+  std::vector<uint32_t> cps;
+  cps.reserve(run.size());
+  for (size_t i = 0; i < run.size(); i++)
+    cps.push_back(run[i].text.codepoint);
+
+  // Reconstruct bidi runs from per-glyph levels stamped by ShapeTextRunBidi.
+  std::vector<text_bidi_utils::BidiRun> bidi_runs;
+  if (!run.empty()) {
+    text_bidi_utils::BidiRun cur;
+    cur.start = 0;
+    cur.length = 1;
+    cur.bidi_level = (int)run[0].bidi_level;
+    for (size_t i = 1; i < run.size(); i++) {
+      if ((int)run[i].bidi_level == cur.bidi_level) {
+        cur.length++;
+      } else {
+        bidi_runs.push_back(cur);
+        cur.start = i;
+        cur.length = 1;
+        cur.bidi_level = (int)run[i].bidi_level;
+      }
+    }
+    bidi_runs.push_back(cur);
+  }
+
+  // Apply UAX#9 L2 visual reordering to the full string.
+  text_bidi_utils::ReorderLineForDisplay(cps, 0, cps.size(), bidi_runs);
+
+  // Encode reordered codepoints back to UTF-8.
+  if (out_utf8) {
+    out_utf8->clear();
+    out_utf8->reserve(run.size() * 3);  // Arabic is typically 3 bytes/cp
+    char buf[4];
+    for (size_t i = 0; i < cps.size(); i++) {
+      int bytes = EncodeUtf8Cp(cps[i], buf);
+      out_utf8->append(buf, (size_t)bytes);
+    }
+  }
   return true;
 }
 
