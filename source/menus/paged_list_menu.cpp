@@ -31,6 +31,13 @@ static const int LIST_ROW_H = 34;
 static const int LIST_ROW_GAP = 2;
 static const int LIST_FOOTER_Y = 292;
 
+static u16 ClampPageTarget(u16 target_page, u16 page_count) {
+  if (page_count == 0)
+    return 0;
+  const u16 last_page = (u16)(page_count - 1);
+  return target_page > last_page ? last_page : target_page;
+}
+
 } // namespace
 
 PagedListMenu::PagedListMenu(App *_app, const char *title) : Menu(_app) {
@@ -225,6 +232,10 @@ void PagedListMenu::ActivateSelected() {
              (unsigned)book->GetPosition());
     DBG_LOG(app, msg);
   }
+  const u16 page_count = book->GetPageCount();
+  if (page_count == 0)
+    return;
+  target_page = ClampPageTarget(target_page, page_count);
   book->SetPosition(target_page);
   app->ShowCurrentBookView();
   book->DrawCurrentView(app->ts);
