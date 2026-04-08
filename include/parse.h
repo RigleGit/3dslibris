@@ -33,6 +33,7 @@ typedef enum {
 	TAG_SCRIPT,TAG_STYLE,
 	TAG_TD,TAG_TITLE,
 	TAG_STRONG,TAG_EM,
+	TAG_UNDERLINE,TAG_STRIKETHROUGH,
 	TAG_UL,TAG_UNKNOWN
 } context_t;
 
@@ -70,8 +71,12 @@ struct parsedata_t {
 	bool paragraph_has_content;
 	bool bold;
 	bool italic;
+	bool underline;
+	bool strikethrough;
 	bool style_bold_stack[32];
 	bool style_italic_stack[32];
+	bool style_underline_stack[32];
+	bool style_strikethrough_stack[32];
 	bool style_hidden_stack[32];
 	std::string docpath; //! Current XHTML document path inside EPUB.
 	std::string doc_title;   //! Current XHTML <title> text (best chapter label).

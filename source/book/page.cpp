@@ -29,6 +29,7 @@
 
 #include "book/book.h"
 #include "book/page_buffer_utils.h"
+#include <algorithm>
 #include <list>
 #include <string.h>
 #include <time.h>
@@ -101,6 +102,8 @@ void Page::Draw(Text *ts) {
   ts->linebegan = false;
   ts->italic = false;
   ts->bold = false;
+  bool underline = false;
+  bool strikethrough = false;
 
 #ifdef OFFSCREEN
   // Draw offscreen.
@@ -199,6 +202,18 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_ITALIC_OFF) {
       i++;
       ts->italic = false;
+    } else if (c == TEXT_UNDERLINE_ON) {
+      i++;
+      underline = true;
+    } else if (c == TEXT_UNDERLINE_OFF) {
+      i++;
+      underline = false;
+    } else if (c == TEXT_STRIKETHROUGH_ON) {
+      i++;
+      strikethrough = true;
+    } else if (c == TEXT_STRIKETHROUGH_OFF) {
+      i++;
+      strikethrough = false;
     } else if (c == TEXT_IMAGE_CONTEXT_DEFAULT) {
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
@@ -283,6 +298,7 @@ void Page::Draw(Text *ts) {
         ts->SetPen((u8)rtl_x, ts->GetPenY());
       }
 
+      const int glyph_x0 = (int)ts->GetPenX();
       if (ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_BOLDITALIC);
       else if (ts->italic)
@@ -291,6 +307,24 @@ void Page::Draw(Text *ts) {
         ts->PrintChar(c, TEXT_STYLE_BOLD);
       else
         ts->PrintChar(c, TEXT_STYLE_REGULAR);
+
+      const int glyph_x1 = (int)ts->GetPenX();
+      const int baseline_y = (int)ts->GetPenY();
+      const u16 deco_color = ts->GetFgColor();
+      if (glyph_x1 > glyph_x0) {
+        if (underline) {
+          const int y = baseline_y + 1;
+          if (y >= 0)
+            ts->FillRect((u16)glyph_x0, (u16)y, (u16)glyph_x1, (u16)(y + 1),
+                         deco_color);
+        }
+        if (strikethrough) {
+          const int y = baseline_y - std::max(2, ts->GetHeight() / 3);
+          if (y >= 0)
+            ts->FillRect((u16)glyph_x0, (u16)y, (u16)glyph_x1, (u16)(y + 1),
+                         deco_color);
+        }
+      }
 
       ts->linebegan = true;
     }

@@ -122,6 +122,10 @@ static bool DetectParagraphRTL(
 static void RestoreParsedStyleMarkers(parsedata_t *p) {
   if (!p)
     return;
+  if (p->strikethrough)
+    AppendParsedByte(p, TEXT_STRIKETHROUGH_ON);
+  if (p->underline)
+    AppendParsedByte(p, TEXT_UNDERLINE_ON);
   if (p->italic)
     AppendParsedByte(p, TEXT_ITALIC_ON);
   if (p->bold)
@@ -161,8 +165,10 @@ static bool AttrNameEquals(const char *name, const char *needle) {
 }
 
 static void ParseInlineStyleFlags(const char *style, bool *bold_out,
-                                  bool *italic_out) {
-  if (!style || (!bold_out && !italic_out))
+                                  bool *italic_out, bool *underline_out,
+                                  bool *strikethrough_out) {
+  if (!style ||
+      (!bold_out && !italic_out && !underline_out && !strikethrough_out))
     return;
   const std::string value(style);
   const std::string style_lc = ToLowerAsciiLocal(value);
@@ -198,11 +204,31 @@ static void ParseInlineStyleFlags(const char *style, bool *bold_out,
       *bold_out = true;
     }
   }
+
+  if (underline_out) {
+    if (ContainsAsciiNoCase(style_lc, "text-decoration:underline") ||
+        ContainsAsciiNoCase(style_lc, "text-decoration: underline") ||
+        ContainsAsciiNoCase(style_lc, "text-decoration-line:underline") ||
+        ContainsAsciiNoCase(style_lc, "text-decoration-line: underline")) {
+      *underline_out = true;
+    }
+  }
+
+  if (strikethrough_out) {
+    if (ContainsAsciiNoCase(style_lc, "text-decoration:line-through") ||
+        ContainsAsciiNoCase(style_lc, "text-decoration: line-through") ||
+        ContainsAsciiNoCase(style_lc, "text-decoration-line:line-through") ||
+        ContainsAsciiNoCase(style_lc, "text-decoration-line: line-through")) {
+      *strikethrough_out = true;
+    }
+  }
 }
 
 static void ParseClassStyleFlags(const char *class_name, bool *bold_out,
-                                 bool *italic_out) {
-  if (!class_name || (!bold_out && !italic_out))
+                                 bool *italic_out, bool *underline_out,
+                                 bool *strikethrough_out) {
+  if (!class_name ||
+      (!bold_out && !italic_out && !underline_out && !strikethrough_out))
     return;
   const std::string class_lc = ToLowerAsciiLocal(class_name);
 
@@ -221,19 +247,39 @@ static void ParseClassStyleFlags(const char *class_name, bool *bold_out,
       *bold_out = true;
     }
   }
+
+  if (underline_out) {
+    if (ContainsAsciiNoCase(class_lc, "underline") ||
+        ContainsAsciiNoCase(class_lc, "underlined")) {
+      *underline_out = true;
+    }
+  }
+
+  if (strikethrough_out) {
+    if (ContainsAsciiNoCase(class_lc, "strikethrough") ||
+        ContainsAsciiNoCase(class_lc, "line-through") ||
+        ContainsAsciiNoCase(class_lc, "strike") ||
+        ContainsAsciiNoCase(class_lc, "deleted")) {
+      *strikethrough_out = true;
+    }
+  }
 }
 
 static void ParseElementStyleFlags(const char **attr, bool *bold_out,
-                                   bool *italic_out) {
-  if ((!bold_out && !italic_out) || !attr)
+                                   bool *italic_out, bool *underline_out,
+                                   bool *strikethrough_out) {
+  if ((!bold_out && !italic_out && !underline_out && !strikethrough_out) ||
+      !attr)
     return;
   for (int i = 0; attr[i]; i += 2) {
     if (!attr[i + 1] || !attr[i + 1][0])
       continue;
     if (AttrNameEquals(attr[i], "style")) {
-      ParseInlineStyleFlags(attr[i + 1], bold_out, italic_out);
+      ParseInlineStyleFlags(attr[i + 1], bold_out, italic_out, underline_out,
+                            strikethrough_out);
     } else if (AttrNameEquals(attr[i], "class")) {
-      ParseClassStyleFlags(attr[i + 1], bold_out, italic_out);
+      ParseClassStyleFlags(attr[i + 1], bold_out, italic_out, underline_out,
+                           strikethrough_out);
     }
   }
 }
@@ -341,6 +387,26 @@ static bool HasActiveStackItalicStyle(const parsedata_t *p) {
     return false;
   for (u8 i = 0; i < p->stacksize; i++) {
     if (p->style_italic_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackUnderlineStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_underline_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackStrikethroughStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_strikethrough_stack[i])
       return true;
   }
   return false;
@@ -735,6 +801,19 @@ void start(void *data, const char *el, const char **attr) {
     AppendParsedByte(p, TEXT_ITALIC_ON);
     p->italic = true;
     SyncParsedTextStyle(ts, p->bold, p->italic);
+  } else if (!strcmp(el, "u") || !strcmp(el, "ins")) {
+    parse_push(p, TAG_UNDERLINE);
+    if (!p->underline) {
+      AppendParsedByte(p, TEXT_UNDERLINE_ON);
+      p->underline = true;
+    }
+  } else if (!strcmp(el, "strike") || !strcmp(el, "s") ||
+             !strcmp(el, "del")) {
+    parse_push(p, TAG_STRIKETHROUGH);
+    if (!p->strikethrough) {
+      AppendParsedByte(p, TEXT_STRIKETHROUGH_ON);
+      p->strikethrough = true;
+    }
   } else if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
     parse_push(p, TAG_UNKNOWN);
 
@@ -850,13 +929,18 @@ void start(void *data, const char *el, const char **attr) {
   if (parse_in(p, TAG_BODY) && p->stacksize > 0) {
     bool style_bold = false;
     bool style_italic = false;
+    bool style_underline = false;
+    bool style_strikethrough = false;
     bool style_hidden = false;
-    ParseElementStyleFlags(attr, &style_bold, &style_italic);
+    ParseElementStyleFlags(attr, &style_bold, &style_italic, &style_underline,
+                           &style_strikethrough);
     ParseElementHiddenFlags(attr, &style_hidden);
 
     const u8 current = (u8)(p->stacksize - 1);
     p->style_bold_stack[current] = style_bold;
     p->style_italic_stack[current] = style_italic;
+    p->style_underline_stack[current] = style_underline;
+    p->style_strikethrough_stack[current] = style_strikethrough;
     p->style_hidden_stack[current] = style_hidden;
 
     bool style_changed = false;
@@ -869,6 +953,16 @@ void start(void *data, const char *el, const char **attr) {
     if (style_italic && !p->italic) {
       AppendParsedByte(p, TEXT_ITALIC_ON);
       p->italic = true;
+      style_changed = true;
+    }
+    if (style_underline && !p->underline) {
+      AppendParsedByte(p, TEXT_UNDERLINE_ON);
+      p->underline = true;
+      style_changed = true;
+    }
+    if (style_strikethrough && !p->strikethrough) {
+      AppendParsedByte(p, TEXT_STRIKETHROUGH_ON);
+      p->strikethrough = true;
       style_changed = true;
     }
     if (style_changed)
@@ -1284,6 +1378,10 @@ void end(void *data, const char *el) {
                          parse_in(p, TAG_H2) || HasActiveStackBoldStyle(p);
   const bool want_italic =
       parse_in(p, TAG_EM) || HasActiveStackItalicStyle(p);
+  const bool want_underline =
+      parse_in(p, TAG_UNDERLINE) || HasActiveStackUnderlineStyle(p);
+  const bool want_strikethrough = parse_in(p, TAG_STRIKETHROUGH) ||
+                                  HasActiveStackStrikethroughStyle(p);
 
   bool style_changed = false;
   if (p->bold != want_bold) {
@@ -1296,6 +1394,18 @@ void end(void *data, const char *el) {
   if (p->italic != want_italic) {
     AppendParsedByte(p, want_italic ? TEXT_ITALIC_ON : TEXT_ITALIC_OFF);
     p->italic = want_italic;
+    style_changed = true;
+  }
+  if (p->underline != want_underline) {
+    AppendParsedByte(p, want_underline ? TEXT_UNDERLINE_ON
+                                       : TEXT_UNDERLINE_OFF);
+    p->underline = want_underline;
+    style_changed = true;
+  }
+  if (p->strikethrough != want_strikethrough) {
+    AppendParsedByte(p, want_strikethrough ? TEXT_STRIKETHROUGH_ON
+                                           : TEXT_STRIKETHROUGH_OFF);
+    p->strikethrough = want_strikethrough;
     style_changed = true;
   }
   if (style_changed)
