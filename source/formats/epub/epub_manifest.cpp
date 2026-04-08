@@ -289,9 +289,9 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
   if (!parse_result.ok)
     rc = (int)parse_result.error_code;
   if (epd->type == PARSE_CONTENT) {
-    epd->parsed_doc_title = Trim(pd.doc_title);
+    epd->parsed_doc_title = Trim(pd.doc_heading);
     if (epd->parsed_doc_title.empty())
-      epd->parsed_doc_title = Trim(pd.doc_heading);
+      epd->parsed_doc_title = Trim(pd.doc_title);
   }
   return (rc);
 }
