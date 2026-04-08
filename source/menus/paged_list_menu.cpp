@@ -131,6 +131,17 @@ void PagedListMenu::Draw() {
 
   u8 start = page * pagesize;
   u8 end = std::min<u8>((u8)buttons.size(), (u8)(start + pagesize));
+#ifdef DSLIBRIS_DEBUG
+  static int s_draw_trace_budget = 48;
+  if (app && s_draw_trace_budget > 0) {
+    DBG_LOGF(app,
+             "LIST draw title=%s entries=%u page=%u/%u sel=%u range=[%u,%u)",
+             header_title.c_str(), (unsigned)buttons.size(),
+             (unsigned)GetCurrentPage(), (unsigned)GetPageCount(),
+             (unsigned)selected, (unsigned)start, (unsigned)end);
+    s_draw_trace_budget--;
+  }
+#endif
   for (u8 i = start; i < end; i++) {
     buttons[i]->Draw(i == selected);
   }
@@ -189,23 +200,39 @@ void PagedListMenu::HandleInput(u32 keys) {
   }
 
   auto key = app->key;
+  const u32 non_touch_keys = keys & ~KEY_TOUCH;
+#ifdef DSLIBRIS_DEBUG
+  static int s_input_trace_budget = 128;
+  if (app && s_input_trace_budget > 0 && (keys != 0 || hidKeysHeld() != 0)) {
+    DBG_LOGF(app,
+             "LIST input title=%s keys=0x%08lx non_touch=0x%08lx held=0x%08lx sel=%u/%u page=%u/%u dirty=%d wait=%d",
+             header_title.c_str(), (unsigned long)keys,
+             (unsigned long)non_touch_keys, (unsigned long)hidKeysHeld(),
+             (unsigned)selected, (unsigned)buttons.size(),
+             (unsigned)GetCurrentPage(), (unsigned)GetPageCount(),
+             dirty ? 1 : 0, wait_input_release ? 1 : 0);
+    s_input_trace_budget--;
+  }
+#endif
 
-  if (keys & KEY_TOUCH) {
-    HandleTouchInput();
-  } else if (keys & KEY_A) {
+  if (non_touch_keys & KEY_A) {
     ActivateSelected();
-  } else if (keys & (KEY_B | KEY_START | KEY_SELECT)) {
+  } else if (non_touch_keys & (KEY_B | KEY_START | KEY_SELECT)) {
     Back();
-  } else if (keys & (key.down | KEY_DOWN | key.right | KEY_RIGHT |
-                     KEY_CPAD_DOWN | KEY_CPAD_RIGHT)) {
+  } else if (non_touch_keys &
+             (key.down | KEY_DOWN | key.right | KEY_RIGHT | KEY_CPAD_DOWN |
+              KEY_CPAD_RIGHT)) {
     SelectNext();
-  } else if (keys & (key.up | KEY_UP | key.left | KEY_LEFT | KEY_CPAD_UP |
-                     KEY_CPAD_LEFT)) {
+  } else if (non_touch_keys &
+             (key.up | KEY_UP | key.left | KEY_LEFT | KEY_CPAD_UP |
+              KEY_CPAD_LEFT)) {
     SelectPrevious();
-  } else if (keys & (key.r | KEY_R)) {
+  } else if (non_touch_keys & (key.r | KEY_R)) {
     NextPage();
-  } else if (keys & (key.l | KEY_L)) {
+  } else if (non_touch_keys & (key.l | KEY_L)) {
     PreviousPage();
+  } else if (keys & KEY_TOUCH) {
+    HandleTouchInput();
   }
 }
 
@@ -216,6 +243,13 @@ void PagedListMenu::SelectNext() {
     selected++;
     page = selected / pagesize;
     dirty = true;
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST nav title=%s action=next sel=%u page=%u",
+               header_title.c_str(), (unsigned)selected,
+               (unsigned)GetCurrentPage());
+    }
+#endif
   }
 }
 
@@ -226,6 +260,13 @@ void PagedListMenu::SelectPrevious() {
     selected--;
     page = selected / pagesize;
     dirty = true;
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST nav title=%s action=prev sel=%u page=%u",
+               header_title.c_str(), (unsigned)selected,
+               (unsigned)GetCurrentPage());
+    }
+#endif
   }
 }
 
@@ -238,6 +279,13 @@ void PagedListMenu::NextPage() {
     selected = (next_selected < buttons.size()) ? next_selected
                                                 : (u8)(buttons.size() - 1);
     dirty = true;
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST nav title=%s action=next_page sel=%u page=%u",
+               header_title.c_str(), (unsigned)selected,
+               (unsigned)GetCurrentPage());
+    }
+#endif
   }
 }
 
@@ -248,6 +296,13 @@ void PagedListMenu::PreviousPage() {
     page--;
     selected = page * pagesize;
     dirty = true;
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST nav title=%s action=prev_page sel=%u page=%u",
+               header_title.c_str(), (unsigned)selected,
+               (unsigned)GetCurrentPage());
+    }
+#endif
   }
 }
 
@@ -305,6 +360,12 @@ bool PagedListMenu::ResolveTargetPage(u8 index, u16 *page_out) {
 }
 
 void PagedListMenu::Back() {
+#ifdef DSLIBRIS_DEBUG
+  if (app) {
+    DBG_LOGF(app, "LIST back title=%s from_book_ctx=%d", header_title.c_str(),
+             app->IsBookSettingsContext() ? 1 : 0);
+  }
+#endif
   if (app->IsBookSettingsContext()) {
     app->ShowSettingsView(true);
     return;
@@ -322,6 +383,12 @@ void PagedListMenu::HandleTouchInput() {
   LayoutFooterButtons();
   TouchCandidates candidates;
   touch::BuildCandidates(app, &candidates);
+#ifdef DSLIBRIS_DEBUG
+  if (app) {
+    DBG_LOGF(app, "LIST touch title=%s c0=(%d,%d)", header_title.c_str(),
+             candidates.points[0].x, candidates.points[0].y);
+  }
+#endif
 
   int footerX = -1;
   touch::FirstXInBottomBand(candidates, 284, &footerX);
@@ -344,19 +411,40 @@ void PagedListMenu::HandleTouchInput() {
     if (idx < 0 || idx >= (int)buttons.size())
       continue;
     selected = (u8)idx;
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST touch row-hit title=%s row=%d sel=%u",
+               header_title.c_str(), row, (unsigned)selected);
+    }
+#endif
     ActivateSelected();
     return;
   }
 
   if (touch::HitsButton(candidates, &app->buttonprefs, 4)) {
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST touch footer=back title=%s", header_title.c_str());
+    }
+#endif
     Back();
     return;
   }
   if (touch::HitsButton(candidates, &app->buttonnext, 4)) {
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST touch footer=next title=%s", header_title.c_str());
+    }
+#endif
     NextPage();
     return;
   }
   if (touch::HitsButton(candidates, &app->buttonprev, 4)) {
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST touch footer=prev title=%s", header_title.c_str());
+    }
+#endif
     PreviousPage();
     return;
   }
@@ -368,6 +456,12 @@ void PagedListMenu::HandleTouchInput() {
     } else {
       NextPage();
     }
+#ifdef DSLIBRIS_DEBUG
+    if (app) {
+      DBG_LOGF(app, "LIST touch footer-band title=%s x=%d", header_title.c_str(),
+               footerX);
+    }
+#endif
     return;
   }
 
@@ -376,8 +470,19 @@ void PagedListMenu::HandleTouchInput() {
   for (u8 i = start; i < end; i++) {
     if (touch::HitsButton(candidates, buttons[i], 4)) {
       selected = i;
+#ifdef DSLIBRIS_DEBUG
+      if (app) {
+        DBG_LOGF(app, "LIST touch button-hit title=%s sel=%u",
+                 header_title.c_str(), (unsigned)selected);
+      }
+#endif
       ActivateSelected();
       return;
     }
   }
+#ifdef DSLIBRIS_DEBUG
+  if (app) {
+    DBG_LOGF(app, "LIST touch no-hit title=%s", header_title.c_str());
+  }
+#endif
 }

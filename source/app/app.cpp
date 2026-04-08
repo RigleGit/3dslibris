@@ -266,9 +266,27 @@ void App::RunChaptersMenuFrame(u32 keys) {
     s_chapters_input_budget--;
   }
 #endif
+  const bool dirty_before = chaptermenu && chaptermenu->IsDirty();
   chaptermenu->HandleInput(keys);
-  if (chaptermenu->IsDirty())
+  const bool dirty_after_input = chaptermenu && chaptermenu->IsDirty();
+#ifdef DSLIBRIS_DEBUG
+  static int s_chapters_dirty_budget = 64;
+  if (s_chapters_dirty_budget > 0 &&
+      (keys != 0 || dirty_before != dirty_after_input)) {
+    DBG_LOGF(this, "INDEX frame state dirty_before=%d dirty_after_input=%d",
+             dirty_before ? 1 : 0, dirty_after_input ? 1 : 0);
+    s_chapters_dirty_budget--;
+  }
+#endif
+  if (dirty_after_input)
     chaptermenu->Draw();
+#ifdef DSLIBRIS_DEBUG
+  static int s_chapters_draw_budget = 32;
+  if (s_chapters_draw_budget > 0 && dirty_after_input) {
+    DBG_LOG(this, "INDEX frame draw");
+    s_chapters_draw_budget--;
+  }
+#endif
 }
 
 bool App::PresentIfDirty() {
