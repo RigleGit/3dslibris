@@ -104,6 +104,8 @@ void Page::Draw(Text *ts) {
   ts->bold = false;
   bool underline = false;
   bool strikethrough = false;
+  bool superscript = false;
+  bool subscript = false;
 
 #ifdef OFFSCREEN
   // Draw offscreen.
@@ -214,6 +216,20 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_STRIKETHROUGH_OFF) {
       i++;
       strikethrough = false;
+    } else if (c == TEXT_SUPERSCRIPT_ON) {
+      i++;
+      superscript = true;
+      subscript = false;
+    } else if (c == TEXT_SUPERSCRIPT_OFF) {
+      i++;
+      superscript = false;
+    } else if (c == TEXT_SUBSCRIPT_ON) {
+      i++;
+      subscript = true;
+      superscript = false;
+    } else if (c == TEXT_SUBSCRIPT_OFF) {
+      i++;
+      subscript = false;
     } else if (c == TEXT_IMAGE_CONTEXT_DEFAULT) {
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
@@ -299,6 +315,14 @@ void Page::Draw(Text *ts) {
       }
 
       const int glyph_x0 = (int)ts->GetPenX();
+      const int base_pen_y = (int)ts->GetPenY();
+      if (superscript || subscript) {
+        const int y_offset =
+            superscript ? -std::max(2, ts->GetHeight() / 3)
+                        : std::max(2, ts->GetHeight() / 4);
+        const int shifted_y = std::max(0, base_pen_y + y_offset);
+        ts->SetPen((u16)glyph_x0, (u16)shifted_y);
+      }
       if (ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_BOLDITALIC);
       else if (ts->italic)
@@ -309,6 +333,8 @@ void Page::Draw(Text *ts) {
         ts->PrintChar(c, TEXT_STYLE_REGULAR);
 
       const int glyph_x1 = (int)ts->GetPenX();
+      if (superscript || subscript)
+        ts->SetPen((u16)glyph_x1, (u16)base_pen_y);
       const int baseline_y = (int)ts->GetPenY();
       const u16 deco_color = ts->GetFgColor();
       if (glyph_x1 > glyph_x0) {

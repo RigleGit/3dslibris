@@ -122,6 +122,10 @@ static bool DetectParagraphRTL(
 static void RestoreParsedStyleMarkers(parsedata_t *p) {
   if (!p)
     return;
+  if (p->superscript)
+    AppendParsedByte(p, TEXT_SUPERSCRIPT_ON);
+  if (p->subscript)
+    AppendParsedByte(p, TEXT_SUBSCRIPT_ON);
   if (p->strikethrough)
     AppendParsedByte(p, TEXT_STRIKETHROUGH_ON);
   if (p->underline)
@@ -166,9 +170,12 @@ static bool AttrNameEquals(const char *name, const char *needle) {
 
 static void ParseInlineStyleFlags(const char *style, bool *bold_out,
                                   bool *italic_out, bool *underline_out,
-                                  bool *strikethrough_out) {
+                                  bool *strikethrough_out,
+                                  bool *superscript_out,
+                                  bool *subscript_out) {
   if (!style ||
-      (!bold_out && !italic_out && !underline_out && !strikethrough_out))
+      (!bold_out && !italic_out && !underline_out && !strikethrough_out &&
+       !superscript_out && !subscript_out))
     return;
   const std::string value(style);
   const std::string style_lc = ToLowerAsciiLocal(value);
@@ -222,13 +229,30 @@ static void ParseInlineStyleFlags(const char *style, bool *bold_out,
       *strikethrough_out = true;
     }
   }
+
+  if (superscript_out) {
+    if (ContainsAsciiNoCase(style_lc, "vertical-align:super") ||
+        ContainsAsciiNoCase(style_lc, "vertical-align: super")) {
+      *superscript_out = true;
+    }
+  }
+
+  if (subscript_out) {
+    if (ContainsAsciiNoCase(style_lc, "vertical-align:sub") ||
+        ContainsAsciiNoCase(style_lc, "vertical-align: sub")) {
+      *subscript_out = true;
+    }
+  }
 }
 
 static void ParseClassStyleFlags(const char *class_name, bool *bold_out,
                                  bool *italic_out, bool *underline_out,
-                                 bool *strikethrough_out) {
+                                 bool *strikethrough_out,
+                                 bool *superscript_out,
+                                 bool *subscript_out) {
   if (!class_name ||
-      (!bold_out && !italic_out && !underline_out && !strikethrough_out))
+      (!bold_out && !italic_out && !underline_out && !strikethrough_out &&
+       !superscript_out && !subscript_out))
     return;
   const std::string class_lc = ToLowerAsciiLocal(class_name);
 
@@ -263,12 +287,27 @@ static void ParseClassStyleFlags(const char *class_name, bool *bold_out,
       *strikethrough_out = true;
     }
   }
+
+  if (superscript_out) {
+    if (ContainsAsciiNoCase(class_lc, "superscript")) {
+      *superscript_out = true;
+    }
+  }
+
+  if (subscript_out) {
+    if (ContainsAsciiNoCase(class_lc, "subscript")) {
+      *subscript_out = true;
+    }
+  }
 }
 
 static void ParseElementStyleFlags(const char **attr, bool *bold_out,
                                    bool *italic_out, bool *underline_out,
-                                   bool *strikethrough_out) {
-  if ((!bold_out && !italic_out && !underline_out && !strikethrough_out) ||
+                                   bool *strikethrough_out,
+                                   bool *superscript_out,
+                                   bool *subscript_out) {
+  if ((!bold_out && !italic_out && !underline_out && !strikethrough_out &&
+       !superscript_out && !subscript_out) ||
       !attr)
     return;
   for (int i = 0; attr[i]; i += 2) {
@@ -276,10 +315,10 @@ static void ParseElementStyleFlags(const char **attr, bool *bold_out,
       continue;
     if (AttrNameEquals(attr[i], "style")) {
       ParseInlineStyleFlags(attr[i + 1], bold_out, italic_out, underline_out,
-                            strikethrough_out);
+                            strikethrough_out, superscript_out, subscript_out);
     } else if (AttrNameEquals(attr[i], "class")) {
       ParseClassStyleFlags(attr[i + 1], bold_out, italic_out, underline_out,
-                           strikethrough_out);
+                           strikethrough_out, superscript_out, subscript_out);
     }
   }
 }
@@ -407,6 +446,26 @@ static bool HasActiveStackStrikethroughStyle(const parsedata_t *p) {
     return false;
   for (u8 i = 0; i < p->stacksize; i++) {
     if (p->style_strikethrough_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackSuperscriptStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_superscript_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackSubscriptStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_subscript_stack[i])
       return true;
   }
   return false;
@@ -814,6 +873,18 @@ void start(void *data, const char *el, const char **attr) {
       AppendParsedByte(p, TEXT_STRIKETHROUGH_ON);
       p->strikethrough = true;
     }
+  } else if (!strcmp(el, "sup")) {
+    parse_push(p, TAG_SUPERSCRIPT);
+    if (!p->superscript) {
+      AppendParsedByte(p, TEXT_SUPERSCRIPT_ON);
+      p->superscript = true;
+    }
+  } else if (!strcmp(el, "sub")) {
+    parse_push(p, TAG_SUBSCRIPT);
+    if (!p->subscript) {
+      AppendParsedByte(p, TEXT_SUBSCRIPT_ON);
+      p->subscript = true;
+    }
   } else if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
     parse_push(p, TAG_UNKNOWN);
 
@@ -931,9 +1002,12 @@ void start(void *data, const char *el, const char **attr) {
     bool style_italic = false;
     bool style_underline = false;
     bool style_strikethrough = false;
+    bool style_superscript = false;
+    bool style_subscript = false;
     bool style_hidden = false;
     ParseElementStyleFlags(attr, &style_bold, &style_italic, &style_underline,
-                           &style_strikethrough);
+                           &style_strikethrough, &style_superscript,
+                           &style_subscript);
     ParseElementHiddenFlags(attr, &style_hidden);
 
     const u8 current = (u8)(p->stacksize - 1);
@@ -941,6 +1015,8 @@ void start(void *data, const char *el, const char **attr) {
     p->style_italic_stack[current] = style_italic;
     p->style_underline_stack[current] = style_underline;
     p->style_strikethrough_stack[current] = style_strikethrough;
+    p->style_superscript_stack[current] = style_superscript;
+    p->style_subscript_stack[current] = style_subscript;
     p->style_hidden_stack[current] = style_hidden;
 
     bool style_changed = false;
@@ -963,6 +1039,16 @@ void start(void *data, const char *el, const char **attr) {
     if (style_strikethrough && !p->strikethrough) {
       AppendParsedByte(p, TEXT_STRIKETHROUGH_ON);
       p->strikethrough = true;
+      style_changed = true;
+    }
+    if (style_superscript && !p->superscript) {
+      AppendParsedByte(p, TEXT_SUPERSCRIPT_ON);
+      p->superscript = true;
+      style_changed = true;
+    }
+    if (style_subscript && !p->subscript) {
+      AppendParsedByte(p, TEXT_SUBSCRIPT_ON);
+      p->subscript = true;
       style_changed = true;
     }
     if (style_changed)
@@ -1382,6 +1468,10 @@ void end(void *data, const char *el) {
       parse_in(p, TAG_UNDERLINE) || HasActiveStackUnderlineStyle(p);
   const bool want_strikethrough = parse_in(p, TAG_STRIKETHROUGH) ||
                                   HasActiveStackStrikethroughStyle(p);
+  const bool want_superscript = parse_in(p, TAG_SUPERSCRIPT) ||
+                                HasActiveStackSuperscriptStyle(p);
+  const bool want_subscript =
+      parse_in(p, TAG_SUBSCRIPT) || HasActiveStackSubscriptStyle(p);
 
   bool style_changed = false;
   if (p->bold != want_bold) {
@@ -1406,6 +1496,18 @@ void end(void *data, const char *el) {
     AppendParsedByte(p, want_strikethrough ? TEXT_STRIKETHROUGH_ON
                                            : TEXT_STRIKETHROUGH_OFF);
     p->strikethrough = want_strikethrough;
+    style_changed = true;
+  }
+  if (p->superscript != want_superscript) {
+    AppendParsedByte(p, want_superscript ? TEXT_SUPERSCRIPT_ON
+                                         : TEXT_SUPERSCRIPT_OFF);
+    p->superscript = want_superscript;
+    style_changed = true;
+  }
+  if (p->subscript != want_subscript) {
+    AppendParsedByte(p, want_subscript ? TEXT_SUBSCRIPT_ON
+                                       : TEXT_SUBSCRIPT_OFF);
+    p->subscript = want_subscript;
     style_changed = true;
   }
   if (style_changed)

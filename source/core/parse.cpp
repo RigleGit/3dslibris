@@ -144,11 +144,15 @@ void parse_init(parsedata_t *data) {
   data->italic = false;
   data->underline = false;
   data->strikethrough = false;
+  data->superscript = false;
+  data->subscript = false;
   for (int i = 0; i < 32; i++) {
     data->style_bold_stack[i] = false;
     data->style_italic_stack[i] = false;
     data->style_underline_stack[i] = false;
     data->style_strikethrough_stack[i] = false;
+    data->style_superscript_stack[i] = false;
+    data->style_subscript_stack[i] = false;
     data->style_hidden_stack[i] = false;
   }
   data->docpath.clear();
@@ -187,6 +191,8 @@ void parse_push(parsedata_t *data, context_t context) {
     data->style_italic_stack[data->stacksize] = false;
     data->style_underline_stack[data->stacksize] = false;
     data->style_strikethrough_stack[data->stacksize] = false;
+    data->style_superscript_stack[data->stacksize] = false;
+    data->style_subscript_stack[data->stacksize] = false;
     data->style_hidden_stack[data->stacksize] = false;
     data->stacksize++;
   }
@@ -199,6 +205,8 @@ context_t parse_pop(parsedata_t *data) {
     data->style_italic_stack[data->stacksize] = false;
     data->style_underline_stack[data->stacksize] = false;
     data->style_strikethrough_stack[data->stacksize] = false;
+    data->style_superscript_stack[data->stacksize] = false;
+    data->style_subscript_stack[data->stacksize] = false;
     data->style_hidden_stack[data->stacksize] = false;
   }
   return data->stack[data->stacksize];
