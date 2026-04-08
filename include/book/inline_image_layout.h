@@ -21,10 +21,12 @@ struct InlineImageMetadata {
 struct InlineImageLayoutRequest {
   int screen_width;
   int screen_height;
+  int next_screen_height;
   int margin_left;
   int margin_right;
   int margin_top;
   int margin_bottom;
+  int next_margin_bottom;
   int line_height;
   int linespacing;
   int pen_x;

@@ -51,12 +51,15 @@ static bool IsAtScreenStart(const InlineImageLayoutRequest &req) {
 
 static int NextScreenHeight(const InlineImageLayoutRequest &req,
                             int *page_breaks) {
+  const int fallback_height = (req.current_screen == 1) ? 400 : 320;
+  const int next_screen_height =
+      (req.next_screen_height > 0) ? req.next_screen_height : fallback_height;
   if (req.current_screen == 1) {
     if (page_breaks)
       (*page_breaks)++;
-    return 400;
+    return next_screen_height;
   }
-  return 320;
+  return next_screen_height;
 }
 
 static void FillPageMode(const InlineImageLayoutRequest &req,
@@ -115,6 +118,8 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
       min_follow_lines * (line_height + req.linespacing);
   const int min_caption_text_height =
       min_caption_lines * (line_height + req.linespacing);
+  const int next_margin_bottom =
+      (req.next_margin_bottom >= 0) ? req.next_margin_bottom : req.margin_bottom;
 
   if (!meta.ok || meta.width <= 0 || meta.height <= 0)
     return plan;
@@ -147,7 +152,7 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
   int next_page_break_probe = 0;
   const int next_screen_height =
       NextScreenHeight(req, &next_page_break_probe);
-  const int next_limit_y = next_screen_height - req.margin_bottom;
+  const int next_limit_y = next_screen_height - next_margin_bottom;
   const int fresh_baseline = req.margin_top + line_height;
   const int next_caption_band_max_height =
       next_limit_y - fresh_baseline - req.linespacing -
