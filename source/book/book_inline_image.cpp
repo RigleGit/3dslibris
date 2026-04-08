@@ -10,6 +10,7 @@
 
 #include "book/book.h"
 
+#include "book/inline_image_screen_layout.h"
 #include "base64_utils.h"
 #include "debug_log.h"
 #include "formats/common/epub_image_utils.h"
@@ -619,13 +620,17 @@ bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
   EnsureInlineImageMetadata(image_id, &meta);
 
   InlineImageLayoutRequest req{};
+  const InlineImageScreenLayout screen_layout =
+      ResolveInlineImageScreenLayoutForReadingScreen(
+          GetOrientation() != 0, current_screen, ts->margin.bottom);
   req.screen_width = 240;
-  req.screen_height = (current_screen == 0) ? 400 : 320;
+  req.screen_height = screen_layout.current_screen_height;
+  req.next_screen_height = screen_layout.next_screen_height;
   req.margin_left = ts->margin.left;
   req.margin_right = ts->margin.right;
   req.margin_top = ts->margin.top;
-  req.margin_bottom = (current_screen == 0) ? ts->margin.bottom
-                                            : std::min(ts->margin.bottom, 16);
+  req.margin_bottom = screen_layout.current_margin_bottom;
+  req.next_margin_bottom = screen_layout.next_margin_bottom;
   req.line_height = ts->GetHeight();
   req.linespacing = ts->linespacing;
   req.pen_x = pen_x;
@@ -658,7 +663,10 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   const InlineImageLayoutPlan &plan = *plan_ptr;
 
   const int screen_w = 240;
-  const int screen_h = left_screen ? 400 : 320;
+  const InlineImageScreenLayout draw_screen_layout =
+      ResolveInlineImageScreenLayoutForReadingScreen(
+          GetOrientation() != 0, current_screen, ts->margin.bottom);
+  const int screen_h = draw_screen_layout.current_screen_height;
   const int text_w = screen_w - ts->margin.left - ts->margin.right;
   const int line_height = ts->GetHeight();
   const int line_top = ts->GetPenY() - line_height;
