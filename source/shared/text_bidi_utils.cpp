@@ -22,6 +22,13 @@ namespace {
 static fz_context *g_bidi_ctx = NULL;
 static bool g_bidi_ctx_init_attempted = false;
 
+struct BidiCollectState {
+  const uint32_t *base;
+  size_t count;
+  std::vector<BidiRun> *runs;
+  size_t fallback_cursor;
+};
+
 static fz_context *GetBidiContext() {
   if (!g_bidi_ctx_init_attempted) {
     g_bidi_ctx_init_attempted = true;
@@ -39,21 +46,39 @@ static void BidiFragmentCallback(const uint32_t *fragment,
                                   int bidiLevel,
                                   int /*script*/,
                                   void *arg) {
-  std::vector<BidiRun> *runs = static_cast<std::vector<BidiRun> *>(arg);
-  // Calcular offset absoluto desde el puntero del fragmento.
-  // El caller pasa codepoints como base; el fragment pointer es dentro de ese array.
-  // Pero no tenemos la base aquí — usamos un truco: el callback recibe
-  // fragmentos en orden secuencial, así que podemos acumular start/length.
+  BidiCollectState *state = static_cast<BidiCollectState *>(arg);
+  if (!state || !state->runs || fragmentLen == 0)
+    return;
+
+  size_t start = state->fallback_cursor;
+  if (state->base && fragment >= state->base &&
+      fragment < (state->base + state->count)) {
+    start = (size_t)(fragment - state->base);
+  }
+
+  if (start + fragmentLen > state->count) {
+    if (start >= state->count)
+      return;
+    fragmentLen = state->count - start;
+  }
+
   BidiRun run;
   run.bidi_level = bidiLevel;
   run.length = fragmentLen;
-  if (runs->empty()) {
-    run.start = 0;
+  run.start = start;
+  if (state->runs->empty()) {
+    state->runs->push_back(run);
   } else {
-    const BidiRun &prev = runs->back();
-    run.start = prev.start + prev.length;
+    BidiRun &prev = state->runs->back();
+    // Merge contiguous runs at same embedding level.
+    if (prev.bidi_level == run.bidi_level &&
+        (prev.start + prev.length) == run.start) {
+      prev.length += run.length;
+    } else {
+      state->runs->push_back(run);
+    }
   }
-  runs->push_back(run);
+  state->fallback_cursor = run.start + run.length;
 }
 
 } // namespace
@@ -92,10 +117,16 @@ bool AnalyzeBidiRuns(const uint32_t *codepoints, size_t count,
     return false;
   }
 
+  BidiCollectState collect_state;
+  collect_state.base = codepoints;
+  collect_state.count = count;
+  collect_state.runs = runs;
+  collect_state.fallback_cursor = 0;
+
   fz_bidi_direction baseDir = FZ_BIDI_NEUTRAL;
   fz_bidi_fragment_fn *callback = BidiFragmentCallback;
-  fz_bidi_fragment_text(ctx, codepoints, count, &baseDir,
-                        callback, runs, 0);
+  fz_bidi_fragment_text(ctx, codepoints, count, &baseDir, callback,
+                        &collect_state, 0);
 
   if (runs->empty()) {
     // Sin fragmentos: todo es LTR.
@@ -115,20 +146,48 @@ void ReorderLineForDisplay(std::vector<uint32_t> &codepoints,
   if (line_start >= line_end || line_end > codepoints.size()) return;
   if (runs.empty()) return;
 
-  // Para cada run RTL en el rango de la línea, invertir los codepoints.
-  // UAX#9 L2: los niveles impares se invierten.
+  const size_t n = line_end - line_start;
+  std::vector<int> levels(n, 0);
+  int max_level = 0;
+  int min_odd_level = 126;
+
+  // Materialize resolved bidi level per codepoint in the current line.
   for (size_t r = 0; r < runs.size(); r++) {
     const BidiRun &run = runs[r];
-    if (run.bidi_level & 1) {
-      // RTL run: invertir.
-      size_t r_start = run.start;
-      size_t r_end = run.start + run.length;
-      // Intersección con el rango de la línea.
-      size_t i_start = (r_start < line_start) ? line_start : r_start;
-      size_t i_end = (r_end > line_end) ? line_end : r_end;
-      if (i_start < i_end && i_end - i_start > 1) {
-        std::reverse(codepoints.begin() + i_start,
-                     codepoints.begin() + i_end);
+    size_t r_start = run.start;
+    size_t r_end = run.start + run.length;
+    size_t i_start = (r_start < line_start) ? line_start : r_start;
+    size_t i_end = (r_end > line_end) ? line_end : r_end;
+    if (i_start >= i_end)
+      continue;
+
+    const int level = run.bidi_level;
+    if (level > max_level)
+      max_level = level;
+    if ((level & 1) && level < min_odd_level)
+      min_odd_level = level;
+
+    for (size_t i = i_start; i < i_end; i++)
+      levels[i - line_start] = level;
+  }
+
+  if (min_odd_level == 126)
+    return;
+
+  // UAX#9 L2: reverse contiguous sequences whose level >= current level,
+  // iterating from max level down to min odd level.
+  for (int level = max_level; level >= min_odd_level; level--) {
+    size_t i = 0;
+    while (i < n) {
+      while (i < n && levels[i] < level)
+        i++;
+      const size_t seq_start = i;
+      while (i < n && levels[i] >= level)
+        i++;
+      const size_t seq_end = i;
+      if (seq_end > seq_start + 1) {
+        std::reverse(codepoints.begin() + line_start + seq_start,
+                     codepoints.begin() + line_start + seq_end);
       }
     }
   }
