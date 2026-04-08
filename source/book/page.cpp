@@ -116,6 +116,7 @@ void Page::Draw(Text *ts) {
   bool strikethrough = false;
   bool superscript = false;
   bool subscript = false;
+  bool mono = false;
 
 #ifdef OFFSCREEN
   // Draw offscreen.
@@ -284,6 +285,12 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_SUBSCRIPT_OFF) {
       i++;
       subscript = false;
+    } else if (c == TEXT_MONO_ON) {
+      i++;
+      mono = true;
+    } else if (c == TEXT_MONO_OFF) {
+      i++;
+      mono = false;
     } else if (c == TEXT_IMAGE_CONTEXT_DEFAULT) {
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
@@ -414,7 +421,9 @@ void Page::Draw(Text *ts) {
         const int shifted_y = std::max(0, base_pen_y + y_offset);
         ts->SetPen((u16)glyph_x0, (u16)shifted_y);
       }
-      if (ts->bold && ts->italic)
+      if (mono)
+        ts->PrintChar(c, TEXT_STYLE_MONO);
+      else if (ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_BOLDITALIC);
       else if (ts->italic)
         ts->PrintChar(c, TEXT_STYLE_ITALIC);

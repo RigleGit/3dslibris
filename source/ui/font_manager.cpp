@@ -74,6 +74,7 @@ FontManager::FontManager(Text *owner)
   filenames[TEXT_STYLE_ITALIC] = FONTITALICFILE;
   filenames[TEXT_STYLE_BOLDITALIC] = FONTBOLDITALICFILE;
   filenames[TEXT_STYLE_BROWSER] = FONTBROWSERFILE;
+  filenames[TEXT_STYLE_MONO] = FONTMONOFILE;
 
   if (parent) {
     ftc = false;
@@ -211,7 +212,7 @@ int FontManager::InitCache(void) {
 
   const int styles[] = {TEXT_STYLE_BROWSER, TEXT_STYLE_REGULAR,
                         TEXT_STYLE_ITALIC, TEXT_STYLE_BOLD,
-                        TEXT_STYLE_BOLDITALIC};
+                        TEXT_STYLE_BOLDITALIC, TEXT_STYLE_MONO};
   for (int i = 0; i < (int)(sizeof(styles) / sizeof(styles[0])); i++) {
     FT_Error err = CreateFace(styles[i]);
     if (err && !error)

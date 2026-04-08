@@ -421,6 +421,16 @@ static bool HasActiveStackSubscriptStyle(const parsedata_t *p) {
   return false;
 }
 
+static bool HasActiveStackMonoStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_mono_stack[i])
+      return true;
+  }
+  return false;
+}
+
 static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
   if (!p || !p->book || !p->ts)
     return;
@@ -796,6 +806,10 @@ void start(void *data, const char *el, const char **attr) {
   } else if (!strcmp(el, "pre")) {
     parse_push(p, TAG_PRE);
     p->preformatted_wrap_enabled = true;
+    if (!p->mono) {
+      AppendParsedByte(p, TEXT_MONO_ON);
+      p->mono = true;
+    }
   }
   else if (!strcmp(el, "li")) {
     parse_push(p, TAG_UNKNOWN);
@@ -854,6 +868,13 @@ void start(void *data, const char *el, const char **attr) {
     if (!p->subscript) {
       AppendParsedByte(p, TEXT_SUBSCRIPT_ON);
       p->subscript = true;
+    }
+  } else if (!strcmp(el, "code") || !strcmp(el, "tt") ||
+             !strcmp(el, "kbd") || !strcmp(el, "samp")) {
+    parse_push(p, TAG_CODE);
+    if (!p->mono) {
+      AppendParsedByte(p, TEXT_MONO_ON);
+      p->mono = true;
     }
   } else if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
     parse_push(p, TAG_UNKNOWN);
@@ -1385,11 +1406,15 @@ void end(void *data, const char *el) {
   } else if (!strcmp(el, "h2")) {
     linefeed(p);
   } else if (!strcmp(el, "h3") || !strcmp(el, "h4") || !strcmp(el, "h5") ||
-             !strcmp(el, "h6") || !strcmp(el, "hr") || !strcmp(el, "pre")) {
-    if (!strcmp(el, "pre"))
-      p->preformatted_wrap_enabled = false;
+             !strcmp(el, "h6") || !strcmp(el, "hr")) {
     linefeed(p);
     linefeed(p);
+  } else if (!strcmp(el, "pre")) {
+    p->preformatted_wrap_enabled = false;
+    linefeed(p);
+    linefeed(p);
+  } else if (!strcmp(el, "code") || !strcmp(el, "tt") ||
+             !strcmp(el, "kbd") || !strcmp(el, "samp")) {
   } else if (!strcmp(el, "li") || !strcmp(el, "ul") || !strcmp(el, "ol")) {
     if (!strcmp(el, "li"))
       p->strip_leading_list_marker = false;
@@ -1410,6 +1435,8 @@ void end(void *data, const char *el) {
                                 HasActiveStackSuperscriptStyle(p);
   const bool want_subscript =
       parse_in(p, TAG_SUBSCRIPT) || HasActiveStackSubscriptStyle(p);
+  const bool want_mono = parse_in(p, TAG_CODE) || parse_in(p, TAG_PRE) ||
+                         HasActiveStackMonoStyle(p);
 
   bool style_changed = false;
   if (p->bold != want_bold) {
@@ -1446,6 +1473,11 @@ void end(void *data, const char *el) {
     AppendParsedByte(p, want_subscript ? TEXT_SUBSCRIPT_ON
                                        : TEXT_SUBSCRIPT_OFF);
     p->subscript = want_subscript;
+    style_changed = true;
+  }
+  if (p->mono != want_mono) {
+    AppendParsedByte(p, want_mono ? TEXT_MONO_ON : TEXT_MONO_OFF);
+    p->mono = want_mono;
     style_changed = true;
   }
   if (style_changed)

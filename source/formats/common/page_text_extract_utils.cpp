@@ -43,7 +43,7 @@ std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
         c == TEXT_UNDERLINE_OFF || c == TEXT_STRIKETHROUGH_ON ||
         c == TEXT_STRIKETHROUGH_OFF || c == TEXT_SUPERSCRIPT_ON ||
         c == TEXT_SUPERSCRIPT_OFF || c == TEXT_SUBSCRIPT_ON ||
-        c == TEXT_SUBSCRIPT_OFF) {
+        c == TEXT_SUBSCRIPT_OFF || c == TEXT_MONO_ON || c == TEXT_MONO_OFF) {
       i++;
       continue;
     }

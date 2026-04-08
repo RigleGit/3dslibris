@@ -11,3 +11,4 @@
 #define FONTITALICFILE "LiberationSerif-Italic.ttf"
 #define FONTBOLDITALICFILE "LiberationSerif-BoldItalic.ttf"
 #define FONTBROWSERFILE "LiberationSans-Regular.ttf"
+#define FONTMONOFILE "LiberationMono-Regular.ttf"
