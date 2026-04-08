@@ -7,6 +7,7 @@
 #include "3ds.h"
 #include "app/app.h"
 #include "color_utils.h"
+#include "debug_log.h"
 #include "shared/bugfix_utils.h"
 #include "path_utils.h"
 #include "stb_image.h"
@@ -78,6 +79,11 @@ static std::vector<u16> grad320;
 static std::vector<u16> grad400;
 static int grad320w = 0;
 static int grad400w = 0;
+#ifdef DSLIBRIS_DEBUG
+static int g_text_clip_right_budget = 32;
+static int g_text_margin_diag_budget = 12;
+static int g_blit_geometry_diag_budget = 12;
+#endif
 
 static void FillSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
   if (!dst || stride <= 0 || w <= 0 || logical_h <= 0)
@@ -326,6 +332,42 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   RGB565ToU8(fg_color, &fg_r, &fg_g, &fg_b);
 
   const int screenWidth = (int)parent->display.width;
+  const int contentRight = screenWidth - (int)parent->margin.right;
+  // Keep hard clipping at physical screen edge so status/HUD elements that
+  // intentionally render near the right boundary are not cut.
+  const int clipRight = screenWidth;
+
+  // For wide glyphs (CJK/RTL), line-breaking can land exactly at the right
+  // boundary and overflow visually. Wrap before drawing when possible.
+  if (face != parent->GetFace(TEXT_STYLE_BROWSER) && width > 0 &&
+      pen.x > parent->margin.left) {
+    const int glyph_right = (int)pen.x + bx + (int)width;
+    if (glyph_right > contentRight) {
+      if (PrintNewLine()) {
+        // Recompute line clip reference after wrap.
+      } else {
+        pen.x += advance;
+        codeprev = ucs;
+        return;
+      }
+    }
+  }
+#ifdef DSLIBRIS_DEBUG
+  const int pen_x_before = (int)pen.x;
+  const bool on_left_screen = (parent->screen == parent->screenleft);
+  int clipped_right_pixels = 0;
+  int layout_overflow_pixels = 0;
+  if (parent->app && g_text_margin_diag_budget > 0 &&
+      (contentRight <= 0 || contentRight > screenWidth ||
+       contentRight < screenWidth - 32)) {
+    DBG_LOGF(parent->app,
+             "TXT margin side=%s sw=%d mr=%d content_right=%d pen=%d,%d style=%d",
+             on_left_screen ? "left" : "right", screenWidth,
+             (int)parent->margin.right, contentRight, pen_x_before, (int)pen.y,
+             (int)style);
+    g_text_margin_diag_budget--;
+  }
+#endif
   
   for (u16 gy = 0; gy < height; gy++) {
     for (u16 gx = 0; gx < width; gx++) {
@@ -336,8 +378,16 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
       int sy = (int)pen.y + (int)gy - by;
       if (sy < 0 || sy >= maxY || sx < 0 || sx >= screenWidth)
         continue;
-      if (!GlyphWithinContentRight(sx, screenWidth - (int)parent->margin.right))
+#ifdef DSLIBRIS_DEBUG
+      if (sx >= contentRight)
+        layout_overflow_pixels++;
+#endif
+      if (!GlyphWithinContentRight(sx, clipRight)) {
+#ifdef DSLIBRIS_DEBUG
+        clipped_right_pixels++;
+#endif
         continue;
+      }
       const size_t dst_index =
           (size_t)sy * (size_t)parent->display.height + (size_t)sx;
 
@@ -350,6 +400,19 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
       parent->screen[dst_index] = (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
     }
   }
+
+#ifdef DSLIBRIS_DEBUG
+  if (parent->app &&
+      (clipped_right_pixels > 0 || layout_overflow_pixels > 0) &&
+      g_text_clip_right_budget > 0) {
+    DBG_LOGF(parent->app,
+             "TXT clipR side=%s ucs=%lu pen=%d bx=%d w=%u overflow_px=%d clip_px=%d layout_right=%d clip_right=%d mr=%d style=%d",
+             on_left_screen ? "left" : "right", (unsigned long)ucs, pen_x_before,
+             bx, (unsigned)width, layout_overflow_pixels, clipped_right_pixels,
+             contentRight, clipRight, (int)parent->margin.right, (int)style);
+    g_text_clip_right_budget--;
+  }
+#endif
 
   pen.x += advance;
   codeprev = ucs;
@@ -619,6 +682,20 @@ bool TextRenderer::BlitToFramebuffer() {
     if (geometry.stride <= 0 || geometry.phys_width <= 0 ||
         geometry.byte_size == 0)
       return;
+#ifdef DSLIBRIS_DEBUG
+    const int max_sx = std::min(parent->display.width, geometry.stride);
+    if (parent->app && g_blit_geometry_diag_budget > 0 &&
+        (max_sx < parent->display.width ||
+         (dirty && dirty_rect.valid && dirty_rect.x1 > max_sx))) {
+      DBG_LOGF(parent->app,
+               "BLIT geom fb=%ux%u stride=%d phys_w=%d logical=%dx%d dirty=%d rect=%d,%d..%d,%d max_sx=%d",
+               (unsigned)fbW, (unsigned)fbH, geometry.stride,
+               geometry.phys_width, parent->display.width, (int)logicalHeight,
+               dirty ? 1 : 0, dirty_rect.x0, dirty_rect.y0, dirty_rect.x1,
+               dirty_rect.y1, max_sx);
+      g_blit_geometry_diag_budget--;
+    }
+#endif
 
     if (cache.size() != geometry.byte_size) {
       cache.assign(geometry.byte_size, 0xFF);
