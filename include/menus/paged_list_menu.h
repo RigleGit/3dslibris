@@ -25,6 +25,10 @@ public:
 
   inline bool IsDirty() const { return dirty; }
   inline void SetDirty(bool d = true) { dirty = d; }
+  inline void DisableInitialReleaseWait() {
+    wait_input_release = false;
+    wait_input_release_started_ms = 0;
+  }
 
 protected:
   inline void SetHeaderTitle(const std::string &title) { header_title = title; }

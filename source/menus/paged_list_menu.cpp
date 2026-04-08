@@ -162,6 +162,15 @@ void PagedListMenu::HandleInput(u32 keys) {
       // Some devices can report sticky held bits after view transitions.
       // Do not deadlock this menu waiting forever for a perfect release.
       const u64 elapsed = osGetTime() - wait_input_release_started_ms;
+#ifdef DSLIBRIS_DEBUG
+      static int s_wait_trace_budget = 32;
+      if (app && s_wait_trace_budget > 0) {
+        DBG_LOGF(app, "LIST waiting title=%s held=0x%08lx elapsed=%llums",
+                 header_title.c_str(), (unsigned long)held,
+                 (unsigned long long)elapsed);
+        s_wait_trace_budget--;
+      }
+#endif
       if (elapsed < 300)
         return;
       if (app) {

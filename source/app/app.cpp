@@ -259,6 +259,12 @@ void App::RunChaptersMenuFrame(u32 keys) {
              chaptermenu && chaptermenu->IsDirty() ? 1 : 0);
     s_chapters_frame_budget--;
   }
+  static int s_chapters_input_budget = 64;
+  if (s_chapters_input_budget > 0 && (keys != 0 || hidKeysHeld() != 0)) {
+    DBG_LOGF(this, "INDEX input down=0x%08lx held=0x%08lx",
+             (unsigned long)keys, (unsigned long)hidKeysHeld());
+    s_chapters_input_budget--;
+  }
 #endif
   chaptermenu->HandleInput(keys);
   if (chaptermenu->IsDirty())
@@ -616,6 +622,7 @@ void App::ShowChaptersView() {
   ts->SetScreen(ts->screenright);
   DBG_LOG(this, "INDEX show init menu begin");
   chaptermenu->Init();
+  chaptermenu->DisableInitialReleaseWait();
   DBG_LOG(this, "INDEX show init menu end");
   DBG_LOGF(this, "INDEX open chapters=%u page_count=%u",
            (unsigned)book->GetChapters().size(), (unsigned)book->GetPageCount());
