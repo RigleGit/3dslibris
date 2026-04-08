@@ -44,6 +44,7 @@ PagedListMenu::PagedListMenu(App *_app, const char *title) : Menu(_app) {
   pagesize = 7;
   header_title = title ? title : "";
   wait_input_release = false;
+  wait_input_release_started_ms = 0;
 }
 
 PagedListMenu::~PagedListMenu() {
@@ -75,6 +76,11 @@ void PagedListMenu::Init() {
   target_pages.clear();
 
   if (!app || !app->GetCurrentBook()) {
+    if (app) {
+      DBG_LOGF(app, "LIST init skipped title=%s app=%p book=%p",
+               header_title.c_str(), (void *)app,
+               (void *)(app ? app->GetCurrentBook() : NULL));
+    }
     dirty = true;
     return;
   }
@@ -107,7 +113,10 @@ void PagedListMenu::Init() {
   page = 0;
   // Avoid immediate accidental activation from the touch/key used to open menu.
   wait_input_release = true;
+  wait_input_release_started_ms = osGetTime();
   dirty = true;
+  DBG_LOGF(app, "LIST init title=%s entries=%u pages=%u", header_title.c_str(),
+           (unsigned)buttons.size(), (unsigned)GetPageCount());
 }
 
 void PagedListMenu::Draw() {
@@ -148,9 +157,25 @@ void PagedListMenu::HandleInput(u32 keys) {
                            KEY_R | KEY_CPAD_UP | KEY_CPAD_DOWN | KEY_CPAD_LEFT |
                            KEY_CPAD_RIGHT;
   if (wait_input_release) {
-    if (hidKeysHeld() & release_mask)
-      return;
+    const u32 held = hidKeysHeld() & release_mask;
+    if (held) {
+      // Some devices can report sticky held bits after view transitions.
+      // Do not deadlock this menu waiting forever for a perfect release.
+      const u64 elapsed = osGetTime() - wait_input_release_started_ms;
+      if (elapsed < 300)
+        return;
+      if (app) {
+        DBG_LOGF(app, "LIST release-timeout title=%s held=0x%08lx elapsed=%llums",
+                 header_title.c_str(), (unsigned long)held,
+                 (unsigned long long)elapsed);
+      }
+    }
+    if (app) {
+      DBG_LOGF(app, "LIST release-ok title=%s held=0x%08lx",
+               header_title.c_str(), (unsigned long)held);
+    }
     wait_input_release = false;
+    wait_input_release_started_ms = 0;
     return;
   }
 
@@ -219,23 +244,42 @@ void PagedListMenu::PreviousPage() {
 
 void PagedListMenu::ActivateSelected() {
   Book *book = app ? app->GetCurrentBook() : NULL;
-  if (!book || buttons.empty() || selected >= target_pages.size())
+  if (!book || buttons.empty() || selected >= target_pages.size()) {
+    if (app) {
+      DBG_LOGF(app,
+               "LIST activate skipped title=%s book=%p buttons=%u sel=%u targets=%u",
+               header_title.c_str(), (void *)book, (unsigned)buttons.size(),
+               (unsigned)selected, (unsigned)target_pages.size());
+    }
     return;
+  }
 
   u16 target_page = target_pages[selected];
-  ResolveTargetPage(selected, &target_page);
+  const bool resolved = ResolveTargetPage(selected, &target_page);
+  if (!resolved) {
+    if (app) {
+      DBG_LOGF(app, "LIST resolve failed title=%s sel=%u targets=%u",
+               header_title.c_str(), (unsigned)selected,
+               (unsigned)target_pages.size());
+    }
+    return;
+  }
 
   if (app) {
-    char msg[128];
-    snprintf(msg, sizeof(msg), "LIST activate title=%s sel=%u page=%u cur=%u",
+    DBG_LOGF(app, "LIST activate title=%s sel=%u target=%u cur=%u",
              header_title.c_str(), (unsigned)selected, (unsigned)target_page,
              (unsigned)book->GetPosition());
-    DBG_LOG(app, msg);
   }
   const u16 page_count = book->GetPageCount();
   if (page_count == 0)
     return;
+  const u16 unclamped_target = target_page;
   target_page = ClampPageTarget(target_page, page_count);
+  if (app) {
+    DBG_LOGF(app, "LIST target title=%s raw=%u clamped=%u page_count=%u",
+             header_title.c_str(), (unsigned)unclamped_target,
+             (unsigned)target_page, (unsigned)page_count);
+  }
   book->SetPosition(target_page);
   app->ShowCurrentBookView();
   book->DrawCurrentView(app->ts);

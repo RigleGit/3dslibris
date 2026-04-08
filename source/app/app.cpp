@@ -252,6 +252,14 @@ void App::RunBookmarksMenuFrame(u32 keys) {
 }
 
 void App::RunChaptersMenuFrame(u32 keys) {
+#ifdef DSLIBRIS_DEBUG
+  static int s_chapters_frame_budget = 24;
+  if (s_chapters_frame_budget > 0) {
+    DBG_LOGF(this, "INDEX frame keys=0x%08lx dirty=%d", (unsigned long)keys,
+             chaptermenu && chaptermenu->IsDirty() ? 1 : 0);
+    s_chapters_frame_budget--;
+  }
+#endif
   chaptermenu->HandleInput(keys);
   if (chaptermenu->IsDirty())
     chaptermenu->Draw();
@@ -562,19 +570,33 @@ void App::ShowBookmarksView() {
 }
 
 void App::ShowChaptersView() {
+  DBG_LOG(this, "INDEX show begin");
   Book *book = reader_state_.bookcurrent;
   format_t format = FORMAT_UNDEF;
   bool toc_quality_known = false;
   if (book) {
     format = book->format;
     toc_quality_known = book->GetTocQuality() != TOC_QUALITY_UNKNOWN;
+    DBG_LOGF(this,
+             "INDEX request mode=%d book=%p fmt=%d chapters=%u tocq=%d tried=%d",
+             (int)nav_.mode, (void *)book, (int)format,
+             (unsigned)book->GetChapters().size(), (int)book->GetTocQuality(),
+             book->tocResolveTried ? 1 : 0);
+  } else {
+    DBG_LOGF(this, "INDEX request mode=%d book=null", (int)nav_.mode);
   }
   app_flow_utils::ChaptersViewDecision decision =
       app_flow_utils::DecideChaptersView(
           book != NULL, format, toc_quality_known,
           book ? book->tocResolveTried : false,
           book ? book->GetChapters().size() : 0);
-  if (decision.queue_toc_resolve && book)
+  DBG_LOGF(this, "INDEX decision open=%d queue=%d reason=%d",
+           decision.open_chapters ? 1 : 0, decision.queue_toc_resolve ? 1 : 0,
+           (int)decision.reason);
+  // Opening index must stay responsive. If chapters already exist, skip
+  // deferred TOC resolve here and use the available chapter list.
+  if (decision.queue_toc_resolve && book &&
+      book->GetChapters().empty())
     QueueTocResolve(book);
   if (!decision.open_chapters) {
     if (decision.reason == app_flow_utils::ChaptersViewReason::NoCurrentBook) {
@@ -592,7 +614,11 @@ void App::ShowChaptersView() {
   }
   nav_.mode = AppMode::Chapters;
   ts->SetScreen(ts->screenright);
+  DBG_LOG(this, "INDEX show init menu begin");
   chaptermenu->Init();
+  DBG_LOG(this, "INDEX show init menu end");
+  DBG_LOGF(this, "INDEX open chapters=%u page_count=%u",
+           (unsigned)book->GetChapters().size(), (unsigned)book->GetPageCount());
 }
 
 void App::ShowCurrentBookView() {
@@ -676,8 +702,12 @@ void App::PrintStatus(const char *msg) {
 
     fprintf(status_log_file_, "[%s] %s\n", buffer, msg);
     status_log_write_count_++;
+#ifdef DSLIBRIS_DEBUG
+    fflush(status_log_file_);
+#else
     if ((status_log_write_count_ & 15u) == 0u)
       fflush(status_log_file_);
+#endif
   }
 
   LightLock_Unlock(&status_log_lock_);

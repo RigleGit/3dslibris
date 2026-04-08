@@ -1,6 +1,7 @@
 #include "app/main_loop_controller.h"
 
 #include <3ds.h>
+#include <string>
 
 #include "app/app.h"
 #include "library/browser_warmup_utils.h"
@@ -8,20 +9,31 @@
 MainLoopController::MainLoopController(App &app) : app_(app) {}
 
 int MainLoopController::RunMainLoop() {
+#ifdef DSLIBRIS_DEBUG
+  AppMode last_mode = app_.GetMode();
+  int mode_log_budget = 64;
+#endif
   while (aptMainLoop()) {
     gspWaitForVBlank();
     hidScanInput();
 
-    if (app_.GetMode() != AppMode::Book && app_.GetMode() != AppMode::Opening) {
-      bool allow_jobs = true;
-      if (app_.GetMode() == AppMode::Browser) {
-        allow_jobs = browser_warmup_utils::IsBrowserWarmupIdle(
-            osGetTime(), app_.GetBrowserLastInteractionMs(),
-            app_.IsBrowserWaitingInputRelease());
-      }
+    if (app_.GetMode() == AppMode::Browser) {
+      bool allow_jobs = browser_warmup_utils::IsBrowserWarmupIdle(
+          osGetTime(), app_.GetBrowserLastInteractionMs(),
+          app_.IsBrowserWaitingInputRelease());
       if (allow_jobs)
         app_.ProcessJobs(3);
     }
+
+#ifdef DSLIBRIS_DEBUG
+    if (mode_log_budget > 0 && app_.GetMode() != last_mode) {
+      app_.PrintStatus("MAIN mode transition");
+      app_.PrintStatus(std::string("MAIN mode now=") +
+                       std::to_string((int)app_.GetMode()));
+      last_mode = app_.GetMode();
+      mode_log_budget -= 2;
+    }
+#endif
 
     switch (app_.GetMode()) {
     case AppMode::Book:
@@ -47,6 +59,8 @@ int MainLoopController::RunMainLoop() {
 
     case AppMode::Prefs:
       app_.PrefsHandleEvent();
+      if (app_.GetMode() != AppMode::Prefs)
+        break;
       if (app_.IsPrefsDirty())
         app_.PrefsDraw();
       break;

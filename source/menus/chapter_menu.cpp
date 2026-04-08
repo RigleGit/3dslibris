@@ -472,6 +472,11 @@ void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
   SetHeaderTitle(TocQualityLabel(book->GetTocQuality()));
 
   const std::vector<ChapterEntry> &chapters = book->GetChapters();
+  if (app) {
+    DBG_LOGF(app, "INDEX build fmt=%d tocq=%d entries=%u pages=%u",
+             (int)book->format, (int)book->GetTocQuality(),
+             (unsigned)chapters.size(), (unsigned)book->GetPageCount());
+  }
   labels.reserve(chapters.size());
   pages.reserve(chapters.size());
   entry_titles.reserve(chapters.size());
@@ -489,18 +494,34 @@ void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
 }
 
 bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
-  if (!PagedListMenu::ResolveTargetPage(index, page_out))
+  if (!PagedListMenu::ResolveTargetPage(index, page_out)) {
+    if (app) {
+      DBG_LOGF(app, "INDEX resolve base failed idx=%u", (unsigned)index);
+    }
     return false;
+  }
   Book *book = app ? app->GetCurrentBook() : NULL;
   if (!book)
     return true;
   if (index >= entry_titles.size() || index >= entry_pages.size() ||
-      index >= approx_page_cache.size())
+      index >= approx_page_cache.size()) {
+    if (app) {
+      DBG_LOGF(app,
+               "INDEX resolve bounds idx=%u titles=%u pages=%u approx=%u",
+               (unsigned)index, (unsigned)entry_titles.size(),
+               (unsigned)entry_pages.size(), (unsigned)approx_page_cache.size());
+    }
     return true;
+  }
 
   TocQuality q = book->GetTocQuality();
-  if (q == TOC_QUALITY_UNKNOWN)
+  if (q == TOC_QUALITY_UNKNOWN) {
+    if (app) {
+      DBG_LOGF(app, "INDEX resolve toc unknown idx=%u page=%u", (unsigned)index,
+               (unsigned)*page_out);
+    }
     return true;
+  }
 
   // For heuristic TOCs the original page hint is a rough guess and we allow
   // larger jumps.  For structured (strong/mixed) TOCs the hint is usually

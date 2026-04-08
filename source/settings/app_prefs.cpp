@@ -27,6 +27,7 @@
 #include "book/book.h"
 #include "ui/button.h"
 #include "color_utils.h"
+#include "debug_log.h"
 #include "parse.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
@@ -236,6 +237,14 @@ void SettingsController::PrefsDraw() {
 void SettingsController::PrefsHandleEvent() {
   App *app = App::GetInstance();
   u32 keys = hidKeysDown();
+#ifdef DSLIBRIS_DEBUG
+  static int s_prefs_keys_budget = 48;
+  if (s_prefs_keys_budget > 0 && keys) {
+    DBG_LOGF(app, "PREFS keys=0x%08lx sel=%d mode=%d", (unsigned long)keys,
+             app->GetPrefsSelectedIndex(), (int)app->GetMode());
+    s_prefs_keys_budget--;
+  }
+#endif
   u8 visibleCount = NormalizeVisibleCount(PrefsVisibleButtonCount());
   int selected_index = app->GetPrefsSelectedIndex();
   ClampSelectedIndex(&selected_index, visibleCount);
@@ -243,6 +252,8 @@ void SettingsController::PrefsHandleEvent() {
 
   if (keys & KEY_A) {
     PrefsHandlePress();
+    if (app->GetMode() != AppMode::Prefs)
+      return;
   } else if (keys & (KEY_SELECT | KEY_START | KEY_B | KEY_Y)) {
     app->ShowLibraryView();
   } else if (keys & (app->key.left | app->key.l)) {
@@ -274,6 +285,7 @@ void SettingsController::PrefsHandleEvent() {
 
 void SettingsController::PrefsHandleTouch() {
   App *app = App::GetInstance();
+  const AppMode mode_before_touch = app->GetMode();
   touchPosition coord = app->TouchRead();
   const int footerX = (int)coord.px;
   const int footerY = (int)coord.py;
@@ -323,6 +335,8 @@ void SettingsController::PrefsHandleTouch() {
         }
       } else {
         PrefsHandlePress();
+        if (app->GetMode() != mode_before_touch)
+          return;
       }
 
       break;
@@ -501,15 +515,35 @@ void SettingsController::PrefsHandlePress() {
   }
 
   if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_INDEX) {
-    if (CanOpenBookIndexInCurrentContext(app)) {
+    Book *current = app->GetCurrentBook();
+    Book *selected = app->GetSelectedBook();
+    DBG_LOGF(
+        app,
+        "PREFS index press from_book=%d cur=%p sel=%p cur_fmt=%d sel_fmt=%d cur_ch=%u sel_ch=%u",
+        app->IsBookSettingsContext() ? 1 : 0, (void *)current, (void *)selected,
+        current ? (int)current->format : -1, selected ? (int)selected->format : -1,
+        current ? (unsigned)current->GetChapters().size() : 0u,
+        selected ? (unsigned)selected->GetChapters().size() : 0u);
+    DBG_LOG(app, "PREFS index eval begin");
+    const bool can_open_current = CanOpenBookIndexInCurrentContext(app);
+    const bool can_open_selected = CanOpenSelectedBookIndex(app);
+    DBG_LOGF(app, "PREFS index eval current=%d selected=%d",
+             can_open_current ? 1 : 0, can_open_selected ? 1 : 0);
+    if (can_open_current) {
+      DBG_LOG(app, "PREFS index action=open current");
       app->ShowChaptersView();
-    } else if (CanOpenSelectedBookIndex(app)) {
+      DBG_LOG(app, "PREFS index action=open current done");
+    } else if (can_open_selected) {
+      DBG_LOG(app, "PREFS index action=open selected");
       app->OpenBook();
+      DBG_LOG(app, "PREFS index action=open selected done");
     } else {
+      DBG_LOG(app, "PREFS index action=unavailable");
       app->PrintStatus("Index unavailable for this book");
       PrefsRefreshButton(PREFS_BUTTON_INDEX);
       app->MarkPrefsDirty();
     }
+    DBG_LOG(app, "PREFS index eval end");
     return;
   }
 
