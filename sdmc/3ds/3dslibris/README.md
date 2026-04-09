@@ -19,7 +19,6 @@ That command creates `dist/sdmc/3ds/3dslibris/` and copies the built
 `3dslibris.3dsx` into it, together with the public license and notice files.
 
 Put user ebooks in `sdmc:/3ds/3dslibris/book/`.
-If someone only needs the quick answer, tell them to copy books into:
 
 ```text
 sdmc:/3ds/3dslibris/book/

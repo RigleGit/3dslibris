@@ -2,8 +2,6 @@
 
 Place your ebooks in this directory.
 
-Quick answer for users:
-
 ```text
 sdmc:/3ds/3dslibris/book/
 ```
