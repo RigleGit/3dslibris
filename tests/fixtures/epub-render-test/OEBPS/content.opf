@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf"
+         unique-identifier="pub-id"
+         version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>3dslibris EPUB Rendering Test</dc:title>
+    <dc:language>es</dc:language>
+    <dc:identifier id="pub-id">urn:uuid:3dslibris-epub-render-test</dc:identifier>
+    <dc:creator>Rigle Test</dc:creator>
+  </metadata>
+
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="css" href="styles/stylesheet.css" media-type="text/css"/>
+    <item id="intro" href="text/intro.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch1" href="text/chapter-01.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/chapter-02-hidden.xhtml" media-type="application/xhtml+xml"/>
+    <item id="img1" href="images/test-card.svg" media-type="image/svg+xml"/>
+  </manifest>
+
+  <spine toc="ncx">
+    <itemref idref="nav"/>
+    <itemref idref="intro"/>
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+  </spine>
+
+  <guide>
+    <reference type="toc" title="Índice" href="nav.xhtml"/>
+  </guide>
+</package>

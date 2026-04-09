@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+  <title>Capítulo 2</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body epub:type="bodymatter">
+
+  <h1 id="capitulo-2">Capítulo 2</h1>
+
+  <h2>Visually Hidden</h2>
+
+  <p>Regla de esta página: solo debe verse el texto marcado como [VISIBLE OK]. Si aparece cualquier texto marcado como [HIDDEN ...], el lector está fallando.</p>
+
+  <p>El siguiente bloque debe mostrar una imagen y no debe enseñar el texto oculto [VISIBLE OK].</p>
+
+  <div>
+    <span class="visually-hidden">[HIDDEN visually-hidden text MUST NOT BE VISIBLE IN 3DSLIBRIS]</span>
+    <img src="../images/test-card.svg" alt="Test illustration"/>
+  </div>
+
+  <p>Otro caso con texto oculto inline [VISIBLE OK]:
+    <span class="visually-hidden">[HIDDEN INLINE TEXT SHOULD NOT APPEAR]</span>
+    [VISIBLE OK]
+  </p>
+
+  <p>Otro caso con aria-hidden [VISIBLE OK]:
+    <span aria-hidden="true">[HIDDEN ARIA-HIDDEN TEXT SHOULD NOT APPEAR]</span>
+    [VISIBLE OK]
+  </p>
+
+  <p>Otro caso con estilo inline equivalente [VISIBLE OK]:
+    <span style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;">
+      [HIDDEN INLINE STYLED TEXT SHOULD NOT APPEAR]
+    </span>
+    [VISIBLE OK]
+  </p>
+
+  <p>Control visible final [VISIBLE OK]: este texto sí debe verse [VISIBLE OK].</p>
+
+</body>
+</html>

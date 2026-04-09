@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/"
+     version="2005-1"
+     xml:lang="es">
+  <head>
+    <meta name="dtb:uid" content="urn:uuid:3dslibris-epub-render-test"/>
+    <meta name="dtb:depth" content="2"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+  </head>
+
+  <docTitle>
+    <text>3dslibris EPUB Rendering Test</text>
+  </docTitle>
+
+  <navMap>
+    <navPoint id="nav-1" playOrder="1">
+      <navLabel><text>Introducción</text></navLabel>
+      <content src="text/intro.xhtml"/>
+    </navPoint>
+
+    <navPoint id="nav-2" playOrder="2">
+      <navLabel><text>Parte I</text></navLabel>
+      <content src="text/chapter-01.xhtml#parte-i"/>
+    </navPoint>
+
+    <navPoint id="nav-3" playOrder="3">
+      <navLabel><text>Capítulo 1</text></navLabel>
+      <content src="text/chapter-01.xhtml#capitulo-1"/>
+    </navPoint>
+
+    <navPoint id="nav-4" playOrder="4">
+      <navLabel><text>Capítulo 2</text></navLabel>
+      <content src="text/chapter-02-hidden.xhtml#capitulo-2"/>
+    </navPoint>
+  </navMap>
+</ncx>

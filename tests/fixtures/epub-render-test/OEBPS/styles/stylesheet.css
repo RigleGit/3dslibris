@@ -1,0 +1,73 @@
+body {
+  line-height: 1.35;
+}
+
+code, tt, kbd, samp, pre {
+  font-family: monospace;
+}
+
+code {
+  white-space: pre-wrap;
+}
+
+pre {
+  white-space: pre-wrap;
+  margin: 0.8em 0;
+}
+
+.underline {
+  text-decoration: underline;
+}
+
+.overline {
+  text-decoration: overline;
+}
+
+.strike {
+  text-decoration: line-through;
+}
+
+.underline-dotted {
+  text-decoration: underline dotted;
+}
+
+.underline-dashed {
+  text-decoration: underline dashed;
+}
+
+.underline-wavy {
+  text-decoration: wavy underline;
+}
+
+.sup {
+  vertical-align: super;
+  font-size: smaller;
+}
+
+.sub {
+  vertical-align: sub;
+  font-size: smaller;
+}
+
+.sidebar {
+  margin: 1em 0;
+  padding: 0.4em 0;
+}
+
+.simplelist {
+  list-style-type: none;
+  padding-left: 0;
+  margin-left: 0;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

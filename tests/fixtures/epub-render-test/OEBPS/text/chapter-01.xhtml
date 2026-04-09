@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+  <title>Capítulo 1</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body epub:type="bodymatter">
+
+  <h1 id="parte-i">Parte I</h1>
+  <h2 id="capitulo-1">Capítulo 1</h2>
+
+  <h3>Monospace Variants</h3>
+
+  <p><code>constant width</code></p>
+  <p><code><strong>constant width bold</strong></code></p>
+  <p><code><em>constant width italic</em></code></p>
+  <p><code><strong><em>constant width bold italic</em></strong></code></p>
+
+  <p>
+    Inline mix:
+    normal text,
+    <code>mono</code>,
+    <code><strong>mono bold</strong></code>,
+    <code><em>mono italic</em></code>,
+    <code><strong><em>mono bold italic</em></strong></code>.
+  </p>
+
+  <h3>Preformatted Code Blocks</h3>
+
+  <pre>>>> import numpy as np
+>>> values = np.array([30, 64, 49, 26, 69, 23, 7, 14, 67, 33, 88, 77, 75, 47, 44, 93])
+>>> np.floor_divide(values, 10)
+array([3, 6, 4, 2, 6, 2, 0, 1, 6, 3, 8, 7, 7, 4, 4, 9], dtype=int32)</pre>
+
+  <pre><code>def very_long_function_name(alpha_value, beta_value, gamma_value, delta_value):
+    return alpha_value + beta_value + gamma_value + delta_value</code></pre>
+
+  <p>Texto después del bloque <code>pre/code</code> para comprobar que el flujo normal se restaura bien.</p>
+
+  <h3>Tag Parameters</h3>
+
+  <p><strike>Strikethrough</strike></p>
+  <p><del>Deleted Text</del></p>
+  <p><u>Underline</u></p>
+  <p>Normal Text<sup>(Superscript)</sup></p>
+  <p>Normal Text<sub>(Subscript)</sub></p>
+
+  <h3>CSS Parameters</h3>
+
+  <p><span class="strike">Strikethrough</span></p>
+  <p><span class="underline">Underline</span></p>
+  <p><span class="overline">Overline</span></p>
+  <p><span class="underline-dotted">Underline Dotted</span></p>
+  <p><span class="underline-dashed">Underline Dashed</span></p>
+  <p><span class="underline-wavy">Wavy Underline</span></p>
+  <p>Normal Text<span class="sup">(Superscript)</span></p>
+  <p>Normal Text<span class="sub">(Subscript)</span></p>
+
+  <h3>Lists</h3>
+
+  <ul>
+    <li>Simple bullet item</li>
+    <li><p>Bullet item with inner paragraph</p></li>
+    <li>Bullet item with <code>inline_code</code> and final punctuation!</li>
+  </ul>
+
+  <ol>
+    <li>First item</li>
+    <li><p>Second item with paragraph</p></li>
+    <li>Third item with <code><strong>mono bold</strong></code></li>
+  </ol>
+
+  <ol type="a">
+    <li>Alpha item</li>
+    <li>
+      Nested section
+      <ol type="i">
+        <li>Roman item one</li>
+        <li>Roman item two</li>
+      </ol>
+    </li>
+  </ol>
+
+  <ul class="simplelist">
+    <li>Simple entry one</li>
+    <li>Simple entry two</li>
+    <li>Simple entry three</li>
+  </ul>
+
+  <h3>Block Elements</h3>
+
+  <blockquote>
+    <p>Este es un bloque de cita para comprobar espaciado y reflow dentro de <code>blockquote</code>.</p>
+  </blockquote>
+
+  <aside class="sidebar">
+    <p>Esto es un <code>aside</code> o caja lateral. Debe verse como bloque separado del texto principal.</p>
+  </aside>
+
+  <dl>
+    <dt>Term</dt>
+    <dd>Definition text for the term.</dd>
+    <dt>Feature Engineering</dt>
+    <dd>Transforming raw data into features that better represent the underlying problem.</dd>
+  </dl>
+
+  <figure>
+    <caption>Figure Caption Test</caption>
+    <p>This paragraph simulates content associated with a figure container.</p>
+  </figure>
+
+  <hr/>
+</body>
+</html>
