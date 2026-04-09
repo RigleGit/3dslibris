@@ -18,6 +18,7 @@
 #include "book/book_xml_css_style_utils.h"
 #include "book/book_xml_list_utils.h"
 #include "book/book_xml_parser_style_utils.h"
+#include "book/book_xml_table_utils.h"
 #include "book/book_xml_text_emit.h"
 #include "book/book_xml.h"
 #include "book/heading_layout.h"
@@ -982,6 +983,327 @@ static void AdvanceParsedScreen(parsedata_t *p) {
   p->linebegan = false;
 }
 
+static void ResetCapturedTable(parsedata_t *p) {
+  if (!p)
+    return;
+  p->table_in_header_section = false;
+  p->table_in_caption = false;
+  p->table_in_row = false;
+  p->table_in_cell = false;
+  p->table_current_cell_is_header = false;
+  p->table_current_cell_is_row_header = false;
+  p->table_caption_text.clear();
+  p->table_current_cell_text.clear();
+  p->table_header_cells.clear();
+  p->table_current_row_cells.clear();
+  p->table_current_row_header_flags.clear();
+  p->table_body_rows.clear();
+  p->table_body_row_header_flags.clear();
+}
+
+static void SetCurrentStackHidden(parsedata_t *p, bool hidden) {
+  if (!p || p->stacksize == 0)
+    return;
+  p->style_hidden_stack[p->stacksize - 1] = hidden;
+}
+
+static std::string *GetActiveCapturedTableText(parsedata_t *p) {
+  if (!p)
+    return NULL;
+  if (p->table_in_cell)
+    return &p->table_current_cell_text;
+  if (p->table_in_caption)
+    return &p->table_caption_text;
+  return NULL;
+}
+
+static void AppendCapturedTableSeparator(parsedata_t *p, char separator) {
+  std::string *buffer = GetActiveCapturedTableText(p);
+  if (!buffer || buffer->empty())
+    return;
+  const char last = (*buffer)[buffer->size() - 1];
+  if (separator == '\n') {
+    if (last != '\n')
+      buffer->push_back('\n');
+    return;
+  }
+  if (last != ' ' && last != '\n')
+    buffer->push_back(' ');
+}
+
+static bool AttrScopeEqualsRow(const char **attr) {
+  if (!attr)
+    return false;
+  for (int i = 0; attr[i]; i += 2) {
+    if (!attr[i + 1] || !attr[i + 1][0])
+      continue;
+    if (AttrNameEquals(attr[i], "scope") &&
+        EqualsAsciiNoCase(attr[i + 1], "row")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void FinishCapturedTableCell(parsedata_t *p) {
+  if (!p || !p->table_in_cell)
+    return;
+  p->table_current_row_cells.push_back(
+      book_xml_table_utils::NormalizeTableCellText(p->table_current_cell_text));
+  p->table_current_row_header_flags.push_back(
+      p->table_current_cell_is_row_header ? 1
+                                          : (p->table_current_cell_is_header ? 2
+                                                                             : 0));
+  p->table_current_cell_text.clear();
+  p->table_current_cell_is_header = false;
+  p->table_current_cell_is_row_header = false;
+}
+
+static void FinishCapturedTableRow(parsedata_t *p) {
+  if (!p || p->table_current_row_cells.empty())
+    return;
+
+  bool all_header = p->table_in_header_section;
+  if (!all_header) {
+    all_header = true;
+    for (size_t i = 0; i < p->table_current_row_header_flags.size(); i++) {
+      if (p->table_current_row_header_flags[i] != 2) {
+        all_header = false;
+        break;
+      }
+    }
+  }
+
+  if (p->table_header_cells.empty() && all_header) {
+    p->table_header_cells = p->table_current_row_cells;
+  } else {
+    p->table_body_rows.push_back(p->table_current_row_cells);
+    p->table_body_row_header_flags.push_back(p->table_current_row_header_flags);
+  }
+
+  p->table_current_row_cells.clear();
+  p->table_current_row_header_flags.clear();
+}
+
+static std::vector<std::string> BuildCapturedTableLines(const parsedata_t *p) {
+  std::vector<std::string> lines;
+  if (!p)
+    return lines;
+
+  book_xml_table_utils::TableRow header_row;
+  book_xml_table_utils::TableRow *header_ptr = NULL;
+  if (!p->table_header_cells.empty()) {
+    for (size_t i = 0; i < p->table_header_cells.size(); i++) {
+      book_xml_table_utils::TableCell cell;
+      cell.text = p->table_header_cells[i];
+      cell.is_header = true;
+      cell.is_row_header = false;
+      header_row.cells.push_back(cell);
+    }
+    header_ptr = &header_row;
+  }
+
+  std::vector<book_xml_table_utils::TableRow> rows;
+  rows.reserve(p->table_body_rows.size());
+  for (size_t r = 0; r < p->table_body_rows.size(); r++) {
+    book_xml_table_utils::TableRow row;
+    const std::vector<std::string> &src_cells = p->table_body_rows[r];
+    const std::vector<u8> &src_flags = p->table_body_row_header_flags[r];
+    for (size_t c = 0; c < src_cells.size(); c++) {
+      book_xml_table_utils::TableCell cell;
+      cell.text = src_cells[c];
+      cell.is_header = false;
+      cell.is_row_header = c < src_flags.size() && src_flags[c] == 1;
+      row.cells.push_back(cell);
+    }
+    rows.push_back(row);
+  }
+
+  return book_xml_table_utils::BuildTableLines(p->table_caption_text, header_ptr,
+                                               rows);
+}
+
+static void EmitCapturedTable(parsedata_t *p, Text *ts) {
+  if (!p || !ts)
+    return;
+  const std::vector<std::string> lines = BuildCapturedTableLines(p);
+  if (lines.empty())
+    return;
+
+  FlushInlineTailAndDeferredStyle(p, ts);
+  if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
+    linefeed(p);
+
+  for (size_t i = 0; i < lines.size(); i++) {
+    const std::string &line = lines[i];
+    if (line.empty()) {
+      linefeed(p);
+      continue;
+    }
+    EmitFlowedFragmentRaw(p, line.c_str(), (int)line.size());
+    linefeed(p);
+  }
+}
+
+static bool HandleTableStart(parsedata_t *p, Text *ts, const char *el,
+                             const char **attr) {
+  if (!p || !el)
+    return false;
+  const bool entering_table = !strcmp(el, "table");
+  const bool inside_table = parse_in(p, TAG_TABLE);
+  if (!entering_table && !inside_table)
+    return false;
+
+  bool hidden = false;
+  ParseElementHiddenFlags(attr, &hidden);
+
+  if (entering_table) {
+    FlushInlineTailAndDeferredStyle(p, ts);
+    if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
+      linefeed(p);
+    ResetCapturedTable(p);
+    parse_push(p, TAG_TABLE);
+    SetCurrentStackHidden(p, hidden);
+    p->in_paragraph = false;
+    p->paragraph_has_content = false;
+    return true;
+  }
+
+  if (!strcmp(el, "caption")) {
+    parse_push(p, TAG_CAPTION);
+    SetCurrentStackHidden(p, hidden);
+    p->table_in_caption = !hidden;
+    return true;
+  }
+  if (!strcmp(el, "thead")) {
+    parse_push(p, TAG_THEAD);
+    SetCurrentStackHidden(p, hidden);
+    p->table_in_header_section = !hidden;
+    return true;
+  }
+  if (!strcmp(el, "tbody")) {
+    parse_push(p, TAG_TBODY);
+    SetCurrentStackHidden(p, hidden);
+    return true;
+  }
+  if (!strcmp(el, "tr")) {
+    parse_push(p, TAG_TR);
+    SetCurrentStackHidden(p, hidden);
+    p->table_in_row = !hidden;
+    p->table_current_row_cells.clear();
+    p->table_current_row_header_flags.clear();
+    return true;
+  }
+  if (!strcmp(el, "th")) {
+    parse_push(p, TAG_TH);
+    SetCurrentStackHidden(p, hidden);
+    p->table_in_cell = !hidden;
+    p->table_current_cell_is_header = !hidden;
+    p->table_current_cell_is_row_header = !hidden && AttrScopeEqualsRow(attr);
+    p->table_current_cell_text.clear();
+    return true;
+  }
+  if (!strcmp(el, "td")) {
+    parse_push(p, TAG_TD);
+    SetCurrentStackHidden(p, hidden);
+    p->table_in_cell = !hidden;
+    p->table_current_cell_is_header = false;
+    p->table_current_cell_is_row_header = false;
+    p->table_current_cell_text.clear();
+    return true;
+  }
+  if (!strcmp(el, "br")) {
+    parse_push(p, TAG_BR);
+    SetCurrentStackHidden(p, hidden);
+    if (!hidden)
+      AppendCapturedTableSeparator(p, '\n');
+    return true;
+  }
+  if (!strcmp(el, "p") || !strcmp(el, "div") || !strcmp(el, "li") ||
+      !strcmp(el, "ul") || !strcmp(el, "ol") || !strcmp(el, "blockquote")) {
+    parse_push(p, TAG_UNKNOWN);
+    SetCurrentStackHidden(p, hidden);
+    if (!hidden)
+      AppendCapturedTableSeparator(p, ' ');
+    return true;
+  }
+  if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
+    parse_push(p, TAG_UNKNOWN);
+    SetCurrentStackHidden(p, hidden);
+    if (!hidden) {
+      AppendCapturedTableSeparator(p, ' ');
+      std::string *buffer = GetActiveCapturedTableText(p);
+      if (buffer)
+        buffer->append("[image]");
+    }
+    return true;
+  }
+  if (!strcmp(el, "script")) {
+    parse_push(p, TAG_SCRIPT);
+    SetCurrentStackHidden(p, hidden);
+    return true;
+  }
+  if (!strcmp(el, "style")) {
+    parse_push(p, TAG_STYLE);
+    SetCurrentStackHidden(p, hidden);
+    return true;
+  }
+
+  parse_push(p, TAG_UNKNOWN);
+  SetCurrentStackHidden(p, hidden);
+  return true;
+}
+
+static bool HandleTableEnd(parsedata_t *p, Text *ts, const char *el) {
+  if (!p || !el || !parse_in(p, TAG_TABLE))
+    return false;
+
+  if (!strcmp(el, "th") || !strcmp(el, "td")) {
+    FinishCapturedTableCell(p);
+    p->table_in_cell = false;
+    p->table_current_cell_is_header = false;
+    p->table_current_cell_is_row_header = false;
+    parse_pop(p);
+    return true;
+  }
+  if (!strcmp(el, "tr")) {
+    if (p->table_in_cell)
+      FinishCapturedTableCell(p);
+    p->table_in_cell = false;
+    FinishCapturedTableRow(p);
+    p->table_in_row = false;
+    parse_pop(p);
+    return true;
+  }
+  if (!strcmp(el, "thead")) {
+    p->table_in_header_section = false;
+    parse_pop(p);
+    return true;
+  }
+  if (!strcmp(el, "tbody")) {
+    parse_pop(p);
+    return true;
+  }
+  if (!strcmp(el, "caption")) {
+    p->table_in_caption = false;
+    parse_pop(p);
+    return true;
+  }
+  if (!strcmp(el, "table")) {
+    if (p->table_in_cell)
+      FinishCapturedTableCell(p);
+    if (p->table_in_row)
+      FinishCapturedTableRow(p);
+    EmitCapturedTable(p, ts);
+    ResetCapturedTable(p);
+    parse_pop(p);
+    return true;
+  }
+
+  parse_pop(p);
+  return true;
+}
+
 } // namespace
 
 namespace xml::book::metadata {
@@ -1060,6 +1382,9 @@ void start(void *data, const char *el, const char **attr) {
       }
     }
   }
+
+  if (HandleTableStart(p, ts, el, attr))
+    return;
 
   if (!strcmp(el, "html"))
     parse_push(p, TAG_HTML);
@@ -1539,7 +1864,6 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
 
   parsedata_t *p = (parsedata_t *)data;
   ChardataPerfScope perf_scope(p);
-  Text *ts = p->ts;
 
   if (p->collecting_fb2_binary) {
     if (!p->fb2_binary_too_large) {
@@ -1571,6 +1895,12 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     return;
   if (HasActiveStackHiddenStyle(p))
     return;
+  if (parse_in(p, TAG_TABLE)) {
+    std::string *buffer = GetActiveCapturedTableText(p);
+    if (buffer)
+      buffer->append((const char *)txt, (size_t)txtlen);
+    return;
+  }
   if (!p->doc_heading_complete &&
       (parse_in(p, TAG_H1) || parse_in(p, TAG_H2) || parse_in(p, TAG_H3)) &&
       p->doc_heading.size() < 160) {
@@ -1657,6 +1987,9 @@ void end(void *data, const char *el) {
       }
     }
   }
+
+  if (HandleTableEnd(p, ts, el))
+    return;
 
   if (!strcmp(el, "body")) {
     FlushInlineTailAndDeferredStyle(p, ts);

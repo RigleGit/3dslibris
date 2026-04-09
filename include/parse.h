@@ -15,6 +15,7 @@
 #include <expat.h>
 #include <3ds.h>
 #include <string>
+#include <vector>
 #include "shared/status_reporter.h"
 
 #define PAGEBUFSIZE 4096
@@ -37,7 +38,9 @@ typedef enum {
 	TAG_OL,
 	TAG_P,TAG_PRE,
 	TAG_SCRIPT,TAG_STYLE,
+	TAG_TABLE,TAG_TBODY,TAG_THEAD,TAG_TH,
 	TAG_TD,TAG_TITLE,
+	TAG_TR,
 	TAG_STRONG,TAG_EM,
 	TAG_UNDERLINE,TAG_STRIKETHROUGH,
 	TAG_SUPERSCRIPT,TAG_SUBSCRIPT,
@@ -110,6 +113,19 @@ struct parsedata_t {
 	bool deferred_target_superscript;
 	bool deferred_target_subscript;
 	bool deferred_target_mono;
+	bool table_in_header_section;
+	bool table_in_caption;
+	bool table_in_row;
+	bool table_in_cell;
+	bool table_current_cell_is_header;
+	bool table_current_cell_is_row_header;
+	std::string table_caption_text;
+	std::string table_current_cell_text;
+	std::vector<std::string> table_header_cells;
+	std::vector<std::string> table_current_row_cells;
+	std::vector<u8> table_current_row_header_flags;
+	std::vector<std::vector<std::string> > table_body_rows;
+	std::vector<std::vector<u8> > table_body_row_header_flags;
 	std::string docpath; //! Current XHTML document path inside EPUB.
 	std::string doc_title;   //! Current XHTML <title> text (best chapter label).
 	std::string doc_heading; //! Fallback heading text from h1/h2/h3.
