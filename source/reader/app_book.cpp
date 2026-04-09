@@ -177,6 +177,18 @@ void DrawBookPage(Book *book, Text *ts) {
   book->DrawCurrentView(ts);
 }
 
+void ResetBookRenderState(App *app, bool clear_glyph_cache,
+                          const char *reason) {
+  if (!app || !app->ts)
+    return;
+  if (clear_glyph_cache)
+    app->ts->ClearCache();
+  app->ts->MarkAllScreensDirty();
+  app->RequestStatusRedraw();
+  if (reason)
+    DBG_LOG(app, reason);
+}
+
 bool SetBookPage(Book *book, Text *ts, u16 page) {
   if (!book || !ts || page >= book->GetPageCount())
     return false;
@@ -255,8 +267,9 @@ bool ReuseParsedBook(App *app) {
       // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
     }
     app->ShowCurrentBookView();
-    DBG_LOG(app, "OpenBook: reused parsed book");
   }
+  ResetBookRenderState(app, true,
+                       "OpenBook: reset text renderer state (reuse)");
   Book *current = app->GetCurrentBook();
   if (current->GetPosition() >= current->GetPageCount())
     current->SetPosition(0);
@@ -839,6 +852,8 @@ u8 ReaderController::OpenBook() {
   bookcurrent_ = app_.GetCurrentBook();
   // Remember which layout generation produced these pages.
   bookcurrent_->SetLayoutRevision(app_.GetLayoutRevision());
+  ResetBookRenderState(&app_, true,
+                       "OpenBook: reset text renderer state (new open)");
 
   int pageCount = bookcurrent_->GetPageCount();
   DBG_LOGF(&app_, "Generated %d pages", pageCount);

@@ -358,9 +358,11 @@ void App::RunChaptersMenuFrame(u32 keys) {
 }
 
 bool App::PresentIfDirty() {
+#ifdef DSLIBRIS_DEBUG
   const bool right_dirty = ts->screenright_dirty;
   const bool left_dirty = ts->screenleft_dirty;
   const bool had_dirty = ts->HasDirtyScreens();
+#endif
   const bool wrote = ts->BlitToFramebuffer();
 #ifdef DSLIBRIS_DEBUG
   // Present-cycle logs are too chatty while debugging pagination/layout.
@@ -372,6 +374,15 @@ bool App::PresentIfDirty() {
              (int)nav_.mode, had_dirty ? 1 : 0, wrote ? 1 : 0,
              right_dirty ? 1 : 0, left_dirty ? 1 : 0);
     s_present_budget--;
+  }
+  static int s_present_miss_budget = 12;
+  if (s_present_miss_budget > 0 && had_dirty && !wrote &&
+      (nav_.mode == AppMode::Book || nav_.mode == AppMode::Opening ||
+       nav_.mode == AppMode::Chapters || nav_.mode == AppMode::Prefs)) {
+    DBG_LOGF(this,
+             "PRESENT dirty-but-no-copy mode=%d right_dirty=%d left_dirty=%d",
+             (int)nav_.mode, right_dirty ? 1 : 0, left_dirty ? 1 : 0);
+    s_present_miss_budget--;
   }
 #endif
   if (wrote) {
@@ -749,6 +760,8 @@ void App::ShowCurrentBookView() {
     return;
   nav_.mode = AppMode::Book;
   ts->SetScreen(ts->screenright);
+  ts->MarkAllScreensDirty();
+  RequestStatusRedraw();
 }
 
 void App::RequestStatusRedraw() { status_controller_->RequestStatusRedraw(); }
