@@ -35,29 +35,7 @@ static std::string TrimLabel(const std::string &in) {
 }
 
 static std::string BuildTwoLineLabelIfNeeded(const std::string &raw) {
-  std::string clean = TrimLabel(raw);
-  if (clean.empty())
-    return clean;
-
-  size_t split = clean.find(" : ");
-  if (split == std::string::npos)
-    split = clean.find(": ");
-  if (split == std::string::npos)
-    split = clean.find(':');
-
-  if (split == std::string::npos)
-    return clean;
-
-  std::string title = TrimLabel(clean.substr(0, split));
-  size_t rhs_start = split + 1;
-  if (rhs_start < clean.size() && clean[rhs_start] == ' ')
-    rhs_start++;
-  std::string subtitle = TrimLabel(clean.substr(rhs_start));
-
-  if (title.size() < 4 || subtitle.size() < 4)
-    return clean;
-
-  return title + "\n" + subtitle;
+  return TrimLabel(raw);
 }
 
 static std::string ApplyLevelPrefix(const std::string &label, u8 level) {
@@ -191,11 +169,16 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 3072) {
     }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
         c == TEXT_ITALIC_OFF || c == TEXT_UNDERLINE_ON ||
-        c == TEXT_UNDERLINE_OFF || c == TEXT_STRIKETHROUGH_ON ||
+        c == TEXT_UNDERLINE_OFF || c == TEXT_OVERLINE_ON ||
+        c == TEXT_OVERLINE_OFF || c == TEXT_STRIKETHROUGH_ON ||
         c == TEXT_STRIKETHROUGH_OFF || c == TEXT_SUPERSCRIPT_ON ||
         c == TEXT_SUPERSCRIPT_OFF || c == TEXT_SUBSCRIPT_ON ||
         c == TEXT_SUBSCRIPT_OFF) {
       i++;
+      continue;
+    }
+    if (c == TEXT_UNDERLINE_STYLE) {
+      i += (i + 1 < len) ? 2 : 1;
       continue;
     }
     if (c < 0x20) {
@@ -285,10 +268,15 @@ static std::vector<std::string> BuildPageHeadingLines(Page *page,
     }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
         c == TEXT_ITALIC_OFF || c == TEXT_UNDERLINE_ON ||
-        c == TEXT_UNDERLINE_OFF || c == TEXT_STRIKETHROUGH_ON ||
+        c == TEXT_UNDERLINE_OFF || c == TEXT_OVERLINE_ON ||
+        c == TEXT_OVERLINE_OFF || c == TEXT_STRIKETHROUGH_ON ||
         c == TEXT_STRIKETHROUGH_OFF || c == TEXT_SUPERSCRIPT_ON ||
         c == TEXT_SUPERSCRIPT_OFF || c == TEXT_SUBSCRIPT_ON ||
         c == TEXT_SUBSCRIPT_OFF) {
+      continue;
+    }
+    if (c == TEXT_UNDERLINE_STYLE) {
+      i += (i + 1 < len) ? 1 : 0;
       continue;
     }
     if (c == '\r')
