@@ -62,8 +62,11 @@ static const char *kDefaultFonts[][2] = {
     {"LiberationSerif-BoldItalic.ttf", "sdmc:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf"},
     {"LiberationSans-Regular.ttf",     "sdmc:/3ds/3dslibris/font/LiberationSans-Regular.ttf"},
     {"LiberationMono-Regular.ttf",     "sdmc:/3ds/3dslibris/font/LiberationMono-Regular.ttf"},
+    {"LiberationMono-Bold.ttf",        "sdmc:/3ds/3dslibris/font/LiberationMono-Bold.ttf"},
+    {"LiberationMono-Italic.ttf",      "sdmc:/3ds/3dslibris/font/LiberationMono-Italic.ttf"},
+    {"LiberationMono-BoldItalic.ttf",  "sdmc:/3ds/3dslibris/font/LiberationMono-BoldItalic.ttf"},
 };
-static const int kDefaultFontCount = 6;
+static const int kDefaultFontCount = 9;
 
 // Fallback font filename patterns (checked in order of preference).
 // When a font filename contains any of these substrings, it is auto-loaded

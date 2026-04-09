@@ -318,6 +318,12 @@ int Prefs::Write() {
       XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BROWSER).c_str());
   const std::string font_mono =
       XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_MONO).c_str());
+  const std::string font_mono_bold =
+      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_MONO_BOLD).c_str());
+  const std::string font_mono_italic =
+      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_MONO_ITALIC).c_str());
+  const std::string font_mono_bolditalic =
+      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_MONO_BOLDITALIC).c_str());
   const std::string fallback1 =
       XmlEscapeAttr(app->ts->GetFallbackFontFile(0).c_str());
   const std::string fallback2 =
@@ -329,7 +335,8 @@ int Prefs::Write() {
 
   fprintf(fp,
           "\t<font size=\"%d\" %s=\"%s\" %s=\"%s\" %s=\"%s\" "
-          "%s=\"%s\" %s=\"%s\" %s=\"%s\" fallback1=\"%s\" "
+          "%s=\"%s\" %s=\"%s\" %s=\"%s\" %s=\"%s\" %s=\"%s\" "
+          "%s=\"%s\" fallback1=\"%s\" "
           "fallback2=\"%s\" fallback3=\"%s\" fallback4=\"%s\" />\n",
           app->ts->GetPixelSize(),
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_REGULAR),
@@ -343,7 +350,13 @@ int Prefs::Write() {
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_BROWSER),
           font_browser.c_str(),
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_MONO),
-          font_mono.c_str(), fallback1.c_str(), fallback2.c_str(),
+          font_mono.c_str(),
+          font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_MONO_BOLD),
+          font_mono_bold.c_str(),
+          font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_MONO_ITALIC),
+          font_mono_italic.c_str(),
+          font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_MONO_BOLDITALIC),
+          font_mono_bolditalic.c_str(), fallback1.c_str(), fallback2.c_str(),
           fallback3.c_str(), fallback4.c_str());
   fprintf(fp, "\t<paragraph indent=\"%d\" spacing=\"%d\" />\n", app->paraindent,
           app->paraspacing);

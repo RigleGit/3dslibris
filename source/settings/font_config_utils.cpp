@@ -11,7 +11,8 @@ namespace {
 
 static const char *kFontTargetLabels[FONT_TARGET_COUNT] = {
     "regular font",     "bold font",       "italic font",    "bold italic font",
-    "browser/ui font",  "mono font",       "fallback font 1",
+    "browser/ui font",  "mono font",       "mono bold font",
+    "mono italic font", "mono bold italic font", "fallback font 1",
     "fallback font 2",  "fallback font 3", "fallback font 4"};
 
 static const FontPrefBinding kFontPrefBindings[] = {
@@ -21,6 +22,9 @@ static const FontPrefBinding kFontPrefBindings[] = {
     {"bolditalic", TEXT_STYLE_BOLDITALIC},
     {"browser", TEXT_STYLE_BROWSER},
     {"mono", TEXT_STYLE_MONO},
+    {"monobold", TEXT_STYLE_MONO_BOLD},
+    {"monoitalic", TEXT_STYLE_MONO_ITALIC},
+    {"monobolditalic", TEXT_STYLE_MONO_BOLDITALIC},
 };
 
 } // namespace
@@ -43,6 +47,12 @@ u8 StyleFromTarget(u8 target) {
     return TEXT_STYLE_BROWSER;
   case FONT_TARGET_MONO:
     return TEXT_STYLE_MONO;
+  case FONT_TARGET_MONO_BOLD:
+    return TEXT_STYLE_MONO_BOLD;
+  case FONT_TARGET_MONO_ITALIC:
+    return TEXT_STYLE_MONO_ITALIC;
+  case FONT_TARGET_MONO_BOLDITALIC:
+    return TEXT_STYLE_MONO_BOLDITALIC;
   case FONT_TARGET_REGULAR:
   default:
     return TEXT_STYLE_REGULAR;
@@ -71,6 +81,12 @@ const char *DefaultFontForStyle(u8 style) {
     return FONTBROWSERFILE;
   case TEXT_STYLE_MONO:
     return FONTMONOFILE;
+  case TEXT_STYLE_MONO_BOLD:
+    return FONTMONOBOLDFILE;
+  case TEXT_STYLE_MONO_ITALIC:
+    return FONTMONOITALICFILE;
+  case TEXT_STYLE_MONO_BOLDITALIC:
+    return FONTMONOBOLDITALICFILE;
   case TEXT_STYLE_REGULAR:
   default:
     return FONTREGULARFILE;

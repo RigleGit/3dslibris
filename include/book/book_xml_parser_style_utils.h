@@ -6,6 +6,12 @@
 namespace book_xml_parser_style_utils {
 
 inline u8 ResolveParsedTextStyle(bool bold, bool italic, bool mono) {
+  if (mono && bold && italic)
+    return TEXT_STYLE_MONO_BOLDITALIC;
+  if (mono && bold)
+    return TEXT_STYLE_MONO_BOLD;
+  if (mono && italic)
+    return TEXT_STYLE_MONO_ITALIC;
   if (mono)
     return TEXT_STYLE_MONO;
   if (bold && italic)

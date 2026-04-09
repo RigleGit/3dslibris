@@ -438,7 +438,13 @@ void Page::Draw(Text *ts) {
         const int shifted_y = std::max(0, base_pen_y + y_offset);
         ts->SetPen((u16)glyph_x0, (u16)shifted_y);
       }
-      if (mono)
+      if (mono && ts->bold && ts->italic)
+        ts->PrintChar(c, TEXT_STYLE_MONO_BOLDITALIC);
+      else if (mono && ts->bold)
+        ts->PrintChar(c, TEXT_STYLE_MONO_BOLD);
+      else if (mono && ts->italic)
+        ts->PrintChar(c, TEXT_STYLE_MONO_ITALIC);
+      else if (mono)
         ts->PrintChar(c, TEXT_STYLE_MONO);
       else if (ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_BOLDITALIC);

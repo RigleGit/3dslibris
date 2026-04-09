@@ -156,6 +156,10 @@ void parse_init(parsedata_t *data) {
     data->style_subscript_stack[i] = false;
     data->style_mono_stack[i] = false;
     data->style_hidden_stack[i] = false;
+    data->list_marker_hidden_stack[i] = false;
+    data->list_item_pending_stack[i] = false;
+    data->ordered_list_ordinal_stack[i] = 0;
+    data->ordered_list_style_stack[i] = 0;
   }
   data->docpath.clear();
   data->doc_title.clear();
@@ -197,6 +201,10 @@ void parse_push(parsedata_t *data, context_t context) {
     data->style_subscript_stack[data->stacksize] = false;
     data->style_mono_stack[data->stacksize] = false;
     data->style_hidden_stack[data->stacksize] = false;
+    data->list_marker_hidden_stack[data->stacksize] = false;
+    data->list_item_pending_stack[data->stacksize] = false;
+    data->ordered_list_ordinal_stack[data->stacksize] = 0;
+    data->ordered_list_style_stack[data->stacksize] = 0;
     data->stacksize++;
   }
 }
@@ -212,6 +220,10 @@ context_t parse_pop(parsedata_t *data) {
     data->style_subscript_stack[data->stacksize] = false;
     data->style_mono_stack[data->stacksize] = false;
     data->style_hidden_stack[data->stacksize] = false;
+    data->list_marker_hidden_stack[data->stacksize] = false;
+    data->list_item_pending_stack[data->stacksize] = false;
+    data->ordered_list_ordinal_stack[data->stacksize] = 0;
+    data->ordered_list_style_stack[data->stacksize] = 0;
   }
   return data->stack[data->stacksize];
 }

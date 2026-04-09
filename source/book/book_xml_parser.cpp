@@ -13,7 +13,9 @@
 
 #include "book/book.h"
 
+#include "book/book_xml_block_utils.h"
 #include "book/book_context.h"
+#include "book/book_xml_list_utils.h"
 #include "book/book_xml_parser_style_utils.h"
 #include "book/book_xml_text_emit.h"
 #include "book/book_xml.h"
@@ -98,6 +100,35 @@ static int MeasureParsedTextAdvance(uint32_t codepoint, void *ctx) {
   if (!measure || !measure->text)
     return 0;
   return measure->text->GetAdvance(codepoint, measure->style);
+}
+
+static bool HasVisibleTextContentUtf8(const char *txt, int txtlen) {
+  if (!txt || txtlen <= 0)
+    return false;
+  size_t offset = 0;
+  while (offset < (size_t)txtlen) {
+    uint32_t cp = 0;
+    const size_t consumed = text_unicode_utils::DecodeNextDisplayCodepoint(
+        txt + offset, (size_t)txtlen - offset, &cp);
+    if (consumed == 0) {
+      offset++;
+      continue;
+    }
+    if (!iswhitespace((u32)cp))
+      return true;
+    offset += consumed;
+  }
+  return false;
+}
+
+static bool ParseInAnyEasyParagraphTightBlock(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (book_xml_block_utils::SuppressInnerParagraphSpacing(p->stack[i]))
+      return true;
+  }
+  return false;
 }
 
 static bool ContainsAsciiNoCase(const std::string &haystack,
@@ -756,12 +787,39 @@ void start(void *data, const char *el, const char **attr) {
 
   if (!strcmp(el, "html"))
     parse_push(p, TAG_HTML);
+  else if (!strcmp(el, "aside")) {
+    parse_push(p, TAG_ASIDE);
+    if (!blankline(p))
+      linefeed(p);
+  } else if (!strcmp(el, "blockquote")) {
+    parse_push(p, TAG_BLOCKQUOTE);
+    if (!blankline(p))
+      linefeed(p);
+  } else if (!strcmp(el, "caption")) {
+    parse_push(p, TAG_CAPTION);
+    if (!blankline(p))
+      linefeed(p);
+  } else if (!strcmp(el, "dd")) {
+    parse_push(p, TAG_DD);
+    if (!blankline(p))
+      linefeed(p);
+    const int leading_spaces = book_xml_block_utils::GetLeadingSpaceCount(TAG_DD);
+    for (int i = 0; i < leading_spaces; i++) {
+      AppendParsedByte(p, ' ');
+      p->pen.x += ts->GetAdvance(' ');
+    }
+  }
   else if (!strcmp(el, "body"))
     parse_push(p, TAG_BODY);
   else if (!strcmp(el, "div"))
     parse_push(p, TAG_DIV);
   else if (!strcmp(el, "dt"))
     parse_push(p, TAG_DT);
+  else if (!strcmp(el, "figure")) {
+    parse_push(p, TAG_FIGURE);
+    if (!blankline(p))
+      linefeed(p);
+  }
   else if (!strcmp(el, "h1")) {
     heading_layout::KeepWithNextRequest req{};
     req.pen_y = p->pen.y;
@@ -892,7 +950,11 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_P);
     p->in_paragraph = true;
     p->paragraph_has_content = false;
-    if (!blankline(p)) {
+    const bool inside_list_item = book_xml_list_utils::IsInsideListItem(p);
+    const bool tight_list_paragraph =
+        book_xml_list_utils::HasPendingListItemContent(p);
+    const bool tight_block_paragraph = ParseInAnyEasyParagraphTightBlock(p);
+    if (!blankline(p) && !tight_list_paragraph && !tight_block_paragraph) {
       const int margin_px = ParseElementMarginTopPx(attr);
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int extra_lf = (margin_px > 0 && line_h > 0)
@@ -903,7 +965,8 @@ void start(void *data, const char *el, const char **attr) {
       for (int i = 0; i < base_lf; i++) {
         linefeed(p);
       }
-      for (int i = 0; i < p->book->GetParagraphIndent(); i++) {
+      for (int i = 0; i < p->book->GetParagraphIndent() && !inside_list_item &&
+                      !parse_in(p, TAG_DD); i++) {
         AppendParsedByte(p, ' ');
         p->pen.x += ts->GetAdvance(' ');
       }
@@ -921,20 +984,35 @@ void start(void *data, const char *el, const char **attr) {
       p->mono = true;
       SyncParsedTextStyle(ts, p->bold, p->italic, p->mono);
     }
-  }
-  else if (!strcmp(el, "li")) {
-    parse_push(p, TAG_UNKNOWN);
-    if (parse_in(p, TAG_UL) && !parse_in(p, TAG_OL)) {
+  } else if (!strcmp(el, "li")) {
+    parse_push(p, TAG_LI);
+    book_xml_list_utils::MarkCurrentListItemPending(p, true);
+    const context_t active_list = book_xml_list_utils::GetActiveListContext(p);
+    const bool suppress_marker =
+        book_xml_list_utils::HasSuppressedListMarkerContext(p);
+    if (active_list == TAG_UL || active_list == TAG_OL) {
       if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
         linefeed(p);
-      AppendParsedByte(p, 0x2022); // bullet '•'
-      AppendParsedByte(p, ' ');
-      p->pen.x += ts->GetAdvance(0x2022) + ts->GetAdvance(' ');
-      p->linebegan = true;
-      p->strip_leading_list_marker = true;
+      if (!suppress_marker) {
+        if (active_list == TAG_UL) {
+          AppendParsedByte(p, 0x2022); // bullet '•'
+          p->pen.x += ts->GetAdvance(0x2022) + ts->GetAdvance(' ');
+        } else {
+          const std::string marker = book_xml_list_utils::BuildOrderedListMarker(
+              book_xml_list_utils::AdvanceOrderedListOrdinal(p),
+              book_xml_list_utils::GetActiveOrderedListStyle(p));
+          for (size_t i = 0; i < marker.size(); i++) {
+            AppendParsedByte(p, (u32)(unsigned char)marker[i]);
+            p->pen.x += ts->GetAdvance((u32)(unsigned char)marker[i]);
+          }
+          p->pen.x += ts->GetAdvance(' ');
+        }
+        AppendParsedByte(p, ' ');
+        p->linebegan = true;
+        p->strip_leading_list_marker = true;
+      }
     }
-  }
-  else if (!strcmp(el, "script"))
+  } else if (!strcmp(el, "script"))
     parse_push(p, TAG_SCRIPT);
   else if (!strcmp(el, "style"))
     parse_push(p, TAG_STYLE);
@@ -1114,6 +1192,7 @@ void start(void *data, const char *el, const char **attr) {
     ParseElementHiddenFlags(attr, &style_hidden);
 
     const u8 current = (u8)(p->stacksize - 1);
+    book_xml_list_utils::ConfigureElementListSemantics(p, attr);
     p->style_bold_stack[current] = style_bold;
     p->style_italic_stack[current] = style_italic;
     p->style_underline_stack[current] = style_underline;
@@ -1216,6 +1295,11 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     } else {
       p->strip_leading_list_marker = false;
     }
+  }
+
+  if (book_xml_list_utils::HasPendingListItemContent(p) &&
+      HasVisibleTextContentUtf8(txt, txtlen)) {
+    book_xml_list_utils::ConsumePendingListItemContent(p);
   }
 
   SyncParsedTextStyle(ts, p->bold, p->italic, p->mono);
@@ -1512,8 +1596,16 @@ void end(void *data, const char *el) {
         p->buf[p->buflen - 1] != '\n') {
       linefeed(p);
     }
+  } else if (!strcmp(el, "aside")) {
+    linefeed(p);
+    linefeed(p);
+  } else if (!strcmp(el, "blockquote") || !strcmp(el, "caption") ||
+             !strcmp(el, "dd") || !strcmp(el, "figure")) {
+    linefeed(p);
   } else if (!strcmp(el, "p")) {
-    if (p->paragraph_has_content) {
+    if (p->paragraph_has_content &&
+        !book_xml_list_utils::IsInsideListItem(p) &&
+        !ParseInAnyEasyParagraphTightBlock(p)) {
       linefeed(p);
       linefeed(p);
     }

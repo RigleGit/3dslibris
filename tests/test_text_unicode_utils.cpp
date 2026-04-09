@@ -103,6 +103,14 @@ void TestListMarkerNormalization() {
                standard_bullet.c_str()),
            (size_t)4);
 
+  ExpectEq("strip numeric marker bytes",
+           text_unicode_utils::StripLeadingListMarkerUtf8("12. texto"),
+           (size_t)4);
+
+  ExpectEq("strip paren numeric marker bytes",
+           text_unicode_utils::StripLeadingListMarkerUtf8("(3) texto"),
+           (size_t)4);
+
   ExpectEq("do not strip plain text",
            text_unicode_utils::StripLeadingListMarkerUtf8("texto"), (size_t)0);
 }

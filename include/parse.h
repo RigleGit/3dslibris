@@ -24,9 +24,15 @@
 //! Not all tags here necessary affect rendering.
 typedef enum {
 	TAG_ANCHOR,
-	TAG_BR,TAG_BODY,
+	TAG_ASIDE,
+	TAG_BLOCKQUOTE,TAG_BODY,
+	TAG_BR,
+	TAG_CAPTION,
+	TAG_DD,
 	TAG_DIV,TAG_DT,
+	TAG_FIGURE,
 	TAG_H1,TAG_H2,TAG_H3,TAG_H4,TAG_H5,TAG_H6,TAG_HTML,TAG_HEAD,
+	TAG_LI,
 	TAG_NONE,
 	TAG_OL,
 	TAG_P,TAG_PRE,
@@ -86,6 +92,10 @@ struct parsedata_t {
 	bool style_subscript_stack[32];
 	bool style_mono_stack[32];
 	bool style_hidden_stack[32];
+	bool list_marker_hidden_stack[32];
+	bool list_item_pending_stack[32];
+	unsigned int ordered_list_ordinal_stack[32];
+	u8 ordered_list_style_stack[32];
 	std::string docpath; //! Current XHTML document path inside EPUB.
 	std::string doc_title;   //! Current XHTML <title> text (best chapter label).
 	std::string doc_heading; //! Fallback heading text from h1/h2/h3.

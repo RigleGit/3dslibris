@@ -58,14 +58,26 @@ int main() {
     test::ExpectStrContains("splash path suffix", paths::kSplashPaths[i], "splash.");
   }
 
-  test::ExpectEq("default font count", paths::kDefaultFontCount, 6);
+  test::ExpectEq("default font count", paths::kDefaultFontCount, 9);
   bool hasMonoFont = false;
+  bool hasMonoBoldFont = false;
+  bool hasMonoItalicFont = false;
+  bool hasMonoBoldItalicFont = false;
   for (int i = 0; i < paths::kDefaultFontCount; ++i) {
     ExpectFontEntry("default font entry", paths::kDefaultFonts[i][0], paths::kDefaultFonts[i][1]);
     if (std::strcmp(paths::kDefaultFonts[i][0], "LiberationMono-Regular.ttf") == 0)
       hasMonoFont = true;
+    if (std::strcmp(paths::kDefaultFonts[i][0], "LiberationMono-Bold.ttf") == 0)
+      hasMonoBoldFont = true;
+    if (std::strcmp(paths::kDefaultFonts[i][0], "LiberationMono-Italic.ttf") == 0)
+      hasMonoItalicFont = true;
+    if (std::strcmp(paths::kDefaultFonts[i][0], "LiberationMono-BoldItalic.ttf") == 0)
+      hasMonoBoldItalicFont = true;
   }
   test::ExpectTrue("default mono font entry", hasMonoFont);
+  test::ExpectTrue("default mono bold font entry", hasMonoBoldFont);
+  test::ExpectTrue("default mono italic font entry", hasMonoItalicFont);
+  test::ExpectTrue("default mono bold italic font entry", hasMonoBoldItalicFont);
 
   {
     std::string decoded = UrlDecode("chapter%2Etxt");

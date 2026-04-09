@@ -78,6 +78,45 @@ bool IsLikelyListMarkerCodepoint(uint32_t cp) {
   return cp >= 0xF000 && cp <= 0xF8FF;
 }
 
+size_t ConsumeOrderedListMarkerUtf8(const char *s, size_t len) {
+  if (!s || !len)
+    return 0;
+
+  size_t offset = 0;
+  bool saw_open_paren = false;
+  if (s[offset] == '(') {
+    saw_open_paren = true;
+    offset++;
+  }
+
+  const size_t digits_start = offset;
+  while (offset < len && s[offset] >= '0' && s[offset] <= '9')
+    offset++;
+  if (offset == digits_start)
+    return 0;
+
+  if (saw_open_paren) {
+    if (offset >= len || s[offset] != ')')
+      return 0;
+    offset++;
+  } else {
+    if (offset >= len || (s[offset] != '.' && s[offset] != ')'))
+      return 0;
+    offset++;
+  }
+
+  size_t ws_start = offset;
+  while (offset < len && s[offset] != '\0') {
+    uint32_t cp = 0;
+    size_t step = DecodeNextDisplayCodepoint(s + offset, len - offset, &cp);
+    if (!step || !IsUnicodeWhitespaceCodepoint(cp))
+      break;
+    offset += step;
+  }
+
+  return (offset > ws_start) ? offset : 0;
+}
+
 } // namespace
 
 size_t DecodeNextDisplayCodepoint(const char *s, size_t len, uint32_t *out) {
@@ -204,8 +243,10 @@ size_t StripLeadingListMarkerUtf8(const char *s, size_t len,
     }
 
     saw_non_whitespace = true;
-    if (!IsLikelyListMarkerCodepoint(cp))
-      return 0;
+    if (!IsLikelyListMarkerCodepoint(cp)) {
+      size_t ordered_marker = ConsumeOrderedListMarkerUtf8(s + offset, len - offset);
+      return ordered_marker ? offset + ordered_marker : 0;
+    }
 
     offset += step;
     while (offset < len && s[offset] != '\0') {

@@ -26,11 +26,15 @@ void TestResolveParsedTextStylePrefersMono() {
   test::ExpectEq("mono overrides bold italic",
                  book_xml_parser_style_utils::ResolveParsedTextStyle(
                      true, true, true),
-                 TEXT_STYLE_MONO);
+                 TEXT_STYLE_MONO_BOLDITALIC);
   test::ExpectEq("mono overrides italic",
                  book_xml_parser_style_utils::ResolveParsedTextStyle(
                      false, true, true),
-                 TEXT_STYLE_MONO);
+                 TEXT_STYLE_MONO_ITALIC);
+  test::ExpectEq("mono bold style",
+                 book_xml_parser_style_utils::ResolveParsedTextStyle(
+                     true, false, true),
+                 TEXT_STYLE_MONO_BOLD);
 }
 
 void TestRestoreParsedStyleMarkersReinjectsMono() {
