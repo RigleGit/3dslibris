@@ -387,7 +387,11 @@ void SavePending(Book *book) {
   path.push_back('/');
   path += file;
 
-  Save(book, path.c_str(), 0, 0, 0, 0, 0, 0, 0, 0, 0, NULL);
+  const Book::EpubCacheSaveParams &p = book->GetEpubCacheSaveParams();
+  Save(book, path.c_str(),
+       p.pixel_size, p.line_spacing, p.paragraph_spacing, p.paragraph_indent,
+       p.orientation, p.margin_left, p.margin_right, p.margin_top,
+       p.margin_bottom, p.regular_font.empty() ? NULL : p.regular_font.c_str());
 
   book->SetPendingEpubPageCacheSave(false);
 }

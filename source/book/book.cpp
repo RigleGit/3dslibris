@@ -631,6 +631,28 @@ void Book::SetPendingEpubPageCacheSave(bool pending) {
   epub_page_cache_save_pending = pending;
 }
 
+void Book::SetPendingEpubPageCacheSaveWithParams(
+    int pixel_size, int line_spacing, int paragraph_spacing,
+    int paragraph_indent, int orientation,
+    int margin_left, int margin_right, int margin_top, int margin_bottom,
+    const char *regular_font) {
+  epub_page_cache_save_pending = true;
+  epub_cache_save_params.pixel_size = pixel_size;
+  epub_cache_save_params.line_spacing = line_spacing;
+  epub_cache_save_params.paragraph_spacing = paragraph_spacing;
+  epub_cache_save_params.paragraph_indent = paragraph_indent;
+  epub_cache_save_params.orientation = orientation;
+  epub_cache_save_params.margin_left = margin_left;
+  epub_cache_save_params.margin_right = margin_right;
+  epub_cache_save_params.margin_top = margin_top;
+  epub_cache_save_params.margin_bottom = margin_bottom;
+  epub_cache_save_params.regular_font = regular_font ? regular_font : "";
+}
+
+const Book::EpubCacheSaveParams &Book::GetEpubCacheSaveParams() const {
+  return epub_cache_save_params;
+}
+
 unsigned int Book::GetLayoutRevision() const { return layout_revision; }
 
 void Book::SetLayoutRevision(unsigned int revision) {

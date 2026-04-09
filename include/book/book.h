@@ -137,6 +137,23 @@ public:
   bool tocResolveTried;
   bool tocResolved;
   bool epub_page_cache_save_pending;
+  struct EpubCacheSaveParams {
+    int pixel_size;
+    int line_spacing;
+    int paragraph_spacing;
+    int paragraph_indent;
+    int orientation;
+    int margin_left;
+    int margin_right;
+    int margin_top;
+    int margin_bottom;
+    std::string regular_font;
+    EpubCacheSaveParams()
+        : pixel_size(0), line_spacing(0), paragraph_spacing(0),
+          paragraph_indent(0), orientation(0), margin_left(0), margin_right(0),
+          margin_top(0), margin_bottom(0) {}
+  };
+  EpubCacheSaveParams epub_cache_save_params;
   //! Per-book opt-in for collapsing visually hard-wrapped MOBI prose.
   bool mobi_line_wrap_fix;
   //! Remembers which wrap-fix state produced the currently cached pages.
@@ -287,6 +304,12 @@ public:
   void CancelAsyncReflowOpen();
   bool HasPendingEpubPageCacheSave() const;
   void SetPendingEpubPageCacheSave(bool pending);
+  void SetPendingEpubPageCacheSaveWithParams(
+      int pixel_size, int line_spacing, int paragraph_spacing,
+      int paragraph_indent, int orientation,
+      int margin_left, int margin_right, int margin_top, int margin_bottom,
+      const char *regular_font);
+  const EpubCacheSaveParams &GetEpubCacheSaveParams() const;
   bool HasDeferredMobiParse() const;
   bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
   void CancelDeferredMobiParse();

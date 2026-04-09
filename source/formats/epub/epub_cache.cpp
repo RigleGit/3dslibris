@@ -37,7 +37,18 @@ int FinalizeEpubParse(unzFile uf, epub_data_t *parsedata, Book *book,
   if (save_cache) {
     if (reflow_cache_save_utils::ShouldDeferAsyncOpenCacheSave(
             true, book && book->IsAsyncReflowOpenPending())) {
-      book->SetPendingEpubPageCacheSave(true);
+      book->SetPendingEpubPageCacheSaveWithParams(
+          deps.ts ? (int)deps.ts->GetPixelSize() : 0,
+          deps.ts ? (int)deps.ts->linespacing : 0,
+          deps.paragraph_spacing, deps.paragraph_indent,
+          deps.orientation,
+          deps.ts ? (int)deps.ts->margin.left : 0,
+          deps.ts ? (int)deps.ts->margin.right : 0,
+          deps.ts ? (int)deps.ts->margin.top : 0,
+          deps.ts ? (int)deps.ts->margin.bottom : 0,
+          deps.regular_font_path.empty()
+              ? NULL
+              : deps.regular_font_path.c_str());
     } else {
       epub_page_cache::Save(book, name.c_str(),
                             deps.ts ? (int)deps.ts->GetPixelSize() : 0,
