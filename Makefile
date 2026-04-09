@@ -282,9 +282,6 @@ mupdf-minimal: $(MUPDF_STAMP)
 # mupdf's internal build has a race condition with parallel compilation.
 .NOTPARALLEL: mupdf-minimal
 
-# mupdf's internal build has a race condition with parallel compilation.
-.NOTPARALLEL: mupdf-minimal
-
 $(MUPDF_STAMP): $(CURDIR)/scripts/build_mupdf_minimal.sh
 	@echo building mupdf minimal ...
 	@sh "$(CURDIR)/scripts/build_mupdf_minimal.sh"
