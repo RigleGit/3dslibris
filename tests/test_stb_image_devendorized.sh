@@ -14,12 +14,12 @@ if [ ! -f third_party/stb/stb_image.h ]; then
   exit 1
 fi
 
-if ! rg -n '\-I.*/?third_party/stb|\-Ithird_party/stb' Makefile tests >/dev/null 2>&1; then
+if ! grep -R -n -E '\-I.*/?third_party/stb|\-Ithird_party/stb' Makefile tests >/dev/null 2>&1; then
   echo "build and tests do not expose third_party/stb include path"
   exit 1
 fi
 
-if ! rg -n '^#define STBI_NO_FAILURE_STRINGS$' source/core/stb_image_impl.cpp >/dev/null 2>&1; then
+if ! grep -n -E '^#define STBI_NO_FAILURE_STRINGS$' source/core/stb_image_impl.cpp >/dev/null 2>&1; then
   echo "stb_image implementation still compiles failure strings"
   exit 1
 fi
