@@ -98,6 +98,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
 	          app->ts->SetFontFile((char *)attr[i + 1], style);
 	      }
 	    }
+    if (has_fallback_attrs)
+      app->ts->AutoLoadFallbackFonts();
   } else if (!strcmp(name, "books")) {
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "reopen"))

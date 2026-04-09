@@ -119,6 +119,7 @@ public:
   void SetFontFile(const char *path, u8 style);
   bool SetFallbackFontFile(int index, const char *path);
   void ClearFallbackFonts();
+  void AutoLoadFallbackFonts();
   void SetScreen(u16 *s);
   void SetStyle(int astyle);
   void MarkScreenDirty(u16 *target);

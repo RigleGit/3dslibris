@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "app/app.h"
+#include "debug_log.h"
 #include "shared/bugfix_utils.h"
 #include "font_constants.h"
 #include "path_utils.h"
@@ -309,11 +310,25 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
   if (ftc)
     halt(parent, "error: GetGlyph() called with ftc enabled");
 
-  // Try fallback if primary face lacks this glyph.
-  if (face && fallback_count_ > 0 && !FT_Get_Char_Index(face, ucs)) {
-    FT_Face fb = FindFallbackFace(ucs);
-    if (fb)
-      face = fb;
+  // Try fallback if primary face lacks this glyph, or has a "ghost glyph"
+  // (cmap entry exists but no ink — common in Unicode fonts for Arabic
+  // Presentation Forms U+FE70-U+FEFF).
+  if (face && fallback_count_ > 0) {
+    bool needs_fallback = !FT_Get_Char_Index(face, ucs);
+    if (!needs_fallback) {
+      FT_Error load_err = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
+      if (!load_err && face->glyph->advance.x != 0 &&
+          face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
+          face->glyph->outline.n_contours == 0) {
+        needs_fallback = true;
+      }
+    }
+    if (needs_fallback) {
+      FT_Face fb = FindFallbackFace(ucs);
+      if (fb) {
+        face = fb;
+      }
+    }
   }
 
   Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
@@ -384,61 +399,66 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
     if (!error)
       return (glyph->advance).x;
   } else {
+    bool needs_fallback = false;
 #ifdef ADVANCE_NO_CACHE
     auto gindex = FT_Get_Char_Index(face, ucs);
-    error = FT_Load_Glyph(face, gindex, FT_LOAD_DEFAULT);
-    if (!error)
-      return face->glyph->advance.x >> 6;
+    if (!gindex) {
+      needs_fallback = true;
+    } else {
+      error = FT_Load_Glyph(face, gindex, FT_LOAD_DEFAULT);
+      if (!error) {
+        bool ghost = face->glyph->advance.x != 0 &&
+                     face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
+                     face->glyph->outline.n_contours == 0;
+        if (!ghost)
+          return face->glyph->advance.x >> 6;
+        needs_fallback = true;
+      }
+    }
 #else
     auto &faceAdvanceCache = advanceCache[face];
     auto iter = faceAdvanceCache.find(ucs);
     if (iter != faceAdvanceCache.end())
       return iter->second;
 
-    error = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
-    if (!error) {
-      u8 advance = face->glyph->advance.x >> 6;
-      faceAdvanceCache.insert(std::make_pair(ucs, advance));
-      return advance;
+    if (!FT_Get_Char_Index(face, ucs)) {
+      needs_fallback = true;
+    } else {
+      error = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
+      if (!error) {
+        bool ghost = face->glyph->advance.x != 0 &&
+                     face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
+                     face->glyph->outline.n_contours == 0;
+        if (!ghost) {
+          u8 advance = face->glyph->advance.x >> 6;
+          faceAdvanceCache.insert(std::make_pair(ucs, advance));
+          return advance;
+        }
+        needs_fallback = true;
+      }
     }
 #endif
-  }
 
-  // Primary face lacks this glyph — try fallback faces.
-  if (face && fallback_count_ > 0 && !FT_Get_Char_Index(face, ucs)) {
-    FT_Face fb = FindFallbackFace(ucs);
-    if (fb) {
-      if (ftc) {
-        // FTC path: look up glyph index in fallback face
-        FTC_FaceID fb_face_id = (FTC_FaceID)fb;
-        auto gindex = FTC_CMapCache_Lookup(cache.cmap, fb_face_id, -1, ucs);
-        if (gindex) {
-          FTC_SBit psbit;
-          error = FTC_SBitCache_Lookup(cache.sbit, &imagetype, gindex, &psbit, NULL);
-          if (!error)
-            return psbit->xadvance;
-
-          FT_Glyph glyph;
-          error = FTC_ImageCache_Lookup(cache.image, &imagetype, gindex, &glyph, NULL);
-          if (!error)
-            return (glyph->advance).x;
-        }
-      } else {
+    if (needs_fallback && fallback_count_ > 0) {
+      FT_Face fb = FindFallbackFace(ucs);
+      if (fb) {
 #ifdef ADVANCE_NO_CACHE
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
         if (!error)
           return fb->glyph->advance.x >> 6;
 #else
-        // Check fallback face's advance cache
         auto &fbAdvanceCache = advanceCache[fb];
         auto fb_iter = fbAdvanceCache.find(ucs);
-        if (fb_iter != fbAdvanceCache.end())
+        if (fb_iter != fbAdvanceCache.end()) {
+          faceAdvanceCache.insert(std::make_pair(ucs, fb_iter->second));
           return fb_iter->second;
+        }
 
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
         if (!error) {
           u8 advance = fb->glyph->advance.x >> 6;
           fbAdvanceCache.insert(std::make_pair(ucs, advance));
+          faceAdvanceCache.insert(std::make_pair(ucs, advance));
           return advance;
         }
 #endif
@@ -535,6 +555,8 @@ bool FontManager::LoadFallbackFont(const char *path) {
     return false;
   if (fallback_count_ >= kMaxFallbackFaces) {
     printf("[WARN] Fallback font limit reached (%d)\n", kMaxFallbackFaces);
+    DBG_LOGF(parent ? parent->app : nullptr,
+             "[WARN] Fallback font limit reached (%d)", kMaxFallbackFaces);
     return false;
   }
 
@@ -606,6 +628,8 @@ bool FontManager::SetFallbackFile(int index, const char *path) {
     fallback_count_ = index + 1;
 
   printf("[OK] Fallback font[%d]: %s\n", index, resolved.c_str());
+  DBG_LOGF(parent ? parent->app : nullptr,
+           "[OK] Fallback font[%d]: %s", index, resolved.c_str());
   return true;
 }
 
@@ -674,6 +698,21 @@ static void AutoLoadFallbackFontsFromDir(FontManager *fm, const std::string &fon
     if (!FilenameMatchesCjkPattern(name))
       continue;
 
+    bool already_loaded = false;
+    for (int i = 0; i < FontManager::kMaxFallbackFaces; i++) {
+      const std::string existing = fm->GetFallbackFile(i);
+      if (existing.empty())
+        continue;
+      const char *existing_base = strrchr(existing.c_str(), '/');
+      existing_base = existing_base ? existing_base + 1 : existing.c_str();
+      if (!strcmp(existing_base, name)) {
+        already_loaded = true;
+        break;
+      }
+    }
+    if (already_loaded)
+      continue;
+
     std::string full_path = font_dir + "/" + name;
     if (fm->LoadFallbackFont(full_path.c_str()))
       (*loaded)++;
@@ -693,6 +732,9 @@ void FontManager::AutoLoadCjkFallbackFonts() {
   for (size_t i = 0; i < search_dirs.size() && loaded < kMaxFallbackFaces; i++)
     AutoLoadFallbackFontsFromDir(this, search_dirs[i], &loaded);
 
-  if (loaded > 0)
+  if (loaded > 0) {
     printf("[OK] Auto-loaded %d CJK fallback font(s)\n", loaded);
+    DBG_LOGF(parent ? parent->app : nullptr,
+             "[OK] Auto-loaded %d CJK fallback font(s)", loaded);
+  }
 }

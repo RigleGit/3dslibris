@@ -184,6 +184,12 @@ void Text::ClearFallbackFonts() {
   fm->UnloadFallbackFonts();
 }
 
+void Text::AutoLoadFallbackFonts() {
+  if (!fm)
+    return;
+  fm->AutoLoadCjkFallbackFonts();
+}
+
 void Text::SetScreen(u16 *s) { tr->SetScreen(s); }
 
 void Text::SetStyle(int astyle) { tr->SetStyle(astyle); }

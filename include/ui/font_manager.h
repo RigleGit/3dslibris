@@ -37,7 +37,7 @@ public:
 
 class FontManager {
 public:
-  static const int kMaxFallbackFaces = 4;
+  static const int kMaxFallbackFaces = 8;
 
   FontManager(Text *parent);
   ~FontManager();
