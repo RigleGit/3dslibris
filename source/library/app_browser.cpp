@@ -62,8 +62,8 @@ static const char *kCoverCacheMagic = "CVR3";
 static const size_t kCoverCacheMaxFiles = 512;
 static const size_t kCoverCacheMaxBytes = 16 * 1024 * 1024;
 // Max extraction attempts per session before a book is skipped.
-// One retry absorbs transient SD-card read failures without retrying forever.
-static const uint8_t kCoverMaxAttempts = 2;
+// Two retries absorb transient SD-card read failures without retrying forever.
+static const uint8_t kCoverMaxAttempts = 3;
 static const int kCoverThumbMaxW = 85;
 static const int kCoverThumbMaxH = 115;
 static const int kBrowserGridCols = 2;
@@ -804,6 +804,15 @@ void LibraryController::TickBrowserWarmup() {
     return;
   }
   QueueBookWarmup(app_.GetSelectedBook());
+  const int page_start = app_.GetBrowserPageStart();
+  for (int i = page_start;
+       i < app_.BookCount() && i < page_start + APP_BROWSER_BUTTON_COUNT;
+       i++) {
+    Book *book = app_.books[i];
+    if (!book || book == app_.GetSelectedBook())
+      continue;
+    QueueBookWarmup(book);
+  }
 }
 
 void LibraryController::QueueTocResolve(Book *book) {
@@ -875,8 +884,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           app_flow_utils::SupportsMetadataIndexing(
               app_flow_utils::DetectBookFormat(book->GetFileName()))) {
         rc = book->Index();
-        if (rc != 0)
-          book->coverAttempts++;
+        // Do not penalise cover extraction on metadata failure.
         app_.SetBrowserDirty(true);
       }
     } else if (job.type == APP_JOB_EXTRACT_COVER) {
