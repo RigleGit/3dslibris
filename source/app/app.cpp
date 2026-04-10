@@ -145,17 +145,20 @@ App::~App() {
     status_log_file_ = NULL;
   }
   LightLock_Unlock(&status_log_lock_);
-  if (prefs)
-    delete prefs;
-  if (ts)
-    delete ts;
   for (std::vector<Book *>::iterator it = books.begin(); it != books.end();
        it++)
     delete *it;
   books.clear();
+  for (size_t i = 0; i < buttons.size(); i++)
+    delete buttons[i];
+  buttons.clear();
   delete fontmenu;
   delete bookmarkmenu;
   delete chaptermenu;
+  if (ts)
+    delete ts;
+  if (prefs)
+    delete prefs;
   UiButtonSkin_Exit();
 }
 
