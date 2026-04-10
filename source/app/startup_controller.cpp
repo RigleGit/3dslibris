@@ -272,7 +272,7 @@ int StartupController::RunBootSequence() {
                    {"Opening last book...",
                     (title && *title) ? title : "(untitled)"},
                    false);
-    app_.OpenBook();
+    app_.SetPendingBootReopen(true);
   }
   return 0;
 }

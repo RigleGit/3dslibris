@@ -17,6 +17,11 @@ int MainLoopController::RunMainLoop() {
     gspWaitForVBlank();
     hidScanInput();
 
+    if (app_.HasPendingBootReopen()) {
+      app_.SetPendingBootReopen(false);
+      app_.OpenBook();
+    }
+
     if (app_.GetMode() == AppMode::Browser) {
       bool allow_jobs = browser_warmup_utils::IsBrowserWarmupIdle(
           osGetTime(), app_.GetBrowserLastInteractionMs(),

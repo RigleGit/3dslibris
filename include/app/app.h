@@ -207,6 +207,8 @@ public:
   void StartupPrepareLibrary();
   void StartupInitUiAndBrowser();
   void StartupInitScreens();
+  bool HasPendingBootReopen() const;
+  void SetPendingBootReopen(bool pending);
 
   // app_book.cpp
   void CloseBook();
@@ -354,6 +356,7 @@ private:
   FILE *status_log_file_;
   unsigned int status_log_write_count_;
   LightLock status_log_lock_;
+  bool pending_boot_reopen_;
 
   void InitScreens();
 

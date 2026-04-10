@@ -122,6 +122,7 @@ App::App() {
   status_log_file_ = NULL;
   status_log_write_count_ = 0;
   LightLock_Init(&status_log_lock_);
+  pending_boot_reopen_ = false;
 
 #ifdef DSLIBRIS_DEBUG
   // Debug builds should emit actionable logs by default.
@@ -407,6 +408,10 @@ void App::StartupInitUiAndBrowser() {
 }
 
 void App::StartupInitScreens() { InitScreens(); }
+
+bool App::HasPendingBootReopen() const { return pending_boot_reopen_; }
+
+void App::SetPendingBootReopen(bool v) { pending_boot_reopen_ = v; }
 
 bool App::IsOpeningPending() const { return reader_state_.opening.pending; }
 
