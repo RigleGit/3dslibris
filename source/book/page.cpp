@@ -130,12 +130,14 @@ void Page::AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned) {
 }
 
 void Page::Draw(Text *ts) {
+#ifdef DSLIBRIS_DEBUG
+  const u64 draw_tick_start = svcGetSystemTick();
+#endif
   const bool saved_auto_wrap = ts->IsAutoWrapEnabled();
   const bool saved_clip_to_content = ts->IsClipToContentEnabled();
   // Reflowed page buffers already carry explicit line breaks/wrap decisions.
   // Runtime per-glyph wrapping in TextRenderer breaks RTL line anchoring.
   ts->SetAutoWrapEnabled(false);
-  ts->SetClipToContentEnabled(true);
 
   int savedBottomMargin = ts->margin.bottom;
   int leftBottomMargin = savedBottomMargin;
@@ -215,6 +217,11 @@ void Page::Draw(Text *ts) {
   int newline_count_second = 0;
   bool first_screen_had_content = false;
   bool second_screen_had_content = false;
+#ifdef DSLIBRIS_DEBUG
+  u64 perf_printchar_ticks = 0;
+  int perf_glyph_count = 0;
+  int perf_ctrl_count = 0;
+#endif
   while (i < length) {
     u32 c = buf[i];
     if (c == TEXT_PARAGRAPH_RTL) {
@@ -445,10 +452,9 @@ void Page::Draw(Text *ts) {
     } else {
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
-
-      ts->margin.bottom = (on_first_screen == first_is_left)
-                              ? leftBottomMargin
-                              : rightBottomMargin;
+#ifdef DSLIBRIS_DEBUG
+      perf_ctrl_count++;
+#endif
 
       if (rtl_paragraph && !ts->linebegan) {
         int line_width;
@@ -491,6 +497,9 @@ void Page::Draw(Text *ts) {
         const int shifted_y = std::max(0, base_pen_y + y_offset);
         ts->SetPen((u16)glyph_x0, (u16)shifted_y);
       }
+#ifdef DSLIBRIS_DEBUG
+      const u64 pc_t0 = svcGetSystemTick();
+#endif
       if (mono && ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_MONO_BOLDITALIC);
       else if (mono && ts->bold)
@@ -507,6 +516,10 @@ void Page::Draw(Text *ts) {
         ts->PrintChar(c, TEXT_STYLE_BOLD);
       else
         ts->PrintChar(c, TEXT_STYLE_REGULAR);
+#ifdef DSLIBRIS_DEBUG
+      perf_printchar_ticks += svcGetSystemTick() - pc_t0;
+      perf_glyph_count++;
+#endif
 
       const int glyph_x1 = (int)ts->GetPenX();
       if (superscript || subscript)
@@ -540,8 +553,20 @@ void Page::Draw(Text *ts) {
   }
 
 #ifdef DSLIBRIS_DEBUG
+  const u64 draw_tick_end = svcGetSystemTick();
+  const u64 draw_total_ticks = draw_tick_end - draw_tick_start;
+  // 3DS CPU runs at 268MHz; divide ticks by 268 to get microseconds.
+  const u32 draw_us  = (u32)(draw_total_ticks / 268u);
+  const u32 pc_us    = (u32)(perf_printchar_ticks / 268u);
+  const u32 other_us = draw_us > pc_us ? draw_us - pc_us : 0u;
   static int s_page_draw_diag_budget = 48;
   if (ts->app && s_page_draw_diag_budget > 0) {
+    DBG_LOGF_CAT(
+        ts->app, DBG_LEVEL_INFO, DBG_CAT_PERF,
+        "PAGE perf draw=%uus printchar=%uus(%d glyphs avg=%uus) other=%uus ctrl=%d",
+        draw_us, pc_us, perf_glyph_count,
+        perf_glyph_count > 0 ? pc_us / (u32)perf_glyph_count : 0u,
+        other_us, perf_ctrl_count);
     DBG_LOGF_CAT(
         ts->app, DBG_LEVEL_INFO, DBG_CAT_LAYOUT,
         "PAGE draw pos=%u len=%u consumed=%u stop=%d reason=%s idx=%d first_content=%d second_content=%d nl_first=%d nl_second=%d final_screen=%s pen=%u,%u",
