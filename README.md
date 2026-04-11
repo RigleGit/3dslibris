@@ -26,7 +26,7 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
 - Supported install paths: `.3dsx` plus `3dslibris-sdmc.zip`, or `3dslibris.cia` with books stored on SD and optional bundled books in RomFS.
-- Main reading focus in `2.1.4`: safer fixed-layout reopen and lower stack pressure during title-page detection.
+- Main reading focus in `2.1.4`: safer fixed-layout reopen, lower stack pressure during title-page detection, and broader debug instrumentation for memory/thread/cache diagnosis.
 
 ## Install
 
