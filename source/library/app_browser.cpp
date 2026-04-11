@@ -693,33 +693,33 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
   }
 }
 
-// marquee scroll state
-static Book *scroll_book      = nullptr;
-static int   scroll_offset_px = 0;
-static int   scroll_timer     = 0;
+struct MarqueeState {
+  Book   *book          = nullptr;
+  u16    *strip         = nullptr;
+  u16    *bg_strip      = nullptr;
+  int     strip_w       = 0;
+  int     strip_h       = 0;
+  int     strip_x       = 0;
+  int     strip_y       = 0;
+  int     blit_w        = 0;
+  int     scroll_offset = 0;
+  int     scroll_timer  = 0;
+  int     end_timer     = 0;
+  bool    active        = false;
 
-static const char *Utf8AdvanceByPixels(Text *ts, const char *s, int target_px, u8 style) {
-  if (!s || target_px <= 0) return s;
-  int accumulated = 0;
-  const char *p = s;
-  while (*p) {
-    unsigned char c = (unsigned char)*p;
-    int char_bytes = 1;
-    if      (c >= 0xF0) char_bytes = 4;
-    else if (c >= 0xE0) char_bytes = 3;
-    else if (c >= 0xC0) char_bytes = 2;
-    char ch_str[5] = {};
-    if (char_bytes <= 4) {
-      memcpy(ch_str, p, char_bytes);
-      ch_str[char_bytes] = '\0';
-    }
-    int w = ts->GetStringWidth(ch_str, style);
-    if (accumulated + w > target_px) break;
-    accumulated += w;
-    p += char_bytes;
+  void Reset() {
+    delete[] strip;
+    delete[] bg_strip;
+    strip    = nullptr;
+    bg_strip = nullptr;
+    book     = nullptr;
+    strip_w = strip_h = strip_x = strip_y = blit_w = 0;
+    scroll_offset = scroll_timer = end_timer = 0;
+    active = false;
   }
-  return p;
-}
+};
+
+static MarqueeState g_marquee;
 
 } // namespace
 
@@ -1125,9 +1125,7 @@ void LibraryController::browser_handleevent() {
     if (app_.GetBrowserPageStart() != old_page_start)
       LoadVisibleBrowserCoverCaches();
     if (app_.GetSelectedBook() != old_selected) {
-      scroll_book      = nullptr;
-      scroll_offset_px = 0;
-      scroll_timer     = 0;
+      g_marquee.Reset();
       PrioritizeSelectedBookJobs(app_.GetSelectedBook());
       app_.SetBrowserLastInteractionMs(osGetTime());
     }
@@ -1200,9 +1198,7 @@ void LibraryController::browser_handleevent() {
                 app_.OpenBook();
               } else {
                 app_.SetSelectedBook(app_.books[book_idx]);
-                scroll_book      = nullptr;
-                scroll_offset_px = 0;
-                scroll_timer     = 0;
+                g_marquee.Reset();
                 PrioritizeSelectedBookJobs(app_.GetSelectedBook());
                 app_.SetBrowserLastInteractionMs(osGetTime());
                 app_.SetBrowserDirty(true);
@@ -1223,9 +1219,7 @@ void LibraryController::browser_handleevent() {
             app_.OpenBook();
           } else {
             app_.SetSelectedBook(app_.books[i]);
-            scroll_book      = nullptr;
-            scroll_offset_px = 0;
-            scroll_timer     = 0;
+            g_marquee.Reset();
             PrioritizeSelectedBookJobs(app_.GetSelectedBook());
             app_.SetBrowserLastInteractionMs(osGetTime());
             app_.SetBrowserDirty(true);
@@ -1271,9 +1265,7 @@ void LibraryController::browser_init(void) {
         (app_.GetBookIndex(app_.GetSelectedBook()) / APP_BROWSER_BUTTON_COUNT) *
         APP_BROWSER_BUTTON_COUNT);
   }
-  scroll_book      = nullptr;
-  scroll_offset_px = 0;
-  scroll_timer     = 0;
+  g_marquee.Reset();
   PrioritizeSelectedBookJobs(app_.GetSelectedBook());
   app_.SetBrowserLastInteractionMs(osGetTime());
   LoadVisibleBrowserCoverCaches();
@@ -1284,9 +1276,7 @@ void LibraryController::browser_nextpage() {
     app_.SetBrowserPageStart(app_.GetBrowserPageStart() +
                              APP_BROWSER_BUTTON_COUNT);
     app_.SetSelectedBook(app_.books[app_.GetBrowserPageStart()]);
-    scroll_book      = nullptr;
-    scroll_offset_px = 0;
-    scroll_timer     = 0;
+    g_marquee.Reset();
     PrioritizeSelectedBookJobs(app_.GetSelectedBook());
     app_.SetBrowserLastInteractionMs(osGetTime());
     LoadVisibleBrowserCoverCaches();
@@ -1300,9 +1290,7 @@ void LibraryController::browser_prevpage() {
                              APP_BROWSER_BUTTON_COUNT);
     app_.SetSelectedBook(
         app_.books[app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT - 1]);
-    scroll_book      = nullptr;
-    scroll_offset_px = 0;
-    scroll_timer     = 0;
+    g_marquee.Reset();
     PrioritizeSelectedBookJobs(app_.GetSelectedBook());
     app_.SetBrowserLastInteractionMs(osGetTime());
     LoadVisibleBrowserCoverCaches();
@@ -1386,42 +1374,93 @@ void LibraryController::browser_draw(void) {
     std::string display_name = BuildBrowserDisplayName(app_.books[i]);
     LogUtf8StageOnce(app_.books[i], "draw_label", display_name);
     if (app_.books[i]->coverPixels) {
-      if (!display_name.empty()) {
+        if (!display_name.empty()) {
         LogUtf8StageOnce(app_.books[i], "draw_label_cut", display_name);
         const char *dname = display_name.c_str();
         u8 cur_style = (u8)app_.ts->GetStyle();
         int full_w = (int)app_.ts->GetStringWidth(dname, cur_style);
         Book *book_i = app_.books[i];
         Book *sel = app_.GetSelectedBook();
-        app_.ts->SetPen(btnX, btnY + kBrowserTitleOffsetY);
-        if (book_i != sel || full_w <= kBrowserCellW) {
-          char truncTitle[20];
-          size_t bytes = Utf8BytesForCharCount(dname, 19);
-          if (bytes > 19)
-            bytes = 19;
-          memcpy(truncTitle, dname, bytes);
-          truncTitle[bytes] = '\0';
-          truncTitle[19] = '\0';
-          app_.ts->PrintString(truncTitle);
-        } else {
-          if (scroll_book != book_i) {
-            scroll_book      = book_i;
-            scroll_offset_px = 0;
-            scroll_timer     = 0;
-          }
-          if (scroll_timer < 60) {
-            scroll_timer++;
-          } else {
-            scroll_offset_px++;
-            if (scroll_offset_px > full_w - kBrowserCellW) {
-              scroll_offset_px = 0;
-              scroll_timer     = 0;
+        bool overflows = full_w > kBrowserCellW;
+        bool is_selected = book_i == sel;
+
+        int saved_margin_right = app_.ts->margin.right;
+        bool saved_clip = app_.ts->IsClipToContentEnabled();
+        bool saved_wrap = app_.ts->IsAutoWrapEnabled();
+
+        app_.ts->margin.right = app_.ts->display.width - (btnX + kBrowserCellW);
+        app_.ts->SetClipToContentEnabled(true);
+        app_.ts->SetAutoWrapEnabled(false);
+
+        if (is_selected && overflows) {
+          const int glyph_top = btnY + kBrowserTitleOffsetY - app_.ts->GetHeight();
+          const int title_y = (glyph_top >= 0) ? glyph_top : 0;
+          const int sh = app_.ts->GetHeight() + 2;
+          const int sw = full_w;
+          const int fb_stride = app_.ts->display.height;
+
+          if (g_marquee.book != book_i) {
+            const int vis_w = (btnX + kBrowserCellW <= app_.ts->display.width)
+                                  ? kBrowserCellW
+                                  : app_.ts->display.width - btnX;
+
+            g_marquee.Reset();
+            g_marquee.book    = book_i;
+            g_marquee.strip_w = sw;
+            g_marquee.strip_h = sh;
+            g_marquee.strip_x = btnX;
+            g_marquee.strip_y = title_y;
+            g_marquee.blit_w  = vis_w;
+            g_marquee.strip   = new u16[sw * sh];
+            g_marquee.bg_strip = new u16[vis_w * sh];
+
+            for (int r = 0; r < sh; r++) {
+              const u16 *src = app_.ts->screenright + (title_y + r) * fb_stride + btnX;
+              u16 *dst = g_marquee.bg_strip + r * vis_w;
+              memcpy(dst, src, vis_w * sizeof(u16));
             }
+
+            u16 *saved_screen = app_.ts->GetScreen();
+            int saved_mr      = app_.ts->margin.right;
+            int saved_ml      = app_.ts->margin.left;
+
+            const int off_fb_stride = app_.ts->display.height;
+            const int cap_w = (sw < app_.ts->display.width) ? sw : app_.ts->display.width;
+            for (int r = 0; r < sh; r++)
+              for (int c = 0; c < cap_w; c++)
+                app_.ts->offscreen[(title_y + r) * off_fb_stride + c] = 0xFFFF;
+
+            app_.ts->SetScreen(app_.ts->offscreen);
+            app_.ts->margin.left  = 0;
+            app_.ts->margin.right = 0;
+            app_.ts->SetPen(0, btnY + kBrowserTitleOffsetY);
+            app_.ts->PrintString(dname, cur_style);
+            app_.ts->margin.left  = saved_ml;
+            app_.ts->margin.right = saved_mr;
+            app_.ts->SetScreen(saved_screen);
+
+            for (int row = 0; row < sh; row++) {
+              const u16 *src = app_.ts->offscreen + (title_y + row) * fb_stride;
+              u16 *dst = g_marquee.strip + row * sw;
+              int copy_w = (sw < app_.ts->display.width) ? sw : app_.ts->display.width;
+              memcpy(dst, src, copy_w * sizeof(u16));
+            }
+            g_marquee.scroll_offset = 0;
+            g_marquee.scroll_timer  = 0;
+            g_marquee.active = true;
           }
-          const char *scrolled = Utf8AdvanceByPixels(app_.ts, dname, scroll_offset_px, cur_style);
-          app_.ts->PrintString(scrolled);
-          app_.SetBrowserDirty(true);
+        } else if (is_selected && !overflows) {
+          g_marquee.Reset();
         }
+
+        if (!(is_selected && overflows)) {
+          app_.ts->SetPen(btnX, btnY + kBrowserTitleOffsetY);
+          app_.ts->PrintString(dname, cur_style);
+        }
+
+        app_.ts->margin.right = saved_margin_right;
+        app_.ts->SetClipToContentEnabled(saved_clip);
+        app_.ts->SetAutoWrapEnabled(saved_wrap);
       }
     } else {
       LogUtf8StageOnce(app_.books[i], "draw_label_wrap", display_name);
@@ -1466,4 +1505,56 @@ void LibraryController::browser_draw(void) {
   app_.ts->SetStyle(style);
 
   app_.SetBrowserDirty(false);
+}
+
+void LibraryController::browser_tick_marquee() {
+  if (!g_marquee.active || !g_marquee.strip || !g_marquee.bg_strip)
+    return;
+
+  const int kPauseFrames = 60;
+  const int scroll_max = g_marquee.strip_w - kBrowserCellW;
+
+  if (g_marquee.scroll_timer < kPauseFrames) {
+    g_marquee.scroll_timer++;
+  } else if (g_marquee.scroll_offset >= scroll_max) {
+    if (g_marquee.end_timer < kPauseFrames) {
+      g_marquee.end_timer++;
+    } else {
+      g_marquee.scroll_offset = 0;
+      g_marquee.scroll_timer  = 0;
+      g_marquee.end_timer     = 0;
+    }
+  } else {
+    g_marquee.scroll_offset++;
+  }
+
+  const int fb_stride = app_.ts->display.height;
+  const int tx  = g_marquee.strip_x;
+  const int ty  = g_marquee.strip_y;
+  const int sh  = g_marquee.strip_h;
+  const int sw  = g_marquee.strip_w;
+  const int off = g_marquee.scroll_offset;
+  const int bw  = g_marquee.blit_w;
+
+  int blit_w = bw;
+  if (blit_w + off > sw)
+    blit_w = sw - off;
+  if (blit_w <= 0)
+    return;
+
+  for (int row = 0; row < sh; row++) {
+    if (ty + row >= app_.ts->display.height)
+      break;
+    u16 *dst = app_.ts->screenright + (ty + row) * fb_stride + tx;
+    memcpy(dst, g_marquee.bg_strip + row * bw, bw * sizeof(u16));
+    const u16 *src = g_marquee.strip + row * sw + off;
+    for (int col = 0; col < blit_w; col++) {
+      if (src[col] != 0xFFFF)
+        dst[col] = src[col];
+    }
+  }
+
+  app_.ts->MarkScreenDirtyRect(app_.ts->screenright,
+                               tx, ty,
+                               tx + bw, ty + sh);
 }

@@ -55,6 +55,7 @@ int MainLoopController::RunMainLoop() {
     case AppMode::Browser:
       app_.browser_handleevent();
       app_.TickBrowserWarmup();
+      app_.browser_tick_marquee();
       if (app_.IsBrowserDirty())
         app_.browser_draw();
 #ifdef DSLIBRIS_DEBUG

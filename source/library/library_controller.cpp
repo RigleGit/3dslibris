@@ -253,6 +253,8 @@ void App::EnqueueJob(app_job_type_t type, Book *book) {
 
 void App::TickBrowserWarmup() { library_controller_->TickBrowserWarmup(); }
 
+void App::browser_tick_marquee() { library_controller_->browser_tick_marquee(); }
+
 void App::QueueBookWarmup(Book *book) { library_controller_->QueueBookWarmup(book); }
 
 void App::QueueTocResolve(Book *book) { library_controller_->QueueTocResolve(book); }

@@ -196,6 +196,7 @@ public:
   void browser_handleevent();
   void browser_init();
   void TickBrowserWarmup();
+  void browser_tick_marquee();
   void PrefsDraw();
   void PrefsHandleEvent();
   void PersistPrefs();
