@@ -719,10 +719,9 @@ static Book *scroll_book      = nullptr;
 static int   scroll_offset_px = 0;
 static int   scroll_timer     = 0;
 
-static int ComputeSkipChars(Text *ts, const char *s, int target_px, u8 style) {
-  if (!s || target_px <= 0) return 0;
+static const char *Utf8AdvanceByPixels(Text *ts, const char *s, int target_px, u8 style) {
+  if (!s || target_px <= 0) return s;
   int accumulated = 0;
-  int skip = 0;
   const char *p = s;
   while (*p) {
     unsigned char c = (unsigned char)*p;
@@ -738,10 +737,9 @@ static int ComputeSkipChars(Text *ts, const char *s, int target_px, u8 style) {
     int w = ts->GetStringWidth(ch_str, style);
     if (accumulated + w > target_px) break;
     accumulated += w;
-    skip++;
     p += char_bytes;
   }
-  return skip;
+  return p;
 }
 
 } // namespace
@@ -1298,6 +1296,9 @@ void LibraryController::browser_init(void) {
         (app_.GetBookIndex(app_.GetSelectedBook()) / APP_BROWSER_BUTTON_COUNT) *
         APP_BROWSER_BUTTON_COUNT);
   }
+  scroll_book      = nullptr;
+  scroll_offset_px = 0;
+  scroll_timer     = 0;
   PrioritizeSelectedBookJobs(app_.GetSelectedBook());
   app_.SetBrowserLastInteractionMs(osGetTime());
   LoadVisibleBrowserCoverCaches();
@@ -1437,22 +1438,12 @@ void LibraryController::browser_draw(void) {
             scroll_timer++;
           } else {
             scroll_offset_px++;
-            if (scroll_offset_px > full_w) {
+            if (scroll_offset_px > full_w - kBrowserCellW) {
               scroll_offset_px = 0;
               scroll_timer     = 0;
             }
           }
-          int skip = ComputeSkipChars(app_.ts, dname, scroll_offset_px, cur_style);
-          const char *scrolled = dname;
-          for (int ci = 0; ci < skip && *scrolled; ) {
-            unsigned char c2 = (unsigned char)*scrolled;
-            int cb = 1;
-            if      (c2 >= 0xF0) cb = 4;
-            else if (c2 >= 0xE0) cb = 3;
-            else if (c2 >= 0xC0) cb = 2;
-            scrolled += cb;
-            ci++;
-          }
+          const char *scrolled = Utf8AdvanceByPixels(app_.ts, dname, scroll_offset_px, cur_style);
           app_.ts->PrintString(scrolled);
           app_.SetBrowserDirty(true);
         }
