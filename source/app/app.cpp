@@ -139,6 +139,9 @@ App::App() {
 }
 
 App::~App() {
+#ifdef DSLIBRIS_DEBUG
+  PrintStatus("APP ~App: start");
+#endif
   LightLock_Lock(&status_log_lock_);
   if (status_log_file_) {
     fflush(status_log_file_);
@@ -146,13 +149,22 @@ App::~App() {
     status_log_file_ = NULL;
   }
   LightLock_Unlock(&status_log_lock_);
+#ifdef DSLIBRIS_DEBUG
+  PrintStatus("APP ~App: deleting books");
+#endif
   for (std::vector<Book *>::iterator it = books.begin(); it != books.end();
        it++)
     delete *it;
   books.clear();
+#ifdef DSLIBRIS_DEBUG
+  PrintStatus("APP ~App: deleting buttons");
+#endif
   for (size_t i = 0; i < buttons.size(); i++)
     delete buttons[i];
   buttons.clear();
+#ifdef DSLIBRIS_DEBUG
+  PrintStatus("APP ~App: deleting menus");
+#endif
   delete fontmenu;
   delete bookmarkmenu;
   delete chaptermenu;
@@ -160,6 +172,9 @@ App::~App() {
     delete ts;
   if (prefs)
     delete prefs;
+#ifdef DSLIBRIS_DEBUG
+  PrintStatus("APP ~App: done");
+#endif
   UiButtonSkin_Exit();
 }
 

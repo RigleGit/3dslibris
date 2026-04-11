@@ -229,9 +229,19 @@ void Book::CancelAsyncReflowOpen() {
   __atomic_store_n(&w->shutdown_requested, true, __ATOMIC_RELEASE);
   LightEvent_Signal(&w->submit_event);
   if (w->thread_handle) {
+#ifdef DSLIBRIS_DEBUG
+    if (GetStatusReporter())
+      DBG_LOGF(GetStatusReporter(), "REFLOW cancel: joining thread book=%s",
+               GetFileName() ? GetFileName() : "");
+#endif
     threadJoin(w->thread_handle, U64_MAX);
     threadFree(w->thread_handle);
     w->thread_handle = NULL;
+#ifdef DSLIBRIS_DEBUG
+    if (GetStatusReporter())
+      DBG_LOGF(GetStatusReporter(), "REFLOW cancel: thread joined book=%s",
+               GetFileName() ? GetFileName() : "");
+#endif
   }
   delete w;
   reflow_worker_state->worker = NULL;

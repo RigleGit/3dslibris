@@ -313,6 +313,14 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   // changes, so stale covers do not survive heuristic fixes.
   if (!ok || memcmp(header, kCoverCacheMagic, 4) != 0) {
     fclose(fp);
+#ifdef DSLIBRIS_DEBUG
+    if (book->GetStatusReporter()) {
+      DBG_LOGF(book->GetStatusReporter(),
+               "COVER: cache corrupt (bad magic/header) book=%s path=%s",
+               book->GetFileName() ? book->GetFileName() : "(null)",
+               cache_path.c_str());
+    }
+#endif
     return false;
   }
 
@@ -320,6 +328,15 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   u16 h = (u16)header[6] | ((u16)header[7] << 8);
   if (w == 0 || h == 0 || w > kCoverThumbMaxW || h > kCoverThumbMaxH) {
     fclose(fp);
+#ifdef DSLIBRIS_DEBUG
+    if (book->GetStatusReporter()) {
+      DBG_LOGF(book->GetStatusReporter(),
+               "COVER: cache corrupt (bad dims %ux%u) book=%s path=%s",
+               (unsigned)w, (unsigned)h,
+               book->GetFileName() ? book->GetFileName() : "(null)",
+               cache_path.c_str());
+    }
+#endif
     return false;
   }
 
@@ -327,6 +344,15 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   std::vector<u16> pixels(count);
   if (fread(pixels.data(), sizeof(u16), count, fp) != count) {
     fclose(fp);
+#ifdef DSLIBRIS_DEBUG
+    if (book->GetStatusReporter()) {
+      DBG_LOGF(book->GetStatusReporter(),
+               "COVER: cache truncated (expected %zu pixels) book=%s path=%s",
+               count,
+               book->GetFileName() ? book->GetFileName() : "(null)",
+               cache_path.c_str());
+    }
+#endif
     return false;
   }
   fclose(fp);
@@ -1014,6 +1040,12 @@ void LibraryController::browser_handleevent() {
   LayoutBrowserNavButtons(&app_);
 
   u32 keys = hidKeysDown();
+#ifdef DSLIBRIS_DEBUG
+  if (keys) {
+    DBG_LOGF(&app_, "BROWSER handleevent keys=0x%08lx",
+             (unsigned long)keys);
+  }
+#endif
   auto map_grid_nav = [&](u32 key_down, BrowserNavMove *move) -> bool {
     if (!move)
       return false;

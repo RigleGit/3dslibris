@@ -12,6 +12,7 @@ int MainLoopController::RunMainLoop() {
 #ifdef DSLIBRIS_DEBUG
   AppMode last_mode = app_.GetMode();
   int mode_log_budget = 64;
+  int heap_log_countdown = 0;
 #endif
   while (aptMainLoop()) {
     gspWaitForVBlank();
@@ -56,6 +57,13 @@ int MainLoopController::RunMainLoop() {
       app_.TickBrowserWarmup();
       if (app_.IsBrowserDirty())
         app_.browser_draw();
+#ifdef DSLIBRIS_DEBUG
+      if (--heap_log_countdown <= 0) {
+        heap_log_countdown = 300; // ~5 seconds at 60fps
+        app_.PrintStatus(std::string("MEM heap_free=") +
+                         std::to_string((int)osGetMemRegionFree(MEMREGION_ALL)));
+      }
+#endif
       break;
 
     case AppMode::Quit:
@@ -88,5 +96,8 @@ int MainLoopController::RunMainLoop() {
 
     app_.PresentIfDirty();
   }
+#ifdef DSLIBRIS_DEBUG
+  app_.PrintStatus("APP exit: aptMainLoop returned false");
+#endif
   return 0;
 }

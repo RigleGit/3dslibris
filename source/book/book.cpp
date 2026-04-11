@@ -14,6 +14,7 @@
 #include "book/book.h"
 
 #include "book/book_context.h"
+#include "debug_log.h"
 #include "book/heading_layout.h"
 #include "formats/epub/epub.h"
 #include "formats/epub/epub_page_cache.h"
@@ -232,6 +233,12 @@ Book::Book(const BookContext &c) : ctx(c) {
 }
 
 Book::~Book() {
+#ifdef DSLIBRIS_DEBUG
+  if (GetStatusReporter()) {
+    DBG_LOGF(GetStatusReporter(), "BOOK ~Book: path=%s/%s",
+             foldername.c_str(), filename.c_str());
+  }
+#endif
   Close();
   if (coverPixels) {
     delete[] coverPixels;
