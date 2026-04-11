@@ -283,4 +283,10 @@ inline bool ContainsToken(const std::string &list, const std::string &token) {
   return false;
 }
 
+// --- Browser display name selection ---
+
+// Returns the string that should be shown as display name in the book browser.
+// Prefers `title` over `filename` unless they are equivalent (same stem), empty, or null.
+const char *BrowserDisplayNameSource(const char *title, const char *filename);
+
 #endif // STRING_UTILS_H
