@@ -81,8 +81,6 @@ static const int kBrowserGridY0 = 3;
 static const int kBrowserFooterY = 296;
 
 static void LayoutBrowserNavButtons(App *app) {
-  if (!app)
-    return;
   app->buttonprev.Move(2, kBrowserFooterY);
   app->buttonprev.Resize(66, 22);
   app->buttonprev.Label("prev");
@@ -202,7 +200,6 @@ static void PruneCoverCache(bool force) {
         std::string l = line;
         size_t tab = l.find('\t');
         std::string fname = (tab != std::string::npos) ? l.substr(0, tab) : l;
-        // Trim trailing newline from fname if no tab found.
         while (!fname.empty() && (fname.back() == '\n' || fname.back() == '\r'))
           fname.pop_back();
         if (alive.count(fname))
@@ -407,7 +404,6 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
   }
   fclose(fp);
   if (ok) {
-    // Append entry to the cover cache manifest for human inspection.
     FILE *mf = fopen(paths::kCoverCacheManifest, "a");
     if (mf) {
       const char *t = book->GetTitle();
@@ -484,27 +480,6 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
 
 namespace {
 
-static bool LooksLikeValidUtf8(const std::string &s) {
-  return utf8_utils::IsValidUtf8(s);
-}
-
-static std::string LegacyBytesToUtf8(const std::string &in) {
-  return utf8_utils::DecodeCp1252ToUtf8(in);
-}
-
-static bool TryRepairMojibakeUtf8(const std::string &in, std::string *out) {
-  return utf8_utils::TryRepairMojibakeUtf8(in, out);
-}
-
-static bool TryRepairFullwidthByteMojibake(const std::string &in,
-                                           std::string *out) {
-  return utf8_utils::TryRepairFullwidthByteMojibake(in, out);
-}
-
-static std::string ComposeLatinCombiningMarks(const std::string &in) {
-  return utf8_utils::ComposeLatinCombiningMarks(in);
-}
-
 #if UTF8_FILENAME_DIAG
 static std::string HexBytesForLog(const std::string &s, size_t max_bytes = 32) {
   static const char hex[] = "0123456789ABCDEF";
@@ -552,7 +527,7 @@ static void LogUtf8StageOnce(Book *book, const char *stage,
   std::string clipped = ClipForLog(value);
   snprintf(msg, sizeof(msg),
            "UTF8 flow %-18s len=%u valid=%d bytes=[%s] text=\"%s\"", stage,
-           (unsigned)value.size(), LooksLikeValidUtf8(value) ? 1 : 0,
+           (unsigned)value.size(), utf8_utils::IsValidUtf8(value) ? 1 : 0,
            bytes.c_str(), clipped.c_str());
   DBG_LOG(book->GetStatusReporter(), msg);
 #endif
@@ -574,25 +549,25 @@ static std::string NormalizeDisplayUtf8(const std::string &raw,
 
   std::string s = raw;
   std::string repaired;
-  if (TryRepairFullwidthByteMojibake(s, &repaired)) {
+  if (utf8_utils::TryRepairFullwidthByteMojibake(s, &repaired)) {
     s = repaired;
     if (repaired_fullwidth)
       *repaired_fullwidth = true;
   }
 
-  if (!LooksLikeValidUtf8(s)) {
+  if (!utf8_utils::IsValidUtf8(s)) {
     if (repaired_legacy)
       *repaired_legacy = true;
-    return LegacyBytesToUtf8(s);
+    return utf8_utils::DecodeCp1252ToUtf8(s);
   }
 
-  if (TryRepairMojibakeUtf8(s, &repaired)) {
+  if (utf8_utils::TryRepairMojibakeUtf8(s, &repaired)) {
     if (repaired_legacy)
       *repaired_legacy = true;
     s = repaired;
   }
 
-  std::string composed = ComposeLatinCombiningMarks(s);
+  std::string composed = utf8_utils::ComposeLatinCombiningMarks(s);
   if (composed != s) {
     s = composed;
     if (composed_accents)
@@ -647,9 +622,7 @@ static size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
   while (s[bytes] && chars < char_count) {
     unsigned char c = (unsigned char)s[bytes];
     size_t step = 1;
-    if ((c & 0x80) == 0x00)
-      step = 1;
-    else if ((c & 0xE0) == 0xC0)
+    if ((c & 0xE0) == 0xC0)
       step = 2;
     else if ((c & 0xF0) == 0xE0)
       step = 3;
@@ -720,7 +693,7 @@ static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
   }
 }
 
-// --- marquee scroll state ---
+// marquee scroll state
 static Book *scroll_book      = nullptr;
 static int   scroll_offset_px = 0;
 static int   scroll_timer     = 0;
@@ -970,14 +943,14 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
               rc = epub_extract_cover(book, path);
               if (rc == 0 && book->coverPixels) {
                 SaveCoverCache(book, path);
-                book->coverAttempts = kCoverMaxAttempts; // success
+                book->coverAttempts = kCoverMaxAttempts;
               } else if (rc != 0) {
-                book->coverAttempts++; // transient failure, allow retry
+                book->coverAttempts++;
               } else {
-                book->coverAttempts = kCoverMaxAttempts; // decoded nothing, permanent
+                book->coverAttempts = kCoverMaxAttempts;
               }
             } else {
-              book->coverAttempts = kCoverMaxAttempts; // no cover in this EPUB, permanent
+              book->coverAttempts = kCoverMaxAttempts;
             }
             app_.SetBrowserDirty(true);
           }
@@ -1165,7 +1138,6 @@ void LibraryController::browser_handleevent() {
   const bool has_grid_nav = map_grid_nav(keys, &nav_move);
 
   if (keys & KEY_A) {
-    // Open selected book with the primary confirm button.
     app_.OpenBook();
   } else if (has_grid_nav) {
     navigateSelection(nav_move);
@@ -1277,14 +1249,11 @@ void LibraryController::browser_init(void) {
 
     app_.buttons.push_back(new Button());
     app_.buttons[i]->Init(app_.ts);
-    // Button is the cover area - portrait orientation
     app_.buttons[i]->Resize(kBrowserCoverW + 4, kBrowserCoverH + 4);
     app_.buttons[i]->Move(kBrowserGridX0 + col * kBrowserCellW,
                      kBrowserGridY0 + row * kBrowserCellH);
 
     // Cover extraction moved to browser_draw to avoid freezing at startup
-
-    // In browser_draw we render fallback title manually for no-cover books.
     app_.buttons[i]->SetLabel1(std::string(""));
 
   }
@@ -1369,7 +1338,7 @@ void LibraryController::browser_draw(void) {
   }
 
   app_.ts->SetScreen(app_.ts->screenright);
-  app_.ts->SetColorMode(0); // Normal for browser text
+  app_.ts->SetColorMode(0);
   app_.ts->ClearScreen();
   app_.DrawBottomGradientBackground();
 
@@ -1402,7 +1371,7 @@ void LibraryController::browser_draw(void) {
     if (app_.books[i] == app_.GetSelectedBook()) {
       app_.ts->DrawRect(btnX - 2, btnY - 2, btnX + kBrowserCellW + 2,
                    btnY + kBrowserCellH + 2,
-                   0xF800); // Red thick outer bounding box
+                   0xF800);
       app_.ts->DrawRect(btnX - 3, btnY - 3, btnX + kBrowserCellW + 3,
                    btnY + kBrowserCellH + 3, 0xF800);
       app_.ts->SetStyle(TEXT_STYLE_BOLD);
@@ -1461,7 +1430,6 @@ void LibraryController::browser_draw(void) {
                                   TEXT_STYLE_BROWSER);
     }
 
-    // Draw progress indicator
     int pos = app_.books[i]->GetPosition();
     char msg[16];
     if (pos > 0)
@@ -1474,7 +1442,6 @@ void LibraryController::browser_draw(void) {
 
   app_.ts->SetPixelSize(savedPixelSize);
 
-  // Navigation buttons at the bottom
   if (app_.GetBrowserPageStart() >= APP_BROWSER_BUTTON_COUNT)
     app_.buttonprev.Draw(app_.ts->screenright, false);
   if (app_.BookCount() > app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT)
@@ -1482,7 +1449,6 @@ void LibraryController::browser_draw(void) {
 
   app_.buttonprefs.Draw(app_.ts->screenright, false);
 
-  // Pagination indicator
   if (app_.BookCount() > APP_BROWSER_BUTTON_COUNT) {
     int currentPage = (app_.GetBrowserPageStart() / APP_BROWSER_BUTTON_COUNT) + 1;
     int totalPages =
@@ -1495,7 +1461,6 @@ void LibraryController::browser_draw(void) {
     app_.ts->SetPixelSize(savedPixelSize);
   }
 
-  // restore state
   app_.ts->SetColorMode(colorMode);
   app_.ts->SetScreen(screen);
   app_.ts->SetStyle(style);

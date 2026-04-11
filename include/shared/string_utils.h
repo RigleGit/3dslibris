@@ -13,8 +13,6 @@
 #include <string.h>
 #include <string>
 
-// --- Trim leading/trailing whitespace ---
-
 inline std::string Trim(const std::string &s) {
   size_t start = 0;
   while (start < s.size() && isspace((unsigned char)s[start]))
@@ -24,8 +22,6 @@ inline std::string Trim(const std::string &s) {
     end--;
   return s.substr(start, end - start);
 }
-
-// --- Case-insensitive prefix check ---
 
 inline bool StartsWithNoCase(const std::string &s, const char *prefix) {
   if (!prefix)
@@ -46,16 +42,12 @@ inline bool StartsWithNoCase(const std::string &s, const char *prefix) {
   return true;
 }
 
-// --- ASCII lowercase ---
-
 inline std::string ToLowerAscii(const std::string &s) {
   std::string out = s;
   std::transform(out.begin(), out.end(), out.begin(),
                  [](unsigned char c) { return (char)tolower(c); });
   return out;
 }
-
-// --- Case-insensitive file extension check ---
 
 inline bool HasExtCI(const char *name, const char *ext) {
   if (!name || !ext)
@@ -67,8 +59,6 @@ inline bool HasExtCI(const char *name, const char *ext) {
   return strcasecmp(name + nlen - elen, ext) == 0;
 }
 
-// --- FNV-1a 64-bit hash ---
-
 inline uint64_t Fnv1a64(const std::string &s) {
   uint64_t hash = 1469598103934665603ULL;
   for (size_t i = 0; i < s.size(); i++) {
@@ -77,8 +67,6 @@ inline uint64_t Fnv1a64(const std::string &s) {
   }
   return hash;
 }
-
-// --- HTML attribute parsing helpers ---
 
 inline bool IsHtmlNameChar(unsigned char c) {
   return isalnum(c) || c == '_' || c == ':' || c == '-';
@@ -138,15 +126,11 @@ inline std::string ExtractHtmlAttrValue(const std::string &tag,
   return "";
 }
 
-// --- Normalize ZIP entry names (backslash to forward slash) ---
-
 inline std::string NormalizeZipEntryName(const std::string &name) {
   std::string n = name;
   std::replace(n.begin(), n.end(), '\\', '/');
   return n;
 }
-
-// --- ASCII-only case-insensitive string equality ---
 
 inline bool EqualsAsciiNoCase(const std::string &a, const std::string &b) {
   if (a.size() != b.size())
@@ -164,8 +148,6 @@ inline bool EqualsAsciiNoCase(const std::string &a, const std::string &b) {
   return true;
 }
 
-// --- Case-insensitive substring search ---
-
 inline bool ContainsNoCase(const std::string &haystack,
                            const std::string &needle) {
   if (needle.empty())
@@ -181,15 +163,12 @@ inline bool ContainsNoCase(const std::string &haystack,
   return h.find(n) != std::string::npos;
 }
 
-// --- Sanitize a string for use as a FAT32 filename component ---
-
 inline std::string SanitizeFat32Name(const std::string &input,
                                      size_t max_len = 80) {
   std::string out;
   out.reserve(input.size());
   for (size_t i = 0; i < input.size(); ) {
     unsigned char c = (unsigned char)input[i];
-    // ASCII control characters.
     if (c < 0x20) {
       out.push_back('_');
       i++;
@@ -202,7 +181,6 @@ inline std::string SanitizeFat32Name(const std::string &input,
       i++;
       continue;
     }
-    // Valid ASCII passthrough.
     if (c < 0x80) {
       out.push_back((char)c);
       i++;
@@ -230,7 +208,6 @@ inline std::string SanitizeFat32Name(const std::string &input,
       i++;
     }
   }
-  // Collapse runs of underscores/spaces into a single underscore.
   std::string collapsed;
   bool last_sep = false;
   for (size_t i = 0; i < out.size(); i++) {
@@ -244,7 +221,6 @@ inline std::string SanitizeFat32Name(const std::string &input,
       last_sep = false;
     }
   }
-  // Trim leading/trailing underscores and dots.
   size_t s = 0, e = collapsed.size();
   while (s < e && (collapsed[s] == '_' || collapsed[s] == '.'))
     s++;
@@ -266,8 +242,6 @@ inline std::string SanitizeFat32Name(const std::string &input,
   return result;
 }
 
-// --- Token search in space-separated list ---
-
 inline bool ContainsToken(const std::string &list, const std::string &token) {
   size_t start = 0;
   while (start < list.size()) {
@@ -282,8 +256,6 @@ inline bool ContainsToken(const std::string &list, const std::string &token) {
   }
   return false;
 }
-
-// --- Browser display name selection ---
 
 // Returns the string that should be shown as display name in the book browser.
 // Prefers `title` over `filename` unless they are equivalent (same stem), empty, or null.

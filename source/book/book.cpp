@@ -198,22 +198,15 @@ static std::string NormalizeDocStartPathKey(const std::string &raw_path,
 } // namespace
 
 Book::Book(const BookContext &c) : ctx(c) {
-  foldername.clear();
-  filename.clear();
-  title.clear();
-  author.clear();
-  browser_display_name_cache.clear();
-  browser_display_name_cached = false;
-  pages.clear();
   mupdf_state = NULL;
   cbz_state = NULL;
   reflow_worker_state = NULL;
+  inline_image_probe_uf = NULL;
   position = 0;
   format = FORMAT_UNDEF;
   coverPixels = nullptr;
   coverWidth = 0;
   coverHeight = 0;
-  coverImagePath.clear();
   coverAttempts = 0;
   metadataIndexTried = false;
   metadataIndexed = false;
@@ -222,14 +215,14 @@ Book::Book(const BookContext &c) : ctx(c) {
   epub_page_cache_save_pending = false;
   mobi_line_wrap_fix = false;
   parsed_with_mobi_line_wrap_fix = false;
-  inline_image_probe_uf = NULL;
+  browser_display_name_cached = false;
   inline_image_zip_index_built = false;
   mobi_inline_index_ready = false;
   mobi_first_image_index = 0;
   fb2_inline_images_bytes = 0;
   inline_image_cache_bytes = 0;
-  ClearTocConfidence();
   layout_revision = 0;
+  ClearTocConfidence();
 }
 
 Book::~Book() {
@@ -267,27 +260,19 @@ void Book::DrawBottomGradientBackground() {
     ctx.draw_background(ctx.draw_background_user_data);
 }
 
-void Book::SetFolderName(const char *name) {
-  foldername.clear();
-  foldername = name;
-}
+void Book::SetFolderName(const char *name) { foldername = name; }
 
 void Book::SetFileName(const char *name) {
-  filename.clear();
   filename = name;
   ClearBrowserDisplayNameCache();
 }
 
 void Book::SetTitle(const char *name) {
-  title.clear();
   title = name;
   ClearBrowserDisplayNameCache();
 }
 
-void Book::SetAuthor(std::string &name) {
-  author.clear();
-  author = name;
-}
+void Book::SetAuthor(std::string &name) { author = name; }
 
 void Book::SetFolderName(std::string &name) { foldername = name; }
 
