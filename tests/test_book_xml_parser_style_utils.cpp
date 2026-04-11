@@ -60,10 +60,24 @@ void TestRestoreParsedStyleMarkersReinjectsMono() {
   test::ExpectEq("mono marker", (int)p.buf[6], TEXT_MONO_ON);
 }
 
+void TestRestoreParsedStyleMarkersReinjectsPreContext() {
+  parsedata_t p{};
+  parse_init(&p);
+  parse_push(&p, TAG_PRE);
+  p.mono = true;
+
+  book_xml_parser_style_utils::RestoreParsedStyleMarkers(&p);
+
+  test::ExpectEq("marker count", p.buflen, 2);
+  test::ExpectEq("pre marker", (int)p.buf[0], TEXT_PRE_ON);
+  test::ExpectEq("mono marker", (int)p.buf[1], TEXT_MONO_ON);
+}
+
 } // namespace
 
 int main() {
   TestResolveParsedTextStylePrefersMono();
   TestRestoreParsedStyleMarkersReinjectsMono();
+  TestRestoreParsedStyleMarkersReinjectsPreContext();
   return 0;
 }

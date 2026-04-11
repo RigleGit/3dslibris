@@ -33,6 +33,8 @@ inline u8 ResolveParsedTextStyle(bool bold, bool italic, bool mono) {
 inline void RestoreParsedStyleMarkers(parsedata_t *p) {
   if (!p)
     return;
+  if (parse_in(p, TAG_PRE))
+    parse_append_page_byte(p, TEXT_PRE_ON);
   if (p->superscript)
     parse_append_page_byte(p, TEXT_SUPERSCRIPT_ON);
   if (p->subscript)

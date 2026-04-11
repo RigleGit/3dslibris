@@ -45,7 +45,7 @@ std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
         c == TEXT_STRIKETHROUGH_OFF || c == TEXT_SUPERSCRIPT_ON ||
         c == TEXT_SUPERSCRIPT_OFF || c == TEXT_SUBSCRIPT_ON ||
         c == TEXT_SUBSCRIPT_OFF || c == TEXT_MONO_ON || c == TEXT_MONO_OFF ||
-        c == TEXT_HR) {
+        c == TEXT_HR || c == TEXT_PRE_ON || c == TEXT_PRE_OFF) {
       i++;
       continue;
     }

@@ -217,6 +217,7 @@ void Page::Draw(Text *ts) {
   int newline_count_second = 0;
   bool first_screen_had_content = false;
   bool second_screen_had_content = false;
+  bool in_preformatted_block = false;
 #ifdef DSLIBRIS_DEBUG
   u64 perf_printchar_ticks = 0;
   int perf_glyph_count = 0;
@@ -351,6 +352,14 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_MONO_OFF) {
       i++;
       mono = false;
+    } else if (c == TEXT_PRE_ON) {
+      i++;
+      in_preformatted_block = true;
+      ts->SetClipToContentEnabled(true);
+    } else if (c == TEXT_PRE_OFF) {
+      i++;
+      in_preformatted_block = false;
+      ts->SetClipToContentEnabled(saved_clip_to_content);
     } else if (c == TEXT_HR) {
       i++;
       const int x0 = ts->margin.left;
@@ -581,6 +590,8 @@ void Page::Draw(Text *ts) {
   }
 #endif
 
+  if (in_preformatted_block)
+    ts->SetClipToContentEnabled(saved_clip_to_content);
   DrawNumber(ts, second_screen);
 #ifdef OFFSCREEN
   ts->SetScreen(second_screen);
