@@ -27,6 +27,7 @@ public:
   void QueueBookWarmup(Book *book);
   void QueueTocResolve(Book *book);
   void ProcessJobs(u32 budget_ms);
+  size_t PauseBrowserJobs();
 
 private:
   App &app_;

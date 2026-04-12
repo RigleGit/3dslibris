@@ -136,10 +136,12 @@ struct parsedata_t {
 	std::string last_h1_style;   //! style= attr of the most-recently-opened <h1>.
 	std::string last_h2_style;   //! style= attr of the most-recently-opened <h2>.
 	std::string last_h_style;    //! style= attr of the most-recently-opened <h3..h6>.
+	std::string last_hr_style;   //! style= attr of the most-recently-opened <hr>.
 	std::string last_p_class;
 	std::string last_h1_class;
 	std::string last_h2_class;
 	std::string last_h_class;
+	std::string last_hr_class;
 	epub_css_class_map::CssClassMap css_class_map;
 	bool collecting_fb2_binary;
 	bool fb2_binary_too_large;

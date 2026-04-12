@@ -66,6 +66,21 @@ static std::string ResolveDefaultFontDir() {
 static int g_orientation_touch_diag_budget = 0;
 #endif
 
+const char *AppletHookName(APT_HookType hook) {
+  switch (hook) {
+  case APTHOOK_ONSUSPEND:
+    return "suspend";
+  case APTHOOK_ONRESTORE:
+    return "restore";
+  case APTHOOK_ONWAKEUP:
+    return "wakeup";
+  case APTHOOK_ONEXIT:
+    return "exit";
+  default:
+    return "unknown";
+  }
+}
+
 } // namespace
 
 App::App() {
@@ -123,6 +138,16 @@ App::App() {
   status_log_write_count_ = 0;
   LightLock_Init(&status_log_lock_);
   pending_boot_reopen_ = false;
+  is_new_3ds_ = false;
+  is_homebrew_ = false;
+  applet_suspended_ = false;
+  applet_resume_pending_ = false;
+  applet_suspend_handled_ = false;
+  apt_hook_installed_ = false;
+  APT_CheckNew3DS(&is_new_3ds_);
+  is_homebrew_ = envIsHomebrew();
+  aptHook(&apt_hook_cookie_, App::AptHookCallback, this);
+  apt_hook_installed_ = true;
 
 #ifdef DSLIBRIS_DEBUG
   // Debug builds should emit actionable logs by default.
@@ -136,9 +161,18 @@ App::App() {
   fontmenu = new FontMenu(this);
   bookmarkmenu = new BookmarkMenu(this);
   chaptermenu = new ChapterMenu(this);
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(this, "ENV runtime=%s device=%s",
+           is_homebrew_ ? "3dsx/homebrew" : "cia/title",
+           is_new_3ds_ ? "new3ds" : "old3ds");
+#endif
 }
 
 App::~App() {
+  if (apt_hook_installed_) {
+    aptUnhook(&apt_hook_cookie_);
+    apt_hook_installed_ = false;
+  }
 #ifdef DSLIBRIS_DEBUG
   PrintStatus("APP ~App: start");
 #endif
@@ -377,6 +411,8 @@ void App::RunChaptersMenuFrame(u32 keys) {
 }
 
 bool App::PresentIfDirty() {
+  if (applet_suspended_)
+    return false;
 #ifdef DSLIBRIS_DEBUG
   const bool right_dirty = ts->screenright_dirty;
   const bool left_dirty = ts->screenleft_dirty;
@@ -544,6 +580,75 @@ u64 App::GetMobiDeferredReadyAtMs() const {
 
 void App::SetMobiDeferredReadyAtMs(u64 ready_at_ms) {
   reader_state_.mobi_deferred_ready_at_ms = ready_at_ms;
+}
+
+bool App::IsNew3dsDevice() const { return is_new_3ds_; }
+
+bool App::IsHomebrewEnvironment() const { return is_homebrew_; }
+
+bool App::IsAppletSuspended() const { return applet_suspended_; }
+
+void App::AptHookCallback(APT_HookType hook, void *param) {
+  App *app = static_cast<App *>(param);
+  if (app)
+    app->HandleAppletHook(hook);
+}
+
+void App::HandleAppletHook(APT_HookType hook) {
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(this, "APPLET hook=%s mode=%d", AppletHookName(hook),
+           (int)nav_.mode);
+#endif
+  switch (hook) {
+  case APTHOOK_ONSUSPEND:
+    applet_suspended_ = true;
+    applet_resume_pending_ = false;
+    applet_suspend_handled_ = false;
+    break;
+  case APTHOOK_ONRESTORE:
+  case APTHOOK_ONWAKEUP:
+    applet_suspended_ = false;
+    applet_resume_pending_ = true;
+    break;
+  case APTHOOK_ONEXIT:
+    nav_.mode = AppMode::Quit;
+    PersistPrefs();
+    break;
+  default:
+    break;
+  }
+}
+
+void App::HandleAppletSuspend() {
+  if (applet_suspend_handled_)
+    return;
+  applet_suspend_handled_ = true;
+  nav_.browser.wait_input_release = true;
+  nav_.browser.last_interaction_ms = osGetTime();
+  const size_t removed_jobs = PauseBrowserJobs();
+  OnReaderAppletSuspended();
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(this, "APPLET suspended queue_dropped=%u mode=%d",
+           (unsigned)removed_jobs, (int)nav_.mode);
+#endif
+}
+
+void App::HandleAppletResume() {
+  if (!applet_resume_pending_)
+    return;
+  applet_resume_pending_ = false;
+  applet_suspend_handled_ = false;
+  nav_.browser.wait_input_release = true;
+  nav_.browser.last_interaction_ms = osGetTime();
+  nav_.browser.view_dirty = true;
+  nav_.prefs.view_dirty = true;
+  if (ts)
+    ts->MarkAllScreensDirty();
+  RequestStatusRedraw();
+  OnReaderAppletResumed();
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(this, "APPLET resumed mode=%d", (int)nav_.mode);
+#endif
 }
 
 int App::Run(void) {

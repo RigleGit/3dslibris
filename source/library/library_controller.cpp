@@ -260,3 +260,5 @@ void App::QueueBookWarmup(Book *book) { library_controller_->QueueBookWarmup(boo
 void App::QueueTocResolve(Book *book) { library_controller_->QueueTocResolve(book); }
 
 void App::ProcessJobs(u32 budget_ms) { library_controller_->ProcessJobs(budget_ms); }
+
+size_t App::PauseBrowserJobs() { return library_controller_->PauseBrowserJobs(); }

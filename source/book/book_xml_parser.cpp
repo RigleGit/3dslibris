@@ -401,6 +401,21 @@ ParseElementMarginBottomWithClass(const std::string &last_style,
   return LookupClassMarginBottom(last_class, class_map);
 }
 
+static bool ShouldRenderHrRule(const std::string &style_attr,
+                               const std::string &class_attr) {
+  if (ContainsAsciiNoCase(class_attr, "transition"))
+    return false;
+  if (ContainsAsciiNoCase(style_attr, "border:none") ||
+      ContainsAsciiNoCase(style_attr, "border: none") ||
+      ContainsAsciiNoCase(style_attr, "border-top:none") ||
+      ContainsAsciiNoCase(style_attr, "border-top: none") ||
+      ContainsAsciiNoCase(style_attr, "border-bottom:none") ||
+      ContainsAsciiNoCase(style_attr, "border-bottom: none")) {
+    return false;
+  }
+  return true;
+}
+
 static const char *MarginUnitName(
     book_xml_css_style_utils::MarginTopResult::Unit unit) {
   using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
@@ -981,6 +996,13 @@ static bool PathLooksLikeTocDoc(const std::string &path) {
          lower.find("contents") != std::string::npos ||
          lower.find("contenido") != std::string::npos ||
          lower.find("nav") != std::string::npos;
+}
+
+static bool DocLooksLikeTocDoc(const parsedata_t *p) {
+  if (!p)
+    return false;
+  return PathLooksLikeTocDoc(p->docpath) || PathLooksLikeTocDoc(p->doc_title) ||
+         PathLooksLikeTocDoc(p->doc_heading);
 }
 
 static std::string ResolveDocPath(const std::string &base_doc_path,
@@ -1704,9 +1726,20 @@ void start(void *data, const char *el, const char **attr) {
     }
   } else if (!strcmp(el, "hr")) {
     parse_push(p, TAG_UNKNOWN);
-    if (!blankline(p))
-      linefeed(p);
-    AppendParsedByte(p, TEXT_HR);
+    p->last_hr_style = ExtractStyleAttr(attr);
+    p->last_hr_class = ExtractClassAttr(attr);
+    const book_xml_css_style_utils::MarginTopResult mtr =
+        ParseElementMarginTopWithClass(attr, p);
+    const int line_h = ts->GetHeight() + ts->linespacing;
+    const int default_lf = !blankline(p) ? 1 : 0;
+    const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
+        default_lf, mtr, line_h);
+    LogResolvedBlockMargin(p, "hr", "top", p->last_hr_style,
+                           p->last_hr_class, mtr, line_h, default_lf,
+                           lf_count);
+    EmitAdditionalTopLinefeeds(p, lf_count);
+    if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class))
+      AppendParsedByte(p, TEXT_HR);
   } else if (!strcmp(el, "pre")) {
     parse_push(p, TAG_PRE);
     p->preformatted_wrap_enabled = true;
@@ -2164,7 +2197,7 @@ void end(void *data, const char *el) {
   } else if (!strcmp(el, "a")) {
     // Many EPUB TOC/Nav documents are built as dense anchor lists with little
     // structural markup; force line breaks there to keep the reading view sane.
-    if (PathLooksLikeTocDoc(p->docpath) && p->linebegan && p->buflen > 0 &&
+    if (DocLooksLikeTocDoc(p) && p->linebegan && p->buflen > 0 &&
         p->buf[p->buflen - 1] != '\n') {
       linefeed(p);
     }
@@ -2237,8 +2270,19 @@ void end(void *data, const char *el) {
              !strcmp(el, "h6") || !strcmp(el, "hr")) {
     FlushInlineTailAndDeferredStyle(p, ts);
     if (!strcmp(el, "hr")) {
-      linefeed(p);
-      linefeed(p);
+      const int line_h = ts->GetHeight() + ts->linespacing;
+      const book_xml_css_style_utils::MarginTopResult mbr =
+          ParseElementMarginBottomWithClass(p->last_hr_style, p->last_hr_class,
+                                            p->css_class_map);
+      const int default_lf = 2;
+      const int lf_count =
+          book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
+              default_lf, mbr, line_h);
+      LogResolvedBlockMargin(p, "hr", "bottom", p->last_hr_style,
+                             p->last_hr_class, mbr, line_h, default_lf,
+                             lf_count);
+      for (int i = 0; i < lf_count; i++)
+        linefeed(p);
     } else {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =

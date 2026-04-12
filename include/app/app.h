@@ -256,6 +256,11 @@ public:
   void SetPdfDeferredReadyAtMs(u64 ready_at_ms);
   u64 GetMobiDeferredReadyAtMs() const;
   void SetMobiDeferredReadyAtMs(u64 ready_at_ms);
+  bool IsNew3dsDevice() const;
+  bool IsHomebrewEnvironment() const;
+  bool IsAppletSuspended() const;
+  void HandleAppletSuspend();
+  void HandleAppletResume();
 
   void PrefsRefreshButton(int index);
   void PrefsRefreshButtonFont();
@@ -358,8 +363,19 @@ private:
   unsigned int status_log_write_count_;
   LightLock status_log_lock_;
   bool pending_boot_reopen_;
+  bool is_new_3ds_;
+  bool is_homebrew_;
+  bool applet_suspended_;
+  bool applet_resume_pending_;
+  bool applet_suspend_handled_;
+  aptHookCookie apt_hook_cookie_;
+  bool apt_hook_installed_;
 
   void InitScreens();
+  static void AptHookCallback(APT_HookType hook, void *param);
+  void HandleAppletHook(APT_HookType hook);
+  void OnReaderAppletSuspended();
+  void OnReaderAppletResumed();
 
   // app_Browser.cpp
   void UnloadNonVisibleBrowserCoverCaches();
@@ -371,6 +387,7 @@ private:
   void EnqueueJob(app_job_type_t type, Book *book);
   void QueueBookWarmup(Book *book);
   void QueueTocResolve(Book *book);
+  size_t PauseBrowserJobs();
 
   // app_prefs.cpp
   void PrefsHandlePress();

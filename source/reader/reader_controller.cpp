@@ -15,3 +15,7 @@ void App::HandleEventInOpening() { reader_controller_->HandleEventInOpening(); }
 u8 App::OpenBook() { return reader_controller_->OpenBook(); }
 
 void App::ToggleBookmark() { reader_controller_->ToggleBookmark(); }
+
+void App::OnReaderAppletSuspended() { reader_controller_->OnAppletSuspended(); }
+
+void App::OnReaderAppletResumed() { reader_controller_->OnAppletResumed(); }

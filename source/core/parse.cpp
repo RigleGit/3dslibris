@@ -194,6 +194,16 @@ void parse_init(parsedata_t *data) {
   data->doc_title.clear();
   data->doc_heading.clear();
   data->doc_heading_complete = false;
+  data->last_p_style.clear();
+  data->last_h1_style.clear();
+  data->last_h2_style.clear();
+  data->last_h_style.clear();
+  data->last_hr_style.clear();
+  data->last_p_class.clear();
+  data->last_h1_class.clear();
+  data->last_h2_class.clear();
+  data->last_h_class.clear();
+  data->last_hr_class.clear();
   data->collecting_fb2_binary = false;
   data->fb2_binary_too_large = false;
   data->fb2_binary_id.clear();

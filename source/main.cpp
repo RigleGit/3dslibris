@@ -136,5 +136,10 @@ int main(int argc, char **argv) {
   }
 
   gfxExit();
+  // In Homebrew Launcher (3dsx) mode the HBL invalidates the APT session
+  // before aptExit() runs via __appExit, causing a data abort at shutdown.
+  // Our app-level cleanup is complete at this point, so terminate directly.
+  if (envIsHomebrew())
+    svcExitProcess();
   return 0;
 }

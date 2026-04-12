@@ -364,7 +364,8 @@ void Page::Draw(Text *ts) {
       i++;
       const int x0 = ts->margin.left;
       const int x1 = ts->display.width - ts->margin.right;
-      const int y = ts->GetPenY() + ts->GetHeight() / 2;
+      const int y = std::max(ts->margin.top,
+                             ts->GetPenY() - std::max(1, ts->GetHeight() / 2));
       ts->FillRect(x0, y, x1, y + 1, ts->GetFgColor());
       if (!ts->PrintNewLine()) {
         stopped_on_render_break = true;

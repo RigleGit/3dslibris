@@ -373,6 +373,31 @@ void ReaderController::ClearDeferredRelayoutState() {
   app_.SetDeferredRelayoutInitialPosition(0);
 }
 
+void ReaderController::OnAppletSuspended() {
+  Book *bookcurrent_ = app_.GetCurrentBook();
+  app_.SetPdfTouchDragActive(false);
+  app_.SetPdfTouchLastX(-1);
+  app_.SetPdfTouchLastY(-1);
+  app_.SetPdfDeferredReadyAtMs(0);
+  app_.SetMobiDeferredReadyAtMs(0);
+  if (!bookcurrent_)
+    return;
+  bookcurrent_->SetFixedLayoutViewportInteraction(false);
+  bookcurrent_->CancelFixedLayoutDeferredWork();
+}
+
+void ReaderController::OnAppletResumed() {
+  Book *bookcurrent_ = app_.GetCurrentBook();
+  if (!bookcurrent_)
+    return;
+  if (bookcurrent_->IsFixedLayout()) {
+    const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
+    app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
+  }
+  if (bookcurrent_->HasDeferredMobiParse())
+    app_.SetMobiDeferredReadyAtMs(osGetTime() + kMobiDeferredIdleDelayMs);
+}
+
 bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count) {
   if (!book || !app_.IsDeferredRelayoutPending() ||
       app_.GetDeferredRelayoutBook() != book)

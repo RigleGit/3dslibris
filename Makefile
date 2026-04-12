@@ -243,7 +243,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean package-sdmc zip-sdmc source-release debug-3dsx cia stage-romfs mupdf-minimal test-host
+.PHONY: all clean package-sdmc zip-sdmc source-release debug-3dsx debug-cia cia stage-romfs mupdf-minimal test-host
 
 #---------------------------------------------------------------------------------
 all: stage-romfs mupdf-minimal $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -309,6 +309,24 @@ debug-3dsx:
 		APP_DESCRIPTION_OVERRIDE="eBook reader for Nintendo 3DS (debug)" \
 		DEBUG_LOGGING=1 \
 		all
+
+#---------------------------------------------------------------------------------
+debug-cia:
+#---------------------------------------------------------------------------------
+	@$(MAKE) --no-print-directory \
+		TARGET=$(DEBUG_TARGET) \
+		BUILD=$(DEBUG_BUILD) \
+		APP_TITLE_OVERRIDE="3dslibris debug" \
+		APP_DESCRIPTION_OVERRIDE="eBook reader for Nintendo 3DS (debug)" \
+		DEBUG_LOGGING=1 \
+		all
+	@$(MAKE) --no-print-directory \
+		TARGET=$(DEBUG_TARGET) \
+		BUILD=$(DEBUG_BUILD) \
+		APP_TITLE_OVERRIDE="3dslibris debug" \
+		APP_DESCRIPTION_OVERRIDE="eBook reader for Nintendo 3DS (debug)" \
+		DEBUG_LOGGING=1 \
+		cia
 
 #---------------------------------------------------------------------------------
 package-sdmc: all

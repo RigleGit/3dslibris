@@ -70,6 +70,41 @@ void TestNonSelectedCoverWarmupUsesHeavyIdle() {
              browser_warmup_utils::ShouldQueueCoverWarmup(false, true, true));
 }
 
+void TestOld3dsWarmupQueueLimit() {
+  ExpectTrue("old3ds selected cover queues when idle and queue empty",
+             browser_warmup_utils::ShouldQueueCoverWarmupForDevice(
+                 false, true, true, false, 0));
+  ExpectFalse("old3ds skips speculative cover when queue busy",
+              browser_warmup_utils::ShouldQueueCoverWarmupForDevice(
+                  false, false, true, true, 1));
+}
+
+void TestOld3dsCoverMemoryGuard() {
+  ExpectTrue("selected old3ds cover allowed above selected threshold",
+             browser_warmup_utils::HasCoverExtractionHeadroom(
+                 false, true,
+                 browser_warmup_utils::kOld3dsSelectedCoverMinFreeBytes));
+  ExpectFalse("selected old3ds cover blocked below selected threshold",
+              browser_warmup_utils::HasCoverExtractionHeadroom(
+                  false, true,
+                  browser_warmup_utils::kOld3dsSelectedCoverMinFreeBytes - 1));
+  ExpectFalse("warm old3ds cover blocked below warm threshold",
+              browser_warmup_utils::HasCoverExtractionHeadroom(
+                  false, false,
+                  browser_warmup_utils::kOld3dsWarmCoverMinFreeBytes - 1));
+}
+
+void TestOld3dsCoverRetryBackoff() {
+  ExpectTrue("selected old3ds retry delay applied",
+             browser_warmup_utils::CoverRetryDelayMs(false, true, 4, false) ==
+                 browser_warmup_utils::kOld3dsSelectedCoverRetryDelayMs);
+  ExpectTrue("warm old3ds retry delay applied",
+             browser_warmup_utils::CoverRetryDelayMs(false, false, 0, false) ==
+                 browser_warmup_utils::kOld3dsWarmCoverRetryDelayMs);
+  ExpectTrue("new3ds does not back off successful decode",
+             browser_warmup_utils::CoverRetryDelayMs(true, true, 0, true) == 0);
+}
+
 } // namespace
 
 int main() {
@@ -79,5 +114,8 @@ int main() {
   TestWarmupRejectsWrappedClock();
   TestSelectedCoverWarmupUsesShortIdle();
   TestNonSelectedCoverWarmupUsesHeavyIdle();
+  TestOld3dsWarmupQueueLimit();
+  TestOld3dsCoverMemoryGuard();
+  TestOld3dsCoverRetryBackoff();
   return 0;
 }

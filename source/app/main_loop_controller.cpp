@@ -18,6 +18,12 @@ int MainLoopController::RunMainLoop() {
     gspWaitForVBlank();
     hidScanInput();
 
+    if (app_.IsAppletSuspended()) {
+      app_.HandleAppletSuspend();
+      continue;
+    }
+    app_.HandleAppletResume();
+
     if (app_.HasPendingBootReopen()) {
       app_.SetPendingBootReopen(false);
       app_.OpenBook();
