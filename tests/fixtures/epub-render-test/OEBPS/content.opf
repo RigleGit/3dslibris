@@ -16,6 +16,7 @@
     <item id="intro" href="text/intro.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch1" href="text/chapter-01.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch2" href="text/chapter-02-hidden.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch3" href="text/chapter-03-cosmetic-pagebreak.xhtml" media-type="application/xhtml+xml"/>
     <item id="img1" href="images/test-card.svg" media-type="image/svg+xml"/>
   </manifest>
 
@@ -24,6 +25,7 @@
     <itemref idref="intro"/>
     <itemref idref="ch1"/>
     <itemref idref="ch2"/>
+    <itemref idref="ch3"/>
   </spine>
 
   <guide>

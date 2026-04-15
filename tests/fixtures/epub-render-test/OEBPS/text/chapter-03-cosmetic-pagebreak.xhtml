@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+  <title>Capítulo 3</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body epub:type="bodymatter">
+
+  <h1 id="capitulo-3">Capítulo 3</h1>
+
+  <h2>Cosmetic Page Break</h2>
+
+  <p>Este capítulo reproduce un marcador de página puramente cosmético. El texto debe fluir seguido y no crear una separación artificial.</p>
+
+  <p>
+    Antes del marcador cosmético, la lectura debe continuar normalmente.
+    <span aria-hidden="true" aria-label="x" epub:type="pagebreak" id="pg_x" role="doc-pagebreak"></span>
+    Después del marcador cosmético, este texto debe seguir en el mismo flujo visible.
+  </p>
+
+  <p>
+    Segundo caso de control inline:
+    <span aria-hidden="true" aria-label="xi" epub:type="frontmatter pagebreak" id="pg_xi" role="doc-pagebreak"></span>
+    si aquí apareciera un salto raro o una página extra, el bug seguiría presente.
+  </p>
+
+  <p>Control visible final [VISIBLE OK]: este párrafo debe verse sin cortes extra entre medias [VISIBLE OK].</p>
+
+</body>
+</html>

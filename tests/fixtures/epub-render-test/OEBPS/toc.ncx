@@ -33,5 +33,10 @@
       <navLabel><text>Capítulo 2</text></navLabel>
       <content src="text/chapter-02-hidden.xhtml#capitulo-2"/>
     </navPoint>
+
+    <navPoint id="nav-5" playOrder="5">
+      <navLabel><text>Capítulo 3</text></navLabel>
+      <content src="text/chapter-03-cosmetic-pagebreak.xhtml#capitulo-3"/>
+    </navPoint>
   </navMap>
 </ncx>

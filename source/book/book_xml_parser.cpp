@@ -16,6 +16,7 @@
 #include "book/book_xml_block_utils.h"
 #include "book/book_context.h"
 #include "book/book_xml_css_style_utils.h"
+#include "book/book_xml_hidden_utils.h"
 #include "book/book_xml_list_utils.h"
 #include "book/epub_css_class_map.h"
 #include "book/book_xml_parser_style_utils.h"
@@ -1478,6 +1479,12 @@ void start(void *data, const char *el, const char **attr) {
 
   parsedata_t *p = (parsedata_t *)data;
   Text *ts = p->ts;
+
+  if (book_xml_hidden_utils::IsCosmeticPageBreakElement(attr)) {
+    parse_push(p, TAG_UNKNOWN);
+    SetCurrentStackHidden(p, true);
+    return;
+  }
 
   if (p->fb2_mode && parse_in(p, TAG_BODY)) {
     if (XmlNameEquals(el, "section")) {
