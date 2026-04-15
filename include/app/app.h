@@ -61,6 +61,7 @@ https://github.com/rhaleblian/dslibris
 #include "ui/button.h"
 #include "main.h"
 #include "parse.h"
+#include "settings/prefs_button_ids.h"
 #include "ui/text.h"
 #include "shared/status_reporter.h"
 
@@ -88,19 +89,6 @@ enum class AppMode : u8 {
   Bookmarks = 8,
   Chapters = 9,
   Opening = 10,
-};
-
-enum prefsbuttonindex {
-  PREFS_BUTTON_FONT_CONFIG,
-  PREFS_BUTTON_FONTSIZE,
-  PREFS_BUTTON_PARASPACING,
-  PREFS_BUTTON_ORIENTATION,
-  PREFS_BUTTON_TIME24H,
-  PREFS_BUTTON_COLORMODE,
-  PREFS_BUTTON_LIBRARY_VIEW,
-  PREFS_BUTTON_INDEX,
-  PREFS_BUTTON_BOOKMARKS,
-  PREFS_BUTTON_COUNT
 };
 
 enum app_job_type_t {

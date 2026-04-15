@@ -31,6 +31,8 @@
 #include "debug_log.h"
 #include "parse.h"
 #include "settings/prefs.h"
+#include "settings/prefs_button_context_utils.h"
+#include "settings/go_to_page_slider_utils.h"
 #include "ui/text.h"
 #include "ui/text_limits.h"
 
@@ -40,6 +42,29 @@ static const int PREFS_LIBRARY_BTN_W = 104;
 static const int PREFS_LIBRARY_BTN_H = 26;
 static const int PREFS_ROW_X = 5;
 static const int PREFS_ROW_W = 230;
+static const u32 kGoToPageCoarseStep = 10;
+static const u32 kGoToPageMobiDeferredDelayMs = 120;
+
+static bool CurrentBookShowsLineWrapFix(App *app);
+
+struct GoToPagePopupLayout {
+  int box_x;
+  int box_y;
+  int box_w;
+  int box_h;
+  int slider_x;
+  int slider_y;
+  int slider_w;
+  int slider_h;
+  int cancel_x;
+  int cancel_y;
+  int cancel_w;
+  int cancel_h;
+  int go_x;
+  int go_y;
+  int go_w;
+  int go_h;
+};
 
 static u8 NormalizeVisibleCount(u8 count) { return count == 0 ? 1 : count; }
 
@@ -48,6 +73,16 @@ static void ClampSelectedIndex(int *selected, u8 visibleCount) {
     return;
   if (*selected >= visibleCount)
     *selected = visibleCount - 1;
+}
+
+static u8 VisiblePrefsButtonCountForApp(App *app) {
+  return settings::VisiblePrefsButtonCount(
+      app && app->IsBookSettingsContext(), CurrentBookShowsLineWrapFix(app));
+}
+
+static int VisiblePrefsButtonIdForSlot(App *app, u8 slot) {
+  return settings::PrefsButtonForVisibleSlot(
+      app && app->IsBookSettingsContext(), CurrentBookShowsLineWrapFix(app), slot);
 }
 
 static void SyncLibraryButtonLayout(Button *button) {
@@ -114,15 +149,51 @@ static bool CurrentBookUsesLineWrapFixSlot(App *app) {
   return app && app->IsBookSettingsContext() && book && book->IsMobiFile();
 }
 
+static bool CurrentBookShowsLineWrapFix(App *app) {
+  return CurrentBookUsesLineWrapFixSlot(app);
+}
+
 static bool CurrentBookUsesTextLayoutSettings(App *app) {
   Book *book = app ? app->GetCurrentBook() : NULL;
   return app && app->IsBookSettingsContext() && book &&
          book->UsesTextLayoutSettings();
 }
 
-SettingsController::SettingsController(App &app) : app_(app) {}
+static bool CurrentBookCanGoToPage(App *app) {
+  Book *book = app ? app->GetCurrentBook() : NULL;
+  return app && app->IsBookSettingsContext() && book &&
+         book->GetPageCount() > 0;
+}
+
+static GoToPagePopupLayout BuildGoToPagePopupLayout() {
+  GoToPagePopupLayout layout;
+  layout.box_x = 18;
+  layout.box_y = 92;
+  layout.box_w = 204;
+  layout.box_h = 122;
+  layout.slider_x = layout.box_x + 16;
+  layout.slider_y = layout.box_y + 58;
+  layout.slider_w = layout.box_w - 32;
+  layout.slider_h = 12;
+  layout.cancel_x = layout.box_x + 16;
+  layout.cancel_y = layout.box_y + 82;
+  layout.cancel_w = 72;
+  layout.cancel_h = 24;
+  layout.go_x = layout.box_x + layout.box_w - 88;
+  layout.go_y = layout.cancel_y;
+  layout.go_w = 72;
+  layout.go_h = 24;
+  return layout;
+}
+
+static bool PointInRect(int x, int y, int rx, int ry, int rw, int rh) {
+  return x >= rx && y >= ry && x < rx + rw && y < ry + rh;
+}
+SettingsController::SettingsController(App &app)
+    : app_(app), go_to_page_popup_open_(false), go_to_page_target_page_(0) {}
 
 void SettingsController::ShowSettingsView(bool from_book) {
+  CloseGoToPagePopup();
   app_.SetBookSettingsContext(from_book);
   app_.SetPrefsLayoutNoticePending(
       from_book && app_.GetCurrentBook() &&
@@ -148,13 +219,175 @@ void SettingsController::ToggleCurrentBookMobiLineWrapFix() {
   book->SetMobiLineWrapFix(!book->GetMobiLineWrapFix());
   if (book->GetPageCount() > 0)
     app->SetPrefsLayoutNoticePending(true);
-  PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+  PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
   app->prefs->Write();
   app->MarkPrefsDirty();
 }
 
+void SettingsController::OpenGoToPagePopup() {
+  Book *book = app_.GetCurrentBook();
+  if (!book || book->GetPageCount() <= 0)
+    return;
+  go_to_page_popup_open_ = true;
+  go_to_page_target_page_ =
+      settings::ClampGoToPageTarget(book->GetPosition(), book->GetPageCount());
+  app_.MarkPrefsDirty();
+}
+
+void SettingsController::CloseGoToPagePopup() {
+  go_to_page_popup_open_ = false;
+  app_.MarkPrefsDirty();
+}
+
+bool SettingsController::IsGoToPagePopupOpen() const {
+  return go_to_page_popup_open_;
+}
+
+void SettingsController::AdjustGoToPageTarget(int delta) {
+  Book *book = app_.GetCurrentBook();
+  if (!book || book->GetPageCount() <= 0)
+    return;
+  go_to_page_target_page_ = settings::ClampGoToPageTarget(
+      go_to_page_target_page_ + delta, book->GetPageCount());
+  app_.MarkPrefsDirty();
+}
+
+bool SettingsController::ConfirmGoToPageSelection() {
+  Book *book = app_.GetCurrentBook();
+  if (!book || book->GetPageCount() <= 0)
+    return false;
+
+  const int target_page = settings::ClampGoToPageTarget(
+      go_to_page_target_page_, book->GetPageCount());
+
+  if (book->IsFixedLayout())
+    book->CancelFixedLayoutDeferredWork();
+  book->SetPosition(target_page);
+  if (book->IsFixedLayout())
+    book->ResetFixedLayoutViewportForNavigation();
+
+  app_.ShowCurrentBookView();
+  book->DrawCurrentView(app_.ts);
+  app_.SetPdfDeferredReadyAtMs(
+      (book->IsFixedLayout() && book->HasPendingFixedLayoutDeferredWork())
+          ? (osGetTime() + book->GetFixedLayoutDeferredDelayMs())
+          : 0);
+  app_.SetMobiDeferredReadyAtMs(
+      book->HasDeferredMobiParse() ? (osGetTime() + kGoToPageMobiDeferredDelayMs)
+                                   : 0);
+  app_.RequestStatusRedraw();
+  go_to_page_popup_open_ = false;
+  return true;
+}
+
+void SettingsController::DrawGoToPagePopup() {
+  App *app = App::GetInstance();
+  Book *book = app ? app->GetCurrentBook() : NULL;
+  if (!app || !app->ts || !book || book->GetPageCount() <= 0 ||
+      !go_to_page_popup_open_) {
+    return;
+  }
+
+  const GoToPagePopupLayout layout = BuildGoToPagePopupLayout();
+  const int page_count = book->GetPageCount();
+  const int target_page = settings::ClampGoToPageTarget(go_to_page_target_page_,
+                                                        page_count);
+  const int fill_w = settings::SliderPageIndexToFillWidth(target_page, page_count,
+                                                          layout.slider_w);
+  const u16 box_bg = RGB565FromU8(255.0f, 250.0f, 236.0f);
+  const u16 box_border = RGB565FromU8(176.0f, 139.0f, 91.0f);
+  const u16 slider_bg = RGB565FromU8(233.0f, 220.0f, 194.0f);
+  const u16 slider_fill = RGB565FromU8(165.0f, 104.0f, 58.0f);
+  const u16 button_bg = RGB565FromU8(248.0f, 240.0f, 222.0f);
+  const u16 text_color = RGB565FromU8(71.0f, 44.0f, 21.0f);
+
+  char page_msg[48];
+  snprintf(page_msg, sizeof(page_msg), "Pg %d / %d", target_page + 1, page_count);
+
+  app->ts->FillRect((u16)layout.box_x, (u16)layout.box_y,
+                    (u16)(layout.box_x + layout.box_w),
+                    (u16)(layout.box_y + layout.box_h), box_bg);
+  app->ts->DrawRect((u16)layout.box_x, (u16)layout.box_y,
+                    (u16)(layout.box_x + layout.box_w),
+                    (u16)(layout.box_y + layout.box_h), box_border);
+
+  app->ts->SetTextColorOverride(text_color);
+  app->ts->SetPen((u16)(layout.box_x + 16), (u16)(layout.box_y + 20));
+  app->ts->PrintString("go to page");
+  app->ts->SetPen((u16)(layout.box_x + 16), (u16)(layout.box_y + 40));
+  app->ts->PrintString(page_msg);
+
+  app->ts->FillRect((u16)layout.slider_x, (u16)layout.slider_y,
+                    (u16)(layout.slider_x + layout.slider_w),
+                    (u16)(layout.slider_y + layout.slider_h), slider_bg);
+  app->ts->DrawRect((u16)layout.slider_x, (u16)layout.slider_y,
+                    (u16)(layout.slider_x + layout.slider_w),
+                    (u16)(layout.slider_y + layout.slider_h), box_border);
+  if (fill_w > 0) {
+    app->ts->FillRect((u16)layout.slider_x, (u16)layout.slider_y,
+                      (u16)(layout.slider_x + fill_w),
+                      (u16)(layout.slider_y + layout.slider_h), slider_fill);
+  }
+
+  const int knob_half = 4;
+  const int knob_center_x = layout.slider_x + fill_w;
+  app->ts->FillRect((u16)(knob_center_x - knob_half),
+                    (u16)(layout.slider_y - 3),
+                    (u16)(knob_center_x + knob_half + 1),
+                    (u16)(layout.slider_y + layout.slider_h + 4), text_color);
+
+  app->ts->FillRect((u16)layout.cancel_x, (u16)layout.cancel_y,
+                    (u16)(layout.cancel_x + layout.cancel_w),
+                    (u16)(layout.cancel_y + layout.cancel_h), button_bg);
+  app->ts->DrawRect((u16)layout.cancel_x, (u16)layout.cancel_y,
+                    (u16)(layout.cancel_x + layout.cancel_w),
+                    (u16)(layout.cancel_y + layout.cancel_h), box_border);
+  app->ts->FillRect((u16)layout.go_x, (u16)layout.go_y,
+                    (u16)(layout.go_x + layout.go_w),
+                    (u16)(layout.go_y + layout.go_h), button_bg);
+  app->ts->DrawRect((u16)layout.go_x, (u16)layout.go_y,
+                    (u16)(layout.go_x + layout.go_w),
+                    (u16)(layout.go_y + layout.go_h), box_border);
+
+  app->ts->SetPen((u16)(layout.cancel_x + 14), (u16)(layout.cancel_y + 16));
+  app->ts->PrintString("cancel");
+  app->ts->SetPen((u16)(layout.go_x + 24), (u16)(layout.go_y + 16));
+  app->ts->PrintString("go");
+  app->ts->ClearTextColorOverride();
+}
+
+void SettingsController::HandleGoToPagePopupTouch(bool touch_down) {
+  App *app = App::GetInstance();
+  Book *book = app ? app->GetCurrentBook() : NULL;
+  if (!app || !book || book->GetPageCount() <= 0 || !go_to_page_popup_open_)
+    return;
+
+  const touchPosition coord = app->TouchRead();
+  const GoToPagePopupLayout layout = BuildGoToPagePopupLayout();
+  if (PointInRect(coord.px, coord.py, layout.slider_x - 4, layout.slider_y - 8,
+                  layout.slider_w + 8, layout.slider_h + 16)) {
+    go_to_page_target_page_ = settings::SliderTouchXToPageIndex(
+        coord.px, layout.slider_x, layout.slider_w, book->GetPageCount());
+    app->MarkPrefsDirty();
+    return;
+  }
+
+  if (!touch_down)
+    return;
+
+  if (PointInRect(coord.px, coord.py, layout.cancel_x, layout.cancel_y,
+                  layout.cancel_w, layout.cancel_h)) {
+    CloseGoToPagePopup();
+    return;
+  }
+  if (PointInRect(coord.px, coord.py, layout.go_x, layout.go_y, layout.go_w,
+                  layout.go_h)) {
+    ConfirmGoToPageSelection();
+  }
+}
+
 u8 SettingsController::PrefsVisibleButtonCount() const {
-  return app_.IsBookSettingsContext() ? PREFS_BUTTON_COUNT : PREFS_BUTTON_INDEX;
+  return VisiblePrefsButtonCountForApp(&app_);
 }
 
 void SettingsController::PrefsInit() {
@@ -197,13 +430,20 @@ void SettingsController::PrefsDraw() {
   app->SetPrefsSelectedIndex(selected_index);
 
   PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+  PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
 
-  for (int i = 0; i < visibleCount; i++)
-    app->prefsButtons[i].Draw(app->ts->screenright,
-                              i == app->GetPrefsSelectedIndex());
+  for (int slot = 0; slot < visibleCount; slot++) {
+    const int button_id = VisiblePrefsButtonIdForSlot(app, (u8)slot);
+    app->prefsButtons[button_id].Move(5, slot * 38);
+    app->prefsButtons[button_id].Draw(app->ts->screenright,
+                                      slot == app->GetPrefsSelectedIndex());
+  }
+
+  if (go_to_page_popup_open_)
+    DrawGoToPagePopup();
 
   SyncLibraryButtonLayout(&app->buttonprefs);
   app->buttonprefs.Draw(app->ts->screenright);
@@ -259,6 +499,7 @@ void SettingsController::PrefsDraw() {
 void SettingsController::PrefsHandleEvent() {
   App *app = App::GetInstance();
   u32 keys = hidKeysDown();
+  u32 held = hidKeysHeld();
 #ifdef DSLIBRIS_DEBUG
   static int s_prefs_keys_budget = 48;
   if (s_prefs_keys_budget > 0 && keys) {
@@ -271,6 +512,35 @@ void SettingsController::PrefsHandleEvent() {
   int selected_index = app->GetPrefsSelectedIndex();
   ClampSelectedIndex(&selected_index, visibleCount);
   app->SetPrefsSelectedIndex(selected_index);
+  const int selected_button = VisiblePrefsButtonIdForSlot(
+      app, (u8)app->GetPrefsSelectedIndex());
+
+  if (go_to_page_popup_open_) {
+    if (keys & KEY_A) {
+      ConfirmGoToPageSelection();
+      return;
+    }
+    if (keys & (KEY_B | KEY_SELECT | KEY_START | KEY_Y)) {
+      CloseGoToPagePopup();
+      if (app->IsPrefsDirty())
+        PrefsDraw();
+      return;
+    }
+    if (keys & app->key.left) {
+      AdjustGoToPageTarget(-1);
+    } else if (keys & app->key.right) {
+      AdjustGoToPageTarget(1);
+    } else if (keys & (app->key.up | app->key.l)) {
+      AdjustGoToPageTarget(-(int)kGoToPageCoarseStep);
+    } else if (keys & (app->key.down | app->key.r)) {
+      AdjustGoToPageTarget((int)kGoToPageCoarseStep);
+    }
+    if ((keys & KEY_TOUCH) || (held & KEY_TOUCH))
+      HandleGoToPagePopupTouch((keys & KEY_TOUCH) != 0);
+    if (app->IsPrefsDirty())
+      PrefsDraw();
+    return;
+  }
 
   if (keys & KEY_A) {
     PrefsHandlePress();
@@ -288,16 +558,16 @@ void SettingsController::PrefsHandleEvent() {
       app->SetPrefsSelectedIndex(app->GetPrefsSelectedIndex() + 1);
       app->MarkPrefsDirty();
     }
-  } else if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_FONTSIZE &&
+  } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
              (keys & app->key.up)) {
     PrefsDecreasePixelSize();
-  } else if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_FONTSIZE &&
+  } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
              (keys & app->key.down)) {
     PrefsIncreasePixelSize();
-  } else if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_PARASPACING &&
+  } else if (selected_button == PREFS_BUTTON_PARASPACING &&
              (keys & app->key.up)) {
     PrefsDecreaseParaspacing();
-  } else if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_PARASPACING &&
+  } else if (selected_button == PREFS_BUTTON_PARASPACING &&
              (keys & app->key.down)) {
     PrefsIncreaseParaspacing();
   } else if (keys & KEY_TOUCH) {
@@ -337,18 +607,19 @@ void SettingsController::PrefsHandleTouch() {
   ClampSelectedIndex(&selected_index, visibleCount);
   app->SetPrefsSelectedIndex(selected_index);
   for (u8 i = 0; i < visibleCount; i++) {
-    if (app->prefsButtons[i].EnclosesPoint(coord.px, coord.py)) {
+    const int button_id = VisiblePrefsButtonIdForSlot(app, i);
+    if (app->prefsButtons[button_id].EnclosesPoint(coord.px, coord.py)) {
       if (i != app->GetPrefsSelectedIndex())
         app->SetPrefsSelectedIndex(i);
 
-      if (i == PREFS_BUTTON_FONTSIZE) {
+      if (button_id == PREFS_BUTTON_FONTSIZE) {
         int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
         if (coord.px >= centerX) {
           PrefsIncreasePixelSize();
         } else {
           PrefsDecreasePixelSize();
         }
-      } else if (i == PREFS_BUTTON_PARASPACING) {
+      } else if (button_id == PREFS_BUTTON_PARASPACING) {
         int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
         if (coord.px >= centerX) {
           PrefsIncreaseParaspacing();
@@ -460,11 +731,17 @@ void SettingsController::PrefsRefreshButton(int index) {
         app->orientation ? std::string("Turned Right") : std::string("Turned Left"));
     break;
   case PREFS_BUTTON_TIME24H:
-    if (CurrentBookUsesLineWrapFixSlot(app)) {
-      app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("line wrap fix"));
-      app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
-          app->GetCurrentBook()->GetMobiLineWrapFix() ? std::string("on")
-                                                      : std::string("off"));
+    if (CurrentBookCanGoToPage(app)) {
+      Book *book = app->GetCurrentBook();
+      app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("go to page"));
+      if (book->GetPageCount() <= 1) {
+        app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
+            std::string("(single page)"));
+      } else {
+        snprintf(msg, sizeof(msg), "Pg %d / %d >", book->GetPosition() + 1,
+                 book->GetPageCount());
+        app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(std::string(msg));
+      }
     } else {
       app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("clock format"));
       app->prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
@@ -474,6 +751,7 @@ void SettingsController::PrefsRefreshButton(int index) {
     break;
   case PREFS_BUTTON_COLORMODE: {
     int mode = app->ts->GetColorMode();
+    app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel1(std::string("color mode"));
     if (mode == 0)
       app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Normal"));
     else if (mode == 1)
@@ -483,8 +761,18 @@ void SettingsController::PrefsRefreshButton(int index) {
     break;
   }
   case PREFS_BUTTON_LIBRARY_VIEW:
-    app->prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel2(
-        std::string(browser_view_utils::Label(app->prefs->browser_view_mode)));
+    if (CurrentBookUsesLineWrapFixSlot(app)) {
+      app->prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel1(
+          std::string("line wrap fix"));
+      app->prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel2(
+          app->GetCurrentBook()->GetMobiLineWrapFix() ? std::string("on")
+                                                      : std::string("off"));
+    } else {
+      app->prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel1(
+          std::string("library view"));
+      app->prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel2(
+          std::string(browser_view_utils::Label(app->prefs->browser_view_mode)));
+    }
     break;
   case PREFS_BUTTON_INDEX:
     if (CanOpenBookIndexInCurrentContext(app)) {
@@ -514,16 +802,22 @@ void SettingsController::PrefsRefreshButton(int index) {
 
 void SettingsController::PrefsHandlePress() {
   App *app = App::GetInstance();
+  const int selected_button = VisiblePrefsButtonIdForSlot(
+      app, (u8)app->GetPrefsSelectedIndex());
 
-  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_ORIENTATION) {
+  if (selected_button == PREFS_BUTTON_ORIENTATION) {
     PrefsFlipOrientation();
     app->MarkPrefsDirty();
     return;
   }
 
-  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_TIME24H) {
-    if (CurrentBookUsesLineWrapFixSlot(app)) {
-      ToggleCurrentBookMobiLineWrapFix();
+  if (selected_button == PREFS_BUTTON_TIME24H) {
+    if (CurrentBookCanGoToPage(app)) {
+      if (app->GetCurrentBook()->GetPageCount() <= 1) {
+        app->PrintStatus("This book has only one page");
+      } else {
+        OpenGoToPagePopup();
+      }
     } else {
       ToggleClockFormatSetting(app->prefs);
       PrefsRefreshButton(PREFS_BUTTON_TIME24H);
@@ -532,7 +826,7 @@ void SettingsController::PrefsHandlePress() {
     return;
   }
 
-  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_COLORMODE) {
+  if (selected_button == PREFS_BUTTON_COLORMODE) {
     CycleColorMode(app->ts);
     PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
     app->prefs->Write();
@@ -540,14 +834,18 @@ void SettingsController::PrefsHandlePress() {
     return;
   }
 
-  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_LIBRARY_VIEW) {
-    ToggleBrowserViewSetting(app);
-    PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
-    app->MarkPrefsDirty();
+  if (selected_button == PREFS_BUTTON_LIBRARY_VIEW) {
+    if (CurrentBookUsesLineWrapFixSlot(app)) {
+      ToggleCurrentBookMobiLineWrapFix();
+    } else {
+      ToggleBrowserViewSetting(app);
+      PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
+      app->MarkPrefsDirty();
+    }
     return;
   }
 
-  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_INDEX) {
+  if (selected_button == PREFS_BUTTON_INDEX) {
     Book *current = app->GetCurrentBook();
     Book *selected = app->GetSelectedBook();
     DBG_LOGF(
@@ -580,7 +878,7 @@ void SettingsController::PrefsHandlePress() {
     return;
   }
 
-  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_BOOKMARKS) {
+  if (selected_button == PREFS_BUTTON_BOOKMARKS) {
     if (app->IsBookSettingsContext() && app->GetCurrentBook() &&
         !app->GetCurrentBook()->SupportsBookmarks()) {
       app->PrintStatus("Bookmarks unavailable for PDF");
@@ -592,7 +890,7 @@ void SettingsController::PrefsHandlePress() {
     return;
   }
 
-  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_FONT_CONFIG) {
+  if (selected_button == PREFS_BUTTON_FONT_CONFIG) {
     app->ShowFontView(AppMode::PrefsFont);
     return;
   }
