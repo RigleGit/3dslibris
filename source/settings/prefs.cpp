@@ -18,6 +18,7 @@
 #include "book/book.h"
 #include "book/book_xml.h"
 #include "formats/common/xml_parse_utils.h"
+#include "library/browser_view_utils.h"
 #include "path_utils.h"
 #include "settings/font_config_utils.h"
 #include "sys/stat.h"
@@ -184,6 +185,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         p->prefs->swapshoulder = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "time24h"))
         p->prefs->time24h = atoi(attr[i + 1]);
+      if (!strcmp(attr[i], "browserView")) {
+        p->prefs->browser_view_mode =
+            browser_view_utils::ParsePrefValue(attr[i + 1]);
+      }
     }
   }
 }
@@ -300,8 +305,10 @@ int Prefs::Write() {
     return 255;
 
   fprintf(fp, "<dslibris format=\"2\">\n");
-  fprintf(fp, "<option swapshoulder=\"%d\" time24h=\"%d\" />\n", swapshoulder,
-          time24h);
+  fprintf(fp,
+          "<option swapshoulder=\"%d\" time24h=\"%d\" browserView=\"%s\" />\n",
+          swapshoulder, time24h,
+          browser_view_utils::ToPrefValue(browser_view_mode));
   fprintf(fp, "\t<screen colorMode=\"%d\" flip=\"%d\" />\n", colorMode,
           app->orientation);
   fprintf(fp,
@@ -398,4 +405,5 @@ void Prefs::Init() {
   modtime = 0; // fill this in with gettimeofday()
   swapshoulder = false;
   time24h = true;
+  browser_view_mode = BROWSER_VIEW_GALLERY;
 }

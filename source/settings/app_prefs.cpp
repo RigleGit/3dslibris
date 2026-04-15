@@ -25,6 +25,7 @@
 
 #include "app/settings_controller.h"
 #include "book/book.h"
+#include "library/browser_view_utils.h"
 #include "ui/button.h"
 #include "color_utils.h"
 #include "debug_log.h"
@@ -68,6 +69,26 @@ static void CycleColorMode(Text *ts) {
     return;
   int mode = ts->GetColorMode();
   ts->SetColorMode((mode + 1) % 3);
+}
+
+static void ToggleBrowserViewSetting(App *app) {
+  if (!app || !app->prefs)
+    return;
+  app->prefs->browser_view_mode =
+      app->prefs->browser_view_mode == BROWSER_VIEW_LIST
+          ? BROWSER_VIEW_GALLERY
+          : BROWSER_VIEW_LIST;
+  if (app->GetSelectedBook()) {
+    const int selected_index = app->GetBookIndex(app->GetSelectedBook());
+    const int page_size =
+        browser_view_utils::PageSize(app->prefs->browser_view_mode);
+    if (selected_index >= 0 && page_size > 0)
+      app->SetBrowserPageStart((selected_index / page_size) * page_size);
+  } else {
+    app->SetBrowserPageStart(0);
+  }
+  app->prefs->Write();
+  app->MarkBrowserDirty();
 }
 
 static bool CanOpenBookIndexInCurrentContext(App *app) {
@@ -140,7 +161,7 @@ void SettingsController::PrefsInit() {
   App *app = App::GetInstance();
   const std::vector<std::string> labels{
       "font configuration", "font size",    "paragraph spacing",
-      "screen orientation", "clock format", "color mode",
+      "screen orientation", "clock format", "color mode", "library view",
       "index",
       "bookmarks"};
 
@@ -176,6 +197,7 @@ void SettingsController::PrefsDraw() {
   app->SetPrefsSelectedIndex(selected_index);
 
   PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+  PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
 
@@ -460,6 +482,10 @@ void SettingsController::PrefsRefreshButton(int index) {
       app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Sepia"));
     break;
   }
+  case PREFS_BUTTON_LIBRARY_VIEW:
+    app->prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel2(
+        std::string(browser_view_utils::Label(app->prefs->browser_view_mode)));
+    break;
   case PREFS_BUTTON_INDEX:
     if (CanOpenBookIndexInCurrentContext(app)) {
       app->prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
@@ -510,6 +536,13 @@ void SettingsController::PrefsHandlePress() {
     CycleColorMode(app->ts);
     PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
     app->prefs->Write();
+    app->MarkPrefsDirty();
+    return;
+  }
+
+  if (app->GetPrefsSelectedIndex() == PREFS_BUTTON_LIBRARY_VIEW) {
+    ToggleBrowserViewSetting(app);
+    PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
     app->MarkPrefsDirty();
     return;
   }

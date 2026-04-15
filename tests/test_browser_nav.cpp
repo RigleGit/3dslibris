@@ -38,6 +38,17 @@ int main() {
   ExpectState("clamps on short last page",
               BrowserNavMoveSelection({6, 4}, 7, 4, 2, BROWSER_NAV_RIGHT), 6,
               4);
+  ExpectState("list view moves down by one item",
+              BrowserNavMoveSelection({0, 0}, 10, 7, 1, BROWSER_NAV_DOWN), 1,
+              0);
+  ExpectState("list view moves up by one item",
+              BrowserNavMoveSelection({5, 0}, 10, 7, 1, BROWSER_NAV_UP), 4, 0);
+  ExpectState("list view advances page at boundary",
+              BrowserNavMoveSelection({6, 0}, 10, 7, 1, BROWSER_NAV_DOWN), 7,
+              7);
+  ExpectState("list view clamps horizontal movement",
+              BrowserNavMoveSelection({4, 0}, 10, 7, 1, BROWSER_NAV_RIGHT), 5,
+              0);
   ExpectState("handles empty library",
               BrowserNavMoveSelection({5, 4}, 0, 4, 2, BROWSER_NAV_RIGHT), 0,
               0);

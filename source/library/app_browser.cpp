@@ -41,10 +41,16 @@
 #include "formats/pdf/pdf.h"
 #include "parse.h"
 #include "shared/app_flow_utils.h"
+#include "color_utils.h"
 #include "library/browser_cover_cache_utils.h"
+#include "library/browser_grid_view.h"
 #include "library/browser_job_queue_utils.h"
+#include "library/browser_list_view.h"
+#include "library/browser_presentation_utils.h"
+#include "library/browser_view_utils.h"
 #include "library/browser_warmup_utils.h"
 #include "shared/string_utils.h"
+#include "settings/prefs.h"
 #include "path_utils.h"
 #include "ui/text.h"
 #include "shared/utf8_utils.h"
@@ -66,19 +72,25 @@ static const size_t kCoverCacheMaxBytes = 16 * 1024 * 1024;
 static const uint8_t kCoverMaxAttempts = 3;
 static const int kCoverThumbMaxW = 85;
 static const int kCoverThumbMaxH = 115;
-static const int kBrowserGridCols = 2;
-static const int kBrowserGridRows = 2;
-static const int kBrowserCoverW = 85;
-static const int kBrowserCoverH = 115;
-static const int kBrowserCellW = 115;
-// Reserve a dedicated footer strip for browser buttons and keep enough visual
-// gap so row-1 labels never collide with row-2 covers.
-static const int kBrowserCellH = 144;
-static const int kBrowserTitleOffsetY = kBrowserCoverH + 10;
-static const int kBrowserProgressOffsetY = kBrowserCoverH + 22;
-static const int kBrowserGridX0 = 5;
-static const int kBrowserGridY0 = 3;
 static const int kBrowserFooterY = 296;
+
+static BrowserViewMode CurrentBrowserViewMode(const App &app) {
+  if (!app.prefs)
+    return BROWSER_VIEW_GALLERY;
+  return app.prefs->browser_view_mode;
+}
+
+static int CurrentBrowserPageSize(const App &app) {
+  return browser_view_utils::PageSize(CurrentBrowserViewMode(app));
+}
+
+static int CurrentBrowserColumnCount(const App &app) {
+  return browser_view_utils::ColumnCount(CurrentBrowserViewMode(app));
+}
+
+static bool ShouldCurrentBrowserLoadCovers(const App &app) {
+  return browser_view_utils::ShouldLoadCovers(CurrentBrowserViewMode(app));
+}
 
 static size_t CountQueuedHeavyJobs(const std::deque<app_job_t> &jobs) {
   size_t count = 0;
@@ -103,16 +115,6 @@ static void LayoutBrowserNavButtons(App *app) {
   app->buttonprefs.Move(72, kBrowserFooterY);
   app->buttonprefs.Resize(96, 22);
   app->buttonprefs.Label("settings");
-}
-
-static std::string TrimSpaces(const std::string &s) {
-  size_t start = 0;
-  while (start < s.size() && s[start] == ' ')
-    start++;
-  size_t end = s.size();
-  while (end > start && s[end - 1] == ' ')
-    end--;
-  return s.substr(start, end - start);
 }
 
 static std::string BuildBookPath(Book *book) {
@@ -444,9 +446,23 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
   if (app_.BookCount() <= 0)
     return;
 
+  if (!ShouldCurrentBrowserLoadCovers(app_)) {
+    for (int i = 0; i < app_.BookCount(); i++) {
+      Book *book = app_.books[i];
+      if (!book || !book->coverPixels)
+        continue;
+      delete[] book->coverPixels;
+      book->coverPixels = nullptr;
+      book->coverWidth = 0;
+      book->coverHeight = 0;
+    }
+    return;
+  }
+
   const browser_cover_cache_utils::VisibleRange visible =
       browser_cover_cache_utils::ComputeVisibleRange(
-          app_.GetBrowserPageStart(), app_.BookCount(), APP_BROWSER_BUTTON_COUNT);
+          app_.GetBrowserPageStart(), app_.BookCount(),
+          CurrentBrowserPageSize(app_));
   for (int i = 0; i < app_.BookCount(); i++) {
     if (browser_cover_cache_utils::RangeContains(visible, i))
       continue;
@@ -465,10 +481,16 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
   if (app_.BookCount() <= 0)
     return;
 
+  if (!ShouldCurrentBrowserLoadCovers(app_)) {
+    UnloadNonVisibleBrowserCoverCaches();
+    return;
+  }
+
   UnloadNonVisibleBrowserCoverCaches();
   const browser_cover_cache_utils::VisibleRange visible =
       browser_cover_cache_utils::ComputeVisibleRange(
-          app_.GetBrowserPageStart(), app_.BookCount(), APP_BROWSER_BUTTON_COUNT);
+          app_.GetBrowserPageStart(), app_.BookCount(),
+          CurrentBrowserPageSize(app_));
   const int start = visible.start;
   const int end = visible.end;
   for (int i = start; i < end; i++) {
@@ -492,246 +514,7 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
 
 namespace {
 
-#if UTF8_FILENAME_DIAG
-static std::string HexBytesForLog(const std::string &s, size_t max_bytes = 32) {
-  static const char hex[] = "0123456789ABCDEF";
-  std::string out;
-  size_t n = s.size() < max_bytes ? s.size() : max_bytes;
-  out.reserve(n * 3 + 8);
-  for (size_t i = 0; i < n; i++) {
-    unsigned char b = (unsigned char)s[i];
-    if (i)
-      out.push_back(' ');
-    out.push_back(hex[(b >> 4) & 0x0F]);
-    out.push_back(hex[b & 0x0F]);
-  }
-  if (s.size() > max_bytes)
-    out += " ...";
-  return out;
-}
-
-static std::string ClipForLog(const std::string &s, size_t max_chars = 72) {
-  if (s.size() <= max_chars)
-    return s;
-  return s.substr(0, max_chars) + "...";
-}
-#endif
-
-static void LogUtf8StageOnce(Book *book, const char *stage,
-                             const std::string &value) {
-#if !UTF8_FILENAME_DIAG
-  (void)book;
-  (void)stage;
-  (void)value;
-  return;
-#else
-  if (!book || !book->GetStatusReporter() || !stage)
-    return;
-
-  static std::set<std::string> logged;
-  char key[96];
-  snprintf(key, sizeof(key), "%p|%s", (void *)book, stage);
-  if (!logged.insert(std::string(key)).second)
-    return;
-
-  char msg[512];
-  std::string bytes = HexBytesForLog(value);
-  std::string clipped = ClipForLog(value);
-  snprintf(msg, sizeof(msg),
-           "UTF8 flow %-18s len=%u valid=%d bytes=[%s] text=\"%s\"", stage,
-           (unsigned)value.size(), utf8_utils::IsValidUtf8(value) ? 1 : 0,
-           bytes.c_str(), clipped.c_str());
-  DBG_LOG(book->GetStatusReporter(), msg);
-#endif
-}
-
-static std::string NormalizeDisplayUtf8(const std::string &raw,
-                                        bool *repaired_fullwidth = nullptr,
-                                        bool *repaired_legacy = nullptr,
-                                        bool *composed_accents = nullptr) {
-  if (repaired_fullwidth)
-    *repaired_fullwidth = false;
-  if (repaired_legacy)
-    *repaired_legacy = false;
-  if (composed_accents)
-    *composed_accents = false;
-
-  if (raw.empty())
-    return raw;
-
-  std::string s = raw;
-  std::string repaired;
-  if (utf8_utils::TryRepairFullwidthByteMojibake(s, &repaired)) {
-    s = repaired;
-    if (repaired_fullwidth)
-      *repaired_fullwidth = true;
-  }
-
-  if (!utf8_utils::IsValidUtf8(s)) {
-    if (repaired_legacy)
-      *repaired_legacy = true;
-    return utf8_utils::DecodeCp1252ToUtf8(s);
-  }
-
-  if (utf8_utils::TryRepairMojibakeUtf8(s, &repaired)) {
-    if (repaired_legacy)
-      *repaired_legacy = true;
-    s = repaired;
-  }
-
-  std::string composed = utf8_utils::ComposeLatinCombiningMarks(s);
-  if (composed != s) {
-    s = composed;
-    if (composed_accents)
-      *composed_accents = true;
-  }
-  return s;
-}
-
-static std::string BuildBrowserDisplayName(Book *book) {
-  if (!book)
-    return "";
-  if (book->HasBrowserDisplayNameCache())
-    return book->GetBrowserDisplayNameCache();
-
-  const char *filename_ptr = book->GetFileName();
-  const char *source =
-      BrowserDisplayNameSource(book->GetTitle(), filename_ptr);
-  bool source_is_filename = (source == filename_ptr);
-  std::string raw = source ? source : "";
-  LogUtf8StageOnce(book, "filename_raw", raw);
-
-  bool repaired_fullwidth = false;
-  bool repaired_legacy = false;
-  bool composed_accents = false;
-  std::string normalized = NormalizeDisplayUtf8(
-      raw, &repaired_fullwidth, &repaired_legacy, &composed_accents);
-  if (repaired_fullwidth)
-    LogUtf8StageOnce(book, "filename_ff_repair", normalized);
-  if (repaired_legacy)
-    LogUtf8StageOnce(book, "filename_legacy_fix", normalized);
-  if (composed_accents)
-    LogUtf8StageOnce(book, "filename_compose", normalized);
-  LogUtf8StageOnce(book, "filename_norm", normalized);
-
-  if (source_is_filename) {
-    size_t dot = normalized.find_last_of('.');
-    if (dot != std::string::npos)
-      normalized = normalized.substr(0, dot);
-  }
-
-  normalized = TrimSpaces(normalized);
-  LogUtf8StageOnce(book, "filename_final", normalized);
-  book->SetBrowserDisplayNameCache(normalized);
-  return book->GetBrowserDisplayNameCache();
-}
-
-static size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
-  if (!s)
-    return 0;
-  size_t bytes = 0;
-  size_t chars = 0;
-  while (s[bytes] && chars < char_count) {
-    unsigned char c = (unsigned char)s[bytes];
-    size_t step = 1;
-    if ((c & 0xE0) == 0xC0)
-      step = 2;
-    else if ((c & 0xF0) == 0xE0)
-      step = 3;
-    else if ((c & 0xF8) == 0xF0)
-      step = 4;
-
-    // Clamp malformed/truncated sequences to avoid overrun.
-    for (size_t i = 1; i < step; i++) {
-      if (!s[bytes + i]) {
-        step = i;
-        break;
-      }
-    }
-    bytes += step;
-    chars++;
-  }
-  return bytes;
-}
-
-static void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
-                                        int x, int y, int w, int h, u8 style) {
-  if (!ts || title.empty() || w <= 8 || h <= 8)
-    return;
-
-  const int kPadX = 6;
-  const int kPadY = 6;
-  const int inner_w = w - kPadX * 2;
-  const int inner_h = h - kPadY * 2;
-  if (inner_w <= 8 || inner_h <= 8)
-    return;
-
-  int line_h = ts->GetHeight();
-  int max_lines = inner_h / std::max(1, line_h);
-  if (max_lines < 1)
-    return;
-
-  size_t pos = 0;
-  int drawn = 0;
-  while (pos < title.size() && drawn < max_lines) {
-    while (pos < title.size() && title[pos] == ' ')
-      pos++;
-    if (pos >= title.size())
-      break;
-
-    u8 fit = ts->GetCharCountInsideWidth(title.c_str() + pos, style, inner_w);
-    if (!fit)
-      break;
-
-    size_t take = Utf8BytesForCharCount(title.c_str() + pos, fit);
-    if (pos + take < title.size()) {
-      size_t back = take;
-      while (back > 0 && title[pos + back - 1] != ' ')
-        back--;
-      if (back > 0)
-        take = back;
-    }
-    std::string line = TrimSpaces(title.substr(pos, take));
-    if (line.empty()) {
-      pos += take;
-      continue;
-    }
-
-    // Set baseline below top padding to avoid clipping accents/ascenders.
-    ts->SetPen(x + kPadX, y + kPadY + (drawn + 1) * line_h);
-    ts->PrintString(line.c_str(), style);
-    drawn++;
-    pos += take;
-  }
-}
-
-struct MarqueeState {
-  Book   *book          = nullptr;
-  u16    *strip         = nullptr;
-  u16    *bg_strip      = nullptr;
-  int     strip_w       = 0;
-  int     strip_h       = 0;
-  int     strip_x       = 0;
-  int     strip_y       = 0;
-  int     blit_w        = 0;
-  int     scroll_offset = 0;
-  int     scroll_timer  = 0;
-  int     end_timer     = 0;
-  bool    active        = false;
-
-  void Reset() {
-    delete[] strip;
-    delete[] bg_strip;
-    strip    = nullptr;
-    bg_strip = nullptr;
-    book     = nullptr;
-    strip_w = strip_h = strip_x = strip_y = blit_w = 0;
-    scroll_offset = scroll_timer = end_timer = 0;
-    active = false;
-  }
-};
-
-static MarqueeState g_marquee;
+static BrowserGridMarqueeState g_marquee;
 
 } // namespace
 
@@ -805,6 +588,7 @@ void LibraryController::QueueBookWarmup(Book *book) {
       browser_warmup_utils::ShouldQueueCoverWarmupForDevice(
           app_.IsNew3dsDevice(), is_selected_book, warmup_idle, heavy_idle,
           queued_heavy_jobs);
+  const bool should_load_covers = ShouldCurrentBrowserLoadCovers(app_);
 
   const format_t format =
       app_flow_utils::DetectBookFormat(book->GetFileName());
@@ -813,21 +597,21 @@ void LibraryController::QueueBookWarmup(Book *book) {
     if (!book->metadataIndexTried &&
         app_flow_utils::SupportsMetadataIndexing(format))
       EnqueueJob(APP_JOB_INDEX_METADATA, book);
-    if (should_queue_cover)
+    if (should_load_covers && should_queue_cover)
       EnqueueJob(APP_JOB_EXTRACT_COVER, book);
   } else if (book->format == FORMAT_PDF) {
     if (!book->metadataIndexTried &&
         app_flow_utils::SupportsMetadataIndexing(format))
       EnqueueJob(APP_JOB_INDEX_METADATA, book);
-    if (should_queue_cover)
+    if (should_load_covers && should_queue_cover)
       EnqueueJob(APP_JOB_EXTRACT_COVER, book);
   } else if (book->format == FORMAT_CBZ) {
-    if (should_queue_cover)
+    if (should_load_covers && should_queue_cover)
       EnqueueJob(APP_JOB_EXTRACT_COVER, book);
   } else if (book->format == FORMAT_XHTML) {
     if (HasExtCI(book->GetFileName(), ".fb2") ||
         HasExtCI(book->GetFileName(), ".mobi")) {
-      if (should_queue_cover)
+      if (should_load_covers && should_queue_cover)
         EnqueueJob(APP_JOB_EXTRACT_COVER, book);
     }
   }
@@ -932,6 +716,11 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
     Book *book = job.book;
     int rc = 0;
     u64 t0 = osGetTime();
+
+    if (job.type == APP_JOB_EXTRACT_COVER && app_.GetMode() == AppMode::Browser &&
+        !ShouldCurrentBrowserLoadCovers(app_)) {
+      continue;
+    }
 
     if (job.type == APP_JOB_INDEX_METADATA) {
       if (!book->metadataIndexTried &&
@@ -1187,10 +976,12 @@ void LibraryController::browser_handleevent() {
       return;
     const int old_page_start = app_.GetBrowserPageStart();
     Book *old_selected = app_.GetSelectedBook();
+    const int page_size = CurrentBrowserPageSize(app_);
+    const int columns = CurrentBrowserColumnCount(app_);
     BrowserNavState state = {app_.GetBookIndex(app_.GetSelectedBook()),
                              app_.GetBrowserPageStart()};
-    state = BrowserNavMoveSelection(state, app_.BookCount(), APP_BROWSER_BUTTON_COUNT,
-                                    kBrowserGridCols, move);
+    state = BrowserNavMoveSelection(state, app_.BookCount(), page_size, columns,
+                                    move);
     if (state.selected_index < 0 || state.selected_index >= app_.BookCount())
       return;
     app_.SetBrowserPageStart(state.page_start);
@@ -1258,47 +1049,37 @@ void LibraryController::browser_handleevent() {
 
       // Prefer coarse cell hit-test (cover + title/progress area):
       // single tap selects, tapping selected book opens.
-      if (x >= kBrowserGridX0 && y >= kBrowserGridY0) {
-        int col = (x - kBrowserGridX0) / kBrowserCellW;
-        int row = (y - kBrowserGridY0) / kBrowserCellH;
-        if (col >= 0 && col < kBrowserGridCols && row >= 0 &&
-            row < kBrowserGridRows) {
-          int page_idx = row * kBrowserGridCols + col;
-          if (page_idx >= 0 && page_idx < APP_BROWSER_BUTTON_COUNT) {
-            int book_idx = app_.GetBrowserPageStart() + page_idx;
-            if (book_idx >= 0 && book_idx < app_.BookCount()) {
-              if (app_.GetSelectedBook() == app_.books[book_idx]) {
-                app_.OpenBook();
-              } else {
-                app_.SetSelectedBook(app_.books[book_idx]);
-                g_marquee.Reset();
-                PrioritizeSelectedBookJobs(app_.GetSelectedBook());
-                app_.SetBrowserLastInteractionMs(osGetTime());
-                app_.SetBrowserDirty(true);
-              }
-              return true;
+      int book_idx = -1;
+      if (CurrentBrowserViewMode(app_) == BROWSER_VIEW_LIST) {
+        book_idx = browser_list_view::HitTestBookIndex(
+            x, y, app_.GetBrowserPageStart(), app_.BookCount(),
+            CurrentBrowserPageSize(app_));
+      } else {
+        book_idx = browser_grid_view::HitTestBookIndex(
+            x, y, app_.GetBrowserPageStart(), app_.BookCount());
+        if (book_idx < 0) {
+          for (int i = app_.GetBrowserPageStart();
+               (i < app_.BookCount()) &&
+               (i < app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT);
+               i++) {
+            if (hitsButtonAt(*app_.buttons[i], x, y, 4)) {
+              book_idx = i;
+              break;
             }
           }
         }
       }
-
-      // Fallback to original cover hitboxes.
-      for (int i = app_.GetBrowserPageStart();
-           (i < app_.BookCount()) &&
-           (i < app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT);
-           i++) {
-        if (hitsButtonAt(*app_.buttons[i], x, y, 4)) {
-          if (app_.GetSelectedBook() == app_.books[i]) {
-            app_.OpenBook();
-          } else {
-            app_.SetSelectedBook(app_.books[i]);
-            g_marquee.Reset();
-            PrioritizeSelectedBookJobs(app_.GetSelectedBook());
-            app_.SetBrowserLastInteractionMs(osGetTime());
-            app_.SetBrowserDirty(true);
-          }
-          return true;
+      if (book_idx >= 0 && book_idx < app_.BookCount()) {
+        if (app_.GetSelectedBook() == app_.books[book_idx]) {
+          app_.OpenBook();
+        } else {
+          app_.SetSelectedBook(app_.books[book_idx]);
+          g_marquee.Reset();
+          PrioritizeSelectedBookJobs(app_.GetSelectedBook());
+          app_.SetBrowserLastInteractionMs(osGetTime());
+          app_.SetBrowserDirty(true);
         }
+        return true;
       }
       return false;
     };
@@ -1311,14 +1092,17 @@ void LibraryController::browser_handleevent() {
 void LibraryController::browser_init(void) {
   for (int i = 0; i < app_.BookCount(); i++) {
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
-    int col = page_idx % kBrowserGridCols;
-    int row = page_idx / kBrowserGridCols;
+    int col = page_idx % browser_grid_view::kGridCols;
+    int row = page_idx / browser_grid_view::kGridCols;
 
     app_.buttons.push_back(new Button());
     app_.buttons[i]->Init(app_.ts);
-    app_.buttons[i]->Resize(kBrowserCoverW + 4, kBrowserCoverH + 4);
-    app_.buttons[i]->Move(kBrowserGridX0 + col * kBrowserCellW,
-                     kBrowserGridY0 + row * kBrowserCellH);
+    app_.buttons[i]->Resize(browser_grid_view::kCoverW + 4,
+                            browser_grid_view::kCoverH + 4);
+    app_.buttons[i]->Move(browser_grid_view::kGridX0 +
+                              col * browser_grid_view::kCellW,
+                          browser_grid_view::kGridY0 +
+                              row * browser_grid_view::kCellH);
 
     // Cover extraction moved to browser_draw to avoid freezing at startup
     app_.buttons[i]->SetLabel1(std::string(""));
@@ -1330,13 +1114,21 @@ void LibraryController::browser_init(void) {
   app_.buttonprefs.Init(app_.ts);
   LayoutBrowserNavButtons(&app_);
 
+  if (app_.BookCount() <= 0) {
+    app_.SetBrowserPageStart(0);
+    app_.SetSelectedBook(NULL);
+    app_.SetBrowserLastInteractionMs(osGetTime());
+    app_.SetBrowserDirty(true);
+    return;
+  }
+
   if (!app_.GetSelectedBook()) {
     app_.SetBrowserPageStart(0);
     app_.SetSelectedBook(app_.books[0]);
   } else {
     app_.SetBrowserPageStart(
-        (app_.GetBookIndex(app_.GetSelectedBook()) / APP_BROWSER_BUTTON_COUNT) *
-        APP_BROWSER_BUTTON_COUNT);
+        (app_.GetBookIndex(app_.GetSelectedBook()) / CurrentBrowserPageSize(app_)) *
+        CurrentBrowserPageSize(app_));
   }
   g_marquee.Reset();
   PrioritizeSelectedBookJobs(app_.GetSelectedBook());
@@ -1345,9 +1137,9 @@ void LibraryController::browser_init(void) {
 }
 
 void LibraryController::browser_nextpage() {
-  if (app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT < app_.BookCount()) {
-    app_.SetBrowserPageStart(app_.GetBrowserPageStart() +
-                             APP_BROWSER_BUTTON_COUNT);
+  const int page_size = CurrentBrowserPageSize(app_);
+  if (app_.GetBrowserPageStart() + page_size < app_.BookCount()) {
+    app_.SetBrowserPageStart(app_.GetBrowserPageStart() + page_size);
     app_.SetSelectedBook(app_.books[app_.GetBrowserPageStart()]);
     g_marquee.Reset();
     PrioritizeSelectedBookJobs(app_.GetSelectedBook());
@@ -1358,11 +1150,11 @@ void LibraryController::browser_nextpage() {
 }
 
 void LibraryController::browser_prevpage() {
-  if (app_.GetBrowserPageStart() >= APP_BROWSER_BUTTON_COUNT) {
-    app_.SetBrowserPageStart(app_.GetBrowserPageStart() -
-                             APP_BROWSER_BUTTON_COUNT);
+  const int page_size = CurrentBrowserPageSize(app_);
+  if (app_.GetBrowserPageStart() >= page_size) {
+    app_.SetBrowserPageStart(app_.GetBrowserPageStart() - page_size);
     app_.SetSelectedBook(
-        app_.books[app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT - 1]);
+        app_.books[app_.GetBrowserPageStart() + page_size - 1]);
     g_marquee.Reset();
     PrioritizeSelectedBookJobs(app_.GetSelectedBook());
     app_.SetBrowserLastInteractionMs(osGetTime());
@@ -1403,168 +1195,26 @@ void LibraryController::browser_draw(void) {
   app_.ts->ClearScreen();
   app_.DrawBottomGradientBackground();
 
-  for (int i = app_.GetBrowserPageStart();
-       (i < app_.BookCount()) &&
-       (i < app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT); i++) {
-    app_.buttons[i]->Draw(app_.ts->screenright, app_.books[i] == app_.GetSelectedBook());
+  const BrowserViewMode view_mode = CurrentBrowserViewMode(app_);
+  const int page_size = CurrentBrowserPageSize(app_);
 
-    int page_idx = i % APP_BROWSER_BUTTON_COUNT;
-    int col = page_idx % kBrowserGridCols;
-    int row = page_idx / kBrowserGridCols;
-    int btnX = kBrowserGridX0 + col * kBrowserCellW;
-    int btnY = kBrowserGridY0 + row * kBrowserCellH;
-
-    if (app_.books[i]->coverPixels) {
-      int cx = btnX + 2 + (kBrowserCoverW - app_.books[i]->coverWidth) / 2;
-      int cy = btnY + 2 + (kBrowserCoverH - app_.books[i]->coverHeight) / 2;
-      int w = app_.ts->display.height; // buffer stride
-      app_.ts->MarkScreenDirtyRect(app_.ts->screenright, cx, cy,
-                              cx + app_.books[i]->coverWidth,
-                              cy + app_.books[i]->coverHeight);
-      for (int py = 0; py < app_.books[i]->coverHeight && (cy + py) < 320; py++) {
-        for (int px = 0; px < app_.books[i]->coverWidth && (cx + px) < 240; px++) {
-          app_.ts->screenright[(cy + py) * w + (cx + px)] =
-              app_.books[i]->coverPixels[py * app_.books[i]->coverWidth + px];
-        }
-      }
-    }
-
-    if (app_.books[i] == app_.GetSelectedBook()) {
-      app_.ts->DrawRect(btnX - 2, btnY - 2, btnX + kBrowserCellW + 2,
-                   btnY + kBrowserCellH + 2,
-                   0xF800);
-      app_.ts->DrawRect(btnX - 3, btnY - 3, btnX + kBrowserCellW + 3,
-                   btnY + kBrowserCellH + 3, 0xF800);
-      app_.ts->SetStyle(TEXT_STYLE_BOLD);
-    } else {
-      app_.ts->SetStyle(TEXT_STYLE_REGULAR);
-    }
-
-    // Draw filename (not EPUB metadata title):
-    //  - with cover: below thumbnail (single line)
-    //  - without cover: wrapped inside thumbnail rectangle
-    app_.ts->SetPixelSize(10);
-    std::string display_name = BuildBrowserDisplayName(app_.books[i]);
-    LogUtf8StageOnce(app_.books[i], "draw_label", display_name);
-    if (app_.books[i]->coverPixels) {
-        if (!display_name.empty()) {
-        LogUtf8StageOnce(app_.books[i], "draw_label_cut", display_name);
-        const char *dname = display_name.c_str();
-        u8 cur_style = (u8)app_.ts->GetStyle();
-        int full_w = (int)app_.ts->GetStringWidth(dname, cur_style);
-        Book *book_i = app_.books[i];
-        Book *sel = app_.GetSelectedBook();
-        bool overflows = full_w > kBrowserCellW;
-        bool is_selected = book_i == sel;
-
-        int saved_margin_right = app_.ts->margin.right;
-        bool saved_clip = app_.ts->IsClipToContentEnabled();
-        bool saved_wrap = app_.ts->IsAutoWrapEnabled();
-
-        app_.ts->margin.right = app_.ts->display.width - (btnX + kBrowserCellW);
-        app_.ts->SetClipToContentEnabled(true);
-        app_.ts->SetAutoWrapEnabled(false);
-
-        if (is_selected && overflows) {
-          const int glyph_top = btnY + kBrowserTitleOffsetY - app_.ts->GetHeight();
-          const int title_y = (glyph_top >= 0) ? glyph_top : 0;
-          const int sh = app_.ts->GetHeight() + 2;
-          const int sw = full_w;
-          const int fb_stride = app_.ts->display.height;
-
-          if (g_marquee.book != book_i) {
-            const int vis_w = (btnX + kBrowserCellW <= app_.ts->display.width)
-                                  ? kBrowserCellW
-                                  : app_.ts->display.width - btnX;
-
-            g_marquee.Reset();
-            g_marquee.book    = book_i;
-            g_marquee.strip_w = sw;
-            g_marquee.strip_h = sh;
-            g_marquee.strip_x = btnX;
-            g_marquee.strip_y = title_y;
-            g_marquee.blit_w  = vis_w;
-            g_marquee.strip   = new u16[sw * sh];
-            g_marquee.bg_strip = new u16[vis_w * sh];
-
-            for (int r = 0; r < sh; r++) {
-              const u16 *src = app_.ts->screenright + (title_y + r) * fb_stride + btnX;
-              u16 *dst = g_marquee.bg_strip + r * vis_w;
-              memcpy(dst, src, vis_w * sizeof(u16));
-            }
-
-            u16 *saved_screen = app_.ts->GetScreen();
-            int saved_mr      = app_.ts->margin.right;
-            int saved_ml      = app_.ts->margin.left;
-
-            const int off_fb_stride = app_.ts->display.height;
-            const int cap_w = (sw < app_.ts->display.width) ? sw : app_.ts->display.width;
-            for (int r = 0; r < sh; r++)
-              for (int c = 0; c < cap_w; c++)
-                app_.ts->offscreen[(title_y + r) * off_fb_stride + c] = 0xFFFF;
-
-            app_.ts->SetScreen(app_.ts->offscreen);
-            app_.ts->margin.left  = 0;
-            app_.ts->margin.right = 0;
-            app_.ts->SetPen(0, btnY + kBrowserTitleOffsetY);
-            app_.ts->PrintString(dname, cur_style);
-            app_.ts->margin.left  = saved_ml;
-            app_.ts->margin.right = saved_mr;
-            app_.ts->SetScreen(saved_screen);
-
-            for (int row = 0; row < sh; row++) {
-              const u16 *src = app_.ts->offscreen + (title_y + row) * fb_stride;
-              u16 *dst = g_marquee.strip + row * sw;
-              int copy_w = (sw < app_.ts->display.width) ? sw : app_.ts->display.width;
-              memcpy(dst, src, copy_w * sizeof(u16));
-            }
-            g_marquee.scroll_offset = 0;
-            g_marquee.scroll_timer  = 0;
-            g_marquee.active = true;
-          }
-        } else if (is_selected && !overflows) {
-          g_marquee.Reset();
-        }
-
-        if (!(is_selected && overflows)) {
-          app_.ts->SetPen(btnX, btnY + kBrowserTitleOffsetY);
-          app_.ts->PrintString(dname, cur_style);
-        }
-
-        app_.ts->margin.right = saved_margin_right;
-        app_.ts->SetClipToContentEnabled(saved_clip);
-        app_.ts->SetAutoWrapEnabled(saved_wrap);
-      }
-    } else {
-      LogUtf8StageOnce(app_.books[i], "draw_label_wrap", display_name);
-      DrawWrappedTitleInsideCover(app_.ts, display_name, btnX + 2, btnY + 2,
-                                  kBrowserCoverW, kBrowserCoverH,
-                                  TEXT_STYLE_BROWSER);
-    }
-
-    int pos = app_.books[i]->GetPosition();
-    char msg[16];
-    if (pos > 0)
-      snprintf(msg, sizeof(msg), "Pg %d", pos + 1);
-    else
-      snprintf(msg, sizeof(msg), "NEW");
-    app_.ts->SetPen(btnX, btnY + kBrowserProgressOffsetY);
-    app_.ts->PrintString(msg);
-  }
+  if (view_mode == BROWSER_VIEW_LIST)
+    browser_list_view::DrawPage(app_, app_.GetBrowserPageStart(), page_size);
+  else
+    browser_grid_view::DrawPage(app_, g_marquee, app_.GetBrowserPageStart());
 
   app_.ts->SetPixelSize(savedPixelSize);
 
-  if (app_.GetBrowserPageStart() >= APP_BROWSER_BUTTON_COUNT)
+  if (app_.GetBrowserPageStart() >= page_size)
     app_.buttonprev.Draw(app_.ts->screenright, false);
-  if (app_.BookCount() > app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT)
+  if (app_.BookCount() > app_.GetBrowserPageStart() + page_size)
     app_.buttonnext.Draw(app_.ts->screenright, false);
 
   app_.buttonprefs.Draw(app_.ts->screenright, false);
 
-  if (app_.BookCount() > APP_BROWSER_BUTTON_COUNT) {
-    int currentPage = (app_.GetBrowserPageStart() / APP_BROWSER_BUTTON_COUNT) + 1;
-    int totalPages =
-        (app_.BookCount() + APP_BROWSER_BUTTON_COUNT - 1) / APP_BROWSER_BUTTON_COUNT;
+  if (app_.BookCount() > page_size) {
+    int currentPage = (app_.GetBrowserPageStart() / page_size) + 1;
+    int totalPages = (app_.BookCount() + page_size - 1) / page_size;
     char pageMsg[32];
     snprintf(pageMsg, sizeof(pageMsg), "%d/%d", currentPage, totalPages);
     app_.ts->SetPixelSize(8);
@@ -1581,53 +1231,5 @@ void LibraryController::browser_draw(void) {
 }
 
 void LibraryController::browser_tick_marquee() {
-  if (!g_marquee.active || !g_marquee.strip || !g_marquee.bg_strip)
-    return;
-
-  const int kPauseFrames = 60;
-  const int scroll_max = g_marquee.strip_w - kBrowserCellW;
-
-  if (g_marquee.scroll_timer < kPauseFrames) {
-    g_marquee.scroll_timer++;
-  } else if (g_marquee.scroll_offset >= scroll_max) {
-    if (g_marquee.end_timer < kPauseFrames) {
-      g_marquee.end_timer++;
-    } else {
-      g_marquee.scroll_offset = 0;
-      g_marquee.scroll_timer  = 0;
-      g_marquee.end_timer     = 0;
-    }
-  } else {
-    g_marquee.scroll_offset++;
-  }
-
-  const int fb_stride = app_.ts->display.height;
-  const int tx  = g_marquee.strip_x;
-  const int ty  = g_marquee.strip_y;
-  const int sh  = g_marquee.strip_h;
-  const int sw  = g_marquee.strip_w;
-  const int off = g_marquee.scroll_offset;
-  const int bw  = g_marquee.blit_w;
-
-  int blit_w = bw;
-  if (blit_w + off > sw)
-    blit_w = sw - off;
-  if (blit_w <= 0)
-    return;
-
-  for (int row = 0; row < sh; row++) {
-    if (ty + row >= app_.ts->display.height)
-      break;
-    u16 *dst = app_.ts->screenright + (ty + row) * fb_stride + tx;
-    memcpy(dst, g_marquee.bg_strip + row * bw, bw * sizeof(u16));
-    const u16 *src = g_marquee.strip + row * sw + off;
-    for (int col = 0; col < blit_w; col++) {
-      if (src[col] != 0xFFFF)
-        dst[col] = src[col];
-    }
-  }
-
-  app_.ts->MarkScreenDirtyRect(app_.ts->screenright,
-                               tx, ty,
-                               tx + bw, ty + sh);
+  browser_grid_view::TickMarquee(app_, g_marquee);
 }

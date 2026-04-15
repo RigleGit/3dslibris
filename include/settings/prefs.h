@@ -12,6 +12,8 @@
 
 #pragma once
 
+#include "library/browser_view_mode.h"
+
 class App;
 
 class Prefs {
@@ -24,6 +26,7 @@ public:
   long modtime;
   bool swapshoulder;
   bool time24h;
+  BrowserViewMode browser_view_mode;
 
 private:
   App *app;
