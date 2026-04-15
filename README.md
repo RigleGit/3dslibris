@@ -20,14 +20,14 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 </table>
 
 ## Project status
-- Current app version: `2.2.0`
+- Current app version: `2.2.1`
 - Focus: stable daily reading on 3DS hardware and Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
 - Releases also include `3dslibris-debug.cia` for the same debug-oriented build on installed-title setups
 - Supported install paths: `.3dsx` plus `3dslibris-sdmc.zip`, or `3dslibris.cia` with books stored on SD and optional bundled books in RomFS.
-- Main reading focus in `2.2.0`: safer HOME/app lifecycle handling across `.3dsx` and `.cia`, more conservative old3DS cover scheduling under memory pressure, improved EPUB spacing/TOC handling, and better fixed-layout reading controls for PDF/CBZ/XPS on 3DS hardware.
+- Main reading focus in `2.2.1`: the library now supports an optional DSLibris-style list view for faster navigation, fixed-layout reading controls from `2.2.0` remain in place, and the debug `.cia` now installs alongside the release build instead of replacing it.
 
 ## Install
 
@@ -63,7 +63,7 @@ Generated install package targets:
 - `make cia` creates `3dslibris.cia`
 - `make debug-cia` creates `3dslibris-debug.cia`
 - `make source-release` creates `dist/3dslibris-source.tar.gz`
-- GitHub Releases: pushing a tag like `v2.2.0` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris-debug.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `dist/3dslibris-sdmc.zip`, and `dist/3dslibris-source.tar.gz` to the release
+- GitHub Releases: pushing a tag like `v2.2.1` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris-debug.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `dist/3dslibris-sdmc.zip`, and `dist/3dslibris-source.tar.gz` to the release
 
 ## Supported formats
 
