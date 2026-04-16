@@ -213,6 +213,8 @@ public:
   void SetOpeningPending(bool pending);
   Book *GetOpeningBook() const;
   void SetOpeningBook(Book *book);
+  unsigned int GetOpeningSessionId() const;
+  void SetOpeningSessionId(unsigned int session_id);
   bool IsOpeningNeedsRelayout() const;
   void SetOpeningNeedsRelayout(bool needs_relayout);
   int GetOpeningOldPageCount() const;
@@ -233,6 +235,9 @@ public:
   std::list<int> &MutableDeferredRelayoutOldBookmarks();
   int GetDeferredRelayoutInitialPosition() const;
   void SetDeferredRelayoutInitialPosition(int initial_position);
+  unsigned int GetCurrentBookSessionId() const;
+  void SetCurrentBookSessionId(unsigned int session_id);
+  unsigned int AllocateBookSessionId();
   unsigned int GetLayoutRevision() const;
   void SetLayoutRevision(unsigned int layout_revision);
   bool IsPdfTouchDragActive() const;
@@ -286,6 +291,7 @@ private:
   struct OpeningState {
     bool pending;
     Book *book;
+    unsigned int session_id;
     bool needs_relayout;
     int old_page_count;
     int old_position;
@@ -293,7 +299,7 @@ private:
     u64 started_at_ms;
 
     OpeningState()
-        : pending(false), book(NULL), needs_relayout(false),
+        : pending(false), book(NULL), session_id(0), needs_relayout(false),
           old_page_count(0), old_position(0), old_bookmarks(),
           started_at_ms(0) {}
   };
@@ -326,6 +332,8 @@ private:
     OpeningState opening;
     DeferredRelayoutState deferred_relayout;
     Book *bookcurrent;
+    unsigned int current_session_id;
+    unsigned int next_session_id;
     unsigned int layout_revision;
     bool pdf_touch_drag_active;
     int pdf_touch_last_x;
@@ -334,7 +342,8 @@ private:
     u64 mobi_deferred_ready_at_ms;
 
     ReaderRuntimeState()
-        : opening(), deferred_relayout(), bookcurrent(NULL), layout_revision(0),
+        : opening(), deferred_relayout(), bookcurrent(NULL),
+          current_session_id(0), next_session_id(1), layout_revision(0),
           pdf_touch_drag_active(false), pdf_touch_last_x(-1),
           pdf_touch_last_y(-1), pdf_deferred_ready_at_ms(0),
           mobi_deferred_ready_at_ms(0) {}

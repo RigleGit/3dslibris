@@ -26,6 +26,7 @@ struct Book::ReflowWorkerState {
     u64 submitted_at_ms;
     u64 started_at_ms;
     u64 finished_at_ms;
+    unsigned int session_id;
     LightEvent submit_event;
     LightEvent done_event;
     Thread thread_handle;
@@ -33,7 +34,8 @@ struct Book::ReflowWorkerState {
     Worker()
         : owner(NULL), shutdown_requested(false), job_pending(false),
           job_submitted(false), job_result(1), submitted_at_ms(0),
-          started_at_ms(0), finished_at_ms(0), thread_handle(NULL) {}
+          started_at_ms(0), finished_at_ms(0), session_id(0),
+          thread_handle(NULL) {}
   };
 
   bool is_new_3ds;
@@ -72,8 +74,8 @@ void ReflowWorkerThreadFunc(void *arg) {
                                ? (w->started_at_ms - w->submitted_at_ms)
                                : 0;
       DBG_LOGF(book->GetStatusReporter(),
-               "REFLOW[w]: open begin queue_ms=%llu book=%s",
-               (unsigned long long)queue_ms,
+               "REFLOW[w]: open begin session=%u queue_ms=%llu book=%s",
+               (unsigned)w->session_id, (unsigned long long)queue_ms,
                book->GetFileName() ? book->GetFileName() : "");
     }
     w->job_result = book->OpenPrepared();
@@ -84,8 +86,9 @@ void ReflowWorkerThreadFunc(void *arg) {
               ? (w->finished_at_ms - w->started_at_ms)
               : 0;
       DBG_LOGF(book->GetStatusReporter(),
-               "REFLOW[w]: open finish rc=%u worker_ms=%llu book=%s",
-               (unsigned)w->job_result, (unsigned long long)worker_ms,
+               "REFLOW[w]: open finish session=%u rc=%u worker_ms=%llu book=%s",
+               (unsigned)w->session_id, (unsigned)w->job_result,
+               (unsigned long long)worker_ms,
                book->GetFileName() ? book->GetFileName() : "");
     }
     __atomic_store_n(&w->job_pending, false, __ATOMIC_RELEASE);
@@ -131,7 +134,7 @@ bool Book::SupportsAsyncReflowOpen() const {
   return UsesTextLayoutSettings();
 }
 
-bool Book::StartAsyncReflowOpen() {
+bool Book::StartAsyncReflowOpen(unsigned int session_id) {
   if (!SupportsAsyncReflowOpen())
     return false;
 
@@ -177,6 +180,7 @@ bool Book::StartAsyncReflowOpen() {
   w->submitted_at_ms = osGetTime();
   w->started_at_ms = 0;
   w->finished_at_ms = 0;
+  w->session_id = session_id;
   LightEvent_Clear(&w->done_event);
   __atomic_store_n(&w->job_pending, true, __ATOMIC_RELEASE);
   w->job_submitted = true;
@@ -231,16 +235,18 @@ void Book::CancelAsyncReflowOpen() {
   if (w->thread_handle) {
 #ifdef DSLIBRIS_DEBUG
     if (GetStatusReporter())
-      DBG_LOGF(GetStatusReporter(), "REFLOW cancel: joining thread book=%s",
-               GetFileName() ? GetFileName() : "");
+      DBG_LOGF(GetStatusReporter(),
+               "REFLOW cancel: joining thread session=%u book=%s",
+               (unsigned)w->session_id, GetFileName() ? GetFileName() : "");
 #endif
     threadJoin(w->thread_handle, U64_MAX);
     threadFree(w->thread_handle);
     w->thread_handle = NULL;
 #ifdef DSLIBRIS_DEBUG
     if (GetStatusReporter())
-      DBG_LOGF(GetStatusReporter(), "REFLOW cancel: thread joined book=%s",
-               GetFileName() ? GetFileName() : "");
+      DBG_LOGF(GetStatusReporter(),
+               "REFLOW cancel: thread joined session=%u book=%s",
+               (unsigned)w->session_id, GetFileName() ? GetFileName() : "");
 #endif
   }
   delete w;
