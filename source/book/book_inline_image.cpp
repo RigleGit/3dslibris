@@ -10,6 +10,7 @@
 
 #include "book/book.h"
 
+#include "book/inline_image_page_layout_utils.h"
 #include "book/inline_image_screen_layout.h"
 #include "base64_utils.h"
 #include "debug_log.h"
@@ -693,18 +694,15 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
       page_imgW = 0;
       page_imgH = 0;
     } else {
-      const int pad = 2;
-      const int avail_w = screen_w - (pad * 2);
-      const int avail_h = screen_h - (pad * 2);
-      int sx = (avail_w * 1024) / std::max(1, page_imgW);
-      int sy = (avail_h * 1024) / std::max(1, page_imgH);
-      int scale = std::min(sx, sy);
-      if (scale > 1024)
-        scale = 1024;
-      draw_w = std::max(1, (page_imgW * scale + 512) / 1024);
-      draw_h = std::max(1, (page_imgH * scale + 512) / 1024);
-      start_x = pad + (avail_w - draw_w) / 2;
-      start_y = pad + (avail_h - draw_h) / 2;
+      const InlineImagePagePlacement placement =
+          ResolveInlineImagePagePlacement(
+              screen_w, screen_h, ts->margin.left, ts->margin.right,
+              ts->margin.top, draw_screen_layout.current_margin_bottom,
+              page_imgW, page_imgH, 2);
+      draw_w = placement.draw_width;
+      draw_h = placement.draw_height;
+      start_x = placement.start_x;
+      start_y = placement.start_y;
     }
   }
 
