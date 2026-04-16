@@ -4,6 +4,7 @@
 #include <string>
 
 #include "app/app.h"
+#include "debug_log.h"
 #include "library/browser_warmup_utils.h"
 
 MainLoopController::MainLoopController(App &app) : app_(app) {}
@@ -60,11 +61,17 @@ int MainLoopController::RunMainLoop() {
 
     case AppMode::Browser:
       app_.browser_handleevent();
-      if (app_.GetMode() != AppMode::Browser)
+      if (app_.GetMode() != AppMode::Browser) {
+        DBG_LOGF(&app_, "MAIN browser frame aborted after handleevent mode=%d",
+                 (int)app_.GetMode());
         break;
+      }
       app_.TickBrowserWarmup();
-      if (app_.GetMode() != AppMode::Browser)
+      if (app_.GetMode() != AppMode::Browser) {
+        DBG_LOGF(&app_, "MAIN browser frame aborted after warmup mode=%d",
+                 (int)app_.GetMode());
         break;
+      }
       app_.browser_tick_marquee();
       if (app_.IsBrowserDirty())
         app_.browser_draw();

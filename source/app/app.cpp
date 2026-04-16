@@ -41,6 +41,7 @@
 #include "path_utils.h"
 #include "parse.h"
 #include "settings/prefs.h"
+#include "reader/book_switch_utils.h"
 #include "ui/text.h"
 
 #ifndef ORIENTATION_DIAG
@@ -472,6 +473,14 @@ Book *App::GetOpeningBook() const { return reader_state_.opening.book; }
 
 void App::SetOpeningBook(Book *book) { reader_state_.opening.book = book; }
 
+unsigned int App::GetOpeningSessionId() const {
+  return reader_state_.opening.session_id;
+}
+
+void App::SetOpeningSessionId(unsigned int session_id) {
+  reader_state_.opening.session_id = session_id;
+}
+
 bool App::IsOpeningNeedsRelayout() const {
   return reader_state_.opening.needs_relayout;
 }
@@ -564,6 +573,20 @@ int App::GetDeferredRelayoutInitialPosition() const {
 
 void App::SetDeferredRelayoutInitialPosition(int initial_position) {
   reader_state_.deferred_relayout.initial_position = initial_position;
+}
+
+unsigned int App::GetCurrentBookSessionId() const {
+  return reader_state_.current_session_id;
+}
+
+void App::SetCurrentBookSessionId(unsigned int session_id) {
+  reader_state_.current_session_id = session_id;
+}
+
+unsigned int App::AllocateBookSessionId() {
+  unsigned int session_id = reader_state_.next_session_id;
+  reader_state_.next_session_id = NextBookSessionId(reader_state_.next_session_id);
+  return session_id;
 }
 
 unsigned int App::GetLayoutRevision() const { return reader_state_.layout_revision; }

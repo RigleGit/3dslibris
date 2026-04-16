@@ -301,7 +301,7 @@ public:
   u8 Parse(bool fulltext = true);
   int ParseHTML();
   bool SupportsAsyncReflowOpen() const;
-  bool StartAsyncReflowOpen();
+  bool StartAsyncReflowOpen(unsigned int session_id = 0);
   bool PumpAsyncReflowOpen();
   bool IsAsyncReflowOpenPending() const;
   u8 ConsumeAsyncReflowOpenResult();
