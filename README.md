@@ -20,14 +20,14 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 </table>
 
 ## Project status
-- Current app version: `2.3.0`
+- Current app version: `2.3.1`
 - Focus: stable daily reading on 3DS hardware and Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
 - Releases also include `3dslibris-debug.cia` for the same debug-oriented build on installed-title setups
 - Supported install paths: `.3dsx` plus `3dslibris-sdmc.zip`, or `3dslibris.cia` with books stored on SD and optional bundled books in RomFS.
-- Main reading focus in `2.3.0`: this release improves in-book navigation and menu structure with a dedicated split between `GENERAL` and `BOOK` settings, plus a per-book `go to page` slider popup for faster jumps in long books, while retaining the recent EPUB compatibility fixes from `2.2.2`.
+- Main reading focus in `2.3.1`: this release keeps the `GENERAL` / `BOOK` settings split and the per-book `go to page` slider from `2.3.0`, while fixing a real crash when switching directly from one open book to another and hardening the reader handoff state so failed opens return cleanly to the library.
 
 ## Install
 
@@ -63,7 +63,7 @@ Generated install package targets:
 - `make cia` creates `3dslibris.cia`
 - `make debug-cia` creates `3dslibris-debug.cia`
 - `make source-release` creates `dist/3dslibris-source.tar.gz`
-- GitHub Releases: pushing a tag like `v2.3.0` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris-debug.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `dist/3dslibris-sdmc.zip`, and `dist/3dslibris-source.tar.gz` to the release
+- GitHub Releases: pushing a tag like `v2.3.1` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris-debug.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `dist/3dslibris-sdmc.zip`, and `dist/3dslibris-source.tar.gz` to the release
 
 ## Supported formats
 
@@ -79,6 +79,7 @@ Generated install package targets:
   - common hidden accessibility/helper text is ignored when marked with `hidden`, `aria-hidden`, `display:none`, `visibility:hidden`, or `visually-hidden`-style classes
   - cosmetic EPUB print-page markers such as hidden `epub:type="pagebreak"` / `role="doc-pagebreak"` spans are ignored instead of forcing bogus page breaks in the reflowed text
   - CSS list marker suppression is honored for reflowed lists, including class-driven rules such as `list-style-type: none`
+  - Switching from one already-open book to another from the library no longer reuses stale reader state or leaves the app stuck on the opening screen after a failed open
   - punctuation handling keeps Spanish opening/closing punctuation attached across inline style boundaries in common cases
   - inline SVG image wrappers are detected and resolved when they point to supported raster image assets
 
