@@ -575,20 +575,6 @@ void App::SetDeferredRelayoutInitialPosition(int initial_position) {
   reader_state_.deferred_relayout.initial_position = initial_position;
 }
 
-unsigned int App::GetCurrentBookSessionId() const {
-  return reader_state_.current_session_id;
-}
-
-void App::SetCurrentBookSessionId(unsigned int session_id) {
-  reader_state_.current_session_id = session_id;
-}
-
-unsigned int App::AllocateBookSessionId() {
-  unsigned int session_id = reader_state_.next_session_id;
-  reader_state_.next_session_id = NextBookSessionId(reader_state_.next_session_id);
-  return session_id;
-}
-
 unsigned int App::GetLayoutRevision() const { return reader_state_.layout_revision; }
 
 void App::SetLayoutRevision(unsigned int layout_revision) {
