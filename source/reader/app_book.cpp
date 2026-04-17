@@ -337,8 +337,11 @@ u8 OpenSelectedBook(App *app) {
   if (!selected)
     return 254;
 
-  if (app->GetCurrentBook() && app->GetCurrentBook() != selected)
+  if (app->GetCurrentBook() && app->GetCurrentBook() != selected) {
     app->GetCurrentBook()->Close();
+    app->SetCurrentBook(NULL);
+    app->SetCurrentBookSessionId(0);
+  }
   if (int err = selected->Open()) {
     if (const char *desc = DescribeBookOpenError(err)) {
       app->PrintStatus(desc);
@@ -376,15 +379,42 @@ void ReaderController::ClearDeferredRelayoutState() {
 
 void ReaderController::OnAppletSuspended() {
   Book *bookcurrent_ = app_.GetCurrentBook();
+  Book *opening_book = app_.GetOpeningBook();
   app_.SetPdfTouchDragActive(false);
   app_.SetPdfTouchLastX(-1);
   app_.SetPdfTouchLastY(-1);
   app_.SetPdfDeferredReadyAtMs(0);
   app_.SetMobiDeferredReadyAtMs(0);
-  if (!bookcurrent_)
+  if (bookcurrent_) {
+    bookcurrent_->SetFixedLayoutViewportInteraction(false);
+    bookcurrent_->CancelFixedLayoutDeferredWork();
+  }
+  if (!opening_book)
     return;
-  bookcurrent_->SetFixedLayoutViewportInteraction(false);
-  bookcurrent_->CancelFixedLayoutDeferredWork();
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(&app_,
+           "BOOK suspend: cancel opening session=%u book=%s async=%u mobi=%u",
+           app_.GetOpeningSessionId(),
+           opening_book->GetFileName() ? opening_book->GetFileName() : "",
+           opening_book->IsAsyncReflowOpenPending() ? 1u : 0u,
+           opening_book->HasDeferredMobiParse() ? 1u : 0u);
+#endif
+  opening_book->CancelFixedLayoutDeferredWork();
+  opening_book->RequestAbortOpen();
+  opening_book->CancelDeferredMobiParse();
+  opening_book->CancelAsyncReflowOpen();
+  app_.SetOpeningPending(false);
+  app_.SetOpeningBook(NULL);
+  app_.SetOpeningSessionId(0);
+  app_.SetOpeningNeedsRelayout(false);
+  app_.SetOpeningOldPageCount(0);
+  app_.SetOpeningOldPosition(0);
+  app_.MutableOpeningOldBookmarks().clear();
+  app_.SetOpeningStartedAtMs(0);
+  if (app_.GetMode() == AppMode::Opening) {
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
+  }
 }
 
 void ReaderController::OnAppletResumed() {
@@ -432,6 +462,32 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
 void ReaderController::HandleEventInOpening() {
   Prefs *prefs = app_.prefs;
   Text *ts = app_.ts;
+  const u32 keys = hidKeysDown();
+
+  if (keys & (app_.key.b | app_.key.start | app_.key.select)) {
+    Book *cancel_book = app_.GetOpeningBook();
+    if (cancel_book) {
+#ifdef DSLIBRIS_DEBUG
+      DBG_LOGF(&app_, "BOOK open cancel: session=%u book=%s",
+               app_.GetOpeningSessionId(),
+               cancel_book->GetFileName() ? cancel_book->GetFileName() : "");
+#endif
+      cancel_book->RequestAbortOpen();
+      cancel_book->CancelDeferredMobiParse();
+      cancel_book->CancelAsyncReflowOpen();
+    }
+    app_.SetOpeningPending(false);
+    app_.SetOpeningBook(NULL);
+    app_.SetOpeningSessionId(0);
+    app_.SetOpeningNeedsRelayout(false);
+    app_.SetOpeningOldPageCount(0);
+    app_.SetOpeningOldPosition(0);
+    app_.MutableOpeningOldBookmarks().clear();
+    app_.SetOpeningStartedAtMs(0);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
+    return;
+  }
 
   if (!app_.IsOpeningPending() || !app_.GetOpeningBook()) {
     app_.SetMode(AppMode::Browser);
@@ -440,14 +496,30 @@ void ReaderController::HandleEventInOpening() {
   }
 
   Book *opening_book = app_.GetOpeningBook();
+  if (app_.GetOpeningSessionId() != opening_book->GetOpenSessionId()) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(&app_,
+             "REFLOW: stale opening session app=%u book=%u book=%s",
+             app_.GetOpeningSessionId(), opening_book->GetOpenSessionId(),
+             opening_book->GetFileName() ? opening_book->GetFileName() : "");
+#endif
+    app_.SetOpeningPending(false);
+    app_.SetOpeningBook(NULL);
+    app_.SetOpeningSessionId(0);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
+    return;
+  }
   if (!opening_book->PumpAsyncReflowOpen())
     return;
 
   const u8 err = opening_book->ConsumeAsyncReflowOpenResult();
   const u64 elapsed_ms =
       app_.GetOpeningStartedAtMs() ? (osGetTime() - app_.GetOpeningStartedAtMs()) : 0;
-  DBG_LOGF(&app_, "REFLOW: async open complete rc=%u ms=%llu book=%s",
-           (unsigned)err, (unsigned long long)elapsed_ms,
+  DBG_LOGF(&app_,
+           "REFLOW: async open complete session=%u rc=%u ms=%llu book=%s",
+           app_.GetOpeningSessionId(), (unsigned)err,
+           (unsigned long long)elapsed_ms,
            opening_book->GetFileName() ? opening_book->GetFileName() : "");
 
   OpenBookRelayoutState relayout_state = {
@@ -456,6 +528,7 @@ void ReaderController::HandleEventInOpening() {
 
   app_.SetOpeningPending(false);
   app_.SetOpeningBook(NULL);
+  app_.SetOpeningSessionId(0);
   app_.SetOpeningNeedsRelayout(false);
   app_.SetOpeningOldPageCount(0);
   app_.SetOpeningOldPosition(0);
@@ -464,6 +537,11 @@ void ReaderController::HandleEventInOpening() {
 
   if (err) {
     ClearDeferredRelayoutState();
+    if (err == BOOK_ERR_CANCELLED) {
+      app_.SetMode(AppMode::Browser);
+      app_.SetBrowserDirty(true);
+      return;
+    }
     if (const char *desc = DescribeBookOpenError(err)) {
       app_.PrintStatus(desc);
     } else {
@@ -802,8 +880,14 @@ void ReaderController::CloseBook() {
   Book *bookcurrent_ = app_.GetCurrentBook();
 
   if (bookcurrent_) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(&app_, "BOOK close session=%u book=%s",
+             app_.GetCurrentBookSessionId(),
+             bookcurrent_->GetFileName() ? bookcurrent_->GetFileName() : "");
+#endif
     bookcurrent_->Close();
     app_.SetCurrentBook(NULL);
+    app_.SetCurrentBookSessionId(0);
   }
   app_.SetPdfDeferredReadyAtMs(0);
   app_.SetMobiDeferredReadyAtMs(0);
@@ -835,6 +919,22 @@ u8 ReaderController::OpenBook() {
   if (!selected_book)
     return 254;
 
+  const unsigned int open_session_id =
+      (bookcurrent_ == selected_book && selected_book->GetPageCount() > 0 &&
+       !needs_relayout)
+          ? app_.GetCurrentBookSessionId()
+          : app_.AllocateBookSessionId();
+  selected_book->SetOpenSessionId(open_session_id);
+
+  DBG_LOGF(&app_,
+           "BOOK open request session=%u book=%s current=%s mode=%d relayout=%u",
+           open_session_id,
+           selected_book->GetFileName() ? selected_book->GetFileName() : "",
+           bookcurrent_ && bookcurrent_->GetFileName()
+               ? bookcurrent_->GetFileName()
+               : "",
+           (int)app_.GetMode(), needs_relayout ? 1u : 0u);
+
   DBG_LOG(&app_, "opening book ...");
   if (selected_book->GetTitle())
     DBG_LOG(&app_, selected_book->GetTitle());
@@ -844,6 +944,7 @@ u8 ReaderController::OpenBook() {
   // Fast path: selected book is already parsed and resident.
   if (selected_book->GetPageCount() > 0 && !needs_relayout) {
     ReuseParsedBook(&app_);
+    app_.SetCurrentBookSessionId(open_session_id);
     if (app_.GetDeferredRelayoutBook() != app_.GetCurrentBook())
       ClearDeferredRelayoutState();
     bookcurrent_ = app_.GetCurrentBook();
@@ -865,17 +966,22 @@ u8 ReaderController::OpenBook() {
   DrawOpeningSplash(&app_);
 
   if (selected_book->SupportsAsyncReflowOpen()) {
-    if (app_.GetCurrentBook() && app_.GetCurrentBook() != selected_book)
+    if (app_.GetCurrentBook() && app_.GetCurrentBook() != selected_book) {
       app_.GetCurrentBook()->Close();
+      app_.SetCurrentBook(NULL);
+      app_.SetCurrentBookSessionId(0);
+    }
     if (selected_book->StartAsyncReflowOpen()) {
       app_.SetOpeningPending(true);
       app_.SetOpeningBook(selected_book);
+      app_.SetOpeningSessionId(open_session_id);
       app_.SetOpeningNeedsRelayout(relayout_state.needs_relayout);
       app_.SetOpeningOldPageCount(relayout_state.old_page_count);
       app_.SetOpeningOldPosition(relayout_state.old_position);
       app_.MutableOpeningOldBookmarks() = relayout_state.old_bookmarks;
       app_.SetOpeningStartedAtMs(osGetTime());
-      DBG_LOGF(&app_, "REFLOW: async open submitted book=%s",
+      DBG_LOGF(&app_, "REFLOW: async open submitted session=%u book=%s",
+               open_session_id,
                selected_book->GetFileName()
                    ? selected_book->GetFileName()
                    : "");
@@ -891,6 +997,7 @@ u8 ReaderController::OpenBook() {
   if (u8 err = OpenSelectedBook(&app_))
     return err;
   app_.SetCurrentBook(selected_book);
+  app_.SetCurrentBookSessionId(open_session_id);
   bookcurrent_ = app_.GetCurrentBook();
   // Remember which layout generation produced these pages.
   bookcurrent_->SetLayoutRevision(app_.GetLayoutRevision());
@@ -904,6 +1011,7 @@ u8 ReaderController::OpenBook() {
     app_.PrintStatus("error: book has no parsed pages");
     bookcurrent_->Close();
     app_.SetCurrentBook(nullptr);
+    app_.SetCurrentBookSessionId(0);
     app_.SetMode(AppMode::Browser);
     app_.SetBrowserDirty(true);
     return 253;

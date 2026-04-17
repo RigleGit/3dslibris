@@ -60,7 +60,11 @@ int MainLoopController::RunMainLoop() {
 
     case AppMode::Browser:
       app_.browser_handleevent();
+      if (app_.GetMode() != AppMode::Browser)
+        break;
       app_.TickBrowserWarmup();
+      if (app_.GetMode() != AppMode::Browser)
+        break;
       app_.browser_tick_marquee();
       if (app_.IsBrowserDirty())
         app_.browser_draw();
