@@ -30,11 +30,14 @@ struct XmlParserOptions {
   XML_UnknownEncodingHandler unknown_encoding;
   void *unknown_encoding_data;
   void *user_data;
+  XmlShouldStopFn abort_parse;
+  void *abort_user_data;
 
   XmlParserOptions()
       : start_element(NULL), end_element(NULL), character_data(NULL),
         default_handler(NULL), processing_instruction(NULL),
-        unknown_encoding(NULL), unknown_encoding_data(NULL), user_data(NULL) {}
+        unknown_encoding(NULL), unknown_encoding_data(NULL), user_data(NULL),
+        abort_parse(NULL), abort_user_data(NULL) {}
 };
 
 struct XmlParseResult {

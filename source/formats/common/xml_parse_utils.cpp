@@ -48,6 +48,12 @@ static XML_Parser CreateParser(const XmlParserOptions &options) {
   return parser;
 }
 
+static bool ShouldAbortParse(const XmlParserOptions &options) {
+  return options.abort_parse &&
+         options.abort_parse(options.abort_user_data ? options.abort_user_data
+                                                    : options.user_data);
+}
+
 } // namespace
 
 XmlParseResult ParseXmlFileStream(FILE *fp, const XmlParserOptions &options,
@@ -66,6 +72,11 @@ XmlParseResult ParseXmlFileStream(FILE *fp, const XmlParserOptions &options,
 
   XmlParseResult result;
   while (true) {
+    if (ShouldAbortParse(options)) {
+      result = BuildCustomError(parser, XML_ERROR_ABORTED,
+                                result.bytes_consumed);
+      break;
+    }
     void *buffer = XML_GetBuffer(parser, (int)chunk_size);
     if (!buffer) {
       result = BuildParseError(parser, result.bytes_consumed);
@@ -88,6 +99,11 @@ XmlParseResult ParseXmlFileStream(FILE *fp, const XmlParserOptions &options,
     }
     if (should_stop && should_stop(options.user_data))
       break;
+    if (ShouldAbortParse(options)) {
+      result = BuildCustomError(parser, XML_ERROR_ABORTED,
+                                result.bytes_consumed);
+      break;
+    }
     if (bytes_read == 0)
       break;
   }
@@ -140,6 +156,11 @@ XmlParseResult ParseXmlZipEntry(unzFile uf, const XmlParserOptions &options,
   std::vector<char> buffer(chunk_size);
   XmlParseResult result;
   while (true) {
+    if (ShouldAbortParse(options)) {
+      result = BuildCustomError(parser, XML_ERROR_ABORTED,
+                                result.bytes_consumed);
+      break;
+    }
     int len = unzReadCurrentFile(uf, buffer.data(), (unsigned)buffer.size());
     if (len < 0) {
       result = BuildCustomError(parser, XML_ERROR_EXTERNAL_ENTITY_HANDLING,
@@ -151,6 +172,11 @@ XmlParseResult ParseXmlZipEntry(unzFile uf, const XmlParserOptions &options,
     result.bytes_consumed += (size_t)len;
     if (status == XML_STATUS_ERROR) {
       result = BuildParseError(parser, result.bytes_consumed);
+      break;
+    }
+    if (ShouldAbortParse(options)) {
+      result = BuildCustomError(parser, XML_ERROR_ABORTED,
+                                result.bytes_consumed);
       break;
     }
     if (len == 0)

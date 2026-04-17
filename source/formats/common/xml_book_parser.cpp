@@ -3,6 +3,7 @@
 #include "book/book.h"
 #include "book/book_xml.h"
 #include "formats/common/plain_text_perf_utils.h"
+#include "formats/common/book_error.h"
 #include "formats/common/xml_parse_utils.h"
 #include "parse.h"
 #include "shared/parser_limits.h"
@@ -55,6 +56,13 @@ u8 ParseXmlBookFile(Book *book, const char *path, bool fulltext,
 
   xml_parse_utils::XmlParserOptions options;
   options.user_data = &parsedata;
+  options.abort_parse = [](void *user_data) {
+    parsedata_t *parsedata = static_cast<parsedata_t *>(user_data);
+    return parsedata &&
+           ((parsedata->book && parsedata->book->IsOpenAbortRequested()) ||
+            (parsedata->reporter && parsedata->reporter->ShouldAbortWork()));
+  };
+  options.abort_user_data = &parsedata;
   options.default_handler = xml::book::fallback;
   options.processing_instruction = xml::book::instruction;
   options.start_element = xml::book::start;
@@ -74,10 +82,14 @@ u8 ParseXmlBookFile(Book *book, const char *path, bool fulltext,
           });
   fclose(fp);
   if (!parse_result.ok) {
-    if (deps.reporter)
-      deps.reporter->PrintStatus(
-          xml_parse_utils::FormatXmlParseError(parse_result).c_str());
-    rc = 254;
+    if (parse_result.error_code == XML_ERROR_ABORTED) {
+      rc = BOOK_ERR_CANCELLED;
+    } else {
+      if (deps.reporter)
+        deps.reporter->PrintStatus(
+            xml_parse_utils::FormatXmlParseError(parse_result).c_str());
+      rc = 254;
+    }
   }
 
   if (rc == 0 && fulltext && parsedata.fb2_mode) {

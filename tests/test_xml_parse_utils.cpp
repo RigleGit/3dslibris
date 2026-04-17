@@ -83,11 +83,20 @@ struct UnknownEncodingState {
   int calls;
 };
 
+struct AbortState {
+  bool abort;
+};
+
 int RejectUnknownEncoding(void *data, const XML_Char *, XML_Encoding *) {
   UnknownEncodingState *state = static_cast<UnknownEncodingState *>(data);
   if (state)
     state->calls++;
   return XML_STATUS_ERROR;
+}
+
+bool ShouldAbort(void *user_data) {
+  AbortState *state = static_cast<AbortState *>(user_data);
+  return state && state->abort;
 }
 
 std::string WriteTempFile(const char *contents) {
@@ -203,6 +212,31 @@ int main() {
     ExpectEq("unknown encoding callback count", encoding_state.calls, 1);
     ExpectEq("unknown encoding error", (int)result.error_code,
              (int)XML_ERROR_UNKNOWN_ENCODING);
+  }
+
+  {
+    std::string path = WriteTempFile("<root><item>abort</item></root>");
+    FILE *fp = fopen(path.c_str(), "rb");
+    if (!fp)
+      Fail("fopen failed");
+
+    ScanState state = {0, 0, 0, false, ""};
+    AbortState abort_state = {true};
+    xml_parse_utils::XmlParserOptions options;
+    options.start_element = ScanStart;
+    options.end_element = ScanEnd;
+    options.character_data = ScanChar;
+    options.user_data = &state;
+    options.abort_parse = ShouldAbort;
+    options.abort_user_data = &abort_state;
+    xml_parse_utils::XmlParseResult result =
+        ParseXmlFileStream(fp, options, 4);
+    fclose(fp);
+    unlink(path.c_str());
+
+    ExpectFalse("abort parse reports failure", result.ok);
+    ExpectEq("abort parse error", (int)result.error_code,
+             (int)XML_ERROR_ABORTED);
   }
 
   return 0;
