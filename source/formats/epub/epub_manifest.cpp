@@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "book/epub_css_class_map.h"
 #include "book/page.h"
 #include "debug_log.h"
+#include "formats/common/book_error.h"
 #include "formats/common/xml_parse_utils.h"
 #include "formats/epub/epub_cover.h"
 #include "formats/epub/epub_package_toc_utils.h"
@@ -306,9 +307,25 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
   xml_parse_utils::XmlParserOptions options;
   if (epd->type == PARSE_CONTAINER) {
     options.user_data = epd;
+    options.abort_parse = [](void *user_data) {
+      Book *book = static_cast<Book *>(user_data);
+      return book &&
+             ((book->GetStatusReporter() &&
+               book->GetStatusReporter()->ShouldAbortWork()) ||
+              book->IsOpenAbortRequested());
+    };
+    options.abort_user_data = epd->book;
     options.start_element = epub_container_start;
   } else if (epd->type == PARSE_ROOTFILE) {
     options.user_data = epd;
+    options.abort_parse = [](void *user_data) {
+      Book *book = static_cast<Book *>(user_data);
+      return book &&
+             ((book->GetStatusReporter() &&
+               book->GetStatusReporter()->ShouldAbortWork()) ||
+              book->IsOpenAbortRequested());
+    };
+    options.abort_user_data = epd->book;
     options.start_element = epub_rootfile_start;
     options.end_element = epub_rootfile_end;
     options.character_data = epub_rootfile_char;
@@ -329,6 +346,13 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
       layout_before = text_layout_utils::GetPerfStats();
     }
     options.user_data = &pd;
+    options.abort_parse = [](void *user_data) {
+      parsedata_t *parsedata = static_cast<parsedata_t *>(user_data);
+      return parsedata &&
+             ((parsedata->book && parsedata->book->IsOpenAbortRequested()) ||
+              (parsedata->reporter && parsedata->reporter->ShouldAbortWork()));
+    };
+    options.abort_user_data = &pd;
     options.start_element = xml::book::start;
     options.end_element = xml::book::end;
     options.character_data = xml::book::chardata;
@@ -372,7 +396,9 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
   }
 #endif
   if (!parse_result.ok)
-    rc = (int)parse_result.error_code;
+    rc = (parse_result.error_code == XML_ERROR_ABORTED)
+             ? BOOK_ERR_CANCELLED
+             : (int)parse_result.error_code;
   if (epd->type == PARSE_CONTENT) {
     epd->parsed_doc_title = Trim(pd.doc_heading);
     if (epd->parsed_doc_title.empty())
@@ -445,15 +471,22 @@ int LoadEpubPackageForParse(
     return 2;
 
   rc = unzOpenCurrentFile(uf);
+  if (rc != UNZ_OK)
+    return rc;
   epub_data_init(parsedata);
   parsedata->book = book;
   parsedata->type = PARSE_CONTAINER;
-  rc = epub_parse_currentfile(uf, parsedata, deps);
-  rc = unzCloseCurrentFile(uf);
+  {
+    const int parse_rc = epub_parse_currentfile(uf, parsedata, deps);
+    const int close_rc = unzCloseCurrentFile(uf);
+    rc = (parse_rc != 0) ? parse_rc : close_rc;
+  }
 #ifdef DSLIBRIS_DEBUG
   if (t_after_container)
     *t_after_container = osGetTime();
 #endif
+  if (rc != 0)
+    return rc;
 
   folder->clear();
   size_t pos = parsedata->rootfile.find_last_of("/", parsedata->rootfile.length());
@@ -463,11 +496,14 @@ int LoadEpubPackageForParse(
   rc = unzLocateFile(uf, parsedata->rootfile.c_str(), 0);
   if (rc == UNZ_OK) {
     rc = unzOpenCurrentFile(uf);
+    if (rc != UNZ_OK)
+      return rc;
     epub_data_init(parsedata);
     parsedata->book = book;
     parsedata->type = PARSE_ROOTFILE;
-    epub_parse_currentfile(uf, parsedata, deps);
-    rc = unzCloseCurrentFile(uf);
+    const int parse_rc = epub_parse_currentfile(uf, parsedata, deps);
+    const int close_rc = unzCloseCurrentFile(uf);
+    rc = (parse_rc != 0) ? parse_rc : close_rc;
   }
 #ifdef DSLIBRIS_DEBUG
   if (t_after_rootfile)

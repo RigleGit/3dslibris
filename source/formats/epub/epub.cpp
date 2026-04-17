@@ -234,10 +234,15 @@ static int ParseEpubSpineDocuments(
       size_t anchors_before = book->GetChapterAnchorCount();
 #endif
       rc = unzOpenCurrentFile(uf);
+      if (rc != UNZ_OK)
+        break;
       parsedata->docpath = path;
       parsedata->archive_path = archive_path;
-      epub_parse_currentfile(uf, parsedata, deps);
-      rc = unzCloseCurrentFile(uf);
+      const int parse_rc = epub_parse_currentfile(uf, parsedata, deps);
+      const int close_rc = unzCloseCurrentFile(uf);
+      rc = (parse_rc != 0) ? parse_rc : close_rc;
+      if (rc != 0)
+        break;
       std::string parsed_title =
           BuildChapterLabelFromText(parsedata->parsed_doc_title, chapter_num);
       if (!parsed_title.empty())
@@ -360,6 +365,8 @@ int epub(Book *book, std::string name, bool metadataonly) {
       &t_after_content
 #endif
   );
+  if (rc != 0)
+    return FinalizeEpubParse(uf, &parsedata, book, name, deps, rc, false);
   if (reporter) {
     char msg[96];
     snprintf(msg, sizeof(msg), "EPUB: content done pages=%u",

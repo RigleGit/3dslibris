@@ -8,6 +8,7 @@
 
 #include "book/book.h"
 #include "debug_log.h"
+#include "formats/common/book_error.h"
 #include "formats/common/epub_image_utils.h"
 #include "formats/epub/epub.h"
 #include "formats/epub/epub_limits.h"
@@ -117,6 +118,13 @@ int Extract(Book *book, const std::string &epubpath) {
 
   int total = 0;
   while (total < (int)imgbuf.size()) {
+    if ((book->GetStatusReporter() &&
+         book->GetStatusReporter()->ShouldAbortWork()) ||
+        book->IsOpenAbortRequested()) {
+      unzCloseCurrentFile(uf);
+      unzClose(uf);
+      return BOOK_ERR_CANCELLED;
+    }
     int n = unzReadCurrentFile(uf, imgbuf.data() + total,
                                (unsigned int)(imgbuf.size() - (size_t)total));
     if (n < 0) {
@@ -164,6 +172,11 @@ int Extract(Book *book, const std::string &epubpath) {
 
   if (decodebuf.size() > epub_limits::kCoverMaxNonJpegBytes && !IsJpegCover())
     return 8;
+
+  if ((book->GetStatusReporter() &&
+       book->GetStatusReporter()->ShouldAbortWork()) ||
+      book->IsOpenAbortRequested())
+    return BOOK_ERR_CANCELLED;
 
   int infoW = 0, infoH = 0, infoChannels = 0;
   bool hasInfo = stbi_info_from_memory(decodebuf.data(), (int)decodebuf.size(),

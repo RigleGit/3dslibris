@@ -34,7 +34,7 @@ typedef BookParseDeps EpubDeps;
 int FinalizeEpubParse(unzFile uf, epub_data_t *parsedata, Book *book,
                       const std::string &name, const EpubDeps &deps,
                       int rc, bool save_cache) {
-  if (save_cache) {
+  if (save_cache && rc == 0) {
     if (reflow_cache_save_utils::ShouldDeferAsyncOpenCacheSave(
             true, book && book->IsAsyncReflowOpenPending())) {
       book->SetPendingEpubPageCacheSaveWithParams(
