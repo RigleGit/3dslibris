@@ -1,10 +1,13 @@
 #pragma once
 
+#include <string>
+
 class App;
 class Book;
 
 struct BrowserGridMarqueeState {
   Book *book;
+  std::string display_name;
   unsigned short *strip;
   unsigned short *bg_strip;
   int strip_w;

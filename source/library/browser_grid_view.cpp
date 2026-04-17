@@ -4,6 +4,7 @@
 
 #include "app/app.h"
 #include "book/book.h"
+#include "debug_log.h"
 #include "library/browser_presentation_hit_utils.h"
 #include "library/browser_presentation_utils.h"
 #include "ui/button.h"
@@ -20,6 +21,7 @@ void BrowserGridMarqueeState::Reset() {
   strip = NULL;
   bg_strip = NULL;
   book = NULL;
+  display_name.clear();
   strip_w = strip_h = strip_x = strip_y = blit_w = 0;
   scroll_offset = scroll_timer = end_timer = 0;
   active = false;
@@ -97,20 +99,32 @@ void DrawPage(App &app, BrowserGridMarqueeState &marquee, int page_start) {
           const int sw = full_w;
           const int fb_stride = app.ts->display.height;
 
-          if (marquee.book != book_i) {
+          if (marquee.book != book_i || marquee.display_name != display_name) {
             const int vis_w = (btnX + kCellW <= app.ts->display.width)
                                   ? kCellW
                                   : app.ts->display.width - btnX;
+            const int capture_w =
+                (sw < app.ts->display.width) ? sw : app.ts->display.width;
 
             marquee.Reset();
             marquee.book = book_i;
-            marquee.strip_w = sw;
+            marquee.display_name = display_name;
+            marquee.strip_w = capture_w;
             marquee.strip_h = sh;
             marquee.strip_x = btnX;
             marquee.strip_y = title_y;
             marquee.blit_w = vis_w;
-            marquee.strip = new unsigned short[sw * sh];
+            marquee.strip = new unsigned short[capture_w * sh];
             marquee.bg_strip = new unsigned short[vis_w * sh];
+#ifdef DSLIBRIS_DEBUG
+            if (book_i->GetStatusReporter()) {
+              DBG_LOGF(book_i->GetStatusReporter(),
+                       "MARQUEE build: dname='%.20s' full_w=%d sw=%d "
+                       "capture_w=%d vis_w=%d btnX=%d title_y=%d sh=%d",
+                       dname, full_w, sw, capture_w, vis_w, btnX, title_y,
+                       sh);
+            }
+#endif
 
             for (int r = 0; r < sh; r++) {
               const unsigned short *src =
@@ -123,10 +137,8 @@ void DrawPage(App &app, BrowserGridMarqueeState &marquee, int page_start) {
             int saved_mr = app.ts->margin.right;
             int saved_ml = app.ts->margin.left;
             const int off_fb_stride = app.ts->display.height;
-            const int cap_w =
-                (sw < app.ts->display.width) ? sw : app.ts->display.width;
             for (int r = 0; r < sh; r++)
-              for (int c = 0; c < cap_w; c++)
+              for (int c = 0; c < capture_w; c++)
                 app.ts->offscreen[(title_y + r) * off_fb_stride + c] = 0xFFFF;
 
             app.ts->SetScreen(app.ts->offscreen);
@@ -141,10 +153,8 @@ void DrawPage(App &app, BrowserGridMarqueeState &marquee, int page_start) {
             for (int row_i = 0; row_i < sh; row_i++) {
               const unsigned short *src =
                   app.ts->offscreen + (title_y + row_i) * fb_stride;
-              unsigned short *dst = marquee.strip + row_i * sw;
-              int copy_w =
-                  (sw < app.ts->display.width) ? sw : app.ts->display.width;
-              memcpy(dst, src, copy_w * sizeof(unsigned short));
+              unsigned short *dst = marquee.strip + row_i * capture_w;
+              memcpy(dst, src, capture_w * sizeof(unsigned short));
             }
             marquee.scroll_offset = 0;
             marquee.scroll_timer = 0;
@@ -185,7 +195,7 @@ void TickMarquee(App &app, BrowserGridMarqueeState &marquee) {
     return;
 
   const int kPauseFrames = 60;
-  const int scroll_max = marquee.strip_w - kCellW;
+  const int scroll_max = marquee.strip_w - marquee.blit_w;
 
   if (marquee.scroll_timer < kPauseFrames) {
     marquee.scroll_timer++;
