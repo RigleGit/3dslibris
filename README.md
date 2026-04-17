@@ -20,14 +20,14 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 </table>
 
 ## Project status
-- Current app version: `2.3.0`
+- Current app version: `2.3.1`
 - Focus: stable daily reading on 3DS hardware and Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
 - Releases also include `3dslibris-debug.3dsx`, which enables verbose diagnostic logging in `3dslibris.log`
 - Releases also include `3dslibris-debug.cia` for the same debug-oriented build on installed-title setups
 - Supported install paths: `.3dsx` plus `3dslibris-sdmc.zip`, or `3dslibris.cia` with books stored on SD and optional bundled books in RomFS.
-- Main reading focus in `2.3.0`: this release improves in-book navigation and menu structure with a dedicated split between `GENERAL` and `BOOK` settings, plus a per-book `go to page` slider popup for faster jumps in long books, while retaining the recent EPUB compatibility fixes from `2.2.2`.
+- Main reading focus in `2.3.1`: this release keeps the `GENERAL` / `BOOK` settings split and `go to page` slider from `2.3.0`, while concentrating on stability fixes for browser rendering, metadata warmup, EPUB parsing, and book-opening lifecycle issues seen on real hardware.
 
 ## Install
 
@@ -63,7 +63,7 @@ Generated install package targets:
 - `make cia` creates `3dslibris.cia`
 - `make debug-cia` creates `3dslibris-debug.cia`
 - `make source-release` creates `dist/3dslibris-source.tar.gz`
-- GitHub Releases: pushing a tag like `v2.3.0` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris-debug.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `dist/3dslibris-sdmc.zip`, and `dist/3dslibris-source.tar.gz` to the release
+- GitHub Releases: pushing a tag like `v2.3.1` triggers `.github/workflows/release.yml` and attaches `3dslibris.cia`, `3dslibris-debug.cia`, `3dslibris.3dsx`, `3dslibris-debug.3dsx`, `dist/3dslibris-sdmc.zip`, and `dist/3dslibris-source.tar.gz` to the release
 
 ## Supported formats
 
@@ -209,6 +209,7 @@ Fixed-layout notes:
 ## Settings menus
 - `GENERAL` settings are opened from the library and contain global preferences such as font configuration, font size, paragraph spacing, screen orientation, clock format, color mode, and library view.
 - `BOOK` settings are opened while reading and contain only book/document-specific actions such as `go to page`, `index`, `bookmarks`, and format-specific toggles like the MOBI `line wrap fix` when applicable.
+- During the `opening book ...` screen, `B`, `Start`, or `Select` now cancel the in-flight open and return to the library instead of leaving the app stuck waiting forever.
 - `go to page` opens a slider popup with the current page number.
 - The old per-book `clock format` entry is gone; clock format now remains only in `GENERAL` settings where it belongs.
 - In the `go to page` popup:

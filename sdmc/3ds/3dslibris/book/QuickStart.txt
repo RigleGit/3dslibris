@@ -73,6 +73,8 @@ Other:
 - X: cycle theme (normal / dark / sepia)
 - Start: return to library
 - Select: open BOOK settings
+- During "opening book ...", B / Start / Select cancels the load and
+  returns to the library
 
 Bookmark persistence:
 - Bookmarks are saved in `sdmc:/3ds/3dslibris/3dslibris.xml`.
@@ -102,6 +104,8 @@ Viewport navigation:
 Other:
 - Start: return to library
 - Select: open BOOK settings
+- During "opening book ...", B / Start / Select cancels the load and
+  returns to the library
 
 Notes:
 - High-quality redraw can appear shortly after interaction.
