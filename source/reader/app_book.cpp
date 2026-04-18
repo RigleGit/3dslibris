@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 
 #include <expat.h>
@@ -27,6 +28,7 @@
 #include "book/book.h"
 #include "formats/common/book_error.h"
 #include "shared/app_flow_utils.h"
+#include "shared/debug_runtime_mode.h"
 #include "reader/deferred_relayout_utils.h"
 #include "reader/book_switch_utils.h"
 #include "reader/fixed_layout_input_utils.h"
@@ -204,6 +206,8 @@ void ResetBookRenderState(App *app, bool clear_glyph_cache,
 bool SetBookPage(Book *book, Text *ts, u16 page) {
   if (!book || !ts || page >= book->GetPageCount())
     return false;
+  if (book->IsCbz())
+    book->ResetCbzFailureState();
   if (book->IsFixedLayout())
     book->CancelFixedLayoutDeferredWork();
   book->SetPosition(page);
@@ -273,6 +277,11 @@ bool ReuseParsedBook(App *app) {
   Book *selected = app ? app->GetSelectedBook() : NULL;
   if (!selected)
     return false;
+  if (selected->IsCbz()) {
+    selected->ResetCbzFailureState();
+    selected->ResetCbzTransientViewState(true);
+    DBG_LOG(app, "BOOK reopen: state reset complete");
+  }
   app->SetCurrentBook(selected);
   if (app->GetMode() == AppMode::Browser) {
     if (app->orientation) {
@@ -383,6 +392,9 @@ u8 OpenSelectedBook(App *app, unsigned int session_id) {
     return 254;
 
   DetachCurrentBookForSwitch(app, selected, session_id, "sync-open");
+  selected->SetOpenSessionId(session_id);
+  if (debug_runtime::ForceSynchronousBookOpen())
+    DBG_LOG(app, "BOOK open path: synchronous");
   DBG_LOGF(app, "BOOK open begin session=%u book=%s", session_id,
            SafeBookName(selected));
   if (int err = selected->Open()) {
@@ -400,6 +412,16 @@ u8 OpenSelectedBook(App *app, unsigned int session_id) {
   DBG_LOGF(app, "BOOK open success session=%u book=%s", session_id,
            SafeBookName(selected));
   return 0;
+}
+
+void CloseFailedOpenBook(App *app, Book *book, unsigned int session_id,
+                         const char *reason) {
+  if (!book)
+    return;
+  DBG_LOGF(app, "BOOK open cleanup: session=%u reason=%s pages=%d book=%s",
+           session_id, reason ? reason : "", book->GetPageCount(),
+           SafeBookName(book));
+  book->Close();
 }
 
 void EnsureBookMode(App *app, const char *log_message) {
@@ -568,6 +590,9 @@ void ReaderController::HandleEventInOpening() {
   ResetOpeningState(&app_);
 
   if (err) {
+    CloseFailedOpenBook(&app_, opening_book, opening_session_id,
+                        err == BOOK_ERR_CANCELLED ? "cancelled"
+                                                  : "async-open-failed");
     app_.SetCurrentBook(nullptr);
     app_.SetCurrentBookSessionId(0);
     app_.SetPdfDeferredReadyAtMs(0);
@@ -590,11 +615,21 @@ void ReaderController::HandleEventInOpening() {
     return;
   }
 
-  if (opening_session_id == 0) {
+  const int pageCount = opening_book->GetPageCount();
+  if (!ShouldAttachOpeningResult(opening_session_id,
+                                 opening_book->GetOpenSessionId(),
+                                 opening_book->IsOpenAbortRequested(),
+                                 pageCount)) {
+    const char *cause = DescribeOpeningFailureCause(
+        opening_session_id, opening_book->GetOpenSessionId(),
+        opening_book->IsOpenAbortRequested(), pageCount);
     DBG_LOGF(&app_,
-             "BOOK open stale-complete session=%u book=%s -> closing result",
-             opening_session_id, SafeBookName(opening_book));
-    opening_book->Close();
+             "BOOK attach denied: cause=%s session=%u book_session=%u pages=%d book=%s",
+             cause, opening_session_id, opening_book->GetOpenSessionId(),
+             pageCount, SafeBookName(opening_book));
+    if (strcmp(cause, "aborted") != 0)
+      app_.PrintStatus("error: book has no parsed pages");
+    CloseFailedOpenBook(&app_, opening_book, opening_session_id, cause);
     app_.SetCurrentBook(nullptr);
     app_.SetCurrentBookSessionId(0);
     app_.SetMode(AppMode::Browser);
@@ -608,19 +643,7 @@ void ReaderController::HandleEventInOpening() {
   bookcurrent_->SetLayoutRevision(app_.GetLayoutRevision());
   DBG_LOGF(&app_, "BOOK open attach session=%u book=%s", opening_session_id,
            SafeBookName(bookcurrent_));
-
-  int pageCount = bookcurrent_->GetPageCount();
   DBG_LOGF(&app_, "Generated %d pages", pageCount);
-
-  if (pageCount <= 0) {
-    app_.PrintStatus("error: book has no parsed pages");
-    bookcurrent_->Close();
-    app_.SetCurrentBook(nullptr);
-    app_.SetCurrentBookSessionId(0);
-    app_.SetMode(AppMode::Browser);
-    app_.SetBrowserDirty(true);
-    return;
-  }
 
   deferred_relayout_utils::OpenRelayoutPlan open_plan =
       deferred_relayout_utils::BuildOpenRelayoutPlan(
@@ -981,10 +1004,14 @@ u8 ReaderController::OpenBook() {
            "BOOK switch: request session=%u current_session=%u current=%s selected=%s needs_relayout=%u async=%u",
            session_id, app_.GetCurrentBookSessionId(), SafeBookName(bookcurrent_),
            SafeBookName(selected_book), needs_relayout ? 1u : 0u,
-           selected_book->SupportsAsyncReflowOpen() ? 1u : 0u);
+           (selected_book->SupportsAsyncReflowOpen() &&
+            !debug_runtime::ForceSynchronousBookOpen())
+               ? 1u
+               : 0u);
 
   // Fast path: selected book is already parsed and resident.
-  if (selected_book->GetPageCount() > 0 && !needs_relayout) {
+  if (selected_book->GetPageCount() > 0 && !needs_relayout &&
+      !selected_book->IsOpenAbortRequested()) {
     ReuseParsedBook(&app_);
     app_.SetCurrentBookSessionId(session_id);
     if (app_.GetDeferredRelayoutBook() != app_.GetCurrentBook())
@@ -1013,7 +1040,8 @@ u8 ReaderController::OpenBook() {
   // While parsing a new book, avoid displaying stale browser highlight state.
   DrawOpeningSplash(&app_);
 
-  if (selected_book->SupportsAsyncReflowOpen()) {
+  if (selected_book->SupportsAsyncReflowOpen() &&
+      !debug_runtime::ForceSynchronousBookOpen()) {
     DetachCurrentBookForSwitch(&app_, selected_book, session_id, "async-open");
     if (selected_book->StartAsyncReflowOpen(session_id)) {
       app_.SetOpeningPending(true);
@@ -1037,8 +1065,10 @@ u8 ReaderController::OpenBook() {
                  ? selected_book->GetFileName()
                  : "");
   }
-
   if (u8 err = OpenSelectedBook(&app_, session_id)) {
+    CloseFailedOpenBook(&app_, selected_book, session_id,
+                        err == BOOK_ERR_CANCELLED ? "cancelled"
+                                                  : "sync-open-failed");
     app_.SetCurrentBook(nullptr);
     app_.SetCurrentBookSessionId(0);
     app_.SetMode(AppMode::Browser);
@@ -1058,7 +1088,7 @@ u8 ReaderController::OpenBook() {
 
   if (pageCount <= 0) {
     app_.PrintStatus("error: book has no parsed pages");
-    bookcurrent_->Close();
+    CloseFailedOpenBook(&app_, bookcurrent_, session_id, "pages-zero");
     app_.SetCurrentBook(nullptr);
     app_.SetCurrentBookSessionId(0);
     app_.SetMode(AppMode::Browser);
