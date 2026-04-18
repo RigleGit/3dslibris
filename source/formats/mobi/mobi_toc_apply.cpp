@@ -149,7 +149,7 @@ size_t BuildChaptersFromStructuredToc(
     u32 pages_last_cursor = 0;
     if (!text_cursor_per_page.empty())
       pages_last_cursor = text_cursor_per_page.back();
-    char dbg[320];
+    static char dbg[320];
     snprintf(dbg, sizeof(dbg),
              "TOC-MAP: precise=%d entries=%u html_map=%u text_pages=%u "
              "pages=%u text_len=%u map_end=(%u,%u) pages_end=%u",
@@ -213,7 +213,7 @@ size_t BuildChaptersFromStructuredToc(
           if (r > 1.0)
             r = 1.0;
           linear_page = (int)((u16)(r * (double)(page_count - 1)));
-          char dbg[256];
+          static char dbg[256];
           snprintf(dbg, sizeof(dbg),
                    "TOC[%u] pos=%u tpos=%u precise=%d linear=%d title=%.40s",
                    (unsigned)i, (unsigned)entries[i].pos, (unsigned)text_pos,
@@ -235,7 +235,7 @@ size_t BuildChaptersFromStructuredToc(
             FindHeadingNearPage(page_lines, needle, (u16)best_page, 4, callbacks);
         if (refined >= 0 && refined != best_page) {
           if (reporter) {
-            char rdbg[192];
+            static char rdbg[192];
             snprintf(rdbg, sizeof(rdbg), "TOC[%u] heading refine %d -> %d",
                      (unsigned)i, best_page, refined);
             DBG_LOG(reporter, rdbg);

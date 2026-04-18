@@ -98,10 +98,13 @@ void FinalizePreparedToc(
         book, structured_toc, text_len_for_pos, &structured_direct,
         !structured_from_filepos, html_to_text_map, text_cursor_per_page,
         toc_callbacks, reporter);
+    DBG_LOGF(reporter, "MOBI: toc-step A mapped=%u", (unsigned)mapped_structured);
     if (mapped_structured >= 2) {
       structured_used = true;
+      DBG_LOGF(reporter, "MOBI: toc-step B prune");
       if (callbacks.prune_front_matter_toc_cluster)
         callbacks.prune_front_matter_toc_cluster(book, reporter);
+      DBG_LOGF(reporter, "MOBI: toc-step C size");
       mapped_structured = book->GetChapters().size();
 
       u16 direct = (structured_direct > 65535) ? 65535 : (u16)structured_direct;
@@ -115,6 +118,7 @@ void FinalizePreparedToc(
           structured_direct * 100 >= mapped_structured * 85) {
         quality = TOC_QUALITY_STRONG;
       }
+      DBG_LOGF(reporter, "MOBI: toc-step D confidence");
       book->SetTocConfidence(quality, direct, 0, unresolved);
       mapped_chapters = mapped_structured;
       if (reporter && structured_from_filepos) {

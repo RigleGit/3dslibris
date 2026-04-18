@@ -32,7 +32,7 @@ int HtmlPosToPage(u32 html_pos,
                   const std::vector<u32> &text_cursor_per_page,
                   u32 *text_pos_out = nullptr);
 
-size_t BuildChaptersFromStructuredToc(
+__attribute__((noinline)) size_t BuildChaptersFromStructuredToc(
     Book *book,
     const std::vector<mobi_structured_toc_parser::MobiStructuredTocEntry> &entries,
     u32 text_len, size_t *direct_out, bool refine_with_heading_search,

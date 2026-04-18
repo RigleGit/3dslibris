@@ -77,43 +77,56 @@ static std::string BuildCachePath(const char *book_path,
       paths::kMobiCacheDir, ".mpc", book_path, params);
 }
 
-static std::vector<page_cache_utils::CachedPage>
-CollectCachedPages(Book *book) {
-  std::vector<page_cache_utils::CachedPage> pages;
-  if (!book)
-    return pages;
-
+static bool WritePagesFromBook(FILE *fp, Book *book,
+                               uint16_t max_page_codepoints) {
+  if (!fp || !book)
+    return false;
   const u16 page_count = book->GetPageCount();
-  pages.reserve(page_count);
   for (u16 i = 0; i < page_count; i++) {
     Page *page = book->GetPage((int)i);
     const int length = page ? page->GetLength() : 0;
-    page_cache_utils::CachedPage cached_page;
-    if (page && length > 0) {
-      const u32 *buffer = page->GetBuffer();
-      if (!buffer)
-        return std::vector<page_cache_utils::CachedPage>();
-      cached_page.assign(buffer, buffer + length);
+    if (length < 0 || (uint32_t)length > max_page_codepoints)
+      return false;
+    const uint16_t len16 = (uint16_t)length;
+    if (fwrite(&len16, 1, sizeof(len16), fp) != sizeof(len16))
+      return false;
+    if (length > 0) {
+      const u32 *buf = page->GetBuffer();
+      if (!buf)
+        return false;
+      const size_t byte_count = (size_t)length * sizeof(u32);
+      if (fwrite(buf, 1, byte_count, fp) != byte_count)
+        return false;
     }
-    pages.push_back(cached_page);
   }
-  return pages;
+  return true;
 }
 
-static void AppendCachedPages(
-    Book *book, std::vector<page_cache_utils::CachedPage> *pages) {
-  if (!book)
-    return;
+static bool ReadPagesIntoBook(FILE *fp, uint32_t count,
+                              uint16_t max_page_codepoints, Book *book) {
+  if (!fp || !book)
+    return false;
 
-  book->ReservePageCapacity(pages ? pages->size() : 0);
+  book->ReservePageCapacity(count);
 
-  for (size_t i = 0; pages && i < pages->size(); i++) {
-    page_cache_utils::CachedPage &cached_page = pages->at(i);
+  for (uint32_t i = 0; i < count; i++) {
+    uint16_t length = 0;
+    if (fread(&length, 1, sizeof(length), fp) != sizeof(length) ||
+        length > max_page_codepoints)
+      return false;
+
+    page_buffer_utils::OwnedPageBuffer owned;
+    if (length > 0) {
+      owned.codepoints.resize(length);
+      const size_t byte_count = (size_t)length * sizeof(uint32_t);
+      if (fread(owned.codepoints.data(), 1, byte_count, fp) != byte_count)
+        return false;
+    }
+
     Page *page = book->AppendPage();
-    page_buffer_utils::OwnedPageBuffer owned =
-        page_buffer_utils::AdoptPageBuffer(&cached_page);
     page->AdoptBuffer(&owned);
   }
+  return true;
 }
 
 static std::vector<page_cache_utils::CachedChapter>
@@ -189,11 +202,7 @@ bool TryLoad(Book *book, const char *book_path,
   }
 
   bool ok = true;
-  std::vector<page_cache_utils::CachedPage> pages;
-  ok = page_cache_utils::ReadPages(fp, hdr.page_count, kPageCachePageMaxBytes,
-                                   &pages);
-  if (ok)
-    AppendCachedPages(book, &pages);
+  ok = ReadPagesIntoBook(fp, hdr.page_count, kPageCachePageMaxBytes, book);
 
   if (ok) {
     std::vector<page_cache_utils::CachedChapter> chapters;
@@ -264,10 +273,6 @@ void Save(Book *book, const char *book_path,
   std::string title = title_c ? title_c : "";
   title = page_cache_utils::ClampString(title, kPageCacheTitleMaxBytes);
   const std::vector<ChapterEntry> &chapters = book->GetChapters();
-  const std::vector<page_cache_utils::CachedPage> pages =
-      CollectCachedPages(book);
-  if (pages.size() != book->GetPageCount())
-    return;
   const std::vector<page_cache_utils::CachedChapter> cached_chapters =
       CollectCachedChapters(chapters);
 
@@ -276,7 +281,7 @@ void Save(Book *book, const char *book_path,
   hdr.magic = kMobiPageCacheMagic;
   hdr.version = kMobiPageCacheVersion;
   hdr.title_len = (u16)title.size();
-  hdr.page_count = (u32)pages.size();
+  hdr.page_count = (u32)book->GetPageCount();
   hdr.chapter_count = (u32)cached_chapters.size();
   hdr.image_count = book->GetInlineImageCount();
   hdr.toc_quality = (u8)book->GetTocQuality();
@@ -293,7 +298,7 @@ void Save(Book *book, const char *book_path,
     ok = page_cache_utils::WriteRawString(fp, title);
 
   if (ok)
-    ok = page_cache_utils::WritePages(fp, pages, kPageCachePageMaxBytes);
+    ok = WritePagesFromBook(fp, book, kPageCachePageMaxBytes);
 
   if (ok)
     ok = page_cache_utils::WriteChapters(fp, cached_chapters,
