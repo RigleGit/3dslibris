@@ -3,6 +3,7 @@
 #include "formats/mupdf/mupdf_worker.h"
 
 #include "formats/mupdf/mupdf_view.h"
+#include "shared/debug_runtime_mode.h"
 
 
 void CancelMuPdfIncrementalRenderState(Book::MuPdfState *mupdf_state) {
@@ -262,6 +263,16 @@ static void MuPdfWorkerThreadFunc(void *arg) {
 }
 
 void InitMuPdfWorker(Book::MuPdfState *mupdf_state) {
+  if (debug_runtime::ForceSynchronousMuPdfRender() ||
+      (mupdf_state &&
+       !app_flow_utils::MuPdfWantsFinalQualityRender(
+           mupdf_state->document_kind) &&
+       !app_flow_utils::MuPdfShouldPrefetchAdjacent(
+           mupdf_state->document_kind))) {
+    if (mupdf_state)
+      mupdf_state->worker_init_attempted = true;
+    return;
+  }
   if (!mupdf_state || !mupdf_state->is_new_3ds || !mupdf_state->ctx)
     return;
   mupdf_state->worker_init_attempted = true;

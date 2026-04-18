@@ -103,21 +103,21 @@ void TestMuPdfDocumentKindHelpers() {
                     MuPdfDocumentKind::Unknown),
                 1.5f);
 
-  ExpectTrue("pdf final render",
-             app_flow_utils::MuPdfWantsFinalQualityRender(
-                 MuPdfDocumentKind::Pdf));
-  ExpectTrue("xps final render",
-             app_flow_utils::MuPdfWantsFinalQualityRender(
-                 MuPdfDocumentKind::Xps));
+  ExpectFalse("pdf final render disabled",
+              app_flow_utils::MuPdfWantsFinalQualityRender(
+                  MuPdfDocumentKind::Pdf));
+  ExpectFalse("xps final render disabled",
+              app_flow_utils::MuPdfWantsFinalQualityRender(
+                  MuPdfDocumentKind::Xps));
   ExpectFalse("unknown no final render",
               app_flow_utils::MuPdfWantsFinalQualityRender(
                   MuPdfDocumentKind::Unknown));
-  ExpectTrue("pdf prefetch",
-             app_flow_utils::MuPdfShouldPrefetchAdjacent(
-                 MuPdfDocumentKind::Pdf));
-  ExpectTrue("xps prefetch",
-             app_flow_utils::MuPdfShouldPrefetchAdjacent(
-                 MuPdfDocumentKind::Xps));
+  ExpectFalse("pdf prefetch disabled",
+              app_flow_utils::MuPdfShouldPrefetchAdjacent(
+                  MuPdfDocumentKind::Pdf));
+  ExpectFalse("xps prefetch disabled",
+              app_flow_utils::MuPdfShouldPrefetchAdjacent(
+                  MuPdfDocumentKind::Xps));
   ExpectFalse("unknown no prefetch",
               app_flow_utils::MuPdfShouldPrefetchAdjacent(
                   MuPdfDocumentKind::Unknown));

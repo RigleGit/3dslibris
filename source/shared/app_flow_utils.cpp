@@ -71,11 +71,13 @@ float GetMuPdfReadingBaseZoom(MuPdfDocumentKind kind) {
 }
 
 bool MuPdfWantsFinalQualityRender(MuPdfDocumentKind kind) {
-  return kind == MuPdfDocumentKind::Pdf || kind == MuPdfDocumentKind::Xps;
+  (void)kind;
+  return false;
 }
 
 bool MuPdfShouldPrefetchAdjacent(MuPdfDocumentKind kind) {
-  return kind == MuPdfDocumentKind::Pdf || kind == MuPdfDocumentKind::Xps;
+  (void)kind;
+  return false;
 }
 
 bool ShouldIndexBookFilename(const char *filename) {
