@@ -135,9 +135,6 @@ void Page::FreeBuffer() {
 }
 
 void Page::Draw(Text *ts) {
-#ifdef DSLIBRIS_DEBUG
-  const u64 draw_tick_start = svcGetSystemTick();
-#endif
   const bool saved_auto_wrap = ts->IsAutoWrapEnabled();
   const bool saved_clip_to_content = ts->IsClipToContentEnabled();
   // Reflowed page buffers already carry explicit line breaks/wrap decisions.
@@ -178,7 +175,6 @@ void Page::Draw(Text *ts) {
   // first_screen == screenleft → leftBottomMargin, maxHeight=400
   // first_screen == screenright → rightBottomMargin, maxHeight=320
   const bool first_is_left = (first_screen == ts->screenleft);
-  const int first_bottom_margin = first_is_left ? leftBottomMargin : rightBottomMargin;
   const int second_bottom_margin = first_is_left ? rightBottomMargin : leftBottomMargin;
   bool on_first_screen = true;
 
@@ -215,19 +211,7 @@ void Page::Draw(Text *ts) {
   InlineImageContext next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
   bool rtl_paragraph = false;
   u32 rtl_line_px = 0;  // parse-time line width stashed by TEXT_RTL_LINE_PX
-  bool stopped_on_render_break = false;
-  const char *render_break_reason = "complete";
-  int render_break_index = -1;
-  int newline_count_first = 0;
-  int newline_count_second = 0;
-  bool first_screen_had_content = false;
-  bool second_screen_had_content = false;
   bool in_preformatted_block = false;
-#ifdef DSLIBRIS_DEBUG
-  u64 perf_printchar_ticks = 0;
-  int perf_glyph_count = 0;
-  int perf_ctrl_count = 0;
-#endif
   while (i < length) {
     u32 c = buf[i];
     if (c == TEXT_PARAGRAPH_RTL) {
@@ -271,8 +255,9 @@ void Page::Draw(Text *ts) {
       int maxHeight = metrics.max_height;
       int currentBottomMargin = metrics.bottom_margin;
       ts->margin.bottom = currentBottomMargin;
-      if (ts->GetPenY() + ts->GetHeight() + ts->linespacing >
-          maxHeight - currentBottomMargin) {
+      if (text_render_layout_utils::WouldOverflowReadingScreen(
+              ts->GetPenY(), ts->GetHeight(), ts->linespacing, maxHeight,
+              currentBottomMargin)) {
         // Move to second page
         if (ts->GetScreen() == first_screen) {
 #ifdef OFFSCREEN
@@ -289,17 +274,10 @@ void Page::Draw(Text *ts) {
           ts->linebegan = false;
         } else
         {
-          stopped_on_render_break = true;
-          render_break_reason = "newline-overflow-second-screen";
-          render_break_index = (int)i;
           break;
         }
       } else if (ts->linebegan) {
         ts->PrintNewLine();
-        if (on_first_screen)
-          newline_count_first++;
-        else
-          newline_count_second++;
       }
     } else if (c == TEXT_BOLD_ON) {
       i++;
@@ -373,15 +351,8 @@ void Page::Draw(Text *ts) {
                              ts->GetPenY() - std::max(1, ts->GetHeight() / 2));
       ts->FillRect(x0, y, x1, y + 1, ts->GetFgColor());
       if (!ts->PrintNewLine()) {
-        stopped_on_render_break = true;
-        render_break_reason = "hr-newline-failed";
-        render_break_index = (int)i;
         break;
       }
-      if (on_first_screen)
-        newline_count_first++;
-      else
-        newline_count_second++;
       ts->linebegan = false;
     } else if (c == TEXT_IMAGE_CONTEXT_DEFAULT) {
       i++;
@@ -406,31 +377,17 @@ void Page::Draw(Text *ts) {
 
         if (image_plan.advance_before) {
           if (!advance_to_next_screen()) {
-            stopped_on_render_break = true;
-            render_break_reason = "image-advance-before-no-next-screen";
-            render_break_index = (int)i;
             break;
           }
         }
         if (image_plan.line_break_before && ts->linebegan) {
           if (!ts->PrintNewLine()) {
-            stopped_on_render_break = true;
-            render_break_reason = "image-line-break-before-failed";
-            render_break_index = (int)i;
             break;
           }
-          if (on_first_screen)
-            newline_count_first++;
-          else
-            newline_count_second++;
           ts->linebegan = false;
         }
 
         book->DrawInlineImage(ts, image_id, &image_plan);
-        if (on_first_screen)
-          first_screen_had_content = true;
-        else
-          second_screen_had_content = true;
 
         bool stop_page_draw = false;
         switch (image_plan.mode) {
@@ -445,15 +402,25 @@ void Page::Draw(Text *ts) {
           ts->SetPen(ts->margin.left,
                      ts->GetPenY() + image_plan.vertical_space_after_draw);
           ts->linebegan = false;
+          {
+            const text_render_layout_utils::ReadingScreenMetrics metrics =
+                text_render_layout_utils::ResolveReadingScreenMetrics(
+                    on_first_screen, first_is_left, leftBottomMargin,
+                    rightBottomMargin);
+            if (text_render_layout_utils::WouldOverflowReadingScreen(
+                    ts->GetPenY(), ts->GetHeight(), ts->linespacing,
+                    metrics.max_height, metrics.bottom_margin)) {
+              if (!advance_to_next_screen()) {
+                stop_page_draw = true;
+              }
+            }
+          }
           break;
 
         case INLINE_IMAGE_LAYOUT_PAGE:
         default:
           if (!advance_to_next_screen()) {
             stop_page_draw = true;
-            stopped_on_render_break = true;
-            render_break_reason = "page-image-no-next-screen";
-            render_break_index = (int)i;
           }
           ts->linebegan = false;
           break;
@@ -464,12 +431,9 @@ void Page::Draw(Text *ts) {
         i++;
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
       }
-    } else {
-      i++;
-      next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
-#ifdef DSLIBRIS_DEBUG
-      perf_ctrl_count++;
-#endif
+      } else {
+        i++;
+        next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
 
       if (rtl_paragraph && !ts->linebegan) {
         int line_width;
@@ -512,9 +476,6 @@ void Page::Draw(Text *ts) {
         const int shifted_y = std::max(0, base_pen_y + y_offset);
         ts->SetPen((u16)glyph_x0, (u16)shifted_y);
       }
-#ifdef DSLIBRIS_DEBUG
-      const u64 pc_t0 = svcGetSystemTick();
-#endif
       if (mono && ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_MONO_BOLDITALIC);
       else if (mono && ts->bold)
@@ -531,10 +492,6 @@ void Page::Draw(Text *ts) {
         ts->PrintChar(c, TEXT_STYLE_BOLD);
       else
         ts->PrintChar(c, TEXT_STYLE_REGULAR);
-#ifdef DSLIBRIS_DEBUG
-      perf_printchar_ticks += svcGetSystemTick() - pc_t0;
-      perf_glyph_count++;
-#endif
 
       const int glyph_x1 = (int)ts->GetPenX();
       if (superscript || subscript)
@@ -560,41 +517,8 @@ void Page::Draw(Text *ts) {
       }
 
       ts->linebegan = true;
-      if (on_first_screen)
-        first_screen_had_content = true;
-      else
-        second_screen_had_content = true;
     }
   }
-
-#ifdef DSLIBRIS_DEBUG
-  const u64 draw_tick_end = svcGetSystemTick();
-  const u64 draw_total_ticks = draw_tick_end - draw_tick_start;
-  // 3DS CPU runs at 268MHz; divide ticks by 268 to get microseconds.
-  const u32 draw_us  = (u32)(draw_total_ticks / 268u);
-  const u32 pc_us    = (u32)(perf_printchar_ticks / 268u);
-  const u32 other_us = draw_us > pc_us ? draw_us - pc_us : 0u;
-  static int s_page_draw_diag_budget = 48;
-  if (ts->app && s_page_draw_diag_budget > 0) {
-    DBG_LOGF_CAT(
-        ts->app, DBG_LEVEL_INFO, DBG_CAT_PERF,
-        "PAGE perf draw=%uus printchar=%uus(%d glyphs avg=%uus) other=%uus ctrl=%d",
-        draw_us, pc_us, perf_glyph_count,
-        perf_glyph_count > 0 ? pc_us / (u32)perf_glyph_count : 0u,
-        other_us, perf_ctrl_count);
-    DBG_LOGF_CAT(
-        ts->app, DBG_LEVEL_INFO, DBG_CAT_LAYOUT,
-        "PAGE draw pos=%u len=%u consumed=%u stop=%d reason=%s idx=%d first_content=%d second_content=%d nl_first=%d nl_second=%d final_screen=%s pen=%u,%u",
-        (unsigned)(book ? book->GetPosition() : 0), (unsigned)length,
-        (unsigned)i, stopped_on_render_break ? 1 : 0, render_break_reason,
-        render_break_index, first_screen_had_content ? 1 : 0,
-        second_screen_had_content ? 1 : 0, newline_count_first,
-        newline_count_second,
-        (ts->GetScreen() == second_screen) ? "second" : "first",
-        (unsigned)ts->GetPenX(), (unsigned)ts->GetPenY());
-    s_page_draw_diag_budget--;
-  }
-#endif
 
   if (in_preformatted_block)
     ts->SetClipToContentEnabled(saved_clip_to_content);

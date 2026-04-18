@@ -50,18 +50,6 @@ u8 Book::Parse(bool fulltext) {
     return odt_loader::ParseOdtFile(this, path);
   if (fulltext && HasExtCI(GetFileName(), ".mobi")) {
     const mobi_parser::Hooks &hooks = SharedMobiHooks();
-#ifdef DSLIBRIS_DEBUG
-    if (GetStatusReporter()) {
-      DBG_LOGF(GetStatusReporter(),
-               "MOBI open call: hooks=%p extract=%08lx toc=%08lx inline=%08lx finalize=%08lx continue=%08lx",
-               (const void *)&hooks,
-               (unsigned long)hooks.extract_markup_to_text,
-               (unsigned long)hooks.make_structured_toc_callbacks,
-               (unsigned long)hooks.make_inline_title_callbacks,
-               (unsigned long)hooks.make_finalize_callbacks,
-               (unsigned long)hooks.make_plain_continue_callbacks);
-    }
-#endif
     return mobi_parser::ParseFile(this, path, hooks);
   }
   if (fulltext && (HasExtCI(GetFileName(), ".pdf") ||

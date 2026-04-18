@@ -78,7 +78,7 @@ void TestResolveReadingScreenMetrics() {
       text_render_layout_utils::ResolveReadingScreenMetrics(
           true, true, 36, 16);
   ExpectEq("first left height", metrics.max_height, 400);
-  ExpectEq("first left bottom margin", metrics.bottom_margin, 36);
+  ExpectEq("first left bottom margin", metrics.bottom_margin, 44);
 
   metrics = text_render_layout_utils::ResolveReadingScreenMetrics(
       false, true, 36, 16);
@@ -93,7 +93,7 @@ void TestResolveReadingScreenMetrics() {
   metrics = text_render_layout_utils::ResolveReadingScreenMetrics(
       false, false, 36, 16);
   ExpectEq("second left height", metrics.max_height, 400);
-  ExpectEq("second left bottom margin", metrics.bottom_margin, 36);
+  ExpectEq("second left bottom margin", metrics.bottom_margin, 44);
 }
 
 void TestResolveReadingScreenMetricsForReadingScreen() {
@@ -101,7 +101,7 @@ void TestResolveReadingScreenMetricsForReadingScreen() {
       text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
           false, 0, 36, 16);
   ExpectEq("turned-left first screen height", metrics.max_height, 400);
-  ExpectEq("turned-left first screen bottom margin", metrics.bottom_margin, 36);
+  ExpectEq("turned-left first screen bottom margin", metrics.bottom_margin, 44);
 
   metrics =
       text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
@@ -122,7 +122,26 @@ void TestResolveReadingScreenMetricsForReadingScreen() {
           true, 1, 36, 16);
   ExpectEq("turned-right second screen height", metrics.max_height, 400);
   ExpectEq("turned-right second screen bottom margin", metrics.bottom_margin,
-           36);
+           44);
+}
+
+void TestResolveCompactReadingBottomMargin() {
+  ExpectEq("keeps compact footer when already small",
+           text_render_layout_utils::ResolveCompactReadingBottomMargin(12), 12);
+  ExpectEq("caps compact footer to 16",
+           text_render_layout_utils::ResolveCompactReadingBottomMargin(36), 16);
+}
+
+void TestWouldOverflowReadingScreen() {
+  ExpectFalse("line fits with spacing",
+              text_render_layout_utils::WouldOverflowReadingScreen(
+                  340, 12, 1, 400, 36));
+  ExpectTrue("line overflows once spacing is counted",
+             text_render_layout_utils::WouldOverflowReadingScreen(
+                 352, 12, 1, 400, 36));
+  ExpectFalse("line may sit exactly on footer edge",
+              text_render_layout_utils::WouldOverflowReadingScreen(
+                  352, 12, 0, 400, 36));
 }
 
 } // namespace
@@ -133,5 +152,7 @@ int main() {
   TestResolveClipRight();
   TestResolveReadingScreenMetrics();
   TestResolveReadingScreenMetricsForReadingScreen();
+  TestResolveCompactReadingBottomMargin();
+  TestWouldOverflowReadingScreen();
   return 0;
 }

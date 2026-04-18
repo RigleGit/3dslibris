@@ -7,6 +7,7 @@
 #include "formats/common/plain_text_stream.h"
 #include "formats/rtf/rtf_loader.h"
 #include "formats/txt/txt_loader.h"
+#include "shared/text_render_layout_utils.h"
 #include "parse.h"
 
 #include <algorithm>
@@ -229,8 +230,11 @@ static bool ApplyPlainHeadingKeepWithNext(parsedata_t *p, int heading_level) {
   heading_layout::KeepWithNextRequest req{};
   req.pen_y = p->pen.y;
   req.screen_height = (p->screen == 1) ? 320 : 400;
-  req.bottom_margin =
-      (p->screen == 1) ? MIN(p->ts->margin.bottom, 16) : p->ts->margin.bottom;
+  req.bottom_margin = (p->screen == 1)
+                          ? text_render_layout_utils::ResolveCompactReadingBottomMargin(
+                                p->ts->margin.bottom)
+                          : (p->ts->margin.bottom +
+                             text_render_layout_utils::kFullReadingScreenFooterGuardPx);
   req.line_height = p->ts->GetHeight();
   req.linespacing = p->ts->linespacing;
   req.heading_level = heading_level;
@@ -239,6 +243,23 @@ static bool ApplyPlainHeadingKeepWithNext(parsedata_t *p, int heading_level) {
     return true;
   }
   return false;
+}
+
+static void PlainAdvanceScreenOnOverflow(parsedata_t *p) {
+  if (!p || !p->ts)
+    return;
+  const int screen_height = (p->screen == 1) ? 320 : 400;
+  const int bottom_margin =
+      (p->screen == 1)
+          ? text_render_layout_utils::ResolveCompactReadingBottomMargin(
+                p->ts->margin.bottom)
+          : (p->ts->margin.bottom +
+             text_render_layout_utils::kFullReadingScreenFooterGuardPx);
+  if (text_render_layout_utils::WouldOverflowReadingScreen(
+          p->pen.y, p->ts->GetHeight(), p->ts->linespacing, screen_height,
+          bottom_margin)) {
+    PlainAdvanceScreen(p);
+  }
 }
 
 static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
@@ -279,6 +300,7 @@ static void AppendInlineImageToPlainParsedData(parsedata_t *p, u16 image_id,
     p->pen.x = ts->margin.left;
     p->pen.y += image_plan.vertical_space_after_draw;
     p->linebegan = false;
+    PlainAdvanceScreenOnOverflow(p);
     break;
   case INLINE_IMAGE_LAYOUT_PAGE:
   default:

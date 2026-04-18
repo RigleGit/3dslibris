@@ -557,20 +557,10 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
 #endif
   if (reporter)
     append_debug_log("MOBI: parse begin");
-  if (reporter) {
-    DBG_LOGF(reporter, "MOBI open stage=parse-begin session=%u book=%s",
-             book->GetOpenSessionId(),
-             book->GetFileName() ? book->GetFileName() : "");
-  }
 
   mobi_deferred_runtime::Erase(book);
 
   if (TryLoadMobiPageCache(book, path, deps)) {
-    if (reporter) {
-      DBG_LOGF(reporter, "MOBI open stage=cache-hit session=%u pages=%u book=%s",
-               book->GetOpenSessionId(), (unsigned)book->GetPageCount(),
-               book->GetFileName() ? book->GetFileName() : "");
-    }
     if (reporter) {
       char msg[224];
       snprintf(msg, sizeof(msg), "MOBI: page cache hit pages=%u chapters=%u",
@@ -594,12 +584,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       mobi_parser_core::LoadMobiSource(path, &raw, &t_after_read, kMobiMaxBytes);
   if (rc != 0)
     return rc;
-  if (reporter) {
-    DBG_LOGF(reporter,
-             "MOBI open stage=source-ready session=%u bytes=%u book=%s",
-             book->GetOpenSessionId(), (unsigned)raw.size(),
-             book->GetFileName() ? book->GetFileName() : "");
-  }
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-source"))
@@ -617,13 +601,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
         reporter->PrintStatus("MOBI: unsupported compression");
     }
     return rc;
-  }
-  if (reporter) {
-    DBG_LOGF(reporter,
-             "MOBI open stage=header-ready session=%u text_records=%u comp=%u book=%s",
-             book->GetOpenSessionId(), (unsigned)header.text_rec_count,
-             (unsigned)header.compression,
-             book->GetFileName() ? book->GetFileName() : "");
   }
   if (open_cancel_poll::Poll(book, reporter, "mobi-header"))
     return BOOK_ERR_CANCELLED;
@@ -658,12 +635,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
     return 255;
   }
   const u64 t_after_decompress = osGetTime();
-  if (reporter) {
-    DBG_LOGF(reporter,
-             "MOBI open stage=text-ready session=%u merged_bytes=%u book=%s",
-             book->GetOpenSessionId(), (unsigned)merged.size(),
-             book->GetFileName() ? book->GetFileName() : "");
-  }
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-text"))
@@ -681,13 +652,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       book, deps, header, merged, decode_plan.capture_toc_metadata, &decoded,
       &t_after_decode, &t_after_markup_scan, &t_after_cleanup, &t_after_markup,
       hooks);
-  if (reporter) {
-    DBG_LOGF(reporter,
-             "MOBI open stage=decode-ready session=%u text_bytes=%u toc_meta=%u book=%s",
-             book->GetOpenSessionId(), (unsigned)decoded.text.size(),
-             decoded.toc_metadata_ready ? 1u : 0u,
-             book->GetFileName() ? book->GetFileName() : "");
-  }
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-decode"))
@@ -714,32 +678,13 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   if (!StartInitialMobiPagination(book, deps, &deferred, &pages_done_initial,
                                   hooks))
     return 1;
-  if (reporter) {
-    DBG_LOGF(reporter,
-             "MOBI open stage=pages-initial session=%u pages=%u done=%u book=%s",
-             book->GetOpenSessionId(), (unsigned)book->GetPageCount(),
-             pages_done_initial ? 1u : 0u,
-             book->GetFileName() ? book->GetFileName() : "");
-  }
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-pages-initial"))
     return BOOK_ERR_CANCELLED;
 
   if (!pages_done_initial) {
-    if (reporter) {
-      DBG_LOGF(reporter,
-               "MOBI open stage=deferred-armed session=%u pages=%u book=%s",
-               book->GetOpenSessionId(), (unsigned)book->GetPageCount(),
-               book->GetFileName() ? book->GetFileName() : "");
-    }
     if (debug_runtime::ForceSynchronousMobiFinalize()) {
-      if (reporter) {
-        DBG_LOGF(reporter,
-                 "MOBI open stage=deferred-sync session=%u pages=%u book=%s",
-                 book->GetOpenSessionId(), (unsigned)book->GetPageCount(),
-                 book->GetFileName() ? book->GetFileName() : "");
-      }
       unsigned int pass_count = 0;
       while (!deferred.stream.completed) {
         if (ShouldAbortMobiOpen(book)) {
@@ -768,10 +713,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       FinalizeImmediateMobiParse(book, path, deps, raw, header, decoded.utf8,
                                  &deferred, &toc_result, hooks);
       if (reporter) {
-        DBG_LOGF(reporter,
-                 "MOBI open stage=ready session=%u pages=%u book=%s",
-                 book->GetOpenSessionId(), (unsigned)book->GetPageCount(),
-                 book->GetFileName() ? book->GetFileName() : "");
         append_debug_log("MOBI: parse end");
       }
       return book->GetPageCount() > 0 ? 0 : 1;
@@ -813,11 +754,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   MobiTocFinalizeResult toc_result;
   FinalizeImmediateMobiParse(book, path, deps, raw, header, decoded.utf8,
                              &deferred, &toc_result, hooks);
-  if (reporter) {
-    DBG_LOGF(reporter, "MOBI open stage=ready session=%u pages=%u book=%s",
-             book->GetOpenSessionId(), (unsigned)book->GetPageCount(),
-             book->GetFileName() ? book->GetFileName() : "");
-  }
 
   if (reporter) {
     char msg[320];

@@ -698,7 +698,8 @@ static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
           rightBottomMargin);
   int maxHeight = metrics.max_height;
   int bottomMargin = metrics.bottom_margin;
-  if ((p->pen.y + lineheight) <= (maxHeight - bottomMargin))
+  if (!text_render_layout_utils::WouldOverflowReadingScreen(
+          p->pen.y, lineheight, ts->linespacing, maxHeight, bottomMargin))
     return;
 
   p->perf_page_overflows++;
@@ -1917,6 +1918,7 @@ void start(void *data, const char *el, const char **attr) {
         p->pen.x = ts->margin.left;
         p->pen.y += image_plan.vertical_space_after_draw;
         p->linebegan = false;
+        AdvanceParsedPageOnOverflow(p, ts->GetHeight());
         if (img_style) {
           const int line_h = ts->GetHeight() + ts->linespacing;
           const book_xml_css_style_utils::MarginTopResult mbr =
@@ -2366,7 +2368,8 @@ void end(void *data, const char *el) {
   int maxHeight = metrics.max_height;
   int bottomMargin = metrics.bottom_margin;
   int lineheight = ts->GetHeight();
-  if ((p->pen.y + lineheight) > (maxHeight - bottomMargin)) {
+  if (text_render_layout_utils::WouldOverflowReadingScreen(
+          p->pen.y, lineheight, ts->linespacing, maxHeight, bottomMargin)) {
     if (p->screen == 1) {
       // End of right screen; end of page.
       // Copy in buffered char data into a new page.

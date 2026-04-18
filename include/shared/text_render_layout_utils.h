@@ -4,6 +4,8 @@
 
 namespace text_render_layout_utils {
 
+static const int kFullReadingScreenFooterGuardPx = 8;
+
 struct ReadingScreenMetrics {
   int max_height;
   int bottom_margin;
@@ -40,9 +42,15 @@ inline ReadingScreenMetrics ResolveReadingScreenMetrics(
 
   ReadingScreenMetrics metrics{};
   metrics.max_height = current_screen_is_left ? 400 : 320;
-  metrics.bottom_margin =
-      current_screen_is_left ? left_bottom_margin : right_bottom_margin;
+  metrics.bottom_margin = current_screen_is_left
+                              ? (left_bottom_margin +
+                                 kFullReadingScreenFooterGuardPx)
+                              : right_bottom_margin;
   return metrics;
+}
+
+inline int ResolveCompactReadingBottomMargin(int full_bottom_margin) {
+  return (full_bottom_margin > 16) ? 16 : full_bottom_margin;
 }
 
 inline ReadingScreenMetrics ResolveReadingScreenMetricsForReadingScreen(
@@ -52,6 +60,12 @@ inline ReadingScreenMetrics ResolveReadingScreenMetricsForReadingScreen(
   const bool first_screen_is_left = !turned_right;
   return ResolveReadingScreenMetrics(on_first_screen, first_screen_is_left,
                                      left_bottom_margin, right_bottom_margin);
+}
+
+inline bool WouldOverflowReadingScreen(int pen_y, int line_height,
+                                       int line_spacing, int max_height,
+                                       int bottom_margin) {
+  return (pen_y + line_height + line_spacing) > (max_height - bottom_margin);
 }
 
 } // namespace text_render_layout_utils
