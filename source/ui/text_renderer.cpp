@@ -386,7 +386,7 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
         continue;
       int sx = (int)pen.x + (int)gx + bx;
       int sy = (int)pen.y + (int)gy - by;
-      if (sy < 0 || sy >= maxY || sx < 0 || sx >= screenWidth)
+      if (sy < 0 || sy >= maxY - bottomClip || sx < 0 || sx >= screenWidth)
         continue;
 #ifdef DSLIBRIS_DEBUG
       if (sx >= contentRight)
