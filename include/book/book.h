@@ -284,6 +284,7 @@ public:
   u32 GetCbzDeferredDelayMs() const;
   bool PumpDeferredCbzWork(u32 budget_ms);
   void CancelCbzDeferredWork();
+  void ResetCbzTransientViewState(bool restart_worker = false);
   void SetMuPdfViewportInteraction(bool active);
   void ResetMuPdfViewport();
   bool ChangeMuPdfZoom(int delta);
@@ -317,6 +318,7 @@ public:
   bool HasDeferredMobiParse() const;
   bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
   void CancelDeferredMobiParse();
+  void ResetCbzFailureState();
   bool IsMobiFile() const;
   bool GetMobiLineWrapFix() const;
   void SetMobiLineWrapFix(bool enabled);

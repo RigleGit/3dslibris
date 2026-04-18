@@ -607,6 +607,14 @@ void Book::Close() {
   open_abort_requested_ = false;
 }
 
+void Book::ResetCbzFailureState() {
+  if (!IsCbz() || !cbz_state)
+    return;
+  cbz_state->failed_page = -1;
+  cbz_state->logged_failed_page = -1;
+  cbz_state->last_error.clear();
+}
+
 bool Book::IsMobiFile() const { return HasExtCaseInsensitive(filename, ".mobi"); }
 
 bool Book::GetMobiLineWrapFix() const { return mobi_line_wrap_fix; }

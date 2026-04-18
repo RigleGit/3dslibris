@@ -4,12 +4,14 @@
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
 #include "formats/common/pdf_view_utils.h"
+#include "shared/debug_runtime_mode.h"
 
 #include <algorithm>
 
 namespace {
 
 static const size_t kCbzMaxEntryBytes = 64u * 1024u * 1024u;
+static const size_t kCbzWorkerStackBytes = 256u * 1024u;
 static const int kCbzPreviewBoundsWidth = 240 - 8;
 static const int kCbzPreviewBoundsHeight = 320 - 8;
 static const int kCbzTopScreenWidth = 240;
@@ -29,7 +31,16 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
   }
 
   CbzDecodedPage decoded;
-  if (!DecodeCbzPageImage(bytes, max_zoom_index, &decoded))
+  int decode_zoom_index = std::min(zoom_index, max_zoom_index);
+  bool decoded_ok = false;
+  for (int try_zoom = decode_zoom_index; try_zoom >= 0; --try_zoom) {
+    if (DecodeCbzPageImage(bytes, try_zoom, &decoded)) {
+      decode_zoom_index = try_zoom;
+      decoded_ok = true;
+      break;
+    }
+  }
+  if (!decoded_ok)
     return false;
 
   const pdf_view_utils::PreviewLayout preview_layout =
@@ -131,6 +142,11 @@ int FindCbzPreloadTarget(const Book::CbzState *cbz_state, int current_page) {
 } // namespace
 
 void InitCbzWorker(Book::CbzState *cbz_state) {
+  if (debug_runtime::BackgroundWorkersDisabled()) {
+    if (cbz_state)
+      cbz_state->worker_init_attempted = true;
+    return;
+  }
   if (!cbz_state || !cbz_state->is_new_3ds)
     return;
   cbz_state->worker_init_attempted = true;
@@ -142,8 +158,11 @@ void InitCbzWorker(Book::CbzState *cbz_state) {
   s32 prio = 0x30;
   svcGetThreadPriority(&prio, CUR_THREAD_HANDLE);
   cbz_state->worker = w;
-  w->thread_handle =
-      threadCreate(CbzWorkerThreadFunc, cbz_state, 64 * 1024, prio + 1, 1, false);
+  // MuPDF/stb decode and scaler paths are stack-hungry in debug builds.
+  // Give the preload worker real headroom so a failed decode does not scribble
+  // process state and surface later as an unrelated HID crash.
+  w->thread_handle = threadCreate(CbzWorkerThreadFunc, cbz_state,
+                                  kCbzWorkerStackBytes, prio + 1, 1, false);
   if (!w->thread_handle) {
     delete w;
     cbz_state->worker = NULL;

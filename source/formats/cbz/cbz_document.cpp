@@ -7,6 +7,7 @@
 #include "formats/common/book_error.h"
 #include "formats/common/pdf_view_utils.h"
 #include "debug_log.h"
+#include "shared/debug_runtime_mode.h"
 
 #include <3ds.h>
 #include <algorithm>
@@ -103,6 +104,11 @@ uint8_t ParseCbzFile(Book *book, const char *path) {
   book->ClearChapters();
   book->ClearTocConfidence();
   book->InitCbzView(path, entries, DetectCbzNew3ds());
+#ifdef DSLIBRIS_DEBUG
+  if (debug_runtime::ForceSynchronousCbzDecode() && book->GetStatusReporter()) {
+    DBG_LOG(book->GetStatusReporter(), "CBZ decode path: synchronous");
+  }
+#endif
   return 0;
 }
 

@@ -23,11 +23,14 @@ struct Book::CbzState {
 
   struct PageBitmap {
     int page;
+    int zoom_index;
     int original_width;
     int original_height;
     CbzBitmap bitmap;
 
-    PageBitmap() : page(-1), original_width(0), original_height(0), bitmap() {}
+    PageBitmap()
+        : page(-1), zoom_index(-1), original_width(0), original_height(0),
+          bitmap() {}
   };
 
   struct AdjacentSlot {
