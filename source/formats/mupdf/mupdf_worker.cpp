@@ -2,6 +2,7 @@
 
 #include "formats/mupdf/mupdf_worker.h"
 
+#include "debug_log.h"
 #include "formats/mupdf/mupdf_view.h"
 #include "shared/debug_runtime_mode.h"
 
@@ -88,6 +89,12 @@ bool EnsureMuPdfDisplayListForPage(Book::MuPdfState *mupdf_state,
 bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_index) {
   if (!mupdf_state)
     return false;
+  DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+               "MUPDF preview: enter page=%d cached=%d current_page=%d",
+               page_index,
+               BitmapCacheValid(mupdf_state->current_preview, page_index) ? 1
+                                                                          : 0,
+               mupdf_state->current_preview.page);
   PromoteMuPdfAdjacentSlotIfMatching(mupdf_state, page_index);
   if (BitmapCacheValid(mupdf_state->current_preview, page_index))
     return true;
@@ -95,17 +102,33 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
   fz_display_list *display_list = NULL;
   if (!EnsureMuPdfDisplayListForPage(mupdf_state, page_index, &display_list))
     return false;
+  DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+               "MUPDF preview: display-list-ready page=%d have=%d cached_page=%d",
+               page_index, display_list ? 1 : 0,
+               mupdf_state->cached_display_list_page);
 
   RenderedMuPdfBitmap rendered;
   fz_display_list *new_list = NULL;
   float page_width = mupdf_state->page_width;
   float page_height = mupdf_state->page_height;
+  const float preview_scale = ComputeMuPdfPreviewScale(page_width, page_height);
+  DBG_LOGF_CAT(
+      mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+      "MUPDF preview: render-begin page=%d scale=%.4f page_size=(%.2f,%.2f)",
+      page_index, (double)preview_scale, (double)page_width,
+      (double)page_height);
   if (!RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
-                       ComputeMuPdfPreviewScale(page_width, page_height),
+                       preview_scale,
                        &rendered, &page_width, &page_height, NULL,
-                       display_list, display_list ? NULL : &new_list)) {
+                       display_list, display_list ? NULL : &new_list,
+                       mupdf_state->reporter)) {
+    DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
+                 "MUPDF preview: render-failed page=%d", page_index);
     return false;
   }
+  DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+               "MUPDF preview: render-done page=%d bmp=%dx%d", page_index,
+               rendered.width, rendered.height);
 
   float left = 0.0f, top = 0.0f, width = 1.0f, height = 1.0f;
   ComputeBitmapContentBoundsNormalized(rendered, &left, &top, &width, &height);
@@ -117,6 +140,10 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
     mupdf_state->cached_display_list = new_list;
     mupdf_state->cached_display_list_page = page_index;
   }
+  DBG_LOGF_CAT(
+      mupdf_state->reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+      "MUPDF preview: cache-store-done page=%d content=(%.3f,%.3f %.3f x %.3f)",
+      page_index, (double)left, (double)top, (double)width, (double)height);
   return true;
 }
 
@@ -144,7 +171,8 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
                                mupdf_state->document_kind,
                                mupdf_state->zoom_index),
                        &rendered, &page_width, &page_height, NULL,
-                       display_list, display_list ? NULL : &new_list);
+                       display_list, display_list ? NULL : &new_list,
+                       mupdf_state->reporter);
   if (!render_ok) {
     return false;
   }
@@ -569,7 +597,7 @@ bool PrepareAdjacentMuPdfSlot(Book::MuPdfState *mupdf_state, int current_page,
   if (!RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
                        ComputeMuPdfPreviewScale(page_width, page_height),
                        &preview, &page_width, &page_height, NULL, NULL,
-                       &display_list) ||
+                       &display_list, mupdf_state->reporter) ||
       !display_list) {
     ResetAdjacentSlot(slot, mupdf_state->ctx);
     return false;
@@ -590,7 +618,7 @@ bool PrepareAdjacentMuPdfSlot(Book::MuPdfState *mupdf_state, int current_page,
                                  mupdf_state->document_kind,
                                  mupdf_state->zoom_index),
                          &interactive, &page_width, &page_height, NULL,
-                         display_list, NULL);
+                         display_list, NULL, mupdf_state->reporter);
     if (!render_ok) {
       ResetAdjacentSlot(slot, mupdf_state->ctx);
       return false;

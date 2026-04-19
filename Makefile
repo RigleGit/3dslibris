@@ -131,7 +131,7 @@ CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include \
 			-DDSLIBRIS_EXPAT_ENABLE_NS=$(EXPAT_ENABLE_NS) \
 			-DDSLIBRIS_EXPAT_CONTEXT_BYTES=$(EXPAT_CONTEXT_BYTES)
 
-CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11
+CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11 -fstack-usage
 
 ifeq ($(DEBUG_LOGGING),1)
 CFLAGS		+=	-DDSLIBRIS_DEBUG -g -O2
@@ -308,6 +308,7 @@ clean:
 #---------------------------------------------------------------------------------
 debug-3dsx:
 #---------------------------------------------------------------------------------
+	@touch $(TOPDIR)/source/app/startup_controller.cpp
 	@$(MAKE) --no-print-directory \
 		TARGET=$(DEBUG_TARGET) \
 		BUILD=$(DEBUG_BUILD) \
@@ -320,6 +321,7 @@ debug-3dsx:
 #---------------------------------------------------------------------------------
 debug-cia:
 #---------------------------------------------------------------------------------
+	@touch $(TOPDIR)/source/app/startup_controller.cpp
 	@$(MAKE) --no-print-directory \
 		TARGET=$(DEBUG_TARGET) \
 		BUILD=$(DEBUG_BUILD) \
@@ -376,8 +378,10 @@ source-release:
 	@echo built ... $(SOURCE_ZIP)
 
 #---------------------------------------------------------------------------------
-cia: all
+cia:
 #---------------------------------------------------------------------------------
+	@touch $(TOPDIR)/source/app/startup_controller.cpp
+	@$(MAKE) --no-print-directory all
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile cia
 
 #---------------------------------------------------------------------------------

@@ -4,6 +4,8 @@
 
 #include <algorithm>
 
+#include "debug_log.h"
+
 static void ComputeBitmapContentBoundsPx(const RenderedMuPdfBitmap &bitmap,
                                          MuPdfBitmapBoundsPx *bounds) {
   if (!bounds)
@@ -118,9 +120,14 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
                        float *page_width, float *page_height,
                        const pdf_view_utils::NormalizedRect *crop_rect,
                        fz_display_list *reuse_list,
-                       fz_display_list **out_list) {
+                       fz_display_list **out_list,
+                       IStatusReporter *reporter) {
   if (!ctx || !doc || !out || scale <= 0.0f)
     return false;
+  DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+               "MUPDF render: begin page=%d scale=%.4f reuse_list=%d crop=%d",
+               page_index, (double)scale, reuse_list ? 1 : 0,
+               crop_rect ? 1 : 0);
 
   fz_page *page = NULL;
   fz_pixmap *pixmap = NULL;
@@ -138,6 +145,8 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
   fz_var(list);
 
   fz_try(ctx) {
+    DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+                 "MUPDF render: load-page-begin page=%d", page_index);
     page = fz_load_page(ctx, doc, page_index);
     bounds = fz_bound_page(ctx, page);
     if (!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0))
@@ -145,6 +154,9 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
 
     const float width = bounds.x1 - bounds.x0;
     const float height = bounds.y1 - bounds.y0;
+    DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+                 "MUPDF render: load-page-done page=%d bounds=(%.2f,%.2f)",
+                 page_index, (double)width, (double)height);
     if (page_width)
       *page_width = width;
     if (page_height)
@@ -168,10 +180,15 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
         render_rect = bounds;
     }
 
-    // Build display list if not provided (captures page ops for cheap replay).
     if (!list) {
+      DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+                   "MUPDF render: display-list-build-begin page=%d",
+                   page_index);
       list = fz_new_display_list_from_page(ctx, page);
       owns_list = true;
+      DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+                   "MUPDF render: display-list-build-done page=%d",
+                   page_index);
     }
 
     const fz_matrix ctm = MakeMuPdfRenderMatrix(bounds, scale);
@@ -181,11 +198,19 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
 
     // Grayscale rendering: 3x less memory bandwidth for MuPDF's rasterizer.
     // Manga pages are B&W, so visual quality is identical.
+    DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+                 "MUPDF render: pixmap-begin page=%d bbox=%d,%d %dx%d",
+                 page_index, bbox.x0, bbox.y0, bbox.x1 - bbox.x0,
+                 bbox.y1 - bbox.y0);
     pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), bbox, NULL, 0);
     fz_clear_pixmap_with_value(ctx, pixmap, 255);
     device = fz_new_draw_device(ctx, fz_identity, pixmap);
+    DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+                 "MUPDF render: run-list-begin page=%d", page_index);
     fz_run_display_list(ctx, list, device, ctm, fz_infinite_rect, NULL);
     fz_close_device(ctx, device);
+    DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+                 "MUPDF render: run-list-done page=%d", page_index);
 
     const int pix_w = fz_pixmap_width(ctx, pixmap);
     const int pix_h = fz_pixmap_height(ctx, pixmap);
@@ -199,6 +224,10 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     out->width = pix_w;
     out->height = pix_h;
     out->pixels.resize((size_t)pix_w * (size_t)pix_h);
+    DBG_LOGF_CAT(
+        reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+        "MUPDF render: convert-begin page=%d pix=%dx%d comps=%d stride=%d",
+        page_index, pix_w, pix_h, comps, stride);
     u16 *dst = out->pixels.data();
     if (comps == 1) {
       // Fast path: grayscale → RGB565 via lookup table.
@@ -217,6 +246,9 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
         }
       }
     }
+    DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+                 "MUPDF render: convert-done page=%d pix=%dx%d", page_index,
+                 pix_w, pix_h);
     ok = true;
   }
   fz_always(ctx) {
@@ -225,9 +257,8 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     fz_drop_page(ctx, page);
   }
   fz_catch(ctx) {
-#ifdef DSLIBRIS_DEBUG
-    printf("[MUPDF] render error: %s\n", fz_caught_message(ctx));
-#endif
+    DBG_LOGF_CAT(reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
+                 "MUPDF render error: %s", fz_caught_message(ctx));
     out->width = 0;
     out->height = 0;
     out->pixels.clear();
@@ -245,6 +276,9 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
   } else if (owns_list && list) {
     fz_drop_display_list(ctx, list);
   }
+
+  DBG_LOGF_CAT(reporter, DBG_LEVEL_DEBUG, DBG_CAT_RENDER,
+               "MUPDF render: end page=%d ok=%d", page_index, ok ? 1 : 0);
 
   return ok;
 }

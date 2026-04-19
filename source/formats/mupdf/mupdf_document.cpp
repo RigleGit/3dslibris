@@ -44,6 +44,7 @@ void Book::InitMuPdfView(u16 page_count, fz_context *ctx, fz_document *doc,
   mupdf_state->page_metrics_valid.assign(page_count, 0);
   mupdf_state->is_new_3ds = is_new_3ds;
   mupdf_state->document_kind = document_kind;
+  mupdf_state->reporter = GetStatusReporter();
   mupdf_state->keep_preview_cache = policy.keep_preview_cache;
   mupdf_state->keep_tile_cache = policy.keep_tile_cache;
   mupdf_state->max_zoom_index = policy.max_zoom_index;

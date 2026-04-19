@@ -68,6 +68,7 @@ struct MuPdfNavigationBounds {
 
 enum class MuPdfDeferredStage {
   None = 0,
+  Preview,
   Interactive,
   Final,
   Prefetch,

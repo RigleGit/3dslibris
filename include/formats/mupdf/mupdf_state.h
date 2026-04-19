@@ -1,6 +1,7 @@
 #pragma once
 
 #include "shared/app_flow_utils.h"
+#include "shared/status_reporter.h"
 
 #include <vector>
 
@@ -107,6 +108,7 @@ struct Book::MuPdfState {
   IncrementalRenderState incremental;
   MuPdfWorker *worker;
   bool worker_init_attempted;
+  IStatusReporter *reporter;
 
   MuPdfState()
       : ctx(NULL), doc(NULL), outline(NULL), page_count(0),
@@ -119,5 +121,5 @@ struct Book::MuPdfState {
         current_preview(), current_interactive_tile(), current_final_zoom(),
         final_cache_pending(false), cached_display_list(NULL),
         cached_display_list_page(-1), prev_slot(), next_slot(), incremental(),
-        worker(NULL), worker_init_attempted(false) {}
+        worker(NULL), worker_init_attempted(false), reporter(NULL) {}
 };
