@@ -20,7 +20,7 @@ static const size_t kCoverMaxDecodedRgbBytes = 16 * 1024 * 1024;
 static const size_t kSvgWrapperMaxBytes = 512 * 1024;
 static const int kCoverMaxDimension = 4096;
 
-static const bool kEnableRealTocResolve = false;
+static const bool kEnableRealTocResolve = true;
 
 static const uint16_t kMaxPagesInMemory = 5000;
 

@@ -269,6 +269,44 @@ static int ParseEpubSpineDocuments(
       parsedata->archive_path = archive_path;
       const int parse_rc = epub_parse_currentfile(uf, parsedata, deps);
       const int close_rc = unzCloseCurrentFile(uf);
+      // Expat XML parse errors (positive, < BOOK_ERR_CANCELLED) are
+      // recoverable: real-world EPUBs routinely have malformed XHTML (mismatched
+      // tags, bare ampersands, unclosed void elements). Skip the bad document
+      // and continue with the rest of the spine rather than failing the whole
+      // book. Only propagate fatal conditions: user cancel (BOOK_ERR_CANCELLED)
+      // and ZIP-level errors from minizip (negative codes).
+      if (parse_rc == BOOK_ERR_CANCELLED) {
+        rc = BOOK_ERR_CANCELLED;
+        break;
+      }
+      if (parse_rc > 0) {
+        if (app) {
+          DBG_LOGF(app, "EPUB: spine doc xml-err=%d path=%s (skipped)",
+                   parse_rc, path.c_str());
+        }
+        rc = 0;
+        // Even on recoverable XML errors the parser may have produced pages
+        // before hitting the error. Register those pages so that TOC resolution
+        // can map NCX hrefs to page numbers.
+        if (book->GetPageCount() > chapter_start_page) {
+          std::string parsed_title =
+              BuildChapterLabelFromText(parsedata->parsed_doc_title, chapter_num);
+          if (!parsed_title.empty())
+            chapter_label = parsed_title;
+          chapter_num++;
+          book->AddChapter(chapter_start_page, chapter_label);
+          book->SetChapterDocStartPage(path_key, chapter_start_page);
+          if (page_start_by_href->find(path_key) == page_start_by_href->end())
+            (*page_start_by_href)[path_key] = chapter_start_page;
+          if (stream_writer && stream_writer->IsOpen()) {
+            if (!stream_writer->FlushPages(book, chapter_start_page)) {
+              rc = BOOK_ERR_CANCELLED;
+              break;
+            }
+          }
+        }
+        continue;
+      }
       rc = (parse_rc != 0) ? parse_rc : close_rc;
       if (rc != 0)
         break;
@@ -428,6 +466,24 @@ int epub(Book *book, std::string name, bool metadataonly) {
       DBG_LOGF(reporter, "EPUB: timing cache_total=%llums",
                (unsigned long long)(osGetTime() - t_parse_begin));
 #endif
+    }
+    if (book->GetChapters().empty() && book->GetPageCount() > 0) {
+      std::map<std::string, u16> page_start_by_href;
+      BuildPageStartMapFromPackage(parsedata, folder, book, &page_start_by_href);
+      ResolveEpubTocFromPackageData(uf, book, parsedata, folder,
+                                    page_start_by_href, reporter);
+      if (!book->GetChapters().empty()) {
+        epub_page_cache::Save(
+            book, name.c_str(),
+            deps.ts ? (int)deps.ts->GetPixelSize() : 0,
+            deps.ts ? (int)deps.ts->linespacing : 0,
+            deps.paragraph_spacing, deps.paragraph_indent, deps.orientation,
+            deps.ts ? (int)deps.ts->margin.left : 0,
+            deps.ts ? (int)deps.ts->margin.right : 0,
+            deps.ts ? (int)deps.ts->margin.top : 0,
+            deps.ts ? (int)deps.ts->margin.bottom : 0,
+            deps.ts ? deps.ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : NULL);
+      }
     }
     return FinalizeEpubParse(uf, &parsedata, book, name, deps, 0, false);
   }

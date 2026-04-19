@@ -92,6 +92,13 @@ void ResolveEpubTocFromPackageData(
       if (key.empty())
         continue;
       auto hit = page_start_by_href.find(key);
+      if (hit == page_start_by_href.end()) {
+        auto hash_pos = key.find('#');
+        if (hash_pos != std::string::npos) {
+          std::string key_no_frag = key.substr(0, hash_pos);
+          hit = page_start_by_href.find(key_no_frag);
+        }
+      }
       if (hit == page_start_by_href.end())
         continue;
       if (used_pages[hit->second])

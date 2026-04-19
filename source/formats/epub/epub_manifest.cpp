@@ -104,10 +104,26 @@ std::string ExtractLinkStylesheetHref(const std::string &xhtml_text) {
 void LoadCssClassMapForDoc(const std::string &archive_path,
                            const std::string &xhtml_path,
                            IStatusReporter *reporter,
+                           epub_data_t *epd,
                            epub_css_class_map::CssClassMap *out) {
   out->clear();
   if (archive_path.empty() || xhtml_path.empty())
     return;
+
+  if (epd) {
+    std::map<std::string, std::string>::const_iterator href_it =
+        epd->css_href_by_doc.find(xhtml_path);
+    if (href_it != epd->css_href_by_doc.end()) {
+      if (href_it->second.empty())
+        return;
+      std::map<std::string, epub_css_class_map::CssClassMap>::const_iterator
+          css_it = epd->css_class_map_by_path.find(href_it->second);
+      if (css_it != epd->css_class_map_by_path.end()) {
+        *out = css_it->second;
+        return;
+      }
+    }
+  }
 
   unzFile scan_uf = unzOpen(archive_path.c_str());
   if (!scan_uf)
@@ -123,6 +139,8 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
 
   std::string css_href = ExtractLinkStylesheetHref(xhtml_text);
   if (css_href.empty()) {
+    if (epd)
+      epd->css_href_by_doc[xhtml_path] = "";
     unzClose(scan_uf);
     return;
   }
@@ -133,6 +151,16 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
     xhtml_folder = xhtml_path.substr(0, slash);
 
   std::string css_path = NormalizePath(xhtml_folder + "/" + css_href);
+  if (epd) {
+    epd->css_href_by_doc[xhtml_path] = css_path;
+    std::map<std::string, epub_css_class_map::CssClassMap>::const_iterator
+        css_it = epd->css_class_map_by_path.find(css_path);
+    if (css_it != epd->css_class_map_by_path.end()) {
+      *out = css_it->second;
+      unzClose(scan_uf);
+      return;
+    }
+  }
 
   std::string css_text;
   epub_zip_utils::ZipEntryIndex css_index;
@@ -141,7 +169,10 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
   if (!ok || css_text.empty())
     return;
 
-  epub_css_class_map::ParseCssIntoClassMap(css_text.c_str(), css_text.size(), out);
+  epub_css_class_map::ParseCssIntoClassMap(css_text.c_str(), css_text.size(),
+                                           out);
+  if (epd)
+    epd->css_class_map_by_path[css_path] = *out;
 }
 
 void NormalizeHtmlEntityChunkForXml(const std::string &chunk, bool final,
@@ -169,6 +200,8 @@ void epub_data_init(epub_data_t *d) {
   d->tocid = "";
   d->navid = "";
   d->parsed_doc_title = "";
+  d->css_href_by_doc.clear();
+  d->css_class_map_by_path.clear();
   d->metadataonly = false;
   d->book = nullptr;
 }
@@ -185,6 +218,8 @@ void epub_data_delete(epub_data_t *d) {
   for (auto *ctx : d->ctx)
     delete ctx;
   d->ctx.clear();
+  d->css_href_by_doc.clear();
+  d->css_class_map_by_path.clear();
 }
 
 void epub_container_start(void *data, const char *el, const char **attr) {
@@ -350,7 +385,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
     pd.docpath = epd->docpath;
     if (!epd->archive_path.empty())
       LoadCssClassMapForDoc(epd->archive_path, epd->docpath, deps.reporter,
-                            &pd.css_class_map);
+                            epd, &pd.css_class_map);
     log_content_layout = deps.reporter && epd->book;
     if (log_content_layout) {
       t_content_begin = osGetTime();

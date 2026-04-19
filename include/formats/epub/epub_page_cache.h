@@ -22,9 +22,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
 void Save(Book *book, const char *book_path, int pixel_size,
           int line_spacing, int paragraph_spacing, int paragraph_indent,
           int orientation, int margin_left, int margin_right, int margin_top,
-          int margin_bottom, const char *regular_font);
+          int margin_bottom, const char *regular_font, bool closing = false);
 
-void SavePending(Book *book);
+void SavePending(Book *book, bool closing = false);
 
 class StreamWriter {
 public:

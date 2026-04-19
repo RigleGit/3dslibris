@@ -12,7 +12,9 @@
 
 #pragma once
 
+#include "book/epub_css_class_map.h"
 #include "book/book.h"
+#include <map>
 #include <string>
 
 typedef enum { PARSE_CONTAINER, PARSE_ROOTFILE, PARSE_CONTENT } epub_parse_t;
@@ -46,6 +48,8 @@ typedef struct {
   std::string tocid;   //! id of the NCX item (EPUB2)
   std::string navid;   //! id of the nav document (EPUB3)
   std::string parsed_doc_title; //! per-XHTML parsed title/heading candidate
+  std::map<std::string, std::string> css_href_by_doc;
+  std::map<std::string, epub_css_class_map::CssClassMap> css_class_map_by_path;
 } epub_data_t;
 
 int epub(Book *book, std::string filepath, bool metadataonly);
