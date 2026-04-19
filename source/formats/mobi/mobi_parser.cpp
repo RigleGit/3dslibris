@@ -6,6 +6,7 @@
 #include "formats/common/plain_text_perf_utils.h"
 #include "formats/common/text_helpers.h"
 #include "formats/mobi/mobi_decode_plan.h"
+#include "formats/mobi/mobi_cleanup_policy.h"
 #include "formats/mobi/mobi_deferred_runtime.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/mobi/mobi_parser_core.h"
@@ -19,6 +20,7 @@
 
 #include <memory>
 #include <new>
+#include <3ds.h>
 #include <stdio.h>
 #include <sys/param.h>
 #include <utility>
@@ -60,36 +62,40 @@ using MobiDeferredState = mobi_deferred_runtime::State;
 static const Hooks *g_deferred_hooks = NULL;
 
 static bool TryLoadMobiPageCache(Book *book, const char *book_path,
-                                 const BookParseDeps &deps) {
-  if (!book || !book_path || !deps.reporter || !deps.ts)
+                                  const BookParseDeps &deps) {
+  if (!book || !book_path || !deps.reporter)
     return false;
-  Text *ts = deps.ts;
-  std::string font = deps.regular_font_path;
+  const TextLayoutSnapshot &layout = deps.layout;
+  if (layout.pixel_size == 0)
+    return false;
   return mobi_page_cache::TryLoad(
-      book, book_path, (int)ts->GetPixelSize(), (int)ts->linespacing,
+      book, book_path, layout.pixel_size, layout.linespacing,
       deps.paragraph_spacing, deps.paragraph_indent, deps.orientation,
-      (int)ts->margin.left, (int)ts->margin.right, (int)ts->margin.top,
-      (int)ts->margin.bottom, font.c_str(), book->GetMobiLineWrapFix());
+      layout.margin_left, layout.margin_right, layout.margin_top,
+      layout.margin_bottom, layout.regular_font_path.c_str(),
+      book->GetMobiLineWrapFix());
 }
 
 static void SaveMobiPageCache(Book *book, const char *book_path,
                                const BookParseDeps &deps,
                                bool line_wrap_fix_enabled) {
-  if (!book || !book_path || !deps.reporter || !deps.ts ||
+  if (!book || !book_path || !deps.reporter ||
       book->GetPageCount() == 0)
+    return;
+  const TextLayoutSnapshot &layout = deps.layout;
+  if (layout.pixel_size == 0)
     return;
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(deps.reporter, "MOBI: cache-save start pages=%u",
            (unsigned)book->GetPageCount());
 #endif
-  Text *ts = deps.ts;
-  std::string font = deps.regular_font_path;
-  mobi_page_cache::Save(book, book_path, (int)ts->GetPixelSize(),
-                        (int)ts->linespacing, deps.paragraph_spacing,
+  mobi_page_cache::Save(book, book_path, layout.pixel_size,
+                        layout.linespacing, deps.paragraph_spacing,
                         deps.paragraph_indent, deps.orientation,
-                        (int)ts->margin.left, (int)ts->margin.right,
-                        (int)ts->margin.top, (int)ts->margin.bottom,
-                        font.c_str(), line_wrap_fix_enabled);
+                        layout.margin_left, layout.margin_right,
+                        layout.margin_top, layout.margin_bottom,
+                        layout.regular_font_path.c_str(),
+                        line_wrap_fix_enabled);
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(deps.reporter, "MOBI: cache-save done");
 #endif
@@ -206,7 +212,34 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
   if (have_map)
     text_before_cleanup = *text;
 
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter,
+             "MOBI cleanup: step=normalize-begin bytes=%u have_map=%d wrap=%d mem=%u",
+             (unsigned)text->size(), have_map ? 1 : 0,
+             line_wrap_fix_applied ? 1 : 0,
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
   NormalizeNewlines(text);
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter, "MOBI cleanup: step=normalize-done bytes=%u mem=%u",
+             (unsigned)text->size(),
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
+  if (!mobi_cleanup_policy::ShouldRunPostNormalizeCleanup(
+          have_map, line_wrap_fix_applied)) {
+#ifdef DSLIBRIS_DEBUG
+    if (reporter)
+      DBG_LOGF(reporter, "MOBI cleanup: step=post-normalize-skipped mem=%u",
+               (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+    return;
+  }
+
   const bool track_image_tokens = HasMobiInlineImageTokens(*text);
   std::string text_before_mobi_cleanup;
   std::vector<u16> image_ids_before_cleanup;
@@ -214,12 +247,50 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
     text_before_mobi_cleanup = *text;
     CollectMobiInlineImageTokenIds(*text, &image_ids_before_cleanup);
   }
-  *text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(
-      *text);
-  if (line_wrap_fix_applied) {
-    *text = mobi_text_cleanup::FixBrokenParagraphWrapsPreservingMobiImageTokens(
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter, "MOBI cleanup: step=mojibake-begin track=%d mem=%u",
+             track_image_tokens ? 1 : 0,
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
+  if (track_image_tokens) {
+    *text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(
         *text);
+  } else {
+    *text = mobi_text_cleanup::RepairCommonMojibake(*text);
   }
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter, "MOBI cleanup: step=mojibake-done bytes=%u mem=%u",
+             (unsigned)text->size(),
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
+  if (line_wrap_fix_applied) {
+#ifdef DSLIBRIS_DEBUG
+    if (reporter)
+      DBG_LOGF(reporter, "MOBI cleanup: step=wrap-fix-begin bytes=%u mem=%u",
+               (unsigned)text->size(),
+               (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+    if (track_image_tokens) {
+      *text =
+          mobi_text_cleanup::FixBrokenParagraphWrapsPreservingMobiImageTokens(
+              *text);
+    } else {
+      *text = mobi_text_cleanup::FixBrokenParagraphWraps(*text);
+    }
+#ifdef DSLIBRIS_DEBUG
+    if (reporter)
+      DBG_LOGF(reporter, "MOBI cleanup: step=wrap-fix-done bytes=%u mem=%u",
+               (unsigned)text->size(),
+               (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+  }
+
   size_t text_post_cleanup = text->size();
   if (track_image_tokens) {
     std::vector<u16> image_ids_after_cleanup;
@@ -231,9 +302,27 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
   }
 
   if (have_map && text_post_cleanup != text_pre_cleanup) {
+#ifdef DSLIBRIS_DEBUG
+    if (reporter)
+      DBG_LOGF(reporter, "MOBI cleanup: step=remap-begin pre=%u post=%u mem=%u",
+               (unsigned)text_pre_cleanup, (unsigned)text_post_cleanup,
+               (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
     mobi_position_map::RemapHtmlToTextAfterCleanup(text_before_cleanup, *text,
                                                    html_map);
+#ifdef DSLIBRIS_DEBUG
+    if (reporter)
+      DBG_LOGF(reporter, "MOBI cleanup: step=remap-done mem=%u",
+               (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
   }
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter, "MOBI cleanup: step=done bytes=%u mem=%u",
+             (unsigned)text->size(),
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
 }
 
 static void BuildMobiTocMetadataFromUtf8(
@@ -266,13 +355,38 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
   if (!decoded || !hooks.extract_markup_to_text)
     return;
 
+  IStatusReporter *reporter = deps.reporter;
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter,
+             "MOBI decode: step=utf8-begin merged_bytes=%u mem_free=%u",
+             (unsigned)merged.size(),
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
   decoded->utf8 = DecodeMobiBytesToUtf8(merged, header.encoding,
                                         &decoded->used_utf8_guess,
                                         &decoded->used_legacy_guess);
   if (t_after_decode)
     *t_after_decode = osGetTime();
 
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter,
+             "MOBI decode: step=utf8-done utf8_bytes=%u mem_free=%u",
+             (unsigned)decoded->utf8.size(),
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
   book->ClearInlineImages();
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter,
+             "MOBI decode: step=markup-extract-begin mem_free=%u",
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
   decoded->text =
       hooks.extract_markup_to_text(book, deps, decoded->utf8,
                                    collect_toc_metadata ? &decoded->heading_hints
@@ -282,13 +396,43 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
                                        : NULL);
   if (t_after_markup_scan)
     *t_after_markup_scan = osGetTime();
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter,
+             "MOBI decode: step=markup-extract-done text_bytes=%u mem_free=%u",
+             (unsigned)decoded->text.size(),
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter, "MOBI decode: step=cleanup-call-begin mem_free=%u",
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
   CleanupDecodedMobiText(deps.reporter, &decoded->text,
                          collect_toc_metadata ? &decoded->html_to_text_map
-                                              : NULL,
+                                             : NULL,
                          book->GetMobiLineWrapFix());
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter, "MOBI decode: step=cleanup-call-returned mem_free=%u",
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
+
   if (t_after_cleanup)
     *t_after_cleanup = osGetTime();
   decoded->toc_metadata_ready = collect_toc_metadata;
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter,
+             "MOBI decode: step=cleanup-done text_bytes=%u mem_free=%u",
+             (unsigned)decoded->text.size(),
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
 
   if (t_after_markup)
     *t_after_markup = osGetTime();
@@ -552,15 +696,24 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
     if (reporter)
       debug_log.Append(line);
   };
+  auto log_stage = [&](const char *stage) {
+    if (!reporter || !stage)
+      return;
+    DBG_LOGF(reporter, "MOBI: stage=%s", stage);
+  };
 #else
   auto append_debug_log = [&](const std::string &) {};
+  auto log_stage = [&](const char *) {};
 #endif
+  log_stage("enter");
   if (reporter)
     append_debug_log("MOBI: parse begin");
 
   mobi_deferred_runtime::Erase(book);
+  log_stage("after-erase");
 
   if (TryLoadMobiPageCache(book, path, deps)) {
+    log_stage("cache-hit");
     if (reporter) {
       char msg[224];
       snprintf(msg, sizeof(msg), "MOBI: page cache hit pages=%u chapters=%u",
@@ -584,6 +737,7 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       mobi_parser_core::LoadMobiSource(path, &raw, &t_after_read, kMobiMaxBytes);
   if (rc != 0)
     return rc;
+  log_stage("source-loaded");
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-source"))
@@ -602,6 +756,7 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
     }
     return rc;
   }
+  log_stage("header-parsed");
   if (open_cancel_poll::Poll(book, reporter, "mobi-header"))
     return BOOK_ERR_CANCELLED;
 
@@ -634,11 +789,20 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       reporter->PrintStatus("MOBI: failed to decode text records");
     return 255;
   }
+  log_stage("text-merged");
   const u64 t_after_decompress = osGetTime();
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-text"))
     return BOOK_ERR_CANCELLED;
+
+#ifdef DSLIBRIS_DEBUG
+  if (reporter)
+    DBG_LOGF(reporter,
+             "MOBI pre-decode: merged_bytes=%u mem_free=%u",
+             (unsigned)merged.size(),
+             (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+#endif
 
   MobiDecodedText decoded;
   u64 t_after_decode = 0;
@@ -652,6 +816,8 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       book, deps, header, merged, decode_plan.capture_toc_metadata, &decoded,
       &t_after_decode, &t_after_markup_scan, &t_after_cleanup, &t_after_markup,
       hooks);
+  { std::string().swap(merged); }
+  log_stage("text-decoded");
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-decode"))
@@ -663,7 +829,7 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   if (!deferred_uptr)
     return 1;
   MobiDeferredState &deferred = *deferred_uptr;
-  PrepareMobiDeferredState(path, header, merged.size(), t_parse_begin,
+  PrepareMobiDeferredState(path, header, text_bytes, t_parse_begin,
                            t_after_read, t_after_decompress, t_after_decode,
                            t_after_markup_scan, t_after_cleanup, t_after_markup,
                            book->GetMobiLineWrapFix(),
@@ -673,11 +839,15 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       deferred.text_len_for_pos, hooks.make_structured_toc_callbacks(),
       hooks.make_inline_title_callbacks(), &deferred.structured_toc,
       &deferred.structured_from_filepos, reporter);
+  log_stage("toc-prepared");
+
+  { std::string().swap(raw); }
 
   bool pages_done_initial = false;
   if (!StartInitialMobiPagination(book, deps, &deferred, &pages_done_initial,
                                   hooks))
     return 1;
+  log_stage("initial-pages");
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-pages-initial"))
@@ -709,9 +879,11 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
         if (done)
           deferred.t_after_pages = osGetTime();
       }
+      log_stage("sync-pages-done");
       MobiTocFinalizeResult toc_result;
       FinalizeImmediateMobiParse(book, path, deps, raw, header, decoded.utf8,
                                  &deferred, &toc_result, hooks);
+      log_stage("finalized");
       if (reporter) {
         append_debug_log("MOBI: parse end");
       }
@@ -754,6 +926,7 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   MobiTocFinalizeResult toc_result;
   FinalizeImmediateMobiParse(book, path, deps, raw, header, decoded.utf8,
                              &deferred, &toc_result, hooks);
+  log_stage("finalized");
 
   if (reporter) {
     char msg[320];

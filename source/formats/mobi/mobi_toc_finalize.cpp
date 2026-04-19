@@ -6,6 +6,7 @@
 
 #include "book/book.h"
 #include "formats/common/page_text_extract_utils.h"
+#include "formats/mobi/mobi_toc_finalize_policy.h"
 #include "formats/mobi/mobi_toc_apply.h"
 #include "debug_log.h"
 #include "shared/status_reporter.h"
@@ -85,8 +86,11 @@ void FinalizePreparedToc(
   size_t mapped_structured = 0;
   size_t structured_direct = 0;
   bool structured_used = false;
+  const bool allow_structured_toc =
+      mobi_toc_finalize_policy::ShouldApplyStructuredToc(html_to_text_map,
+                                                         text_cursor_per_page);
 
-  if (have_structured_toc) {
+  if (have_structured_toc && allow_structured_toc) {
     const std::vector<ChapterEntry> fallback = book->GetChapters();
     book->ClearChapters();
     mobi_toc_apply::BuildCallbacks toc_callbacks;
@@ -136,6 +140,8 @@ void FinalizePreparedToc(
                          fallback[i].level);
       }
     }
+  } else if (have_structured_toc && reporter) {
+    DBG_LOG(reporter, "MOBI: toc-step structured-skip reason=unusable-map");
   }
 
   size_t mapped_hints = 0;

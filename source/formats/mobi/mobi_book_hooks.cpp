@@ -5,6 +5,7 @@
 #include "debug_log.h"
 #include "formats/common/plain_parser.h"
 #include "formats/mobi/mobi_markup_extract.h"
+#include "formats/mobi/mobi_safe_markup_extract.h"
 #include "formats/mobi/mobi_text_decode.h"
 #include "formats/mobi/mobi_toc_finalize.h"
 #include "formats/mobi/mobi_toc_prepare.h"
@@ -262,9 +263,17 @@ static std::string ExtractMobiMarkupToText(
     Book *book, const BookIoDeps &deps, const std::string &in,
     std::vector<MobiHeadingHint> *heading_hints,
     std::vector<std::pair<u32, u32>> *html_to_text_map) {
-  return mobi_markup_extract::ExtractToText(
-      book, deps, in, heading_hints, html_to_text_map,
-      MakeMobiMarkupExtractCallbacks());
+  (void)book;
+  (void)heading_hints;
+  if (html_to_text_map)
+    html_to_text_map->clear();
+#ifdef DSLIBRIS_DEBUG
+  if (deps.reporter) {
+    DBG_LOG(deps.reporter, "MOBI: using safe markup extractor");
+    DBG_LOG(deps.reporter, "MOBI: safe extractor inline images disabled");
+  }
+#endif
+  return mobi_safe_markup_extract::ExtractToText(in);
 }
 
 } // namespace

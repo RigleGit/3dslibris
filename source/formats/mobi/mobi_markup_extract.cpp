@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "book/book.h"
+#include "book/book_parse_deps.h"
 #include "formats/common/html_entity_utils.h"
 #include "formats/common/text_helpers.h"
 #include "formats/mobi/mobi.h"
@@ -21,7 +22,7 @@
 namespace mobi_markup_extract {
 namespace {
 
-const ExtractCallbacks *g_callbacks = nullptr;
+thread_local const ExtractCallbacks *g_callbacks = nullptr;
 
 static std::string Trim(const std::string &in) {
   return (g_callbacks && g_callbacks->trim_ascii_whitespace)
@@ -236,14 +237,16 @@ static std::string CollectMobiMarkupBlockText(const MobiMarkupBlock &block) {
   return text;
 }
 
-static int EstimateWrappedLineCount(Text *ts, const std::string &text,
-                                    int width) {
+static int EstimateWrappedLineCount(const TextLayoutSnapshot *layout,
+                                    const std::string &text, int width) {
   if (text.empty())
     return 0;
-  if (!ts || width <= 0)
+  if (!layout || width <= 0)
     return 1;
 
-  const int space_width = std::max(1, (int)ts->GetAdvance(' '));
+  const int avg_char_width = std::max(1, layout->pixel_size / 2); // snapshot heuristic, no live Text*
+  const int space_width = avg_char_width;
+
   int lines = 1;
   int line_width = 0;
   int word_width = 0;
@@ -295,15 +298,29 @@ static int EstimateWrappedLineCount(Text *ts, const std::string &text,
 
     u32 cp = 0;
     size_t step = 1;
-    if (c >= 0x80)
-      step = (size_t)ts->GetCharCode(text.c_str() + i, text.size() - i, &cp);
-    else
+    if (c >= 0x80) {
+      // Simple UTF-8 decoder without needing Text*
+      if ((c & 0xE0) == 0xC0 && i + 1 < text.size()) {
+        cp = ((c & 0x1F) << 6) | (text[i + 1] & 0x3F);
+        step = 2;
+      } else if ((c & 0xF0) == 0xE0 && i + 2 < text.size()) {
+        cp = ((c & 0x0F) << 12) | ((text[i + 1] & 0x3F) << 6) | (text[i + 2] & 0x3F);
+        step = 3;
+      } else if ((c & 0xF8) == 0xF0 && i + 3 < text.size()) {
+        cp = ((c & 0x07) << 18) | ((text[i + 1] & 0x3F) << 12) |
+             ((text[i + 2] & 0x3F) << 6) | (text[i + 3] & 0x3F);
+        step = 4;
+      } else {
+        cp = c;
+      }
+    } else {
       cp = c;
+    }
     if (step == 0 || i + step > text.size()) {
       step = 1;
       cp = c;
     }
-    word_width += std::max(1, (int)ts->GetAdvance(cp));
+    word_width += std::max(1, avg_char_width);
     have_word = true;
     i += step;
   }
@@ -333,7 +350,8 @@ static bool StartsLikeListOrTitle(const std::string &text) {
   return LooksStructured(compact);
 }
 
-static bool IsMobiCaptionLikeBlock(const MobiMarkupBlock &block, Text *ts,
+static bool IsMobiCaptionLikeBlock(const MobiMarkupBlock &block,
+                                   const TextLayoutSnapshot *layout,
                                    int text_width, int max_bytes,
                                    int max_lines) {
   if (!MobiMarkupBlockHasMeaningfulContent(block))
@@ -350,7 +368,7 @@ static bool IsMobiCaptionLikeBlock(const MobiMarkupBlock &block, Text *ts,
     return false;
   if (StartsLikeListOrTitle(collapsed))
     return false;
-  return EstimateWrappedLineCount(ts, raw, text_width) <= max_lines;
+  return EstimateWrappedLineCount(layout, raw, text_width) <= max_lines;
 }
 
 static bool IsMobiFigureFollowerBlock(const MobiMarkupBlock &block) {
@@ -367,8 +385,9 @@ static bool IsMobiFigureFollowerBlock(const MobiMarkupBlock &block) {
   return !StartsLikeListOrTitle(collapsed);
 }
 
-static u8 EstimateMobiImageFollowTextLines(const MobiMarkupBlock &block, Text *ts,
-                                           int text_width, size_t image_index) {
+static u8 EstimateMobiImageFollowTextLines(const MobiMarkupBlock &block,
+                                            const TextLayoutSnapshot *layout,
+                                            int text_width, size_t image_index) {
   std::string follow_text;
   for (size_t i = image_index + 1; i < block.items.size(); i++) {
     const MobiMarkupBlockItem &item = block.items[i];
@@ -382,14 +401,15 @@ static u8 EstimateMobiImageFollowTextLines(const MobiMarkupBlock &block, Text *t
   std::string collapsed = Collapse(Trim(follow_text));
   if (collapsed.empty())
     return 0;
-  int lines = EstimateWrappedLineCount(ts, follow_text, text_width);
+  int lines = EstimateWrappedLineCount(layout, follow_text, text_width);
   lines = std::max(1, std::min(lines, 8));
   return (u8)lines;
 }
 
 static void ApplyMobiImageContexts(Book *book,
                                    std::vector<MobiMarkupBlock> *blocks,
-                                   std::string *out, Text *ts,
+                                   std::string *out,
+                                   const TextLayoutSnapshot *layout,
                                    int text_width) {
   if (!book || !blocks || !out)
     return;
@@ -416,20 +436,20 @@ static void ApplyMobiImageContexts(Book *book,
 
       if (figure_with_caption)
         follow_text_lines =
-            EstimateMobiImageFollowTextLines(block, ts, text_width, ii);
+            EstimateMobiImageFollowTextLines(block, layout, text_width, ii);
 
       if (!figure_with_caption && MobiMarkupBlockHasOnlyImage(block, ii)) {
         for (size_t next = bi + 1; next < blocks->size(); next++) {
           if (!MobiMarkupBlockHasMeaningfulContent((*blocks)[next]))
             continue;
           const bool caption_like =
-              IsMobiCaptionLikeBlock((*blocks)[next], ts, text_width, 220, 4);
+              IsMobiCaptionLikeBlock((*blocks)[next], layout, text_width, 220, 4);
           const bool figure_follower = IsMobiFigureFollowerBlock((*blocks)[next]);
           figure_with_caption = caption_like || figure_follower;
           if (figure_with_caption) {
             std::string raw = CollectMobiMarkupBlockText((*blocks)[next]);
             follow_text_lines = (u8)std::max(
-                1, std::min(EstimateWrappedLineCount(ts, raw, text_width), 8));
+                1, std::min(EstimateWrappedLineCount(layout, raw, text_width), 8));
           }
           break;
         }
@@ -702,10 +722,9 @@ std::string ExtractToText(
 
   finalize_block();
 
-  if (book && deps.ts) {
-    Text *ts = deps.ts;
-    const int text_width = 240 - ts->margin.left - ts->margin.right;
-    ApplyMobiImageContexts(book, &blocks, &out, ts, text_width);
+  if (book && !deps.layout.regular_font_path.empty()) {
+    const int text_width = 240 - deps.layout.margin_left - deps.layout.margin_right;
+    ApplyMobiImageContexts(book, &blocks, &out, &deps.layout, text_width);
   }
 
   if (html_to_text_map)

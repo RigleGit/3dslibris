@@ -93,9 +93,9 @@ Generated install package targets:
   - First open can be slow on large books (decompress + parse + pagination)
   - Subsequent opens are accelerated by persistent page cache
   - TOC quality is heuristic for many files (can be approximate)
-  - Inline MOBI images now reuse the same smart `inline / band / page` layout pipeline used by EPUB/FB2, with better caption flow on mixed photo spreads
   - Includes an optional per-book `line wrap fix` for badly converted files that hard-wrap prose line by line, while preserving embedded image markers during cleanup
   - Empty or corrupt books are reported with a readable error instead of a raw numeric code
+  - On unstable files / runtimes, the reader can fall back to a conservative safe-open path that prefers successful open over full feature fidelity
 - `PDF`
   - Viewer-only path with MuPDF-backed rendering
   - Top screen shows a zoomed page region; bottom screen shows the full-page preview and viewport box
@@ -118,7 +118,8 @@ Generated install package targets:
 - EPUB SVG support is limited to common wrapper patterns that reference raster images; arbitrary SVG drawing is not rendered as vector graphics.
 - After changing font size, paragraph spacing, orientation, reading fonts, or other EPUB layout settings, reopen the current book if a cached layout is still visible.
 - MOBI TOC extraction depends on file structure and may omit or merge entries in some books.
-- MOBI inline images depend on recoverable image references in the source markup, including the zero-padded `recindex` values commonly found in Kindle-generated books; malformed files can still miss some images.
+- In the current safe MOBI fallback path, inline MOBI images can be disabled completely to keep `.cia` / new3DS opening stable.
+- In the current safe MOBI fallback path, structured MOBI TOC/index can be unavailable when the reader cannot trust the HTML-to-text position map.
 - Some malformed MOBI sources still contain encoding or OCR artifacts that cannot be repaired reliably on the reader side.
 - After changing font size, paragraph spacing, orientation, reading fonts, or the per-book MOBI `line wrap fix`, reopen the current book to apply the new layout.
 - Reading position and existing bookmarks are remapped approximately after that reopen and can shift a few pages from their original location.
@@ -223,6 +224,7 @@ Fixed-layout notes:
 - Hardens the book-opening lifecycle used by `START -> library -> open another book`, including cancellation of stale open sessions and safer suspend/resume behavior while a book is still opening.
 - Fixes browser-side issues seen on hardware in `2.3.0`, including `list view` metadata/title warmup stalling after only a few entries and `gallery view` marquee corruption on the selected title.
 - Improves EPUB robustness by handling more named HTML entities found in real books and by propagating cancellation/error states more cleanly through the open pipeline.
+- Stabilizes problematic `PDF`, `CBZ`, and `MOBI` opens by preferring safer render/open paths over aggressive background or rich-layout behavior when those paths proved unreliable.
 - Keeps the reading view clear of leftover browser artifacts when entering a book.
 
 ## Documentation

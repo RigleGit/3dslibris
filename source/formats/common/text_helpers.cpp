@@ -82,19 +82,21 @@ std::string NormalizeTextUtf8(std::string raw) {
 void NormalizeNewlines(std::string *s) {
   if (!s)
     return;
-  std::string out;
-  out.reserve(s->size());
-  for (size_t i = 0; i < s->size(); i++) {
-    char c = (*s)[i];
+  if (s->find('\r') == std::string::npos)
+    return;
+
+  size_t write = 0;
+  for (size_t read = 0; read < s->size(); read++) {
+    char c = (*s)[read];
     if (c == '\r') {
-      if (i + 1 < s->size() && (*s)[i + 1] == '\n')
-        i++;
-      out.push_back('\n');
+      if (read + 1 < s->size() && (*s)[read + 1] == '\n')
+        read++;
+      (*s)[write++] = '\n';
     } else {
-      out.push_back(c);
+      (*s)[write++] = c;
     }
   }
-  s->swap(out);
+  s->resize(write);
 }
 
 static int HexDigit(char c) {

@@ -21,7 +21,9 @@ void ExpectEqual(const char *label, const std::string &actual,
 
 int main() {
   using mobi_text_cleanup::FixBrokenParagraphWraps;
+  using mobi_text_cleanup::FixBrokenParagraphWrapsPreservingMobiImageTokens;
   using mobi_text_cleanup::RepairCommonMojibake;
+  using mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens;
 
   ExpectEqual("repairs mojibake acute vowels",
               RepairCommonMojibake("coraz\xc3\x83\xc2\xb3n, religi\xc3\x83\xc2\xb3n"),
@@ -29,6 +31,12 @@ int main() {
   ExpectEqual("repairs mojibake i with soft hyphen marker",
               RepairCommonMojibake("as\xc3\x83\xc2\xad como"),
               "as\xc3\xad como");
+
+  ExpectEqual("preserving wrapper matches plain mojibake cleanup without tokens",
+              RepairCommonMojibakePreservingMobiImageTokens(
+                  "coraz\xc3\x83\xc2\xb3n, religi\xc3\x83\xc2\xb3n"),
+              RepairCommonMojibake(
+                  "coraz\xc3\x83\xc2\xb3n, religi\xc3\x83\xc2\xb3n"));
 
   ExpectEqual("keeps utf8 acute letter when merging wraps",
               FixBrokenParagraphWraps(
@@ -56,5 +64,15 @@ int main() {
               FixBrokenParagraphWraps("Primera idea completa.\n\n"
                                       "Segunda idea independiente."),
               "Primera idea completa.\n\nSegunda idea independiente.");
+
+  ExpectEqual("preserving wrapper matches plain wrap cleanup without tokens",
+              FixBrokenParagraphWrapsPreservingMobiImageTokens(
+                  "encontrado solo el reflejo de si mismo\n\n"
+                  "en la fantastica realidad del\n\n"
+                  "cielo, donde buscaba un superhombre"),
+              FixBrokenParagraphWraps(
+                  "encontrado solo el reflejo de si mismo\n\n"
+                  "en la fantastica realidad del\n\n"
+                  "cielo, donde buscaba un superhombre"));
   return 0;
 }
