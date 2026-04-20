@@ -16,12 +16,21 @@
 #include "path_utils.h"
 #include "stb_image.h"
 #include "shared/string_utils.h"
+#include <png.h>
 #include <3ds.h>
 #include <algorithm>
 #include <ctype.h>
+#include <setjmp.h>
 #include <vector>
 
+extern "C" {
+#include "mupdf/fitz.h"
+}
+
 namespace {
+
+static const int kCoverThumbMaxW = 85;
+static const int kCoverThumbMaxH = 115;
 
 static std::string BuildDocPath(const std::string &opf_folder,
                                 const std::string &href) {
@@ -80,6 +89,295 @@ static bool ResolveSvgCoverPayload(unzFile uf, const std::string &svg_path,
   return epub_image_utils::ResolveSvgWrapperImage(
       uf, svg_path, svg_buf, out, epub_limits::kCoverMaxEntryBytes,
       resolved_path);
+}
+
+static bool LooksLikePngPayload(const std::string &path_hint,
+                                const std::vector<u8> &buf) {
+  std::string lower_path = ToLowerAscii(path_hint);
+  if (lower_path.size() >= 4 &&
+      lower_path.rfind(".png") == lower_path.size() - 4) {
+    return true;
+  }
+  return buf.size() >= 8 && !png_sig_cmp((png_bytep)buf.data(), 0, 8);
+}
+
+static bool ComputeCoverThumbSize(int img_w, int img_h, int *final_w,
+                                  int *final_h, float *scale_out) {
+  if (!final_w || !final_h || !scale_out || img_w <= 0 || img_h <= 0)
+    return false;
+  const float scale_x = (float)img_w / (float)kCoverThumbMaxW;
+  const float scale_y = (float)img_h / (float)kCoverThumbMaxH;
+  const float scale = std::max(scale_x, scale_y);
+  if (scale <= 0.0f)
+    return false;
+  int thumb_w = (int)(img_w / scale);
+  int thumb_h = (int)(img_h / scale);
+  if (thumb_w > kCoverThumbMaxW)
+    thumb_w = kCoverThumbMaxW;
+  if (thumb_h > kCoverThumbMaxH)
+    thumb_h = kCoverThumbMaxH;
+  thumb_w = std::max(1, thumb_w);
+  thumb_h = std::max(1, thumb_h);
+  *final_w = thumb_w;
+  *final_h = thumb_h;
+  *scale_out = scale;
+  return true;
+}
+
+static bool AdoptCoverPixels(Book *book, const std::vector<u16> &pixels, int w,
+                             int h) {
+  if (!book || pixels.empty() || w <= 0 || h <= 0 ||
+      pixels.size() != (size_t)w * (size_t)h) {
+    return false;
+  }
+  if (book->coverPixels) {
+    delete[] book->coverPixels;
+    book->coverPixels = nullptr;
+  }
+  book->coverPixels = new u16[(size_t)w * (size_t)h];
+  if (!book->coverPixels)
+    return false;
+  memcpy(book->coverPixels, pixels.data(), pixels.size() * sizeof(u16));
+  book->coverWidth = w;
+  book->coverHeight = h;
+  return true;
+}
+
+struct PngMemoryReader {
+  const unsigned char *data;
+  size_t size;
+  size_t offset;
+};
+
+static void ReadPngFromMemory(png_structp png_ptr, png_bytep out_bytes,
+                              png_size_t byte_count) {
+  PngMemoryReader *reader =
+      (PngMemoryReader *)png_get_io_ptr(png_ptr);
+  if (!reader || reader->offset + byte_count > reader->size) {
+    png_error(png_ptr, "png read overflow");
+    return;
+  }
+  memcpy(out_bytes, reader->data + reader->offset, byte_count);
+  reader->offset += (size_t)byte_count;
+}
+
+static bool DecodePngCoverThumbnail(const std::vector<u8> &decodebuf,
+                                    std::vector<u16> *thumb_pixels,
+                                    int *thumb_w_out, int *thumb_h_out) {
+  if (!thumb_pixels || !thumb_w_out || !thumb_h_out ||
+      !LooksLikePngPayload("", decodebuf)) {
+    return false;
+  }
+
+  png_structp png_ptr =
+      png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+  if (!png_ptr)
+    return false;
+  png_infop info_ptr = png_create_info_struct(png_ptr);
+  if (!info_ptr) {
+    png_destroy_read_struct(&png_ptr, NULL, NULL);
+    return false;
+  }
+
+  PngMemoryReader reader = {decodebuf.data(), decodebuf.size(), 0};
+  bool ok = false;
+  std::vector<u16> thumb;
+  std::vector<png_byte> row_buf;
+
+  if (setjmp(png_jmpbuf(png_ptr))) {
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    return false;
+  }
+
+  png_set_read_fn(png_ptr, &reader, ReadPngFromMemory);
+  png_read_info(png_ptr, info_ptr);
+
+  png_uint_32 img_w = 0;
+  png_uint_32 img_h = 0;
+  int bit_depth = 0;
+  int color_type = 0;
+  png_get_IHDR(png_ptr, info_ptr, &img_w, &img_h, &bit_depth, &color_type,
+               NULL, NULL, NULL);
+
+  if (img_w == 0 || img_h == 0 || img_w > epub_limits::kCoverMaxDimension ||
+      img_h > epub_limits::kCoverMaxDimension) {
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    return false;
+  }
+
+  if (bit_depth == 16)
+    png_set_strip_16(png_ptr);
+  if (color_type == PNG_COLOR_TYPE_PALETTE)
+    png_set_palette_to_rgb(png_ptr);
+  if (color_type == PNG_COLOR_TYPE_GRAY && bit_depth < 8)
+    png_set_expand_gray_1_2_4_to_8(png_ptr);
+  if (png_get_valid(png_ptr, info_ptr, PNG_INFO_tRNS))
+    png_set_tRNS_to_alpha(png_ptr);
+  if (color_type == PNG_COLOR_TYPE_GRAY ||
+      color_type == PNG_COLOR_TYPE_GRAY_ALPHA) {
+    png_set_gray_to_rgb(png_ptr);
+  }
+  if (color_type & PNG_COLOR_MASK_ALPHA)
+    png_set_strip_alpha(png_ptr);
+
+  png_read_update_info(png_ptr, info_ptr);
+
+  const int channels = png_get_channels(png_ptr, info_ptr);
+  const png_size_t rowbytes = png_get_rowbytes(png_ptr, info_ptr);
+  if (channels < 3 || rowbytes == 0) {
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    return false;
+  }
+
+  int thumb_w = 0;
+  int thumb_h = 0;
+  float scale = 1.0f;
+  if (!ComputeCoverThumbSize((int)img_w, (int)img_h, &thumb_w, &thumb_h,
+                             &scale)) {
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+    return false;
+  }
+
+  thumb.assign((size_t)thumb_w * (size_t)thumb_h, 0);
+  row_buf.resize(rowbytes);
+
+  std::vector<int> sample_x((size_t)thumb_w);
+  for (int x = 0; x < thumb_w; x++) {
+    int src_x = (int)((float)x * scale);
+    if (src_x >= (int)img_w)
+      src_x = (int)img_w - 1;
+    sample_x[(size_t)x] = std::max(0, src_x);
+  }
+
+  int out_y = 0;
+  int target_src_y = 0;
+  for (png_uint_32 y = 0; y < img_h; y++) {
+    png_read_row(png_ptr, row_buf.data(), NULL);
+    while (out_y < thumb_h && target_src_y == (int)y) {
+      for (int x = 0; x < thumb_w; x++) {
+        const png_bytep px = row_buf.data() + (size_t)sample_x[(size_t)x] *
+                                                  (size_t)channels;
+        const u16 r = (u16)((px[0] >> 3) & 0x1F);
+        const u16 g = (u16)((px[1] >> 2) & 0x3F);
+        const u16 b = (u16)((px[2] >> 3) & 0x1F);
+        thumb[(size_t)out_y * (size_t)thumb_w + (size_t)x] =
+            (u16)((r << 11) | (g << 5) | b);
+      }
+      out_y++;
+      if (out_y < thumb_h) {
+        target_src_y = (int)((float)out_y * scale);
+        if (target_src_y >= (int)img_h)
+          target_src_y = (int)img_h - 1;
+      }
+    }
+  }
+
+  png_read_end(png_ptr, NULL);
+  png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+
+  *thumb_pixels = thumb;
+  *thumb_w_out = thumb_w;
+  *thumb_h_out = thumb_h;
+  return true;
+}
+
+static bool RenderSvgCoverThumbnail(const std::vector<u8> &svg_buf,
+                                    std::vector<u16> *thumb_pixels,
+                                    int *thumb_w_out, int *thumb_h_out) {
+  if (!thumb_pixels || !thumb_w_out || !thumb_h_out || svg_buf.empty())
+    return false;
+
+  fz_context *ctx = NULL;
+  fz_buffer *buf = NULL;
+  fz_document *doc = NULL;
+  fz_page *page = NULL;
+  fz_pixmap *pixmap = NULL;
+  fz_device *device = NULL;
+  bool ok = false;
+
+  ctx = fz_new_context(NULL, NULL, 4u * 1024u * 1024u);
+  if (!ctx)
+    return false;
+  fz_register_document_handlers(ctx);
+
+  fz_var(buf);
+  fz_var(doc);
+  fz_var(page);
+  fz_var(pixmap);
+  fz_var(device);
+
+  fz_try(ctx) {
+    buf = fz_new_buffer_from_copied_data(ctx, svg_buf.data(), svg_buf.size());
+    doc = fz_open_document_with_buffer(ctx, "image/svg+xml", buf);
+    if (!doc)
+      fz_throw(ctx, FZ_ERROR_FORMAT, "failed to open svg document");
+    page = fz_load_page(ctx, doc, 0);
+    if (!page)
+      fz_throw(ctx, FZ_ERROR_FORMAT, "failed to load svg page");
+
+    const fz_rect page_bounds = fz_bound_page(ctx, page);
+    float svg_w = 0.0f;
+    float svg_h = 0.0f;
+    svg_w = page_bounds.x1 - page_bounds.x0;
+    svg_h = page_bounds.y1 - page_bounds.y0;
+    if (!(svg_w > 0.0f && svg_h > 0.0f))
+      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid svg size");
+
+    int thumb_w = 0;
+    int thumb_h = 0;
+    float scale = 1.0f;
+    if (!ComputeCoverThumbSize((int)(svg_w + 0.5f), (int)(svg_h + 0.5f),
+                               &thumb_w, &thumb_h, &scale)) {
+      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid svg thumbnail size");
+    }
+
+    const fz_rect bounds = fz_make_rect(0.0f, 0.0f, svg_w, svg_h);
+    const fz_matrix ctm = fz_scale(scale, scale);
+    const fz_irect bbox = fz_round_rect(fz_transform_rect(bounds, ctm));
+    if (bbox.x1 <= bbox.x0 || bbox.y1 <= bbox.y0)
+      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid svg bbox");
+
+    pixmap = fz_new_pixmap_with_bbox(ctx, fz_device_rgb(ctx), bbox, NULL, 0);
+    fz_clear_pixmap_with_value(ctx, pixmap, 255);
+    device = fz_new_draw_device(ctx, fz_identity, pixmap);
+    fz_run_page(ctx, page, device, ctm, NULL);
+    fz_close_device(ctx, device);
+
+    const int pix_w = fz_pixmap_width(ctx, pixmap);
+    const int pix_h = fz_pixmap_height(ctx, pixmap);
+    const int stride = fz_pixmap_stride(ctx, pixmap);
+    const int comps = fz_pixmap_components(ctx, pixmap);
+    unsigned char *samples = fz_pixmap_samples(ctx, pixmap);
+    if (!samples || pix_w <= 0 || pix_h <= 0 || comps < 3)
+      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid svg pixmap");
+
+    thumb_pixels->assign((size_t)pix_w * (size_t)pix_h, 0);
+    for (int y = 0; y < pix_h; y++) {
+      const unsigned char *src = samples + (size_t)y * (size_t)stride;
+      for (int x = 0; x < pix_w; x++) {
+        const u16 r = (u16)((src[0] >> 3) & 0x1F);
+        const u16 g = (u16)((src[1] >> 2) & 0x3F);
+        const u16 b = (u16)((src[2] >> 3) & 0x1F);
+        (*thumb_pixels)[(size_t)y * (size_t)pix_w + (size_t)x] =
+            (u16)((r << 11) | (g << 5) | b);
+        src += comps;
+      }
+    }
+    *thumb_w_out = pix_w;
+    *thumb_h_out = pix_h;
+    ok = true;
+  }
+  fz_always(ctx) {
+    fz_drop_device(ctx, device);
+    fz_drop_pixmap(ctx, pixmap);
+    fz_drop_page(ctx, page);
+    fz_drop_document(ctx, doc);
+    fz_drop_buffer(ctx, buf);
+  }
+  fz_catch(ctx) { ok = false; }
+  fz_drop_context(ctx);
+
+  return ok;
 }
 
 } // namespace
@@ -145,6 +443,8 @@ int Extract(Book *book, const std::string &epubpath) {
 
   std::vector<u8> decodebuf = imgbuf;
   std::string decode_path = book->coverImagePath;
+  const bool is_svg_cover =
+      epub_image_utils::LooksLikeSvgWrapper(decode_path, decodebuf);
   if (epub_image_utils::LooksLikeSvgWrapper(decode_path, decodebuf)) {
     std::vector<u8> resolved;
     std::string resolved_path;
@@ -156,6 +456,16 @@ int Extract(Book *book, const std::string &epubpath) {
     }
   }
   unzClose(uf);
+
+  if (is_svg_cover && decode_path == book->coverImagePath) {
+    std::vector<u16> svg_pixels;
+    int svg_w = 0;
+    int svg_h = 0;
+    if (RenderSvgCoverThumbnail(decodebuf, &svg_pixels, &svg_w, &svg_h) &&
+        AdoptCoverPixels(book, svg_pixels, svg_w, svg_h)) {
+      return 0;
+    }
+  }
 
   auto IsJpegCover = [&]() -> bool {
     if (decode_path.size() >= 4) {
@@ -191,6 +501,16 @@ int Extract(Book *book, const std::string &epubpath) {
     size_t decoded_bytes = (size_t)infoW * (size_t)infoH * 3;
     if (decoded_bytes > epub_limits::kCoverMaxDecodedRgbBytes)
       return 9;
+    if (LooksLikePngPayload(decode_path, decodebuf) &&
+        decoded_bytes > 4u * 1024u * 1024u) {
+      std::vector<u16> png_pixels;
+      int png_w = 0;
+      int png_h = 0;
+      if (DecodePngCoverThumbnail(decodebuf, &png_pixels, &png_w, &png_h) &&
+          AdoptCoverPixels(book, png_pixels, png_w, png_h)) {
+        return 0;
+      }
+    }
   }
 
   int imgW, imgH, channels;
@@ -198,8 +518,18 @@ int Extract(Book *book, const std::string &epubpath) {
       stbi_load_from_memory(decodebuf.data(), (int)decodebuf.size(), &imgW,
                             &imgH, &channels, 3);
 
-  if (!pixels)
+  if (!pixels) {
+    if (LooksLikePngPayload(decode_path, decodebuf)) {
+      std::vector<u16> png_pixels;
+      int png_w = 0;
+      int png_h = 0;
+      if (DecodePngCoverThumbnail(decodebuf, &png_pixels, &png_w, &png_h) &&
+          AdoptCoverPixels(book, png_pixels, png_w, png_h)) {
+        return 0;
+      }
+    }
     return 4;
+  }
 
   if (imgW <= 0 || imgH <= 0 || imgW > epub_limits::kCoverMaxDimension ||
       imgH > epub_limits::kCoverMaxDimension) {
@@ -207,8 +537,8 @@ int Extract(Book *book, const std::string &epubpath) {
     return 7;
   }
 
-  int thumbW = 85;
-  int thumbH = 115;
+  int thumbW = kCoverThumbMaxW;
+  int thumbH = kCoverThumbMaxH;
   float scaleX = (float)imgW / thumbW;
   float scaleY = (float)imgH / thumbH;
   float scale = (scaleX > scaleY) ? scaleX : scaleY;
