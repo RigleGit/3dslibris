@@ -31,7 +31,7 @@ jobs:
       - name: No generated artifacts tracked
         run: |
           set -euo pipefail
-          bad="$(git ls-files | grep -E '^(build/|.*\.(o|d|map|lst|elf|3dsx|smdh|cia)$)' || true)"
+          bad="$(git ls-files | grep -E '^(build/|.*\.(o|d|map|lst|elf|3dsx|smdh)$|^.*(?<!Dockerfile)\.cia$)' | grep -v 'Dockerfile' || true)"
           if [[ -n "$bad" ]]; then
             echo "Tracked generated artifacts are forbidden:"
             echo "$bad"

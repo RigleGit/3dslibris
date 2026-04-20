@@ -317,10 +317,13 @@ void TestTocConfidenceScoringStrongMixedAndLow() {
     structured.push_back({"Chapter One", 100u, 0});
     structured.push_back({"Chapter Two", 900u, 0});
 
+    // Provide a valid position map so ShouldApplyStructuredToc returns true.
+    std::vector<std::pair<u32, u32>> htm{{0u, 0u}, {1000u, 1000u}};
+    std::vector<u32> cursors{0u, 250u, 500u, 750u};
     mobi_toc_finalize::FinalizePreparedToc(
         &strong_book, nullptr, structured, true, true,
         std::vector<mobi_toc_finalize::MobiHeadingHint>(), 1000u,
-        std::vector<std::pair<u32, u32>>(), std::vector<u32>(),
+        htm, cursors,
         FinalizeCallbacks(false), nullptr);
 
     test::ExpectEq("strong quality", (int)strong_book.GetTocQuality(),
@@ -340,10 +343,12 @@ void TestTocConfidenceScoringStrongMixedAndLow() {
     structured.push_back({"Chapter Two", 900u, 0});
     structured.push_back({"Duplicate Target", 920u, 0});
 
+    std::vector<std::pair<u32, u32>> htm{{0u, 0u}, {1000u, 1000u}};
+    std::vector<u32> cursors{0u, 200u, 400u, 600u, 800u};
     mobi_toc_finalize::FinalizePreparedToc(
         &mixed_book, nullptr, structured, true, true,
         std::vector<mobi_toc_finalize::MobiHeadingHint>(), 1000u,
-        std::vector<std::pair<u32, u32>>(), std::vector<u32>(),
+        htm, cursors,
         FinalizeCallbacks(false), nullptr);
 
     test::ExpectEq("mixed quality", (int)mixed_book.GetTocQuality(),
@@ -461,9 +466,9 @@ namespace mobi_position_map {
 size_t HtmlSampleIntervalForTextBytes(size_t text_bytes) { return text_bytes; }
 
 bool LooksUsableForToc(
-    const std::vector<std::pair<uint32_t, uint32_t>> &,
-    const std::vector<uint32_t> &) {
-  return false;
+    const std::vector<std::pair<uint32_t, uint32_t>> &html_to_text_map,
+    const std::vector<uint32_t> &text_cursor_per_page) {
+  return html_to_text_map.size() >= 2 && !text_cursor_per_page.empty();
 }
 
 void RemapHtmlToTextAfterCleanup(
