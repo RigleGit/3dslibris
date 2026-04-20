@@ -259,21 +259,30 @@ static mobi_markup_extract::ExtractCallbacks MakeMobiMarkupExtractCallbacks() {
   return callbacks;
 }
 
+static uint16_t RegisterMobiInlineImage(void *user_data,
+                                        const std::string &path) {
+  Book *book = static_cast<Book *>(user_data);
+  if (!book)
+    return 0;
+  return book->RegisterInlineImage(path);
+}
+
 static std::string ExtractMobiMarkupToText(
     Book *book, const BookIoDeps &deps, const std::string &in,
     std::vector<MobiHeadingHint> *heading_hints,
     std::vector<std::pair<u32, u32>> *html_to_text_map) {
-  (void)book;
   (void)heading_hints;
-  if (html_to_text_map)
-    html_to_text_map->clear();
 #ifdef DSLIBRIS_DEBUG
-  if (deps.reporter) {
+  if (deps.reporter)
     DBG_LOG(deps.reporter, "MOBI: using safe markup extractor");
-    DBG_LOG(deps.reporter, "MOBI: safe extractor inline images disabled");
-  }
 #endif
-  return mobi_safe_markup_extract::ExtractToText(in);
+  mobi_safe_markup_extract::InlineImageCallbacks img_callbacks;
+  if (book) {
+    img_callbacks.register_inline_image = RegisterMobiInlineImage;
+    img_callbacks.user_data = book;
+  }
+  return mobi_safe_markup_extract::ExtractToText(in, img_callbacks,
+                                                 html_to_text_map);
 }
 
 } // namespace

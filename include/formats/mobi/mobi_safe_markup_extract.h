@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdint.h>
+#include <utility>
+#include <vector>
 
 #include <string>
 
@@ -15,6 +17,8 @@ struct InlineImageCallbacks {
 
 std::string ExtractToText(const std::string &markup_utf8,
                           const InlineImageCallbacks &image_callbacks =
-                              InlineImageCallbacks());
+                              InlineImageCallbacks(),
+                          std::vector<std::pair<uint32_t, uint32_t>>
+                              *html_to_text_map = nullptr);
 
 } // namespace mobi_safe_markup_extract

@@ -6,6 +6,7 @@ cd "$(dirname "$0")/.."
 build_test test_mobi_safe_markup_extract \
   tests/test_mobi_safe_markup_extract.cpp \
   source/formats/mobi/mobi_safe_markup_extract.cpp \
+  source/formats/mobi/mobi_position_map.cpp \
   source/formats/common/html_entity_utils.cpp \
   source/formats/common/text_helpers.cpp \
   source/shared/utf8_utils.cpp \

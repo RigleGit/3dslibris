@@ -3,8 +3,11 @@
 #include <cctype>
 #include <stdint.h>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "formats/common/html_entity_utils.h"
+#include "formats/mobi/mobi_position_map.h"
 #include "shared/text_token_constants.h"
 
 bool mobi_extract_image_recindex(const std::string &tag, uint16_t *recindex_out);
@@ -97,8 +100,24 @@ static void AppendInlineImageToken(std::string *out, uint16_t image_id,
 } // namespace
 
 std::string ExtractToText(const std::string &markup_utf8,
-                          const InlineImageCallbacks &image_callbacks) {
+                          const InlineImageCallbacks &image_callbacks,
+                          std::vector<std::pair<uint32_t, uint32_t>>
+                              *html_to_text_map) {
   std::string out;
+
+  if (html_to_text_map) {
+    html_to_text_map->clear();
+    const size_t interval =
+        mobi_position_map::HtmlSampleIntervalForTextBytes(markup_utf8.size());
+    html_to_text_map->reserve(markup_utf8.size() / (interval > 0 ? interval : 1) + 2);
+    html_to_text_map->push_back({0u, 0u});
+  }
+
+  const size_t kSampleInterval =
+      html_to_text_map
+          ? mobi_position_map::HtmlSampleIntervalForTextBytes(markup_utf8.size())
+          : 0;
+  size_t next_sample = kSampleInterval;
 
   bool in_script = false;
   bool in_style = false;
@@ -106,6 +125,10 @@ std::string ExtractToText(const std::string &markup_utf8,
   bool at_paragraph_start = true;
 
   for (size_t i = 0; i < markup_utf8.size();) {
+    if (html_to_text_map && kSampleInterval > 0 && i >= next_sample) {
+      html_to_text_map->push_back({(uint32_t)i, (uint32_t)out.size()});
+      next_sample = i + kSampleInterval;
+    }
     const unsigned char c = (unsigned char)markup_utf8[i];
 
     if (c == '<') {
