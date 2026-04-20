@@ -1,0 +1,37 @@
+{
+  "name": "3dslibris-devkitarm",
+  "image": "3dslibris-dev",
+  "runArgs": [
+    "--platform=linux/amd64"
+  ],
+  "workspaceFolder": "/project",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/project,type=bind,consistency=cached",
+  "overrideCommand": true,
+  "remoteUser": "root",
+  "containerEnv": {
+    "DEVKITPRO": "/opt/devkitpro",
+    "DEVKITARM": "/opt/devkitpro/devkitARM"
+  },
+  "remoteEnv": {
+    "PATH": "/opt/devkitpro/devkitARM/bin:/opt/devkitpro/tools/bin:/opt/devkitpro/portlibs/3ds/bin:${containerEnv:PATH}"
+  },
+  
+  "postCreateCommand": "apt-get update && apt-get install -y bear",
+  
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.makefile-tools"
+      ],
+      "settings": {
+        "C_Cpp.default.compilerPath": "/opt/devkitpro/devkitARM/bin/arm-none-eabi-g++",
+        "C_Cpp.default.intelliSenseMode": "linux-gcc-arm",
+        "C_Cpp.default.cStandard": "c17",
+        "C_Cpp.default.cppStandard": "c++17",
+        "C_Cpp.default.configurationProvider": "ms-vscode.makefile-tools",
+        "C_Cpp.errorSquiggles": "enabled"
+      }
+    }
+  }
+}
