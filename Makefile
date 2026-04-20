@@ -15,12 +15,11 @@ include $(DEVKITARM)/3ds_rules
 # TARGET is the name of the output
 # BUILD is the directory where object files & intermediate files will be placed
 # SOURCES is a list of directories containing source code
+# EXTRA_CPPFILES is a list of extra .cpp files outside normal source dir scanning
 # DATA is a list of directories containing data files
 # INCLUDES is a list of directories containing header files
 # GRAPHICS is a list of directories containing graphics files
 # GFXBUILD is the directory where converted graphics files will be placed
-#   If set to $(BUILD), it will statically link in the converted
-#   files as if they were data files.
 #
 # NO_SMDH: if set to anything, no SMDH file is generated.
 # ROMFS is the directory which contains the RomFS, relative to the Makefile (Optional)
@@ -28,23 +27,39 @@ include $(DEVKITARM)/3ds_rules
 # APP_DESCRIPTION is the description of the app stored in the SMDH file (Optional)
 # APP_AUTHOR is the author of the app stored in the SMDH file (Optional)
 # ICON is the filename of the icon (.png), relative to the project folder.
-#   If not set, it attempts to use one of the following (in this order):
-#     - <Project name>.png
-#     - icon.png
-#     - <libctru folder>/default_icon.png
 #---------------------------------------------------------------------------------
 BASE_TARGET	:=	3dslibris
 DEBUG_TARGET	:=	$(BASE_TARGET)-debug
 DEBUG_BUILD	:=	build-debug
 TARGET		?=	$(BASE_TARGET)
 BUILD		?=	build
-SOURCES		:=	source source/core source/app source/shared source/ui source/menus \
-			source/library source/reader source/settings source/book source/book/book_xml_parser.cpp \
-			source/formats/common source/formats/epub source/formats/fb2 \
-			source/formats/mobi source/formats/pdf source/formats/cbz \
-	source/formats/txt source/formats/rtf source/formats/odt \
-			source/formats/mupdf third_party/expat third_party/utf8proc \
+
+SOURCES		:=	source \
+			source/core \
+			source/app \
+			source/shared \
+			source/ui \
+			source/menus \
+			source/library \
+			source/reader \
+			source/settings \
+			source/book \
+			source/formats/common \
+			source/formats/epub \
+			source/formats/fb2 \
+			source/formats/mobi \
+			source/formats/pdf \
+			source/formats/cbz \
+			source/formats/txt \
+			source/formats/rtf \
+			source/formats/odt \
+			source/formats/mupdf \
+			third_party/expat \
+			third_party/utf8proc \
 			third_party/libunibreak/src
+
+EXTRA_CPPFILES	:=	source/book/book_xml_parser.cpp
+
 DATA		:=	data
 INCLUDES	:=	include third_party/stb third_party/utf8proc third_party/libunibreak/src \
 			third_party/mupdf/include
@@ -53,8 +68,9 @@ ifneq ($(wildcard $(TOPDIR)/gfx),)
 GRAPHICS	:=	gfx
 endif
 GFXBUILD	:=	$(BUILD)
+
 DEFAULT_APP_TITLE	:=	3dslibris
-DEFAULT_APP_DESCRIPTION	:=	eBook reader for Nintendo 3DS
+DEFAULT_APP_DESCRIPTION	:=	Manga and eBook reader for Nintendo 3DS
 DEFAULT_APP_AUTHOR	:=	Rigle
 APP_TITLE_OVERRIDE	?=
 APP_DESCRIPTION_OVERRIDE ?=
@@ -63,6 +79,7 @@ APP_TITLE	:=	$(if $(APP_TITLE_OVERRIDE),$(APP_TITLE_OVERRIDE),$(DEFAULT_APP_TITL
 APP_DESCRIPTION	:=	$(if $(APP_DESCRIPTION_OVERRIDE),$(APP_DESCRIPTION_OVERRIDE),$(DEFAULT_APP_DESCRIPTION))
 APP_AUTHOR	:=	$(if $(APP_AUTHOR_OVERRIDE),$(APP_AUTHOR_OVERRIDE),$(DEFAULT_APP_AUTHOR))
 ICON		:=	assets/release/icon.png
+
 DEBUG_LOGGING	?=	0
 EXPAT_ENABLE_DTD ?= 0
 EXPAT_ENABLE_NS ?= 0
@@ -77,12 +94,12 @@ SDMC_ZIP	:=	$(DISTDIR)/$(TARGET)-sdmc.zip
 SOURCE_ZIP	:=	$(DISTDIR)/$(BASE_TARGET)-source.tar.gz
 ROMFS		:=	$(DISTDIR)/romfs
 ROMFS_RUNTIME_APPDIR := $(ROMFS)/3ds/$(BASE_TARGET)
+
 MUPDF_ROOT	:=	third_party/mupdf
 MUPDF_OUT	:=	$(MUPDF_ROOT)/build/3ds-minimal
 MUPDF_LIB_A	:=	$(MUPDF_OUT)/libmupdf.a
 MUPDF_LIB_THIRD_A := $(MUPDF_OUT)/libmupdf-third.a
 MUPDF_STAMP	:=	$(MUPDF_OUT)/.built-stamp
-#GFXBUILD	:=	$(ROMFS)/gfx
 
 #---------------------------------------------------------------------------------
 # CIA build settings
@@ -104,10 +121,12 @@ CIA_TMPDIR	:=	$(BUILD)/cia
 CIA_BANNER_BIN	:=	$(CIA_TMPDIR)/banner.bin
 CIA_ICON_BIN	:=	$(CIA_TMPDIR)/icon.icn
 ICON_FLAGS	:=	--flags visible,ratingrequired --cero 153 --esrb 153 --usk 153 --pegigen 153 --pegiptr 153 --pegibbfc 153 --cob 153 --grb 153 --cgsrr 153
+
 VERSION_STR	:=	$(strip $(shell grep '^#define VERSION ' "$(TOPDIR)/include/version.h" | cut -d '"' -f2))
 VERSION_MAJOR	:=	$(word 1,$(subst ., ,$(VERSION_STR)))
 VERSION_MINOR	:=	$(word 2,$(subst ., ,$(VERSION_STR)))
 VERSION_MICRO	:=	$(word 3,$(subst ., ,$(VERSION_STR)))
+
 CIA_MAKEROM_EXTRA	:=
 ifdef ROMFS
 CIA_MAKEROM_EXTRA	+=	-DAPP_ROMFS="$(TOPDIR)/$(ROMFS)"
@@ -120,9 +139,11 @@ ARCH	:=	-march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 
 PORTLIBS := $(DEVKITPRO)/portlibs/3ds
 
-CFLAGS	:=	-Wall -O3 -mword-relocations \
+CFLAGS_BASE	:=	-Wall -mword-relocations \
 			-ffunction-sections \
 			$(ARCH)
+
+CFLAGS	:=	$(CFLAGS_BASE) -O2
 
 CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include \
 			-I$(CURDIR)/third_party/expat \
@@ -131,12 +152,11 @@ CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include \
 			-DDSLIBRIS_EXPAT_ENABLE_NS=$(EXPAT_ENABLE_NS) \
 			-DDSLIBRIS_EXPAT_CONTEXT_BYTES=$(EXPAT_CONTEXT_BYTES)
 
-CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11 -fstack-usage
-
 ifeq ($(DEBUG_LOGGING),1)
-CFLAGS		+=	-DDSLIBRIS_DEBUG -g -O2
-CXXFLAGS	+=	-DDSLIBRIS_DEBUG
+CFLAGS	:=	$(filter-out -O2,$(CFLAGS)) -Og -g -DDSLIBRIS_DEBUG
 endif
+
+CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11 -fstack-usage
 
 ifeq ($(DISABLE_BACKGROUND_WORKERS),1)
 CFLAGS		+=	-DDEBUG_DISABLE_BACKGROUND_WORKERS=1
@@ -154,7 +174,6 @@ LIBS	:= -lmupdf -lmupdf-third -lfreetype -lpng -lbz2 -lminizip -lz -lm -lctru
 #---------------------------------------------------------------------------------
 LIBDIRS	:= $(CTRULIB) $(PORTLIBS) $(CURDIR)/lib
 
-
 #---------------------------------------------------------------------------------
 # no real need to edit anything past this point unless you need to add additional
 # rules for different file extensions
@@ -166,14 +185,16 @@ export OUTPUT	:=	$(CURDIR)/$(TARGET)
 export TOPDIR	:=	$(CURDIR)
 
 export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
+			$(foreach file,$(EXTRA_CPPFILES),$(CURDIR)/$(dir $(file))) \
 			$(foreach dir,$(GRAPHICS),$(CURDIR)/$(dir)) \
 			$(foreach dir,$(DATA),$(CURDIR)/$(dir))
 
 export DEPSDIR	:=	$(CURDIR)/$(BUILD)
 
 CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
-CPPFILES	:=	$(sort $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp))) \
-			$(notdir $(filter %.cpp,$(SOURCES))))
+CPPFILES	:=	$(sort \
+			$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp))) \
+			$(notdir $(EXTRA_CPPFILES)))
 SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 PICAFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.v.pica)))
 SHLISTFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.shlist)))
@@ -184,28 +205,18 @@ BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
 # use CXX for linking C++ projects, CC for standard C
 #---------------------------------------------------------------------------------
 ifeq ($(strip $(CPPFILES)),)
-#---------------------------------------------------------------------------------
 	export LD	:=	$(CC)
-#---------------------------------------------------------------------------------
 else
-#---------------------------------------------------------------------------------
 	export LD	:=	$(CXX)
-#---------------------------------------------------------------------------------
 endif
 #---------------------------------------------------------------------------------
 
-#---------------------------------------------------------------------------------
 ifeq ($(GFXBUILD),$(BUILD))
-#---------------------------------------------------------------------------------
 export T3XFILES :=  $(GFXFILES:.t3s=.t3x)
-#---------------------------------------------------------------------------------
 else
-#---------------------------------------------------------------------------------
 export ROMFS_T3XFILES	:=	$(patsubst %.t3s, $(GFXBUILD)/%.t3x, $(GFXFILES))
 export T3XHFILES		:=	$(patsubst %.t3s, $(BUILD)/%.h, $(GFXFILES))
-#---------------------------------------------------------------------------------
 endif
-#---------------------------------------------------------------------------------
 
 export OFILES_SOURCES 	:=	$(CPPFILES:.cpp=.o) $(CFILES:.c=.o) $(SFILES:.s=.o)
 
@@ -283,6 +294,7 @@ stage-romfs:
 	@cp docs/PDF_SOURCE_RELEASE.md "$(ROMFS_RUNTIME_APPDIR)/licenses/PDF_SOURCE_RELEASE.md"
 	@cp LICENSES/GPL-2.0-or-later.txt "$(ROMFS_RUNTIME_APPDIR)/licenses/GPL-2.0-or-later.txt"
 	@cp LICENSES/AGPL-3.0-or-later.txt "$(ROMFS_RUNTIME_APPDIR)/licenses/AGPL-3.0-or-later.txt"
+
 mupdf-minimal: $(MUPDF_STAMP)
 
 # mupdf's internal build has a race condition with parallel compilation.
@@ -313,7 +325,7 @@ debug-3dsx:
 		TARGET=$(DEBUG_TARGET) \
 		BUILD=$(DEBUG_BUILD) \
 		APP_TITLE_OVERRIDE="3dslibris [DBG]" \
-		APP_DESCRIPTION_OVERRIDE="eBook reader for Nintendo 3DS (debug)" \
+		APP_DESCRIPTION_OVERRIDE="Manga and eBook reader for Nintendo 3DS (debug)" \
 		DEBUG_LOGGING=1 \
 		DISABLE_BACKGROUND_WORKERS=1 \
 		all
@@ -327,7 +339,7 @@ debug-cia:
 		BUILD=$(DEBUG_BUILD) \
 		CIA_RSF=$(CIA_DEBUG_RSF) \
 		APP_TITLE_OVERRIDE="3dslibris [DBG]" \
-		APP_DESCRIPTION_OVERRIDE="eBook reader for Nintendo 3DS (debug)" \
+		APP_DESCRIPTION_OVERRIDE="Manga and eBook reader for Nintendo 3DS (debug)" \
 		DEBUG_LOGGING=1 \
 		DISABLE_BACKGROUND_WORKERS=1 \
 		all
@@ -336,7 +348,7 @@ debug-cia:
 		BUILD=$(DEBUG_BUILD) \
 		CIA_RSF=$(CIA_DEBUG_RSF) \
 		APP_TITLE_OVERRIDE="3dslibris [DBG]" \
-		APP_DESCRIPTION_OVERRIDE="eBook reader for Nintendo 3DS (debug)" \
+		APP_DESCRIPTION_OVERRIDE="Manga and eBook reader for Nintendo 3DS (debug)" \
 		DEBUG_LOGGING=1 \
 		DISABLE_BACKGROUND_WORKERS=1 \
 		cia

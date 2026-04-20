@@ -1,27 +1,43 @@
-FROM devkitpro/devkitarm:latest
+FROM devkitpro/devkitarm:20260221
 
-ARG BANNERTOOL_REF=master
-ARG MAKEROM_REF=makerom-v0.17
+ARG TARGETPLATFORM
+ARG BANNERTOOL_REF=1.2.0
+ARG MAKEROM_VERSION=makerom-v0.18.4
 
 RUN set -eux; \
+    echo "Building for platform: ${TARGETPLATFORM}"; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl git g++ make libpng-dev zlib1g-dev; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        git \
+        g++ \
+        make \
+        curl \
+        unzip \
+        libpng-dev \
+        zlib1g-dev; \
     rm -rf /var/lib/apt/lists/*; \
     tmpdir="$(mktemp -d)"; \
-    jobs="$(nproc)"; \
-    git clone --depth 1 --branch "${BANNERTOOL_REF}" https://github.com/diasurgical/bannertool.git "${tmpdir}/bannertool"; \
+    \
+    git clone --depth 1 --branch "${BANNERTOOL_REF}" \
+        https://github.com/diasurgical/bannertool.git \
+        "${tmpdir}/bannertool"; \
     cd "${tmpdir}/bannertool"; \
-    g++ -std=c++11 -O2 -DVERSION_MAJOR=1 -DVERSION_MINOR=2 -DVERSION_MICRO=0 \
+    g++ -std=c++11 -O2 \
+        -DVERSION_MAJOR=1 -DVERSION_MINOR=2 -DVERSION_MICRO=0 \
         source/main.cpp source/cmd.cpp \
         source/3ds/cbmd.cpp source/3ds/cwav.cpp source/3ds/lz11.cpp \
         source/pc/wav.cpp source/pc/stb_image.c source/pc/stb_vorbis.c \
-        -Isource -Isource/3ds -Isource/pc -lpng -lz -lm \
+        -Isource -Isource/3ds -Isource/pc \
+        -lpng -lz -lm \
         -o /usr/local/bin/bannertool; \
-    git clone --depth 1 --branch "${MAKEROM_REF}" https://github.com/3DSGuy/Project_CTR.git "${tmpdir}/Project_CTR"; \
-    cd "${tmpdir}/Project_CTR/makerom"; \
-    if grep -q '^deps:' Makefile; then make deps -j"${jobs}"; fi; \
-    make -j"${jobs}"; \
-    if [ -x bin/makerom ]; then install -m 0755 bin/makerom /usr/local/bin/makerom; \
-    elif [ -x makerom ]; then install -m 0755 makerom /usr/local/bin/makerom; \
-    else echo "makerom binary not found after build" >&2; exit 1; fi; \
+    test -x /usr/local/bin/bannertool; \
+    \
+    cd "${tmpdir}"; \
+    curl -L -o makerom.zip \
+        "https://github.com/3DSGuy/Project_CTR/releases/download/${MAKEROM_VERSION}/${MAKEROM_VERSION}-ubuntu_x86_64.zip"; \
+    unzip makerom.zip; \
+    find . -maxdepth 3 -type f -name makerom | head -n 1 | xargs -r install -m 0755 -t /usr/local/bin; \
+    test -x /usr/local/bin/makerom; \
+    \
     rm -rf "${tmpdir}"

@@ -2,6 +2,9 @@ name: ci
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DEVKITPRO: /opt/devkitpro
+  DEVKITARM: /opt/devkitpro/devkitARM
+  DEVKITARM_IMAGE: devkitpro/devkitarm:20260221
 
 on:
   pull_request:
@@ -28,7 +31,7 @@ jobs:
       - name: No generated artifacts tracked
         run: |
           set -euo pipefail
-          bad="$(git ls-files | grep -E '^(build/|.*\.(o|d|map|lst|elf|3dsx|smdh)$)' || true)"
+          bad="$(git ls-files | grep -E '^(build/|.*\.(o|d|map|lst|elf|3dsx|smdh|cia)$)' || true)"
           if [[ -n "$bad" ]]; then
             echo "Tracked generated artifacts are forbidden:"
             echo "$bad"
@@ -47,9 +50,6 @@ jobs:
 
   build-3dsx:
     runs-on: ubuntu-latest
-    env:
-      DEVKITPRO: /opt/devkitpro
-      DEVKITARM: /opt/devkitpro/devkitARM
     steps:
       - uses: actions/checkout@v5
 
@@ -63,7 +63,7 @@ jobs:
             -v "$PWD:/project" -w /project \
             -e DEVKITPRO="$DEVKITPRO" \
             -e DEVKITARM="$DEVKITARM" \
-            devkitpro/devkitarm \
+            "$DEVKITARM_IMAGE" \
             sh -lc 'make clean && make -j2 && make debug-3dsx'
 
       - name: Verify outputs
@@ -86,9 +86,6 @@ jobs:
 
   build-cia:
     runs-on: ubuntu-latest
-    env:
-      DEVKITPRO: /opt/devkitpro
-      DEVKITARM: /opt/devkitpro/devkitARM
     steps:
       - uses: actions/checkout@v5
 

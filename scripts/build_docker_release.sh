@@ -2,25 +2,28 @@
 set -euo pipefail
 
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
-IMAGE_TAG="${IMAGE_TAG:-3dslibris/devkitarm-cia:local}"
+IMAGE_TAG="${IMAGE_TAG:-3dslibris-cia}"
+PLATFORM="${PLATFORM:-linux/amd64}"
 JOBS="${JOBS:-2}"
 DEVKITPRO_PATH="${DEVKITPRO:-/opt/devkitpro}"
 DEVKITARM_PATH="${DEVKITARM:-/opt/devkitpro/devkitARM}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/build_docker_release.sh [--skip-image-build] [--jobs N]
+Usage: scripts/build_docker_release.sh [--skip-image-build] [--jobs N] [--platform PLATFORM]
 
-Builds the local Docker image used by the GitHub release workflow and runs:
+Builds the local Docker image used for 3dslibris and runs:
   make clean
   make -jN
   make zip-sdmc
   make debug-3dsx
   make cia
+  make debug-cia
   make source-release
 
 Environment overrides:
   IMAGE_TAG   Docker image tag to build/run
+  PLATFORM    Docker platform (default: linux/amd64)
   JOBS        Parallel make jobs inside the container
   DEVKITPRO   Passed into the container (default: /opt/devkitpro)
   DEVKITARM   Passed into the container (default: /opt/devkitpro/devkitARM)
@@ -41,6 +44,14 @@ while [[ $# -gt 0 ]]; do
         exit 1
       }
       JOBS="$1"
+      ;;
+    --platform)
+      shift
+      [[ $# -gt 0 ]] || {
+        echo "Missing value for --platform" >&2
+        exit 1
+      }
+      PLATFORM="$1"
       ;;
     -h|--help)
       usage
@@ -63,10 +74,10 @@ fi
 cd "$ROOT"
 
 if [[ "$skip_image_build" -eq 0 ]]; then
-  echo "[1/3] Building Docker image: $IMAGE_TAG"
-  docker build -f docker/Dockerfile.cia -t "$IMAGE_TAG" .
+  echo "[1/3] Building Docker image: $IMAGE_TAG ($PLATFORM)"
+  docker build --platform "$PLATFORM" -f docker/Dockerfile.cia -t "$IMAGE_TAG" .
 else
-  echo "[1/3] Skipping image build, using existing image: $IMAGE_TAG"
+  echo "[1/3] Skipping image build, using existing image: $IMAGE_TAG ($PLATFORM)"
 fi
 
 uid="$(id -u)"
@@ -74,15 +85,18 @@ gid="$(id -g)"
 
 echo "[2/3] Running release build inside Docker"
 docker run --rm \
+  --platform "$PLATFORM" \
   --user "${uid}:${gid}" \
-  -v "$ROOT:/project" -w /project \
+  -v "$ROOT:/project" \
+  -w /project \
   -e DEVKITPRO="$DEVKITPRO_PATH" \
   -e DEVKITARM="$DEVKITARM_PATH" \
   "$IMAGE_TAG" \
-  sh -lc "make clean && make -j${JOBS} && make zip-sdmc && make debug-3dsx && make cia && make source-release"
+  sh -lc "make clean && make -j${JOBS} && make zip-sdmc && make debug-3dsx && make cia && make debug-cia && make source-release"
 
 echo "[3/3] Verifying expected outputs"
 test -f 3dslibris.cia
+test -f 3dslibris-debug.cia
 test -f 3dslibris.3dsx
 test -f 3dslibris-debug.3dsx
 test -f 3dslibris.smdh
@@ -97,6 +111,7 @@ Build complete.
 
 Outputs:
   $ROOT/3dslibris.cia
+  $ROOT/3dslibris-debug.cia
   $ROOT/3dslibris.3dsx
   $ROOT/3dslibris-debug.3dsx
   $ROOT/3dslibris.smdh
