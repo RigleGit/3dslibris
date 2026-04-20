@@ -333,7 +333,9 @@ debug-3dsx:
 #---------------------------------------------------------------------------------
 debug-cia:
 #---------------------------------------------------------------------------------
+ifdef UPDATE_DATE
 	@touch $(TOPDIR)/source/app/startup_controller.cpp
+endif
 	@$(MAKE) --no-print-directory \
 		TARGET=$(DEBUG_TARGET) \
 		BUILD=$(DEBUG_BUILD) \
@@ -392,7 +394,9 @@ source-release:
 #---------------------------------------------------------------------------------
 cia:
 #---------------------------------------------------------------------------------
+ifdef UPDATE_DATE
 	@touch $(TOPDIR)/source/app/startup_controller.cpp
+endif
 	@$(MAKE) --no-print-directory all
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile cia
 
