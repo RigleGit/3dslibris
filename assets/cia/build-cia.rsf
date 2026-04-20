@@ -13,11 +13,11 @@ RomFs:
   RootPath                : $(APP_ROMFS)
 
 Option:
-  UseOnSD                 : true
-  FreeProductCode         : true
-  MediaFootPadding        : false
-  EnableCrypt             : false
-  EnableCompress          : false
+  UseOnSD                 : true # true if App is to be installed to SD
+  EnableCompress          : false # Compresses exefs code
+  FreeProductCode         : true # Removes limitations on ProductCode
+  EnableCrypt             : false # Enables encryption for NCCH and CIA
+  MediaFootPadding        : false # If true CCI files are created with padding
 
 AccessControlInfo:
   CoreVersion             : 2
@@ -31,9 +31,9 @@ AccessControlInfo:
    - DirectSdmcWrite
 
   MemoryType              : Application
-  SystemMode              : 64MB
+  SystemMode              : 80MB
   IdealProcessor          : 0
-  AffinityMask            : 1
+  AffinityMask            : 3
   Priority                : 16
   HandleTableSize         : 0x200
   DisableDebug            : false
@@ -110,4 +110,4 @@ AccessControlInfo:
 SystemControlInfo:
   SaveDataSize            : 0KB
   RemasterVersion         : $(APP_VERSION_MAJOR)
-  StackSize               : 0x40000
+  StackSize               : 0x80000

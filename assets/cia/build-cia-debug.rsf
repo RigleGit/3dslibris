@@ -13,11 +13,11 @@ RomFs:
   RootPath                : $(APP_ROMFS)
 
 Option:
-  UseOnSD                 : true
-  FreeProductCode         : true
-  MediaFootPadding        : false
-  EnableCrypt             : false
-  EnableCompress          : false
+  UseOnSD                 : true # true if App is to be installed to SD
+  EnableCompress          : false # Compresses exefs code
+  FreeProductCode         : true # Removes limitations on ProductCode
+  EnableCrypt             : false # Enables encryption for NCCH and CIA
+  MediaFootPadding        : false # If true CCI files are created with padding
 
 AccessControlInfo:
   CoreVersion             : 2
@@ -27,25 +27,64 @@ AccessControlInfo:
   UseExtSaveData          : false
 
   FileSystemAccess:
+   #- CategorySystemApplication
+   #- CategoryHardwareCheck
+   #- CategoryFileSystemTool
+   - Debug
+   #- TwlCardBackup
+   #- TwlNandData
+   #- Boss
    - DirectSdmc
+   #- Core
+   #- CtrNandRo
+   #- CtrNandRw
+   #- CtrNandRoWrite
+   #- CategorySystemSettings
+   #- CardBoard
+   #- ExportImportIvs
    - DirectSdmcWrite
+   #- SwitchCleanup
+   #- SaveDataMove
+   #- Shop
+   #- Shell
+   #- CategoryHomeMenu
 
-  MemoryType              : Application
-  SystemMode              : 64MB
-  IdealProcessor          : 0
-  AffinityMask            : 1
-  Priority                : 16
-  HandleTableSize         : 0x200
-  DisableDebug            : false
-  EnableForceDebug        : false
-  RunnableOnSleep         : false
-  CanUseNonAlphabetAndNumber: true
-  PermitMainFunctionArgument: true
+# Process Settings
+  MemoryType                    : Application # Application/System/Base
+  SystemMode                    : 80MB # 64MB(Default)/96MB/80MB/72MB/32MB
+  IdealProcessor                : 0
+  AffinityMask                  : 3
+  Priority                      : 16
+  MaxCpu                        : 0 # Let system decide
+  HandleTableSize               : 0x200
+  DisableDebug                  : false
+  EnableForceDebug              : false
+  CanWriteSharedPage            : true
+  CanUsePrivilegedPriority      : false
+  CanUseNonAlphabetAndNumber    : true
+  PermitMainFunctionArgument    : true
+  CanShareDeviceMemory          : true
+  RunnableOnSleep               : false
+  SpecialMemoryArrange          : true
+
+  # New3DS Exclusive Process Settings
+  SystemModeExt                 : 124MB # Legacy(Default)/124MB/178MB  Legacy:Use Old3DS SystemMode
+  CpuSpeed                      : 804MHz # 268MHz(Default)/804MHz
+  EnableL2Cache                 : true # false(default)/true
+  CanAccessCore2                : true
+
+  # Virtual Address Mappings
+  IORegisterMapping:
+    - 1ff00000-1ff7ffff   # Memoria para el procesador de audio (DSP)
+
+  MemoryMapping:
+    - 1f000000-1f5fffff:r # Mapeo de la VRAM (Memoria de video rápida)
 
   SystemCallAccess:
     ControlMemory: 1
     QueryMemory: 2
     ExitProcess: 3
+    GetProcessIdealProcessor: 6
     CreateThread: 8
     ExitThread: 9
     SleepThread: 10
@@ -94,8 +133,14 @@ AccessControlInfo:
     GetResourceLimit: 56
     GetResourceLimitLimitValues: 57
     GetResourceLimitCurrentValues: 58
+    GetThreadContext: 59
     Break: 60
     OutputDebugString: 61
+    FlushProcessDataCache: 84
+    SetProcessMemorySpatialQuery: 85
+    ControlProcessMemory: 112
+    MapProcessMemory: 113
+    UnmapProcessMemory: 114
 
   ServiceAccessControl:
    - APT:U
@@ -106,8 +151,13 @@ AccessControlInfo:
    - hid:USER
    - ndm:u
    - ptm:u
+   # - soc:U # sockets
+   # - http:C # download content
+   # - ssl:C
+   # - pxi:dev # low level processor
+   # - dsp::DSP # música
 
 SystemControlInfo:
   SaveDataSize            : 0KB
   RemasterVersion         : $(APP_VERSION_MAJOR)
-  StackSize               : 0x40000
+  StackSize               : 0x80000
