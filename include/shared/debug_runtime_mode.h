@@ -7,7 +7,7 @@ namespace debug_runtime {
 // hardware again.
 inline bool BackgroundWorkersDisabled() { return true; }
 
-inline bool BrowserWarmupDisabled() { return false; }
+inline bool BrowserWarmupDisabled() { return true; }
 
 inline bool ForceSynchronousBookOpen() { return true; }
 

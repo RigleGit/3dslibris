@@ -4,46 +4,32 @@
 #include <cstdlib>
 #include <string>
 
-// This test documents the current state of each runtime flag.
-// Update the expected value here whenever a flag is changed.
-
 namespace {
 
-struct FlagExpectation {
-  const char *label;
-  bool actual;
-  bool expected;
-};
+[[noreturn]] void Fail(const std::string &msg) {
+  std::fprintf(stderr, "%s\n", msg.c_str());
+  std::exit(1);
+}
+
+void ExpectTrue(const char *label, bool value) {
+  if (!value)
+    Fail(std::string(label) + ": expected true");
+}
 
 } // namespace
 
 int main() {
-  FlagExpectation flags[] = {
-      {"BackgroundWorkersDisabled", debug_runtime::BackgroundWorkersDisabled(),
-       true},
-      {"BrowserWarmupDisabled", debug_runtime::BrowserWarmupDisabled(), false},
-      {"ForceSynchronousBookOpen", debug_runtime::ForceSynchronousBookOpen(),
-       true},
-      {"ForceSynchronousCbzDecode", debug_runtime::ForceSynchronousCbzDecode(),
-       true},
-      {"ForceSynchronousMuPdfRender",
-       debug_runtime::ForceSynchronousMuPdfRender(), true},
-      {"ForceSynchronousMobiFinalize",
-       debug_runtime::ForceSynchronousMobiFinalize(), true},
-  };
-
-  bool ok = true;
-  for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); i++) {
-    if (flags[i].actual != flags[i].expected) {
-      std::fprintf(stderr, "%s: expected %s, got %s\n", flags[i].label,
-                   flags[i].expected ? "true" : "false",
-                   flags[i].actual ? "true" : "false");
-      ok = false;
-    }
-  }
-  if (!ok)
-    return 1;
-
-  std::fprintf(stdout, "All runtime mode flags match expected values.\n");
+  ExpectTrue("background workers disabled",
+             debug_runtime::BackgroundWorkersDisabled());
+  ExpectTrue("browser warmup disabled",
+             debug_runtime::BrowserWarmupDisabled());
+  ExpectTrue("sync book open forced",
+             debug_runtime::ForceSynchronousBookOpen());
+  ExpectTrue("sync cbz decode forced",
+             debug_runtime::ForceSynchronousCbzDecode());
+  ExpectTrue("sync mupdf render forced",
+             debug_runtime::ForceSynchronousMuPdfRender());
+  ExpectTrue("sync mobi finalize forced",
+             debug_runtime::ForceSynchronousMobiFinalize());
   return 0;
 }
