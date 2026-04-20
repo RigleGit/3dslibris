@@ -6,10 +6,10 @@
     Modified for Nintendo 3DS by Rigle.
 
     Summary:
-    - Book domain model (metadata, pages, chapters, bookmarks, parse context).
-    - Tracks source path/format and reading progress for persistence.
-    - Adds 3DS-side helpers for browser labels and inline image cache
-   bookkeeping.
+    - Core book domain model for metadata, pages, chapters, bookmarks, and parse/runtime state.
+    - Tracks source path, format, reading position, TOC confidence, and layout/cache state.
+    - Exposes shared helpers used across reflowable formats and fixed-layout backends
+      (MuPDF/CBZ), including inline-image and chapter-anchor bookkeeping.
 */
 
 #pragma once
@@ -19,7 +19,6 @@
 #include "shared/app_flow_utils.h"
 #include <3ds.h>
 #include <list>
-#include <memory>
 #include <stddef.h>
 #include <string>
 #include <unordered_map>
@@ -35,13 +34,15 @@ struct fz_document;
 struct fz_display_list;
 struct fz_outline;
 
-struct ChapterEntry {
+struct ChapterEntry
+{
   u16 page; // page index where chapter starts
   u8 level; // toc nesting depth (0 = top-level)
   std::string title;
 };
 
-enum TocQuality {
+enum TocQuality
+{
   TOC_QUALITY_UNKNOWN = 0,
   TOC_QUALITY_STRONG,
   TOC_QUALITY_MIXED,
@@ -53,12 +54,14 @@ enum TocQuality {
 //! Bookmarks are in here too.
 //! App maintains a vector of Book to represent the available library.
 
-class Book {
+class Book
+{
 public:
   struct MuPdfState;
   struct CbzState;
   struct ReflowWorkerState;
-  struct InlineImageEntry {
+  struct InlineImageEntry
+  {
     std::string path;
     bool metadata_probed;
     bool metadata_ok;
@@ -71,7 +74,8 @@ public:
           source_height(0), follow_text_lines(0) {}
   };
 
-  struct InlineImageCacheEntry {
+  struct InlineImageCacheEntry
+  {
     u16 image_id;
     u16 screen_h;
     u16 bg565;
@@ -110,7 +114,10 @@ private:
   u16 toc_direct_count;
   u16 toc_heuristic_count;
   u16 toc_unresolved_count;
-  std::vector<Page *> pages;
+  // TODO: Modernize owned raw buffers/objects here (pages, coverPixels) once the
+  // remaining callers are ready, ideally moving Page ownership to std::unique_ptr
+  // and the cover thumbnail buffer to a safer RAII container.
+  std::vector<Page *> pages; //! Owned page objects for the current parsed/open book.
   MuPdfState *mupdf_state;
   CbzState *cbz_state;
   ReflowWorkerState *reflow_worker_state;
@@ -121,26 +128,29 @@ private:
 
   void ClearInlineImageCache();
   bool LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
-                             std::string *resolved_path = NULL);
+                             std::string *resolved_path = nullptr);
   bool EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out);
   void ResetMuPdfState();
   void ResetCbzState();
   void ResetReflowWorkerState();
 
+  // TODO: Gradually reduce public mutable runtime state here by moving frequently
+  // coupled flags behind narrower helpers/getters once the current refactor settles.
 public:
   //! Cover thumbnail for library grid (RGB565, scaled to fit)
-  u16 *coverPixels;
+  u16 *coverPixels; //! Owned RGB565 cover thumbnail buffer.
   int coverWidth;
   int coverHeight;
   std::string coverImagePath; //! path inside EPUB zip
-  uint8_t coverAttempts; // 0=never tried; incremented on failure; capped at kCoverMaxAttempts
+  uint8_t coverAttempts;      // 0=never tried; incremented on failure; capped at kCoverMaxAttempts
   uint64_t coverRetryAfterMs;
   bool metadataIndexTried;
   bool metadataIndexed;
   bool tocResolveTried;
   bool tocResolved;
   bool epub_page_cache_save_pending;
-  struct EpubCacheSaveParams {
+  struct EpubCacheSaveParams
+  {
     int pixel_size;
     int line_spacing;
     int paragraph_spacing;
@@ -172,18 +182,22 @@ public:
   int GetParagraphIndent();
   int GetOrientation();
   void DrawBottomGradientBackground();
-  inline std::string GetAuthor() { return author; }
-  inline bool HasBrowserDisplayNameCache() const {
+  inline const std::string &GetAuthor() const { return author; }
+  inline bool HasBrowserDisplayNameCache() const
+  {
     return browser_display_name_cached;
   }
-  inline const std::string &GetBrowserDisplayNameCache() const {
+  inline const std::string &GetBrowserDisplayNameCache() const
+  {
     return browser_display_name_cache;
   }
-  inline void SetBrowserDisplayNameCache(const std::string &name) {
+  inline void SetBrowserDisplayNameCache(const std::string &name)
+  {
     browser_display_name_cache = name;
     browser_display_name_cached = true;
   }
-  inline void ClearBrowserDisplayNameCache() {
+  inline void ClearBrowserDisplayNameCache()
+  {
     browser_display_name_cache.clear();
     browser_display_name_cached = false;
   }
@@ -192,19 +206,22 @@ public:
   inline u16 GetTocHeuristicCount() const { return toc_heuristic_count; }
   inline u16 GetTocUnresolvedCount() const { return toc_unresolved_count; }
   inline void SetTocConfidence(TocQuality quality, u16 direct, u16 heuristic,
-                               u16 unresolved) {
+                               u16 unresolved)
+  {
     toc_quality = quality;
     toc_direct_count = direct;
     toc_heuristic_count = heuristic;
     toc_unresolved_count = unresolved;
   }
-  inline void ClearTocConfidence() {
+  inline void ClearTocConfidence()
+  {
     toc_quality = TOC_QUALITY_UNKNOWN;
     toc_direct_count = 0;
     toc_heuristic_count = 0;
     toc_unresolved_count = 0;
   }
-  std::list<u16> *GetBookmarks(void);
+  std::list<u16> &GetBookmarks();
+  const std::list<u16> &GetBookmarks() const;
   const std::vector<ChapterEntry> &GetChapters() const;
   u16 RegisterInlineImage(const std::string &path);
   void AddChapterAnchor(const std::string &docpath,
@@ -246,8 +263,8 @@ public:
   u16 GetPageCount();
   int GetPosition(void);
   const char *GetTitle();
-  void SetAuthor(std::string &s);
-  void SetFileName(const char *filename);
+  void SetAuthor(const std::string &s);
+  void SetFolderName(const std::string &foldername);
   void SetFolderName(const char *foldername);
   void SetFolderName(std::string &foldername);
   void SetPage(u16 index);
