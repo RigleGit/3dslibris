@@ -35,6 +35,29 @@ namespace
   // TODO: Route HUD status labels like "opening" through a central UI string
   // table if the app later adds localization or more status variants.
   static const char *kOpeningStatusLabel = "opening";
+
+  // Formats the current time into buf. Supports 12h (with AM/PM) and 24h modes.
+  // Falls back to "--:--" if timeStruct is null.
+  static void FormatClockString(char *buf, size_t bufsz, const struct tm *t,
+                                bool time24h)
+  {
+    if (!t)
+    {
+      snprintf(buf, bufsz, "--:--");
+    }
+    else if (time24h)
+    {
+      snprintf(buf, bufsz, "%02d:%02d", t->tm_hour, t->tm_min);
+    }
+    else
+    {
+      int h = t->tm_hour % 12;
+      if (h == 0)
+        h = 12;
+      snprintf(buf, bufsz, "%02d:%02d %s", h, t->tm_min,
+               t->tm_hour >= 12 ? "PM" : "AM");
+    }
+  }
 } // namespace
 
 StatusController::StatusController(App &app)
@@ -70,7 +93,7 @@ void StatusController::UpdateStatus()
          current_book ? (int)current_book->GetPageCount() : 0,
          false,
          progress_lock_book_, progress_pagecount_lock_});
-    progress_lock_book_ = (Book *)snapshot.next_locked_book; // TODO: avoid C-style cast here by changing snapshot to use Book* directly.
+    progress_lock_book_ = const_cast<Book *>(snapshot.next_locked_book);
     progress_pagecount_lock_ = snapshot.next_locked_pagecount;
   }
   else
@@ -94,23 +117,7 @@ void StatusController::UpdateStatus()
   }
 
   char tmsg[24];
-  if (!timeStruct)
-  {
-    snprintf(tmsg, sizeof(tmsg), "--:--");
-  }
-  else if (app_.prefs->time24h)
-  {
-    snprintf(tmsg, sizeof(tmsg), "%02d:%02d", timeStruct->tm_hour,
-             timeStruct->tm_min);
-  }
-  else
-  {
-    int h = timeStruct->tm_hour % 12;
-    if (h == 0)
-      h = 12;
-    snprintf(tmsg, sizeof(tmsg), "%02d:%02d %s", h, timeStruct->tm_min,
-             timeStruct->tm_hour >= 12 ? "PM" : "AM");
-  }
+  FormatClockString(tmsg, sizeof(tmsg), timeStruct, app_.prefs->time24h);
 
   int style = app_.ts->GetStyle();
   app_.ts->SetStyle(TEXT_STYLE_BROWSER); // smaller, readable font

@@ -3,6 +3,8 @@
 #include <list>
 #include <string>
 
+class Book;
+
 typedef enum {
   FORMAT_UNDEF,
   FORMAT_XHTML,
@@ -42,11 +44,11 @@ struct ChaptersViewDecision {
 };
 
 struct StatusSnapshotInput {
-  const void *current_book;
+  const Book *current_book;
   int page_num;
   int live_page_count;
   bool deferred_pagination;
-  const void *locked_book;
+  const Book *locked_book;
   int locked_pagecount;
 };
 
@@ -55,7 +57,7 @@ struct StatusSnapshot {
   int draw_page_count;
   float percent_value;
   int percent_tenths;
-  const void *next_locked_book;
+  const Book *next_locked_book;
   int next_locked_pagecount;
 };
 
