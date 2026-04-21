@@ -31,7 +31,5 @@ struct Hooks {
 };
 
 u8 ParseFile(Book *book, const char *path, const Hooks &hooks);
-bool ContinueDeferredParse(Book *book, u32 budget_ms, u16 page_budget,
-                           const Hooks &hooks);
 
 } // namespace mobi_parser

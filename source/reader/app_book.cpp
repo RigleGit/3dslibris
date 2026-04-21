@@ -46,9 +46,6 @@
 namespace {
 
 static const int kPdfTouchRerenderDelta = 4;
-static const u32 kMobiDeferredIdleDelayMs = 120;
-static const u32 kMobiDeferredIdleBudgetMs = 12;
-static const u16 kMobiDeferredIdlePageBudget = 8;
 static const int kOpeningTitleMaxWidth = 216;
 static const int kOpeningTitleMaxLines = 3;
 static const int kOpeningTitleLineHeight = 16;
@@ -236,44 +233,14 @@ bool TurnBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 pagecount,
   return SetBookPage(book, ts, *pagecurrent);
 }
 
-// Pumps deferred MOBI parsing work for the book, with a specified time and page budget, and outputs whether any progress was made or if the status should be considered dirty (needing redraw).
-bool PumpDeferredMobi(Book *book, u32 budget_ms, u16 page_budget,
-                      u16 *pagecount, bool *status_dirty,
-                      bool *deferred_pumped) {
-  if (!book || !pagecount || !status_dirty || !deferred_pumped ||
-      !book->HasDeferredMobiParse()) {
-    return false;
-  }
-
-  u16 before = book->GetPageCount();
-  bool done = book->ContinueDeferredMobiParse(budget_ms, page_budget);
-  u16 after = book->GetPageCount();
-  if (after != before)
-    *pagecount = after;
-  if (after != before)
-    *status_dirty = true;
-  if (done)
-    *status_dirty = true;
-  *deferred_pumped = true;
-  return (after != before) || done;
-}
-
-// Advances the book page by one, pumping deferred MOBI parsing if needed and within the specified budgets. 
-// Returns true if the page was advanced or if the status was marked dirty due to progress, false if no advancement was possible.
+// Advances the book page by one.
+// Returns true if the page was advanced, false if no advancement was possible.
 bool AdvanceBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 *pagecount,
-                     bool *status_dirty, bool *deferred_pumped) {
-  if (!book || !ts || !pagecurrent || !pagecount || !status_dirty ||
-      !deferred_pumped) {
+                     bool *status_dirty) {
+  if (!book || !ts || !pagecurrent || !pagecount || !status_dirty) {
     return false;
   }
   if (TurnBookPage(book, ts, pagecurrent, *pagecount, 1)) {
-    *status_dirty = true;
-    return true;
-  }
-  if (!book->HasDeferredMobiParse())
-    return false;
-  PumpDeferredMobi(book, 80, 18, pagecount, status_dirty, deferred_pumped);
-  if (TurnBookPage(book, ts, pagecurrent, *pagecount, 1)) { // Try again after pumping in case new pages were parsed.
     *status_dirty = true;
     return true;
   }
@@ -388,7 +355,6 @@ void DetachCurrentBookForSwitch(App *app, Book *next_book,
   app->SetCurrentBook(NULL);
   app->SetCurrentBookSessionId(0);
   app->SetPdfDeferredReadyAtMs(0);
-  app->SetMobiDeferredReadyAtMs(0);
   current->Close();
   DBG_LOGF(app, "BOOK switch: current closed current=%s", SafeBookName(current));
 }
@@ -460,7 +426,6 @@ void ReaderController::OnAppletSuspended() {
   app_.SetPdfTouchLastX(-1);
   app_.SetPdfTouchLastY(-1);
   app_.SetPdfDeferredReadyAtMs(0);
-  app_.SetMobiDeferredReadyAtMs(0);
   if (bookcurrent_) {
     bookcurrent_->SetFixedLayoutViewportInteraction(false);
     bookcurrent_->CancelFixedLayoutDeferredWork();
@@ -469,15 +434,13 @@ void ReaderController::OnAppletSuspended() {
     return;
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(&app_,
-           "BOOK suspend: cancel opening session=%u book=%s async=%u mobi=%u",
+           "BOOK suspend: cancel opening session=%u book=%s async=%u",
            app_.GetOpeningSessionId(),
            opening_book->GetFileName() ? opening_book->GetFileName() : "",
-           opening_book->IsAsyncReflowOpenPending() ? 1u : 0u,
-           opening_book->HasDeferredMobiParse() ? 1u : 0u);
+           opening_book->IsAsyncReflowOpenPending() ? 1u : 0u);
 #endif
   opening_book->CancelFixedLayoutDeferredWork();
   opening_book->RequestAbortOpen();
-  opening_book->CancelDeferredMobiParse();
   opening_book->CancelAsyncReflowOpen();
   app_.SetOpeningPending(false);
   app_.SetOpeningBook(NULL);
@@ -501,8 +464,6 @@ void ReaderController::OnAppletResumed() {
     const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
     app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
   }
-  if (bookcurrent_->HasDeferredMobiParse())
-    app_.SetMobiDeferredReadyAtMs(osGetTime() + kMobiDeferredIdleDelayMs);
 }
 
 bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count) {
@@ -518,7 +479,7 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
   }
 
   if (!deferred_relayout_utils::ShouldApplyFinalDeferredRelayout(
-          app_.IsDeferredRelayoutPending(), book->HasDeferredMobiParse(),
+          app_.IsDeferredRelayoutPending(), false,
           book->GetPosition(), app_.GetDeferredRelayoutInitialPosition())) {
     return false;
   }
@@ -549,7 +510,6 @@ void ReaderController::HandleEventInOpening() {
                cancel_book->GetFileName() ? cancel_book->GetFileName() : "");
 #endif
       cancel_book->RequestAbortOpen();
-      cancel_book->CancelDeferredMobiParse();
       cancel_book->CancelAsyncReflowOpen();
     }
     app_.SetOpeningPending(false);
@@ -603,7 +563,6 @@ void ReaderController::HandleEventInOpening() {
     app_.SetCurrentBook(nullptr);
     app_.SetCurrentBookSessionId(0);
     app_.SetPdfDeferredReadyAtMs(0);
-    app_.SetMobiDeferredReadyAtMs(0);
     ClearDeferredRelayoutState();
     if (err == BOOK_ERR_CANCELLED) {
       app_.SetMode(AppMode::Browser);
@@ -654,7 +613,7 @@ void ReaderController::HandleEventInOpening() {
 
   deferred_relayout_utils::OpenRelayoutPlan open_plan =
       deferred_relayout_utils::BuildOpenRelayoutPlan(
-          relayout_state.needs_relayout, bookcurrent_->HasDeferredMobiParse(),
+          relayout_state.needs_relayout, false,
           relayout_state.old_page_count, relayout_state.old_position, pageCount,
           relayout_state.old_bookmarks);
   if (open_plan.has_remap) {
@@ -682,10 +641,6 @@ void ReaderController::HandleEventInOpening() {
         bookcurrent_->HasPendingFixedLayoutDeferredWork()
             ? (osGetTime() + bookcurrent_->GetFixedLayoutDeferredDelayMs())
             : 0);
-  app_.SetMobiDeferredReadyAtMs(
-      (bookcurrent_ && bookcurrent_->HasDeferredMobiParse())
-          ? (osGetTime() + kMobiDeferredIdleDelayMs)
-          : 0);
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
@@ -704,7 +659,6 @@ void ReaderController::HandleEventInBook() {
   u16 pagecurrent = bookcurrent_->GetPosition();
   u16 pagecount = bookcurrent_->GetPageCount();
   bool status_dirty = false;
-  bool deferred_pumped = false;
 
   // Use 3DS edge-triggered key state to avoid carry-over/repeat from the key
   // press used to open the book.
@@ -849,8 +803,7 @@ void ReaderController::HandleEventInBook() {
 
   if (keys & (KEY_A | key.r | key.down)) {
     // page forward.
-    AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty,
-                    &deferred_pumped);
+    AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
   } else if (keys & (KEY_B | key.l | key.up)) {
     // page back.
     if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
@@ -900,23 +853,6 @@ void ReaderController::HandleEventInBook() {
       bookcurrent_->SetPosition(jump.page);
       DrawBookPage(bookcurrent_, ts);
       status_dirty = true;
-    }
-  }
-
-  if (!deferred_pumped) {
-    if (bookcurrent_->HasDeferredMobiParse()) {
-      const u64 now = osGetTime();
-      if (now >= app_.GetMobiDeferredReadyAtMs()) {
-        PumpDeferredMobi(bookcurrent_, kMobiDeferredIdleBudgetMs,
-                         kMobiDeferredIdlePageBudget, &pagecount,
-                         &status_dirty, &deferred_pumped);
-        app_.SetMobiDeferredReadyAtMs(
-            bookcurrent_->HasDeferredMobiParse()
-                ? (osGetTime() + kMobiDeferredIdleDelayMs)
-                : 0);
-      }
-    } else {
-      app_.SetMobiDeferredReadyAtMs(0);
     }
   }
 
@@ -972,7 +908,6 @@ void ReaderController::CloseBook() {
     app_.SetCurrentBookSessionId(0);
   }
   app_.SetPdfDeferredReadyAtMs(0);
-  app_.SetMobiDeferredReadyAtMs(0);
   ResetOpeningState(&app_);
   ClearDeferredRelayoutState();
 }
@@ -1026,11 +961,6 @@ u8 ReaderController::OpenBook() {
     app_.SetCurrentBookSessionId(session_id);
     if (app_.GetDeferredRelayoutBook() != app_.GetCurrentBook())
       ClearDeferredRelayoutState();
-    bookcurrent_ = app_.GetCurrentBook();
-    app_.SetMobiDeferredReadyAtMs(
-        (bookcurrent_ && bookcurrent_->HasDeferredMobiParse())
-            ? (osGetTime() + kMobiDeferredIdleDelayMs)
-            : 0);
     app_.RequestStatusRedraw();
     app_.SetPrefsLayoutNoticePending(false);
     prefs->Write();
@@ -1112,7 +1042,7 @@ u8 ReaderController::OpenBook() {
   // Keep the reader roughly in the same part of the book after repagination.
   deferred_relayout_utils::OpenRelayoutPlan open_plan =
       deferred_relayout_utils::BuildOpenRelayoutPlan(
-          relayout_state.needs_relayout, bookcurrent_->HasDeferredMobiParse(),
+          relayout_state.needs_relayout, false,
           relayout_state.old_page_count, relayout_state.old_position, pageCount,
           relayout_state.old_bookmarks);
   if (open_plan.has_remap) {
@@ -1140,10 +1070,6 @@ u8 ReaderController::OpenBook() {
         bookcurrent_->HasPendingFixedLayoutDeferredWork()
             ? (osGetTime() + bookcurrent_->GetFixedLayoutDeferredDelayMs())
             : 0);
-  app_.SetMobiDeferredReadyAtMs(
-      (bookcurrent_ && bookcurrent_->HasDeferredMobiParse())
-          ? (osGetTime() + kMobiDeferredIdleDelayMs)
-          : 0);
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();

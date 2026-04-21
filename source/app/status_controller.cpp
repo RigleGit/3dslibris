@@ -68,7 +68,7 @@ void StatusController::UpdateStatus()
     snapshot = app_flow_utils::ComputeStatusSnapshot(
         {current_book, current_book ? (int)current_book->GetPosition() : 0,
          current_book ? (int)current_book->GetPageCount() : 0,
-         current_book ? current_book->HasDeferredMobiParse() : false,
+         false,
          progress_lock_book_, progress_pagecount_lock_});
     progress_lock_book_ = (Book *)snapshot.next_locked_book; // TODO: avoid C-style cast here by changing snapshot to use Book* directly.
     progress_pagecount_lock_ = snapshot.next_locked_pagecount;

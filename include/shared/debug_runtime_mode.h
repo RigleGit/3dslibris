@@ -15,6 +15,4 @@ inline bool ForceSynchronousCbzDecode() { return true; }
 
 inline bool ForceSynchronousMuPdfRender() { return true; }
 
-inline bool ForceSynchronousMobiFinalize() { return true; }
-
 } // namespace debug_runtime

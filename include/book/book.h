@@ -334,9 +334,6 @@ public:
       int margin_left, int margin_right, int margin_top, int margin_bottom,
       const char *regular_font);
   const EpubCacheSaveParams &GetEpubCacheSaveParams() const;
-  bool HasDeferredMobiParse() const;
-  bool ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget = 0);
-  void CancelDeferredMobiParse();
   void ResetCbzFailureState();
   bool IsMobiFile() const;
   bool GetMobiLineWrapFix() const;

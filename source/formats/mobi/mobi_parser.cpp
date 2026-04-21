@@ -7,14 +7,13 @@
 #include "formats/common/text_helpers.h"
 #include "formats/mobi/mobi_decode_plan.h"
 #include "formats/mobi/mobi_cleanup_policy.h"
-#include "formats/mobi/mobi_deferred_runtime.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/mobi/mobi_parser_core.h"
+#include "formats/mobi/mobi_structured_toc_parser.h"
 #include "formats/mobi/mobi_position_map.h"
 #include "formats/mobi/mobi_text_cleanup.h"
 #include "formats/mobi/mobi_text_decode.h"
 #include "parse.h"
-#include "shared/debug_runtime_mode.h"
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
 
@@ -58,8 +57,50 @@ using plain_text_perf_utils::PlainTextStreamPerf;
 using mobi_parser_core::MobiHeaderInfo;
 using mobi_toc_finalize::MobiHeadingHint;
 using mobi_toc_finalize::MobiTocFinalizeResult;
-using MobiDeferredState = mobi_deferred_runtime::State;
-static const Hooks *g_deferred_hooks = NULL;
+
+struct MobiParseState {
+  plain_text_stream::State stream;
+  std::string source_path;
+  std::string markup_utf8;
+  std::string text_utf8;
+  std::vector<MobiHeadingHint> heading_hints;
+  std::vector<mobi_structured_toc_parser::MobiStructuredTocEntry> structured_toc;
+  std::vector<std::pair<u32, u32>> html_to_text_map;
+  std::vector<u32> text_cursor_per_page;
+  bool have_structured_toc;
+  bool structured_from_filepos;
+  bool toc_metadata_ready;
+  bool structured_toc_loaded;
+  bool toc_applied;
+  bool cache_saved;
+  bool used_utf8_guess;
+  bool used_legacy_guess;
+  bool line_wrap_fix_applied;
+  bool finalized;
+  u32 text_len_for_pos;
+  u64 t_parse_begin;
+  u64 t_after_read;
+  u64 t_after_decompress;
+  u64 t_after_decode;
+  u64 t_after_markup_scan;
+  u64 t_after_cleanup;
+  u64 t_after_initial_pages;
+  u64 t_after_markup;
+  u64 t_after_pages;
+  u64 t_after_toc;
+
+  MobiParseState()
+      : have_structured_toc(false), structured_from_filepos(false),
+        toc_metadata_ready(false), structured_toc_loaded(false),
+        toc_applied(false), cache_saved(false), used_utf8_guess(false),
+        used_legacy_guess(false), line_wrap_fix_applied(false), finalized(false),
+        text_len_for_pos(0), t_parse_begin(0), t_after_read(0),
+        t_after_decompress(0), t_after_decode(0), t_after_markup_scan(0),
+        t_after_cleanup(0), t_after_initial_pages(0), t_after_markup(0),
+        t_after_pages(0), t_after_toc(0) {}
+};
+
+using MobiDeferredState = MobiParseState;
 
 static bool TryLoadMobiPageCache(Book *book, const char *book_path,
                                   const BookParseDeps &deps) {
@@ -561,117 +602,6 @@ static void FinalizeImmediateMobiParse(Book *book, const char *path,
   book->MarkMobiRenderSettingsApplied(deferred->line_wrap_fix_applied);
 }
 
-static void BuildDeferredMobiTocMetadata(Book *book, MobiDeferredState *state) {
-  if (!book || !state)
-    return;
-  if (!g_deferred_hooks)
-    return;
-  const BookParseDeps deps = BuildBookParseDeps(book);
-  IStatusReporter *reporter = deps.reporter;
-#ifdef DSLIBRIS_DEBUG
-  const u64 t_meta_begin = osGetTime();
-#endif
-  BuildMobiTocMetadataFromUtf8(book, deps, state->markup_utf8,
-                               state->line_wrap_fix_applied,
-                               &state->heading_hints,
-                               &state->html_to_text_map, *g_deferred_hooks);
-#ifdef DSLIBRIS_DEBUG
-  if (reporter) {
-    DBG_LOGF(reporter,
-             "MOBI: deferred toc metadata ready ms=%llu headings=%u map=%u",
-             (unsigned long long)(osGetTime() - t_meta_begin),
-             (unsigned)state->heading_hints.size(),
-             (unsigned)state->html_to_text_map.size());
-  }
-#else
-  (void)reporter;
-#endif
-}
-
-static void LoadDeferredMobiStructuredToc(Book *book, MobiDeferredState *state) {
-  if (!book || !state || !g_deferred_hooks ||
-      !g_deferred_hooks->make_structured_toc_callbacks ||
-      !g_deferred_hooks->make_inline_title_callbacks)
-    return;
-  const BookParseDeps deps = BuildBookParseDeps(book);
-  IStatusReporter *reporter = deps.reporter;
-  // Deferred TOC resolution runs only once we already have the full page map.
-  state->have_structured_toc = mobi_toc_prepare::LoadDeferred(
-      state->structured_toc, state->have_structured_toc, state->markup_utf8,
-      state->text_len_for_pos, state->source_path,
-      g_deferred_hooks->make_structured_toc_callbacks(),
-      g_deferred_hooks->make_inline_title_callbacks(),
-      &state->structured_toc, &state->structured_from_filepos, reporter);
-}
-
-static void ApplyDeferredMobiToc(Book *book, MobiDeferredState *state) {
-  if (!book || !state || !g_deferred_hooks ||
-      !g_deferred_hooks->make_finalize_callbacks)
-    return;
-  const BookParseDeps deps = BuildBookParseDeps(book);
-  IStatusReporter *reporter = deps.reporter;
-  MobiTocFinalizeResult toc_result;
-  mobi_toc_finalize::FinalizePreparedToc(
-      book, reporter, state->structured_toc, state->have_structured_toc,
-      state->structured_from_filepos, state->heading_hints,
-      state->text_len_for_pos, state->html_to_text_map,
-      state->text_cursor_per_page, g_deferred_hooks->make_finalize_callbacks(),
-      &toc_result);
-  state->t_after_toc = osGetTime();
-
-  if (reporter) {
-    char msg[320];
-    snprintf(
-        msg, sizeof(msg),
-        "MOBI: text bytes=%u headings=%u mapped=%u structured=%u direct=%u "
-        "chapters=%u guess_utf8=%u guess_legacy=%u filepos_toc=%u",
-        (unsigned)state->text_utf8.size(), (unsigned)state->heading_hints.size(),
-        (unsigned)toc_result.mapped_chapters,
-        (unsigned)toc_result.structured_entries,
-        (unsigned)toc_result.structured_direct,
-        (unsigned)book->GetChapters().size(), state->used_utf8_guess ? 1u : 0u,
-        state->used_legacy_guess ? 1u : 0u,
-        toc_result.structured_from_filepos ? 1u : 0u);
-    DBG_LOG(reporter, msg);
-
-    char tmsg[320];
-    snprintf(
-        tmsg, sizeof(tmsg),
-        "MOBI: timing read=%llums decomp=%llums decode=%llums "
-        "markup_scan=%llums cleanup=%llums initial_pages=%llums "
-        "deferred_pages=%llums deferred_toc=%llums total=%llums",
-        (unsigned long long)(state->t_after_read - state->t_parse_begin),
-        (unsigned long long)(state->t_after_decompress - state->t_after_read),
-        (unsigned long long)(state->t_after_decode - state->t_after_decompress),
-        (unsigned long long)(state->t_after_markup_scan - state->t_after_decode),
-        (unsigned long long)(state->t_after_cleanup - state->t_after_markup_scan),
-        (unsigned long long)(state->t_after_initial_pages - state->t_after_cleanup),
-        (unsigned long long)(state->t_after_pages - state->t_after_initial_pages),
-        (unsigned long long)(state->t_after_toc - state->t_after_pages),
-        (unsigned long long)(state->t_after_toc - state->t_parse_begin));
-    DBG_LOG(reporter, tmsg);
-  }
-}
-
-static void SaveDeferredMobiCache(Book *book, MobiDeferredState *state) {
-  if (!book || !state)
-    return;
-  const BookParseDeps deps = BuildBookParseDeps(book);
-  SaveMobiPageCache(book, state->source_path.c_str(), deps,
-                    state->line_wrap_fix_applied);
-  book->MarkMobiRenderSettingsApplied(state->line_wrap_fix_applied);
-}
-
-static mobi_deferred_runtime::FinalizeCallbacks
-MakeMobiDeferredFinalizeCallbacks() {
-  mobi_deferred_runtime::FinalizeCallbacks callbacks;
-  callbacks.build_toc_metadata = BuildDeferredMobiTocMetadata;
-  callbacks.load_structured_toc = LoadDeferredMobiStructuredToc;
-  callbacks.apply_toc = ApplyDeferredMobiToc;
-  callbacks.save_cache = SaveDeferredMobiCache;
-  return callbacks;
-}
-
 } // namespace
 
 u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
@@ -709,7 +639,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   if (reporter)
     append_debug_log("MOBI: parse begin");
 
-  mobi_deferred_runtime::Erase(book);
   log_stage("after-erase");
 
   if (TryLoadMobiPageCache(book, path, deps)) {
@@ -854,73 +783,39 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
     return BOOK_ERR_CANCELLED;
 
   if (!pages_done_initial) {
-    if (debug_runtime::ForceSynchronousMobiFinalize()) {
-      unsigned int pass_count = 0;
-      while (!deferred.stream.completed) {
-        if (ShouldAbortMobiOpen(book)) {
-          return BOOK_ERR_CANCELLED;
-        }
-        if (open_cancel_poll::Poll(book, reporter, "mobi-deferred-sync")) {
-          return BOOK_ERR_CANCELLED;
-        }
-        if (++pass_count > kMobiSynchronousPassLimit) {
-          return 1;
-        }
-        PlainTextStreamPerf perf;
-        const plain_text_stream::ContinueCallbacks callbacks =
-            hooks.make_plain_continue_callbacks();
-        const bool done = plain_text_stream::ContinueState(
-            &deferred.stream, deferred.text_utf8, kMobiSynchronousBudgetMs,
-            kMobiSynchronousPageBudget, 0, &deferred.text_cursor_per_page, &perf,
-            callbacks);
+    unsigned int pass_count = 0;
+    while (!deferred.stream.completed) {
+      if (ShouldAbortMobiOpen(book)) {
+        return BOOK_ERR_CANCELLED;
+      }
+      if (open_cancel_poll::Poll(book, reporter, "mobi-deferred-sync")) {
+        return BOOK_ERR_CANCELLED;
+      }
+      if (++pass_count > kMobiSynchronousPassLimit) {
+        return 1;
+      }
+      PlainTextStreamPerf perf;
+      const plain_text_stream::ContinueCallbacks callbacks =
+          hooks.make_plain_continue_callbacks();
+      const bool done = plain_text_stream::ContinueState(
+          &deferred.stream, deferred.text_utf8, kMobiSynchronousBudgetMs,
+          kMobiSynchronousPageBudget, 0, &deferred.text_cursor_per_page, &perf,
+          callbacks);
 #ifdef DSLIBRIS_DEBUG
-        LogPlainTextStreamPerf(reporter, "PLAIN-MOBI sync", perf, done);
+      LogPlainTextStreamPerf(reporter, "PLAIN-MOBI sync", perf, done);
 #endif
-        if (done)
-          deferred.t_after_pages = osGetTime();
-      }
-      log_stage("sync-pages-done");
-      MobiTocFinalizeResult toc_result;
-      FinalizeImmediateMobiParse(book, path, deps, raw, header, decoded.utf8,
-                                 &deferred, &toc_result, hooks);
-      log_stage("finalized");
-      if (reporter) {
-        append_debug_log("MOBI: parse end");
-      }
-      return book->GetPageCount() > 0 ? 0 : 1;
+      if (done)
+        deferred.t_after_pages = osGetTime();
     }
-    mobi_deferred_runtime::Put(book, std::move(deferred));
+    log_stage("sync-pages-done");
+    MobiTocFinalizeResult toc_result;
+    FinalizeImmediateMobiParse(book, path, deps, raw, header, decoded.utf8,
+                               &deferred, &toc_result, hooks);
+    log_stage("finalized");
     if (reporter) {
-      if (decode_plan.defer_toc_finalize) {
-        DBG_LOGF(reporter,
-                 "MOBI: deferred TOC finalize enabled text_bytes=%u threshold=%u",
-                 (unsigned)text_bytes,
-                 (unsigned)mobi_decode_plan::kDeferredTocFinalizeMinBytes);
-      }
-      DBG_LOGF(reporter,
-               "MOBI: deferred open armed pages=%u initial_budget_ms=%u "
-               "initial_page_budget=%u",
-               (unsigned)book->GetPageCount(),
-               (unsigned)kMobiInitialOpenBudgetMs,
-               (unsigned)kMobiInitialOpenPageBudget);
-      char tmsg[320];
-      snprintf(tmsg, sizeof(tmsg),
-               "MOBI: timing read=%llums decomp=%llums decode=%llums "
-               "markup_scan=%llums cleanup=%llums initial_pages=%llums "
-               "total_open=%llums",
-               (unsigned long long)(t_after_read - t_parse_begin),
-               (unsigned long long)(t_after_decompress - t_after_read),
-               (unsigned long long)(t_after_decode - t_after_decompress),
-               (unsigned long long)(t_after_markup_scan - t_after_decode),
-               (unsigned long long)(t_after_cleanup - t_after_markup_scan),
-               (unsigned long long)(deferred.t_after_initial_pages -
-                                    t_after_cleanup),
-               (unsigned long long)(deferred.t_after_initial_pages -
-                                    t_parse_begin));
-      append_debug_log(tmsg);
       append_debug_log("MOBI: parse end");
     }
-    return 0;
+    return book->GetPageCount() > 0 ? 0 : 1;
   }
 
   MobiTocFinalizeResult toc_result;
@@ -971,29 +866,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   if (reporter)
     append_debug_log("MOBI: parse end");
   return 0;
-}
-
-bool ContinueDeferredParse(Book *book, u32 budget_ms, u16 page_budget,
-                           const Hooks &hooks) {
-  if (!book || !hooks.make_plain_continue_callbacks)
-    return true;
-  MobiDeferredState *state = mobi_deferred_runtime::Find(book);
-  if (!state)
-    return true;
-
-  const plain_text_stream::ContinueCallbacks callbacks =
-      hooks.make_plain_continue_callbacks();
-  g_deferred_hooks = &hooks;
-  const bool continue_ok = mobi_deferred_runtime::Continue(
-      book, state, budget_ms, page_budget, callbacks,
-      MakeMobiDeferredFinalizeCallbacks());
-  g_deferred_hooks = NULL;
-  if (!continue_ok) {
-    return false;
-  }
-
-  mobi_deferred_runtime::Erase(book);
-  return true;
 }
 
 } // namespace mobi_parser

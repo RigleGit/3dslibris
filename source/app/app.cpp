@@ -151,7 +151,6 @@ App::App()
   reader_state_.pdf_touch_last_x = -1;
   reader_state_.pdf_touch_last_y = -1;
   reader_state_.pdf_deferred_ready_at_ms = 0;
-  reader_state_.mobi_deferred_ready_at_ms = 0;
 
   // Initialize status log.
   status_log_file_ = nullptr;
@@ -683,16 +682,6 @@ u64 App::GetPdfDeferredReadyAtMs() const
 void App::SetPdfDeferredReadyAtMs(u64 ready_at_ms)
 {
   reader_state_.pdf_deferred_ready_at_ms = ready_at_ms;
-}
-
-u64 App::GetMobiDeferredReadyAtMs() const
-{
-  return reader_state_.mobi_deferred_ready_at_ms;
-}
-
-void App::SetMobiDeferredReadyAtMs(u64 ready_at_ms)
-{
-  reader_state_.mobi_deferred_ready_at_ms = ready_at_ms;
 }
 
 bool App::IsNew3dsDevice() const { return is_new_3ds_; }

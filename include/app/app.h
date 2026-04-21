@@ -255,8 +255,6 @@ public:
   void SetPdfTouchLastY(int y);
   u64 GetPdfDeferredReadyAtMs() const;
   void SetPdfDeferredReadyAtMs(u64 ready_at_ms);
-  u64 GetMobiDeferredReadyAtMs() const;
-  void SetMobiDeferredReadyAtMs(u64 ready_at_ms);
   bool IsNew3dsDevice() const;
   bool IsHomebrewEnvironment() const;
   bool IsAppletSuspended() const;
@@ -356,15 +354,13 @@ private:
     int pdf_touch_last_x;
     int pdf_touch_last_y;
     u64 pdf_deferred_ready_at_ms;
-    u64 mobi_deferred_ready_at_ms;
 
     ReaderRuntimeState()
         : opening(), deferred_relayout(), bookcurrent(nullptr),
           current_book_session_id(0), next_book_session_id(1),
           layout_revision(0),
           pdf_touch_drag_active(false), pdf_touch_last_x(-1),
-          pdf_touch_last_y(-1), pdf_deferred_ready_at_ms(0),
-          mobi_deferred_ready_at_ms(0) {}
+          pdf_touch_last_y(-1), pdf_deferred_ready_at_ms(0) {}
   };
 
   NavigationState nav_;

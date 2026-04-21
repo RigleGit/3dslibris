@@ -708,8 +708,6 @@ void Book::Close()
     DBG_LOGF(r, "BOOK close: save-epub-cache done book=%s", filename.c_str());
   }
   epub_page_cache_save_pending = false;
-  DBG_LOGF(r, "BOOK close: cancel-mobi-parse book=%s", filename.c_str());
-  CancelDeferredMobiParse();
   DBG_LOGF(r, "BOOK close: clear-pages count=%d book=%s", (int)pages.size(), filename.c_str());
   std::vector<Page *>::iterator it = pages.begin();
   while (it != pages.end())
