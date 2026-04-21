@@ -19,8 +19,10 @@ struct BookContext {
   const unsigned char *paragraph_indent;  //! Non-owning.
   const unsigned char *orientation;       //! Non-owning.
   IStatusReporter *status_reporter;   //! Non-owning.
-  void (*draw_background)(void *);    //! Non-owning callback.
+  void (*draw_background)(void *);    //! Non-owning callback (bottom screen).
   void *draw_background_user_data;    //! Non-owning callback user data.
+  void (*draw_top_background)(void *); //! Non-owning callback (top screen).
+  void *draw_top_background_user_data; //! Non-owning callback user data.
 
   BookContext()
       : text(nullptr),
@@ -30,5 +32,7 @@ struct BookContext {
         orientation(nullptr),
         status_reporter(nullptr),
         draw_background(nullptr),
-        draw_background_user_data(nullptr) {}
+        draw_background_user_data(nullptr),
+        draw_top_background(nullptr),
+        draw_top_background_user_data(nullptr) {}
 };

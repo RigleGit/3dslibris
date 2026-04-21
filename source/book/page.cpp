@@ -189,7 +189,15 @@ void Page::Draw(Text *ts) {
 #endif
       on_first_screen = false;
       ts->margin.bottom = second_bottom_margin;
-      ts->ClearScreen();
+      if (book) {
+        if (ts->GetScreen() == ts->screenright)
+          book->DrawBottomGradientBackground();
+        else
+          book->DrawTopGradientBackground();
+        ts->MarkScreenDirty(ts->GetScreen());
+      } else {
+        ts->ClearScreen();
+      }
       ts->InitPen();
       ts->linebegan = false;
       return true;
@@ -202,9 +210,19 @@ void Page::Draw(Text *ts) {
           .bottom_margin;
   // Clear both page buffers through Text API so dirty flags stay coherent.
   ts->SetScreen(ts->screenleft);
-  ts->ClearScreen();
+  if (book) {
+    book->DrawTopGradientBackground();
+    ts->MarkScreenDirty(ts->screenleft);
+  } else {
+    ts->ClearScreen();
+  }
   ts->SetScreen(ts->screenright);
-  ts->ClearScreen();
+  if (book) {
+    book->DrawBottomGradientBackground();
+    ts->MarkScreenDirty(ts->screenright);
+  } else {
+    ts->ClearScreen();
+  }
   ts->SetScreen(first_screen);
 
   u16 i = 0;
@@ -269,7 +287,15 @@ void Page::Draw(Text *ts) {
 #endif
           on_first_screen = false;
           ts->margin.bottom = second_bottom_margin;
-          ts->ClearScreen();
+          if (book) {
+            if (ts->GetScreen() == ts->screenright)
+              book->DrawBottomGradientBackground();
+            else
+              book->DrawTopGradientBackground();
+            ts->MarkScreenDirty(ts->GetScreen());
+          } else {
+            ts->ClearScreen();
+          }
           ts->InitPen();
           ts->linebegan = false;
         } else

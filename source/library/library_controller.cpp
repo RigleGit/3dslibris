@@ -102,6 +102,12 @@ static void DrawBottomGradientFromApp(void *user_data) {
     app->DrawBottomGradientBackground();
 }
 
+static void DrawTopGradientFromApp(void *user_data) {
+  App *app = static_cast<App *>(user_data);
+  if (app)
+    app->DrawTopGradientBackground();
+}
+
 static void AppendBookFromFilename(App *app, const std::string &source_dir,
                                    const char *filename) {
   if (!app || !app_flow_utils::ShouldIndexBookFilename(filename))
@@ -126,6 +132,8 @@ static void AppendBookFromFilename(App *app, const std::string &source_dir,
   ctx.status_reporter = app;
   ctx.draw_background = &DrawBottomGradientFromApp;
   ctx.draw_background_user_data = app;
+  ctx.draw_top_background = &DrawTopGradientFromApp;
+  ctx.draw_top_background_user_data = app;
   Book *book = new Book(ctx);
   book->SetFolderName(source_dir.c_str());
   book->SetFileName(io_name.c_str());

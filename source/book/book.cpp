@@ -316,6 +316,12 @@ void Book::DrawBottomGradientBackground()
     ctx.draw_background(ctx.draw_background_user_data);
 }
 
+void Book::DrawTopGradientBackground()
+{
+  if (ctx.draw_top_background)
+    ctx.draw_top_background(ctx.draw_top_background_user_data);
+}
+
 void Book::SetFolderName(const char *name) { foldername = name; }
 
 void Book::SetFileName(const char *name)

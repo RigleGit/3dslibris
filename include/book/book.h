@@ -182,6 +182,7 @@ public:
   int GetParagraphIndent();
   int GetOrientation();
   void DrawBottomGradientBackground();
+  void DrawTopGradientBackground();
   inline const std::string &GetAuthor() const { return author; }
   inline bool HasBrowserDisplayNameCache() const
   {
