@@ -22,6 +22,9 @@ public:
   void Init();
   void Draw() override;
   void HandleInput(u32 keys) override;
+  u8 GetCurrentPage() const override;
+  u8 GetPageCount() const override;
+  void SelectItem(u8 index) override;
 
   inline bool IsDirty() const { return dirty; }
   inline void SetDirty(bool d = true) { dirty = d; }
@@ -35,6 +38,12 @@ protected:
   virtual void BuildEntries(std::vector<std::string> &labels,
                             std::vector<u16> &pages) = 0;
   virtual bool ResolveTargetPage(u8 index, u16 *page_out);
+
+  u8 GetPageStart(u8 page_index) const;
+  u8 GetPageSize(u8 page_index) const;
+  u8 GetPageForIndex(u8 index) const;
+  void UpdatePageSize();
+  std::vector<u8> page_sizes;
 
 private:
   void ActivateSelected();

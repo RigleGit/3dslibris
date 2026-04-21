@@ -20,10 +20,10 @@ public:
   Menu(class App *app);
   virtual ~Menu();
   virtual void Draw() = 0; // Draw the menu on the screen
-  u8 GetCurrentPage() const;
-  u8 GetPageCount() const;
+  virtual u8 GetCurrentPage() const;
+  virtual u8 GetPageCount() const;
   virtual void HandleInput(u32 keys) = 0; // Handle input events
-  void SelectItem(u8 index);
+  virtual void SelectItem(u8 index);
 
   class App *app; //! Pointer to the application instance.
   std::vector<class Button *> buttons;
