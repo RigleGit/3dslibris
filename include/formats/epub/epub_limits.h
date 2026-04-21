@@ -22,6 +22,6 @@ static const int kCoverMaxDimension = 4096;
 
 static const bool kEnableRealTocResolve = true;
 
-static const uint16_t kMaxPagesInMemory = 15000;
+static const uint16_t kMaxPagesInMemory = 25000;
 
 } // namespace epub_limits
