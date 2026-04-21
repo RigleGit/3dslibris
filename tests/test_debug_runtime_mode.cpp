@@ -11,25 +11,40 @@ namespace {
   std::exit(1);
 }
 
-void ExpectTrue(const char *label, bool value) {
-  if (!value)
-    Fail(std::string(label) + ": expected true");
+struct FlagExpectation {
+  const char *label;
+  bool actual;
+  bool expected;
+};
+
+void CheckFlags(const FlagExpectation *flags, int count) {
+  bool any_failed = false;
+  for (int i = 0; i < count; ++i) {
+    const FlagExpectation &f = flags[i];
+    if (f.actual != f.expected) {
+      std::fprintf(stderr, "%s: expected %s but got %s\n", f.label,
+                   f.expected ? "true" : "false",
+                   f.actual ? "true" : "false");
+      any_failed = true;
+    }
+  }
+  if (any_failed)
+    std::exit(1);
 }
 
 } // namespace
 
 int main() {
-  ExpectTrue("background workers disabled",
-             debug_runtime::BackgroundWorkersDisabled());
-  ExpectTrue("browser warmup disabled",
-             debug_runtime::BrowserWarmupDisabled());
-  ExpectTrue("sync book open forced",
-             debug_runtime::ForceSynchronousBookOpen());
-  ExpectTrue("sync cbz decode forced",
-             debug_runtime::ForceSynchronousCbzDecode());
-  ExpectTrue("sync mupdf render forced",
-             debug_runtime::ForceSynchronousMuPdfRender());
-  ExpectTrue("sync mobi finalize forced",
-             debug_runtime::ForceSynchronousMobiFinalize());
+  // Document the intended runtime mode for each flag.
+  // Update expected values here when a flag is re-enabled.
+  FlagExpectation flags[] = {
+      {"BackgroundWorkersDisabled", debug_runtime::BackgroundWorkersDisabled(), true},
+      {"BrowserWarmupDisabled",     debug_runtime::BrowserWarmupDisabled(),     false},
+      {"ForceSynchronousBookOpen",  debug_runtime::ForceSynchronousBookOpen(),  true},
+      {"ForceSynchronousCbzDecode", debug_runtime::ForceSynchronousCbzDecode(), true},
+      {"ForceSynchronousMuPdfRender", debug_runtime::ForceSynchronousMuPdfRender(), true},
+      {"ForceSynchronousMobiFinalize", debug_runtime::ForceSynchronousMobiFinalize(), false},
+  };
+  CheckFlags(flags, 6);
   return 0;
 }
