@@ -8,6 +8,7 @@
 #include "app/app.h"
 #include "color_utils.h"
 #include "debug_log.h"
+#include "ui/theme_colors.h"
 #include "shared/bugfix_utils.h"
 #include "shared/text_render_layout_utils.h"
 #include "path_utils.h"
@@ -39,6 +40,25 @@ static inline u16 BlendRGB565(u16 fg, u16 bg, u8 alpha) {
   const int g = div255(fgc * a + bgc * ia + 127);
   const int b = div255(fb * a + bb * ia + 127);
   return (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+}
+
+static inline u16 ThemeGradientPixel(int x, int y, int w, int h,
+                                     const ThemePalette &p) {
+  const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
+  const float dx =
+      (w > 1) ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
+              : 0.0f;
+  const float edge = fabsf(dx);
+
+  float r = p.bgTopR + (p.bgBotR - p.bgTopR) * tY;
+  float g = p.bgTopG + (p.bgBotG - p.bgTopG) * tY;
+  float b = p.bgTopB + (p.bgBotB - p.bgTopB) * tY;
+
+  const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
+  r *= vignette;
+  g *= vignette;
+  b *= vignette;
+  return RGB565FromU8(r, g, b);
 }
 
 static inline u16 SepiaGradientPixel(int x, int y, int w, int h) {
@@ -76,10 +96,19 @@ static inline u16 SepiaGradientPixel(int x, int y, int w, int h) {
 static const u16 kSepiaTextColor = RGB565FromU8(70.0f, 52.0f, 32.0f);
 static const u16 kSepiaBgMidColor = RGB565FromU8(241.0f, 223.0f, 190.0f);
 
+static const u16 kTrueDarkTextColor = RGB565FromU8(180.0f, 180.0f, 180.0f);
+static const u16 kDarkSepiaTextColor = RGB565FromU8(180.0f, 150.0f, 110.0f);
+static const u16 kDarkSepiaBgMidColor = RGB565FromU8(65.0f, 45.0f, 30.0f);
+
 static std::vector<u16> grad320;
 static std::vector<u16> grad400;
 static int grad320w = 0;
 static int grad400w = 0;
+
+static std::vector<u16> grad320_ds;
+static std::vector<u16> grad400_ds;
+static int grad320w_ds = 0;
+static int grad400w_ds = 0;
 #ifdef DSLIBRIS_DEBUG
 static int g_text_clip_right_budget = 32;
 static int g_text_margin_diag_budget = 12;
@@ -122,18 +151,89 @@ static void FillSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
   }
 }
 
+static inline u16 DarkSepiaGradientPixel(int x, int y, int w, int h) {
+  static const u8 kBayer4x4[4][4] = {
+      {0, 8, 2, 10},
+      {12, 4, 14, 6},
+      {3, 11, 1, 9},
+      {15, 7, 13, 5},
+  };
+
+  const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
+  const float dx =
+      (w > 1) ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
+              : 0.0f;
+  const float edge = fabsf(dx);
+
+  float r = 80.0f + (50.0f - 80.0f) * tY;
+  float g = 60.0f + (35.0f - 60.0f) * tY;
+  float b = 40.0f + (20.0f - 40.0f) * tY;
+
+  const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
+
+  const float bayer = (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) - 0.5f;
+
+  const u32 h0 = (u32)x * 73856093u;
+  const u32 h1 = (u32)y * 19349663u;
+  const u32 h2 = (h0 ^ h1 ^ 0x9E3779B9u);
+  const float noise = ((((h2 >> 8) & 0xFF) / 255.0f) - 0.5f) * 0.6f;
+
+  r = r * vignette + bayer * 3.8f + noise;
+  g = g * vignette + bayer * 1.9f + noise * 0.6f;
+  b = b * vignette + bayer * 3.8f + noise;
+  return RGB565FromU8(r, g, b);
+}
+
+static void FillDarkSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
+  if (!dst || stride <= 0 || w <= 0 || logical_h <= 0)
+    return;
+
+  std::vector<u16> *grad = nullptr;
+  int *cached_w = nullptr;
+  const int h = (logical_h <= 320) ? 320 : 400;
+  if (h == 320) {
+    grad = &grad320_ds;
+    cached_w = &grad320w_ds;
+  } else {
+    grad = &grad400_ds;
+    cached_w = &grad400w_ds;
+  }
+
+  if (grad->empty() || *cached_w != w) {
+    grad->resize((size_t)w * (size_t)h);
+    *cached_w = w;
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        (*grad)[(size_t)y * (size_t)w + (size_t)x] =
+            DarkSepiaGradientPixel(x, y, w, h);
+      }
+    }
+  }
+
+  const int max_y = std::min(logical_h, h);
+  for (int y = 0; y < max_y; y++) {
+    memcpy(dst + (size_t)y * (size_t)stride,
+           grad->data() + (size_t)y * (size_t)w, (size_t)w * sizeof(u16));
+  }
+}
+
 }  // anonymous namespace
 
 TextRenderer::TextRenderer(Text *owner)
     : parent(owner), turned_right(false), style(TEXT_STYLE_REGULAR), codeprev(0),
-      hit(false), justify(false), colorMode(0), splash_attempted(false),
-      splash_loaded(false), splash_pixels(nullptr), stats_hits(0),
-      stats_misses(0), auto_wrap_enabled(true), clip_to_content_enabled(false) {
+      hit(false), justify(false), colorMode(0), splash_light_attempted(false),
+      splash_light_loaded(false), splash_light_pixels(nullptr),
+      splash_dark_attempted(false), splash_dark_loaded(false),
+      splash_dark_pixels(nullptr), stats_hits(0), stats_misses(0),
+      auto_wrap_enabled(true), clip_to_content_enabled(false) {
   pen.x = 0;
   pen.y = 0;
 }
 
-TextRenderer::~TextRenderer() { delete[] splash_pixels; }
+TextRenderer::~TextRenderer() {
+  delete[] splash_light_pixels;
+  delete[] splash_dark_pixels;
+}
 
 void TextRenderer::CopyScreen(u16 *src, u16 *dst) {
   memcpy(dst, src, parent->display.width * parent->display.height * sizeof(u16));
@@ -144,18 +244,19 @@ void TextRenderer::ClearScreen() {
   const int logicalHeight =
       framebuffer_blit_utils::LogicalTextScreenHeight(is_left_screen);
   MarkCurrentScreenDirtyRect(0, 0, parent->display.width, logicalHeight);
-  u16 bg_color;
-  if (colorMode == 1)
-    bg_color = 0x0000;
-  else
-    bg_color = 0xFFFF;
 
   if (colorMode == 2) {
     FillSepiaGradient(parent->screen, parent->display.height, parent->display.width,
                       logicalHeight);
     return;
   }
+  if (colorMode == 5) {
+    FillDarkSepiaGradient(parent->screen, parent->display.height, parent->display.width,
+                          logicalHeight);
+    return;
+  }
 
+  u16 bg_color = (colorMode == 1 || colorMode == 4) ? 0x0000 : 0xFFFF;
   text_buffer_utils::FillLogicalScreenRows(parent->screen, parent->display.height,
                                            parent->display.width, logicalHeight,
                                            bg_color);
@@ -163,39 +264,45 @@ void TextRenderer::ClearScreen() {
 
 void TextRenderer::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
   MarkCurrentScreenDirtyRect((int)xl, (int)yl, (int)xh, (int)yh);
-  u16 clearcolor;
-  if (colorMode == 1)
-    clearcolor = 0x0000;
-  else
-    clearcolor = 0xFFFF;
+  u16 clearcolor = (colorMode == 1 || colorMode == 4) ? 0x0000 : 0xFFFF;
   int maxHeight = (parent->screen == parent->screenleft ? 400 : 320);
   // Pre-clamp to valid range
   if (xl >= (u16)parent->display.width || yl >= (u16)maxHeight) return;
   xh = std::min((int)xh, (int)parent->display.width);
   yh = std::min((int)yh, (int)maxHeight);
-  // Sepia mode: copy from cached gradient instead of per-pixel powf
-  if (colorMode == 2) {
-    // Ensure full-screen gradient cache is populated
-    std::vector<u16> *grad = (maxHeight <= 320) ? &grad320 : &grad400;
-    int *cached_w = (maxHeight <= 320) ? &grad320w : &grad400w;
-    if (grad->empty() || *cached_w != (int)parent->display.width) {
-      FillSepiaGradient(parent->screen, parent->display.height,
-                        (int)parent->display.width, maxHeight);
+  // Gradient modes: copy from cached gradient instead of per-pixel powf
+  if (colorMode == 2 || colorMode == 5) {
+    std::vector<u16> *grad = nullptr;
+    int *cached_w = nullptr;
+    if (colorMode == 2) {
+      grad = (maxHeight <= 320) ? &grad320 : &grad400;
+      cached_w = (maxHeight <= 320) ? &grad320w : &grad400w;
+    } else {
+      grad = (maxHeight <= 320) ? &grad320_ds : &grad400_ds;
+      cached_w = (maxHeight <= 320) ? &grad320w_ds : &grad400w_ds;
     }
-    // Copy just the rect region from cache
+    if (grad->empty() || *cached_w != (int)parent->display.width) {
+      if (colorMode == 2)
+        FillSepiaGradient(parent->screen, parent->display.height,
+                          (int)parent->display.width, maxHeight);
+      else
+        FillDarkSepiaGradient(parent->screen, parent->display.height,
+                              (int)parent->display.width, maxHeight);
+    }
     const int rw = (int)xh - (int)xl;
     const int rh = (int)yh - (int)yl;
     for (int y = 0; y < rh; y++) {
       memcpy(parent->screen + (size_t)(yl + y) * (size_t)parent->display.height + (size_t)xl,
-             grad->data() + (size_t)y * (size_t)*cached_w + (size_t)xl,
+             grad->data() + (size_t)(yl + y) * (size_t)*cached_w + (size_t)xl,
              (size_t)rw * sizeof(u16));
     }
     return;
   }
+  const ThemePalette &palette = GetThemePalette(colorMode);
   for (u16 y = yl; y < yh; y++) {
     u16 *row = parent->screen + (size_t)y * (size_t)parent->display.height + (size_t)xl;
     for (u16 x = xl; x < xh; x++) {
-      *row++ = clearcolor;
+      *row++ = ThemeGradientPixel(x, y, parent->display.width, maxHeight, palette);
     }
   }
 }
@@ -203,19 +310,32 @@ void TextRenderer::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
 u16 TextRenderer::GetFgColor() {
   if (parent->usefgcolor)
     return parent->fgcolor;
-  if (colorMode == 0)
-    return 0x0000;
-  if (colorMode == 1)
+  switch (colorMode) {
+  case 1:
     return 0xFFFF;
-  return kSepiaTextColor;
+  case 2:
+    return kSepiaTextColor;
+  case 4:
+    return kTrueDarkTextColor;
+  case 5:
+    return kDarkSepiaTextColor;
+  default:
+    return 0x0000;
+  }
 }
 
 u16 TextRenderer::GetBgColor() {
-  if (colorMode == 0)
-    return 0xFFFF;
-  if (colorMode == 1)
+  switch (colorMode) {
+  case 1:
+  case 4:
     return 0x0000;
-  return kSepiaBgMidColor;
+  case 2:
+    return kSepiaBgMidColor;
+  case 5:
+    return kDarkSepiaBgMidColor;
+  default:
+    return 0xFFFF;
+  }
 }
 
 void TextRenderer::FillRect(u16 xl, u16 yl, u16 xh, u16 yh, u16 color) {
@@ -266,7 +386,21 @@ void TextRenderer::GetPen(u16 &x, u16 &y) {
   y = pen.y;
 }
 
-void TextRenderer::SetColorMode(int state) { colorMode = state; }
+void TextRenderer::SetColorMode(int state) {
+  int old_dark = (colorMode == 1 || colorMode == 4 || colorMode == 5) ? 1 : 0;
+  int new_dark = (state == 1 || state == 4 || state == 5) ? 1 : 0;
+  if (old_dark != new_dark) {
+    delete[] splash_light_pixels;
+    splash_light_pixels = nullptr;
+    splash_light_attempted = false;
+    splash_light_loaded = false;
+    delete[] splash_dark_pixels;
+    splash_dark_pixels = nullptr;
+    splash_dark_attempted = false;
+    splash_dark_loaded = false;
+  }
+  colorMode = state;
+}
 
 int TextRenderer::GetColorMode() { return colorMode; }
 
@@ -330,9 +464,11 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
 
   // Pre-resolve foreground color components (constant for this character)
   int fg_r, fg_g, fg_b;
-  const u16 fg_color = (colorMode == 0) ? 0x0000
-                       : (colorMode == 1) ? 0xFFFF
-                       : kSepiaTextColor;
+  const u16 fg_color = (colorMode == 1) ? 0xFFFF
+                       : (colorMode == 2) ? kSepiaTextColor
+                       : (colorMode == 4) ? kTrueDarkTextColor
+                       : (colorMode == 5) ? kDarkSepiaTextColor
+                       : 0x0000;
   RGB565ToU8(fg_color, &fg_r, &fg_g, &fg_b);
 
   const int screenWidth = (int)parent->display.width;
@@ -488,27 +624,36 @@ void TextRenderer::ClearScreen(u16 *screen, u8 r, u8 g, u8 b) {
     screen[i] = pixel;
 }
 
-bool TextRenderer::EnsureSplashLoaded() {
-  if (splash_attempted)
-    return splash_loaded;
-  splash_attempted = true;
+bool TextRenderer::EnsureSplashLoaded(bool dark) {
+  bool &attempted = dark ? splash_dark_attempted : splash_light_attempted;
+  bool &loaded = dark ? splash_dark_loaded : splash_light_loaded;
+  u16 *&pixels = dark ? splash_dark_pixels : splash_light_pixels;
 
-  static const char *kSplashCandidates[] = {
+  if (attempted)
+    return loaded;
+  attempted = true;
+
+  static const char *kSplashLight[] = {
+      "romfs:/3ds/3dslibris/resources/3DSLibris_light_small.jpg",
+      "sdmc:/3ds/3dslibris/resources/3DSLibris_light_small.jpg",
       paths::kSplashPaths[0],
       paths::kSplashPaths[1],
-      "romfs:/3ds/3dslibris/resources/splash.jpg",
-      "romfs:/3ds/3dslibris/resources/splash.jpeg",
-      paths::kSplashPaths[2],
-      paths::kSplashPaths[3],
       nullptr,
   };
+  static const char *kSplashDark[] = {
+      "romfs:/3ds/3dslibris/resources/3DSLibris_dark_small.jpg",
+      "sdmc:/3ds/3dslibris/resources/3DSLibris_dark_small.jpg",
+      nullptr,
+  };
+
+  const char **candidates = dark ? kSplashDark : kSplashLight;
 
   int srcW = 0;
   int srcH = 0;
   int srcChannels = 0;
   unsigned char *srcRgb = nullptr;
-  for (int i = 0; kSplashCandidates[i] != nullptr; i++) {
-    FILE *fp = fopen(kSplashCandidates[i], "rb");
+  for (int i = 0; candidates[i] != nullptr; i++) {
+    FILE *fp = fopen(candidates[i], "rb");
     if (!fp)
       continue;
     fseek(fp, 0, SEEK_END);
@@ -534,8 +679,8 @@ bool TextRenderer::EnsureSplashLoaded() {
 
   const int targetW = parent->display.width;
   const int targetH = parent->display.height;
-  splash_pixels = new u16[(size_t)targetW * (size_t)targetH];
-  if (!splash_pixels) {
+  pixels = new u16[(size_t)targetW * (size_t)targetH];
+  if (!pixels) {
     stbi_image_free(srcRgb);
     return false;
   }
@@ -557,8 +702,8 @@ bool TextRenderer::EnsureSplashLoaded() {
   }
   if (scaledW <= 0 || scaledH <= 0) {
     stbi_image_free(srcRgb);
-    delete[] splash_pixels;
-    splash_pixels = nullptr;
+    delete[] pixels;
+    pixels = nullptr;
     return false;
   }
 
@@ -573,13 +718,13 @@ bool TextRenderer::EnsureSplashLoaded() {
       const u16 r = (u16)(p[0] >> 3);
       const u16 g = (u16)(p[1] >> 2);
       const u16 b = (u16)(p[2] >> 3);
-      splash_pixels[(size_t)y * (size_t)targetW + (size_t)x] =
+      pixels[(size_t)y * (size_t)targetW + (size_t)x] =
           (u16)((r << 11) | (g << 5) | b);
     }
   }
 
   stbi_image_free(srcRgb);
-  splash_loaded = true;
+  loaded = true;
   return true;
 }
 
@@ -604,17 +749,20 @@ void TextRenderer::PrintSplash(u16 *screen) {
   int savedColorMode = GetColorMode();
 
   SetScreen(screen);
-  SetColorMode(0);
   ClearScreen();
-  if (screen == parent->screenleft && EnsureSplashLoaded()) {
-    for (int y = 0; y < parent->display.height; y++) {
-      u16 *dst = screen + y * parent->display.height;
-      const u16 *src = splash_pixels + y * parent->display.width;
-      for (int x = 0; x < parent->display.width; x++)
-        dst[x] = src[x];
+  if (screen == parent->screenleft) {
+    bool dark = (colorMode == 1 || colorMode == 4 || colorMode == 5);
+    if (EnsureSplashLoaded(dark)) {
+      u16 *pixels = dark ? splash_dark_pixels : splash_light_pixels;
+      for (int y = 0; y < parent->display.height; y++) {
+        u16 *dst = screen + y * parent->display.height;
+        const u16 *src = pixels + y * parent->display.width;
+        for (int x = 0; x < parent->display.width; x++)
+          dst[x] = src[x];
+      }
+    } else {
+      DrawFallbackSplash();
     }
-  } else if (screen == parent->screenleft) {
-    DrawFallbackSplash();
   }
   MarkScreenDirty(screen);
   SetColorMode(savedColorMode);

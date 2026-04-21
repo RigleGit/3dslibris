@@ -24,7 +24,7 @@ void DrawPage(App &app, int page_start, int page_size) {
     const int row_y = kRowY0 + row * kRowPitch;
     const bool selected = app.books[i] == app.GetSelectedBook();
     const browser_view_utils::ListRowPalette palette =
-        browser_view_utils::PaletteForListRow(selected);
+        browser_view_utils::PaletteForListRow(selected, app.ts->GetColorMode());
     app.ts->FillRect((u16)row_x, (u16)row_y, (u16)(row_x + kRowW),
                      (u16)(row_y + kRowH), palette.fill);
     app.ts->DrawRect((u16)row_x, (u16)row_y, (u16)(row_x + kRowW),

@@ -27,7 +27,9 @@
 #include "book/book.h"
 #include "library/browser_view_utils.h"
 #include "ui/button.h"
+#include "ui/ui_button_skin.h"
 #include "color_utils.h"
+#include "ui/theme_colors.h"
 #include "debug_log.h"
 #include "parse.h"
 #include "settings/prefs.h"
@@ -99,11 +101,18 @@ static void ToggleClockFormatSetting(Prefs *prefs) {
   prefs->Write();
 }
 
-static void CycleColorMode(Text *ts) {
+static void CycleColorMode(Text *ts, App *app) {
   if (!ts)
     return;
   int mode = ts->GetColorMode();
-  ts->SetColorMode((mode + 1) % 3);
+  int next = (mode + 1) % 6;
+  ts->SetColorMode(next);
+  UiButtonSkin_SetColorMode(next);
+  if (app) {
+    app->colorMode = next;
+    ts->MarkAllScreensDirty();
+    DBG_LOGF(app, "CycleColorMode: %d -> %d", mode, next);
+  }
 }
 
 static void ToggleBrowserViewSetting(App *app) {
@@ -308,12 +317,21 @@ void SettingsController::DrawGoToPagePopup() {
                                                         page_count);
   const int fill_w = settings::SliderPageIndexToFillWidth(target_page, page_count,
                                                           layout.slider_w);
-  const u16 box_bg = RGB565FromU8(255.0f, 250.0f, 236.0f);
-  const u16 box_border = RGB565FromU8(176.0f, 139.0f, 91.0f);
-  const u16 slider_bg = RGB565FromU8(233.0f, 220.0f, 194.0f);
-  const u16 slider_fill = RGB565FromU8(165.0f, 104.0f, 58.0f);
-  const u16 button_bg = RGB565FromU8(248.0f, 240.0f, 222.0f);
-  const u16 text_color = RGB565FromU8(71.0f, 44.0f, 21.0f);
+  const int color_mode = app->ts->GetColorMode();
+  const ThemePalette &palette = GetThemePalette(color_mode);
+  const u16 box_bg = RGB565FromU8(
+      (palette.bgTopR + palette.btnFillTopR) * 0.5f,
+      (palette.bgTopG + palette.btnFillTopG) * 0.5f,
+      (palette.bgTopB + palette.btnFillTopB) * 0.5f);
+  const u16 box_border = RGB565FromU8(
+      palette.btnBorderOuterR, palette.btnBorderOuterG, palette.btnBorderOuterB);
+  const u16 slider_bg = RGB565FromU8(
+      palette.btnFillBotR, palette.btnFillBotG, palette.btnFillBotB);
+  const u16 slider_fill = RGB565FromU8(
+      palette.iconR, palette.iconG, palette.iconB);
+  const u16 button_bg = RGB565FromU8(
+      palette.btnFillTopR, palette.btnFillTopG, palette.btnFillTopB);
+  const u16 text_color = palette.textFgColor;
 
   char page_msg[48];
   snprintf(page_msg, sizeof(page_msg), "Pg %d / %d", target_page + 1, page_count);
@@ -434,7 +452,6 @@ void SettingsController::PrefsDraw() {
   app->ts->margin.bottom = 0;
 
   app->ts->SetScreen(app->ts->screenright);
-  app->ts->SetColorMode(0);
   app->ts->ClearScreen();
   app->DrawBottomGradientBackground();
 
@@ -766,12 +783,26 @@ void SettingsController::PrefsRefreshButton(int index) {
   case PREFS_BUTTON_COLORMODE: {
     int mode = app->ts->GetColorMode();
     app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel1(std::string("color mode"));
-    if (mode == 0)
-      app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Normal"));
-    else if (mode == 1)
+    switch (mode) {
+    case 0:
+      app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Light"));
+      break;
+    case 1:
       app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Dark"));
-    else
+      break;
+    case 2:
       app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Sepia"));
+      break;
+    case 3:
+      app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("True Light"));
+      break;
+    case 4:
+      app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("True Dark"));
+      break;
+    case 5:
+      app->prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Dark Sepia"));
+      break;
+    }
     break;
   }
   case PREFS_BUTTON_LIBRARY_VIEW:
@@ -847,7 +878,7 @@ void SettingsController::PrefsHandlePress() {
   }
 
   if (selected_button == PREFS_BUTTON_COLORMODE) {
-    CycleColorMode(app->ts.get());
+    CycleColorMode(app->ts.get(), app);
     PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
     app->prefs->Write();
     app->MarkPrefsDirty();

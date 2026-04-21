@@ -51,7 +51,6 @@ static void DrawMuPdfLoadFailure(Book *book, Text *ts, int page_index) {
   const int saved_bottom_margin = ts->margin.bottom;
 
   ts->SetStyle(TEXT_STYLE_BROWSER);
-  ts->SetColorMode(0);
   ts->margin.bottom = 0;
 
   ts->SetScreen(ts->screenleft);
@@ -719,7 +718,6 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   const int saved_bottom_margin = ts->margin.bottom;
 
   ts->SetStyle(TEXT_STYLE_BROWSER);
-  ts->SetColorMode(0);
   ts->margin.bottom = 0;
 
   ts->SetScreen(ts->screenleft);

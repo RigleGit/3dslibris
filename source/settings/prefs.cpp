@@ -15,6 +15,7 @@
 
 #include "3ds.h"
 #include "app/app.h"
+#include "debug_log.h"
 #include "book/book.h"
 #include "book/book_xml.h"
 #include "formats/common/xml_parse_utils.h"
@@ -54,8 +55,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       if (!strcmp(attr[i], "brightness")) {
         // Ignored on 3DS (brightness is system-managed).
       } else if (!strcmp(attr[i], "colorMode")) {
-        app->colorMode = atoi(attr[i + 1]);
-        app->ts->SetColorMode(atoi(attr[i + 1]));
+        int mode = atoi(attr[i + 1]);
+        app->colorMode = mode;
+        app->ts->SetColorMode(mode);
+        UiButtonSkin_SetColorMode(mode);
       } else if (!strcmp(attr[i], "flip")) {
         app->orientation = atoi(attr[i + 1]);
       }

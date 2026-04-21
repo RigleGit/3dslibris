@@ -28,6 +28,7 @@
 #include "path_utils.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
+#include "ui/ui_button_skin.h"
 #include "version.h"
 
 namespace
@@ -181,7 +182,6 @@ void StartupController::DrawBootStatus(const char *title,
   int savedPixelSize = app_.ts->pixelsize;
 
   app_.ts->SetStyle(TEXT_STYLE_BROWSER);
-  app_.ts->SetColorMode(0);
   app_.ts->SetPixelSize(10);
 
   app_.ts->SetScreen(app_.ts->screenleft);
@@ -311,6 +311,7 @@ int StartupController::RunBootSequence()
              prefs_read_err);
     app_.PrintStatus(msg);
   }
+  UiButtonSkin_SetColorMode(app_.colorMode);
   NormalizeRuntimeAssetPaths(&app_);
   DrawBootStatus("Booting", {"Preparing library..."}, false);
   app_.SetOrientation(app_.orientation);

@@ -12,6 +12,7 @@
 
 #include "color_utils.h"
 #include "path_utils.h"
+#include "ui/theme_colors.h"
 #include <algorithm>
 #include <cmath>
 #include <ctype.h>
@@ -39,6 +40,7 @@ struct ButtonCacheKey {
   u16 h;
   u8 state;
   u8 with_icon;
+  u8 color_mode;
 };
 
 struct ButtonCacheEntry {
@@ -47,11 +49,12 @@ struct ButtonCacheEntry {
   ButtonCacheKey key;
   std::vector<u16> rgb565;
   std::vector<u8> alpha;
-  ButtonCacheEntry() : used(false), age(0), key{0, 0, 0, 0} {}
+  ButtonCacheEntry() : used(false), age(0), key{0, 0, 0, 0, 0} {}
 };
 
 static bool g_inited = false;
 static u32 g_age = 1;
+static int g_color_mode = 0;
 static ButtonCacheEntry g_cache[kCacheMax];
 static IconBitmap g_icons[UI_BUTTON_ICON_COUNT];
 
@@ -208,7 +211,7 @@ static void cache_reset_internal() {
 
 static bool key_equals(const ButtonCacheKey &a, const ButtonCacheKey &b) {
   return a.w == b.w && a.h == b.h && a.state == b.state &&
-         a.with_icon == b.with_icon;
+         a.with_icon == b.with_icon && a.color_mode == b.color_mode;
 }
 
 static ButtonCacheEntry *cache_find(const ButtonCacheKey &key) {
@@ -266,11 +269,13 @@ static void generate_button_bitmap(ButtonCacheEntry *entry) {
   const bool with_icon = entry->key.with_icon != 0;
   UiButtonSkinState state = (UiButtonSkinState)entry->key.state;
 
-  float fillTopR = 241.0f, fillTopG = 231.0f, fillTopB = 213.0f;
-  float fillBotR = 229.0f, fillBotG = 216.0f, fillBotB = 196.0f;
-  float borderOuterR = 114.0f, borderOuterG = 80.0f, borderOuterB = 48.0f;
-  float borderInnerR = 186.0f, borderInnerG = 158.0f, borderInnerB = 124.0f;
-  float shadowR = 78.0f, shadowG = 56.0f, shadowB = 36.0f;
+  const ThemePalette &palette = GetThemePalette(g_color_mode);
+
+  float fillTopR = palette.btnFillTopR, fillTopG = palette.btnFillTopG, fillTopB = palette.btnFillTopB;
+  float fillBotR = palette.btnFillBotR, fillBotG = palette.btnFillBotG, fillBotB = palette.btnFillBotB;
+  float borderOuterR = palette.btnBorderOuterR, borderOuterG = palette.btnBorderOuterG, borderOuterB = palette.btnBorderOuterB;
+  float borderInnerR = palette.btnBorderInnerR, borderInnerG = palette.btnBorderInnerG, borderInnerB = palette.btnBorderInnerB;
+  float shadowR = palette.btnShadowR, shadowG = palette.btnShadowG, shadowB = palette.btnShadowB;
 
   if (state == UI_BUTTON_STATE_PRESSED) {
     fillTopR -= 9.0f;
@@ -345,9 +350,9 @@ static void generate_button_bitmap(ButtonCacheEntry *entry) {
 
         float topBand = (1.0f - ty);
         float high = smoothstepf(-3.4f, -1.0f, sd) * topBand * 0.20f;
-        fr = lerpf(fr, 254.0f, high);
-        fg = lerpf(fg, 251.0f, high);
-        fb = lerpf(fb, 244.0f, high);
+        fr = lerpf(fr, palette.btnHighlightR, high);
+        fg = lerpf(fg, palette.btnHighlightG, high);
+        fb = lerpf(fb, palette.btnHighlightB, high);
 
         if (with_icon) {
           int iconW = UiButtonSkin_IconBlockWidth(h);
@@ -368,9 +373,9 @@ static void generate_button_bitmap(ButtonCacheEntry *entry) {
         if (state == UI_BUTTON_STATE_SELECTED) {
           float sel = smoothstepf(-4.0f, -1.4f, sd) *
                       (1.0f - smoothstepf(-1.1f, -0.1f, sd));
-          fr = lerpf(fr, 250.0f, sel * 0.18f);
-          fg = lerpf(fg, 236.0f, sel * 0.18f);
-          fb = lerpf(fb, 192.0f, sel * 0.18f);
+          fr = lerpf(fr, palette.btnHighlightR, sel * 0.18f);
+          fg = lerpf(fg, palette.btnHighlightG, sel * 0.18f);
+          fb = lerpf(fb, palette.btnHighlightB, sel * 0.18f);
         }
 
         float alpha =
@@ -396,6 +401,7 @@ get_or_build_cache(int w, int h, UiButtonSkinState state, bool with_icon) {
   key.h = (u16)h;
   key.state = (u8)state;
   key.with_icon = with_icon ? 1 : 0;
+  key.color_mode = (u8)g_color_mode;
 
   // Cache hit: avoid regenerating gradients/borders every frame.
   ButtonCacheEntry *entry = cache_find(key);
@@ -445,7 +451,8 @@ static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight,
   int ox = x + w - iconBlock + (iconBlock - boxSize) / 2;
   int oy = y + (h - boxSize) / 2;
 
-  const u16 ink = RGB565FromU8(110.0f, 73.0f, 42.0f);
+  const ThemePalette &palette = GetThemePalette(g_color_mode);
+  const u16 ink = RGB565FromU8(palette.iconR, palette.iconG, palette.iconB);
   const u8 alpha = disabled ? 160 : 230;
 
   if (icon == UI_BUTTON_ICON_NEXT || icon == UI_BUTTON_ICON_PREV ||
@@ -494,7 +501,9 @@ static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight,
     }
     int doorW = std::max(2, bw / 4);
     fill_rect_clip(screen, stride, logicalHeight, cx - doorW / 2, by + bh / 2,
-                   cx + doorW / 2 + 1, by + bh, RGB565FromU8(228, 212, 187),
+                   cx + doorW / 2 + 1, by + bh,
+                   RGB565FromU8(palette.btnFillBotR, palette.btnFillBotG,
+                                palette.btnFillBotB),
                    alpha);
     return;
   }
@@ -653,6 +662,7 @@ void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalHeight, int x,
   int iconX = x + w - iconBlock + (iconBlock - boxSize) / 2;
   int iconY = y + (h - boxSize) / 2;
 
+  const ThemePalette &palette = GetThemePalette(g_color_mode);
   for (int dy = 0; dy < boxSize; dy++) {
     int sy = iconY + dy;
     if (sy < 0 || sy >= logicalHeight)
@@ -673,9 +683,16 @@ void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalHeight, int x,
       if (disabled)
         sa = (u8)((int)sa * 170 / 255);
 
-      u16 fg = RGB565FromU8((float)sr, (float)sg, (float)sb);
+      float lum = ((float)sr + (float)sg + (float)sb) / 3.0f;
+      float t = 1.0f - (lum / 255.0f);
+      u16 fg = RGB565FromU8(palette.iconR * t, palette.iconG * t,
+                            palette.iconB * t);
       size_t didx = (size_t)sy * (size_t)stride + (size_t)sx;
       screen[didx] = Blend565(fg, screen[didx], sa);
     }
   }
+}
+
+void UiButtonSkin_SetColorMode(int mode) {
+  g_color_mode = mode;
 }

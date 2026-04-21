@@ -3,6 +3,7 @@
 #include <string.h>
 #include <vector>
 
+#include "debug_log.h"
 #include "screen_constants.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
@@ -138,7 +139,9 @@ u8 Text::GetStringWidth(const char *txt, u8 style) {
 
 int Text::GetStyle() { return tr->GetStyle(); }
 
-void Text::SetColorMode(int mode) { tr->SetColorMode(mode); }
+void Text::SetColorMode(int mode) {
+  tr->SetColorMode(mode);
+}
 
 int Text::GetColorMode() { return tr->GetColorMode(); }
 

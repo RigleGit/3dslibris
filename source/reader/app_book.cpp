@@ -328,7 +328,6 @@ void DrawOpeningSplash(App *app) {
   u16 *savedScreen = app->ts->GetScreen();
 
   app->ts->SetStyle(TEXT_STYLE_BROWSER);
-  app->ts->SetColorMode(0);
   app->ts->PrintSplash(app->ts->screenleft);
 
   app->ts->SetScreen(app->ts->screenright);
@@ -857,9 +856,12 @@ void ReaderController::HandleEventInBook() {
     if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
       status_dirty = true;
   } else if (keys & KEY_X) {
-    // cycle color modes: 0=normal, 1=dark, 2=sepia
     int mode = ts->GetColorMode();
-    ts->SetColorMode((mode + 1) % 3);
+    int next = (mode + 1) % 6;
+    app_.colorMode = next;
+    ts->SetColorMode(next);
+    UiButtonSkin_SetColorMode(next);
+    ts->MarkAllScreensDirty();
     DrawBookPage(bookcurrent_, ts);
     status_dirty = true;
   } else if (keys & KEY_Y) {

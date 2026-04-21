@@ -31,6 +31,7 @@ enum UiButtonIconId {
 bool UiButtonSkin_Init();
 void UiButtonSkin_Exit();
 void UiButtonSkin_ResetCache();
+void UiButtonSkin_SetColorMode(int mode);
 
 UiButtonIconId UiButtonSkin_IconFromLabel(const char *label);
 int UiButtonSkin_IconBlockWidth(int buttonHeight);

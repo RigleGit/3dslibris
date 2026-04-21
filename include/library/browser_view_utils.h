@@ -18,6 +18,6 @@ bool ShouldLoadCovers(BrowserViewMode mode);
 const char *Label(BrowserViewMode mode);
 BrowserViewMode ParsePrefValue(const char *value);
 const char *ToPrefValue(BrowserViewMode mode);
-ListRowPalette PaletteForListRow(bool selected);
+ListRowPalette PaletteForListRow(bool selected, int colorMode);
 
 } // namespace browser_view_utils

@@ -135,7 +135,6 @@ void PagedListMenu::Draw() {
 #endif
   int savedColorMode = app->ts->GetColorMode();
   app->ts->SetScreen(app->ts->screenright);
-  app->ts->SetColorMode(0);
   app->ts->ClearScreen();
   app->DrawBottomGradientBackground();
 

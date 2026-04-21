@@ -98,15 +98,18 @@ private:
   bool justify;
   int colorMode;
 
-  bool splash_attempted;
-  bool splash_loaded;
-  u16 *splash_pixels;
+  bool splash_light_attempted;
+  bool splash_light_loaded;
+  u16 *splash_light_pixels;
+  bool splash_dark_attempted;
+  bool splash_dark_loaded;
+  u16 *splash_dark_pixels;
 
   int stats_hits;
   int stats_misses;
   bool auto_wrap_enabled;
   bool clip_to_content_enabled;
 
-  bool EnsureSplashLoaded();
+  bool EnsureSplashLoaded(bool dark);
   void DrawFallbackSplash();
 };

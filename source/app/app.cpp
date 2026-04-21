@@ -53,6 +53,7 @@ namespace
 {
 } // end anonymous namespace
 #include "color_utils.h"
+#include "ui/theme_colors.h"
 
 // Singleton instance management for App class, allowing global access to the app instance from other modules.
 App *App::s_instance_ = nullptr;
@@ -836,39 +837,38 @@ touchPosition App::TouchRead()
   return mapped;
 }
 
-// Draw a smooth gradient background on the bottom screen, with a subtle vignette and dithering to reduce banding.
-void App::DrawBottomGradientBackground()
+static void DrawGradientToScreen(Text *ts, int colorMode, u16 *target_screen, int logical_h)
 {
-  if (!ts || !ts->screenright)
+  if (!ts || !target_screen)
     return;
-
-  const int w = ts->display.width;       // 240
-  const int stride = ts->display.height; // 400 (software page stride)
-  const int h = 320;                     // bottom screen logical height
-  if (w <= 0 || stride <= 0)
+  const int w = ts->display.width;
+  const int stride = ts->display.height;
+  if (w <= 0 || stride <= 0 || logical_h <= 0)
     return;
 
   static std::vector<u16> gradient;
   static int cachedW = 0;
   static int cachedH = 0;
+  static int cachedColorMode = -1;
 
-  if (gradient.empty() || cachedW != w || cachedH != h)
+  const ThemePalette &palette = GetThemePalette(colorMode);
+
+  if (gradient.empty() || cachedW != w || cachedH != logical_h || cachedColorMode != colorMode)
   {
-    gradient.resize((size_t)w * (size_t)h);
+    gradient.resize((size_t)w * (size_t)logical_h);
     cachedW = w;
-    cachedH = h;
+    cachedH = logical_h;
+    cachedColorMode = colorMode;
     static const u8 kBayer4x4[4][4] = {
-        // 4x4 Bayer matrix for ordered dithering, values from 0 to 15.
         {0, 8, 2, 10},
         {12, 4, 14, 6},
         {3, 11, 1, 9},
         {15, 7, 13, 5},
     };
 
-    // Generate the gradient with a vertical color transition, horizontal vignette, and dithering/noise to reduce banding.
-    for (int y = 0; y < h; y++)
+    for (int y = 0; y < logical_h; y++)
     {
-      const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
+      const float tY = (logical_h > 1) ? ((float)y / (float)(logical_h - 1)) : 0.0f;
       for (int x = 0; x < w; x++)
       {
         const float dx =
@@ -877,16 +877,14 @@ void App::DrawBottomGradientBackground()
                 : 0.0f;
         const float edge = fabsf(dx);
 
-        float r = 244.0f + (238.0f - 244.0f) * tY;
-        float g = 226.0f + (220.0f - 226.0f) * tY;
-        float b = 195.0f + (185.0f - 195.0f) * tY;
+        float r = palette.bgTopR + (palette.bgBotR - palette.bgTopR) * tY;
+        float g = palette.bgTopG + (palette.bgBotG - palette.bgTopG) * tY;
+        float b = palette.bgTopB + (palette.bgBotB - palette.bgTopB) * tY;
 
         const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
 
-        // Ordered dithering (Bayer 4x4) is the primary anti-banding signal
-        // for RGB565; tiny stable grain helps hide residual steps.
         const float bayer = (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) -
-                            0.5f; // about [-0.47, +0.47]
+                            0.5f;
 
         const u32 h0 = (u32)x * 73856093u;
         const u32 h1 = (u32)y * 19349663u;
@@ -902,12 +900,22 @@ void App::DrawBottomGradientBackground()
     }
   }
 
-  for (int y = 0; y < h; y++)
+  for (int y = 0; y < logical_h; y++)
   {
-    u16 *dst = ts->screenright + (size_t)y * (size_t)stride;
+    u16 *dst = target_screen + (size_t)y * (size_t)stride;
     const u16 *src = gradient.data() + (size_t)y * (size_t)w;
     memcpy(dst, src, (size_t)w * sizeof(u16));
   }
+}
+
+void App::DrawBottomGradientBackground()
+{
+  DrawGradientToScreen(ts.get(), colorMode, ts->screenright, 320);
+}
+
+void App::DrawTopGradientBackground()
+{
+  DrawGradientToScreen(ts.get(), colorMode, ts->screenleft, 400);
 }
 
 // Show the font selection menu, initializing it with the specified font mode (regular, bold, italic, etc.).

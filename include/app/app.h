@@ -272,6 +272,7 @@ public:
   void ShowSettingsView(bool from_book = false);
   inline bool IsBookSettingsContext() const { return nav_.prefs.from_book; }
   void DrawBottomGradientBackground();
+  void DrawTopGradientBackground();
   void SetOrientation(bool flipped);
   void ShowFontView(AppMode app_mode);
   void ShowLibraryView();

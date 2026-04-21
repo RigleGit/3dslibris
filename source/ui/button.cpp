@@ -138,10 +138,6 @@ void Button::Draw(u16 *screen, bool highlight) {
   UiButtonSkin_Draw(screen, stride, logicalHeight, bx, by, bw, bh, state,
                     hasIcon);
 
-  u16 old_color_mode = ts->GetColorMode();
-  if (old_color_mode != 0)
-    ts->SetColorMode(0);
-
   int line_height = ts->GetHeight();
   int text_x = bx + ((bw <= 90) ? 6 : 8);
   int right_pad = (bw <= 90) ? 6 : 8;
@@ -229,8 +225,6 @@ void Button::Draw(u16 *screen, bool highlight) {
                           resolvedIcon, !enabled);
   }
 
-  if (old_color_mode != 0)
-    ts->SetColorMode(old_color_mode);
   ts->SetScreen(save_screen);
   ts->SetStyle(save_style);
 }

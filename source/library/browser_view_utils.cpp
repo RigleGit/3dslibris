@@ -1,5 +1,7 @@
 #include "library/browser_view_utils.h"
 
+#include "ui/theme_colors.h"
+
 namespace browser_view_utils {
 
 namespace {
@@ -60,17 +62,18 @@ const char *ToPrefValue(BrowserViewMode mode) {
   return mode == BROWSER_VIEW_LIST ? "list" : "gallery";
 }
 
-ListRowPalette PaletteForListRow(bool selected) {
+ListRowPalette PaletteForListRow(bool selected, int colorMode) {
   ListRowPalette palette;
+  const ThemePalette &theme = GetThemePalette(colorMode);
   if (selected) {
-    palette.fill = Rgb565FromU8(248.0f, 240.0f, 224.0f);
-    palette.border = 0xF800;
-    palette.text = Rgb565FromU8(36.0f, 28.0f, 18.0f);
+    palette.fill = Rgb565FromU8(theme.btnFillTopR, theme.btnFillTopG, theme.btnFillTopB);
+    palette.border = Rgb565FromU8(theme.btnBorderOuterR, theme.btnBorderOuterG, theme.btnBorderOuterB);
+    palette.text = theme.textFgColor;
     return palette;
   }
-  palette.fill = Rgb565FromU8(232.0f, 220.0f, 198.0f);
-  palette.border = Rgb565FromU8(162.0f, 134.0f, 92.0f);
-  palette.text = Rgb565FromU8(34.0f, 27.0f, 19.0f);
+  palette.fill = Rgb565FromU8(theme.btnFillBotR, theme.btnFillBotG, theme.btnFillBotB);
+  palette.border = Rgb565FromU8(theme.btnBorderInnerR, theme.btnBorderInnerG, theme.btnBorderInnerB);
+  palette.text = theme.textFgColor;
   return palette;
 }
 
