@@ -40,10 +40,9 @@ int main() {
   FlagExpectation flags[] = {
       {"BackgroundWorkersDisabled", debug_runtime::BackgroundWorkersDisabled(), true},
       {"BrowserWarmupDisabled",     debug_runtime::BrowserWarmupDisabled(),     false},
-      {"ForceSynchronousBookOpen",  debug_runtime::ForceSynchronousBookOpen(),  true},
       {"ForceSynchronousCbzDecode", debug_runtime::ForceSynchronousCbzDecode(), true},
       {"ForceSynchronousMuPdfRender", debug_runtime::ForceSynchronousMuPdfRender(), true},
   };
-  CheckFlags(flags, 5);
+  CheckFlags(flags, 4);
   return 0;
 }

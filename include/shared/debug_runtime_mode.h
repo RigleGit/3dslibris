@@ -9,8 +9,6 @@ inline bool BackgroundWorkersDisabled() { return true; }
 
 inline bool BrowserWarmupDisabled() { return false; }
 
-inline bool ForceSynchronousBookOpen() { return true; }
-
 inline bool ForceSynchronousCbzDecode() { return true; }
 
 inline bool ForceSynchronousMuPdfRender() { return true; }

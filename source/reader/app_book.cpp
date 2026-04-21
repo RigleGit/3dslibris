@@ -366,8 +366,7 @@ u8 OpenSelectedBook(App *app, unsigned int session_id) {
 
   DetachCurrentBookForSwitch(app, selected, session_id, "sync-open");
   selected->SetOpenSessionId(session_id);
-  if (debug_runtime::ForceSynchronousBookOpen())
-    DBG_LOG(app, "BOOK open path: synchronous");
+  DBG_LOG(app, "BOOK open path: synchronous");
   DBG_LOGF(app, "BOOK open begin session=%u book=%s", session_id,
            SafeBookName(selected));
   if (int err = selected->Open()) {
@@ -949,10 +948,7 @@ u8 ReaderController::OpenBook() {
            "BOOK switch: request session=%u current_session=%u current=%s selected=%s needs_relayout=%u async=%u",
            session_id, app_.GetCurrentBookSessionId(), SafeBookName(bookcurrent_),
            SafeBookName(selected_book), needs_relayout ? 1u : 0u,
-           (selected_book->SupportsAsyncReflowOpen() &&
-            !debug_runtime::ForceSynchronousBookOpen())
-               ? 1u
-               : 0u);
+           selected_book->SupportsAsyncReflowOpen() ? 1u : 0u);
 
   // Fast path: selected book is already parsed and resident.
   if (selected_book->GetPageCount() > 0 && !needs_relayout &&
@@ -980,8 +976,7 @@ u8 ReaderController::OpenBook() {
   // While parsing a new book, avoid displaying stale browser highlight state.
   DrawOpeningSplash(&app_);
 
-  if (selected_book->SupportsAsyncReflowOpen() &&
-      !debug_runtime::ForceSynchronousBookOpen()) {
+  if (selected_book->SupportsAsyncReflowOpen()) {
     if (switching_books) {
       app_.PauseBrowserJobs();
     }
