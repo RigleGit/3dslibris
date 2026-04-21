@@ -728,6 +728,7 @@ static void AdvanceParsedPageOnOverflowThunk(parsedata_t *p, int lineheight,
   AdvanceParsedPageOnOverflow(p, lineheight);
 }
 
+#ifdef DSLIBRIS_DEBUG
 struct ChardataPerfScope {
   parsedata_t *parsedata;
   u64 t_begin;
@@ -742,6 +743,11 @@ struct ChardataPerfScope {
     parsedata->perf_chardata_ms += (u64)(osGetTime() - t_begin);
   }
 };
+#else
+struct ChardataPerfScope {
+  explicit ChardataPerfScope(parsedata_t *) {}
+};
+#endif
 
 static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
                                   int txtlen) {
