@@ -117,7 +117,10 @@ FontManager::~FontManager() {
     FT_Done_FreeType(library);
 }
 
-FT_Face FontManager::GetFace(u8 style) { return faces[style]; }
+FT_Face FontManager::GetFace(u8 style) {
+  auto it = faces.find(style);
+  return (it != faces.end()) ? it->second : NULL;
+}
 
 FT_Error FontManager::InitFreeTypeCache(void) {
   auto init_error = FT_Init_FreeType(&library);
@@ -292,8 +295,10 @@ int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
 FT_UInt FontManager::GetGlyphIndex(u32 ucs) {
   if (ftc)
     return FTC_CMapCache_Lookup(cache.cmap, (FTC_FaceID)&face_id, -1, ucs);
-  else
-    return FT_Get_Char_Index(GetFace((u8)parent->GetStyle()), ucs);
+  FT_Face face = GetFace((u8)parent->GetStyle());
+  if (!face)
+    return 0;
+  return FT_Get_Char_Index(face, ucs);
 }
 
 int FontManager::GetGlyphBitmap(u32 ucs, FTC_SBit *asbit, FTC_Node *anode) {
@@ -515,16 +520,25 @@ u8 FontManager::GetStringWidth(const char *txt, FT_Face face) {
 }
 
 u8 FontManager::GetHeight() {
-  return (GetFace((u8)parent->GetStyle())->size->metrics.height >> 6);
+  FT_Face face = GetFace((u8)parent->GetStyle());
+  if (!face || !face->size)
+    return 0;
+  return (face->size->metrics.height >> 6);
 }
 
 std::string FontManager::GetFontName(u8 style) {
-  return std::string(faces[style]->family_name) + " " +
-         std::string(faces[style]->style_name);
+  FT_Face face = GetFace(style);
+  if (!face)
+    return "";
+  return std::string(face->family_name) + " " +
+         std::string(face->style_name);
 }
 
 bool FontManager::GetFontName(std::string &s) {
-  const char *name = FT_Get_Postscript_Name(GetFace((u8)parent->GetStyle()));
+  FT_Face face = GetFace((u8)parent->GetStyle());
+  if (!face)
+    return false;
+  const char *name = FT_Get_Postscript_Name(face);
   if (!name)
     return false;
   s = name;
