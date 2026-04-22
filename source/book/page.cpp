@@ -373,11 +373,16 @@ void Page::Draw(Text *ts) {
       i++;
       const int x0 = ts->margin.left;
       const int x1 = ts->display.width - ts->margin.right;
+      // Draw the rule slightly below centre of the line box so it sits between
+      // the preceding and following text rather than within the ascender zone.
       const int y = std::max(ts->margin.top,
-                             ts->GetPenY() - std::max(1, ts->GetHeight() / 2));
+                             ts->GetPenY() - std::max(1, ts->GetHeight() / 3));
       ts->FillRect(x0, y, x1, y + 1, ts->GetFgColor());
       if (!ts->PrintNewLine()) {
-        break;
+        // Screen 0 is full; advance to screen 1 so that any content the
+        // parser placed there is actually rendered, rather than stopping here.
+        if (!advance_to_next_screen())
+          break;
       }
       ts->linebegan = false;
     } else if (c == TEXT_IMAGE_CONTEXT_DEFAULT) {
