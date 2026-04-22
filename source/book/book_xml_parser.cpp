@@ -1708,6 +1708,14 @@ void start(void *data, const char *el, const char **attr) {
     p->paragraph_has_content = false;
     p->last_p_style = ExtractStyleAttr(attr);
     p->last_p_class = ExtractClassAttr(attr);
+    const book_xml_css_style_utils::TextAlign align = book_xml_css_style_utils::ParseTextAlign(p->last_p_style.c_str());
+    if (align == book_xml_css_style_utils::TextAlign::Center) {
+      AppendParsedByte(p, TEXT_PARAGRAPH_CENTER);
+    } else if (align == book_xml_css_style_utils::TextAlign::Right) {
+      AppendParsedByte(p, TEXT_PARAGRAPH_RIGHT);
+    } else {
+      AppendParsedByte(p, TEXT_PARAGRAPH_LEFT);
+    }
     const bool inside_list_item = book_xml_list_utils::IsInsideListItem(p);
     const bool tight_list_paragraph =
         book_xml_list_utils::HasPendingListItemContent(p);

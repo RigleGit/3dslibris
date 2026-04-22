@@ -34,4 +34,8 @@ struct InlineStyleFlags {
 
 void ParseInlineStyleFlags(const char *style, InlineStyleFlags *out);
 
+enum class TextAlign { Left, Center, Right, Justify };
+
+TextAlign ParseTextAlign(const char *style);
+
 } // namespace book_xml_css_style_utils

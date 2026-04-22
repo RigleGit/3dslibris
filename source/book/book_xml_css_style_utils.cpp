@@ -237,4 +237,24 @@ MarginTopResult ParseMarginBottom(const char *style) {
   return ParseMarginValue(style, "margin-bottom", 2);
 }
 
+TextAlign ParseTextAlign(const char *style) {
+  if (!style || !style[0])
+    return TextAlign::Left;
+  const std::string style_lc = ToLowerAscii(std::string(style));
+  if (style_lc.find("text-align: center") != std::string::npos ||
+      style_lc.find("text-align:center") != std::string::npos) {
+    return TextAlign::Center;
+  }
+  if (style_lc.find("text-align: right") != std::string::npos ||
+      style_lc.find("text-align:right") != std::string::npos) {
+    return TextAlign::Right;
+  }
+  if (style_lc.find("text-align: justify") != std::string::npos ||
+      style_lc.find("text-align:justify") != std::string::npos) {
+    return TextAlign::Justify;
+  }
+  return TextAlign::Left;
+}
+
 } // namespace book_xml_css_style_utils
+

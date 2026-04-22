@@ -58,7 +58,8 @@ SOURCES		:=	source \
 			third_party/utf8proc \
 			third_party/libunibreak/src
 
-EXTRA_CPPFILES	:=	source/book/book_xml_parser.cpp
+EXTRA_CPPFILES	:=	source/book/book_xml_parser.cpp \
+			source/book/book_xml_css_style_utils.cpp
 
 DATA		:=	data
 INCLUDES	:=	include third_party/stb third_party/utf8proc third_party/libunibreak/src \

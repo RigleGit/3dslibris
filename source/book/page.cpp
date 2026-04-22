@@ -29,6 +29,7 @@
 
 #include "app/app.h"
 #include "book/book.h"
+#include "book/book_xml_css_style_utils.h"
 #include "book/page_buffer_utils.h"
 #include "debug_log.h"
 #include "shared/text_render_layout_utils.h"
@@ -230,7 +231,7 @@ void Page::Draw(Text *ts) {
   bool rtl_paragraph = false;
   u32 rtl_line_px = 0;  // parse-time line width stashed by TEXT_RTL_LINE_PX
   bool in_preformatted_block = false;
-  while (i < length) {
+  book_xml_css_style_utils::TextAlign paragraph_align = book_xml_css_style_utils::TextAlign::Left;  while (i < length) {
     u32 c = buf[i];
     if (c == TEXT_PARAGRAPH_RTL) {
       rtl_paragraph = true;
@@ -239,6 +240,18 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_PARAGRAPH_LTR) {
       rtl_paragraph = false;
       rtl_line_px = 0;
+      i++;
+      continue;
+    } else if (c == TEXT_PARAGRAPH_LEFT) {
+      paragraph_align = book_xml_css_style_utils::TextAlign::Left;
+      i++;
+      continue;
+    } else if (c == TEXT_PARAGRAPH_CENTER) {
+      paragraph_align = book_xml_css_style_utils::TextAlign::Center;
+      i++;
+      continue;
+    } else if (c == TEXT_PARAGRAPH_RIGHT) {
+      paragraph_align = book_xml_css_style_utils::TextAlign::Right;
       i++;
       continue;
     } else if (c == TEXT_RTL_LINE_PX) {
@@ -496,6 +509,26 @@ void Page::Draw(Text *ts) {
             (int)ts->GetPenY(), on_first_screen ? "first" : "second");
 #endif
         ts->SetPen((u16)rtl_x, ts->GetPenY());
+      } else if (ts->GetPenX() == ts->margin.left &&
+                 (paragraph_align == book_xml_css_style_utils::TextAlign::Center ||
+                  paragraph_align == book_xml_css_style_utils::TextAlign::Right)) {
+        int line_width = 0;
+        for (u16 scan = (u16)(i - 1); scan < length; scan++) {
+          u32 sc = buf[scan];
+          if (sc == '\n' || sc < 32)
+            break;
+          line_width += ts->GetAdvance((u16)sc);
+        }
+        int available_width = ts->display.width - ts->margin.left - ts->margin.right;
+        int x_offset = 0;
+        if (paragraph_align == book_xml_css_style_utils::TextAlign::Center) {
+          x_offset = (available_width - line_width) / 2;
+        } else if (paragraph_align == book_xml_css_style_utils::TextAlign::Right) {
+          x_offset = available_width - line_width;
+        }
+        if (x_offset < 0)
+          x_offset = 0;
+        ts->SetPen((u16)(ts->margin.left + x_offset), ts->GetPenY());
       }
 
       const int glyph_x0 = (int)ts->GetPenX();
