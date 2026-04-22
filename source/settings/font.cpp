@@ -152,6 +152,8 @@ FontMenu::FontMenu(App *_app)
     if (lines.size() > 1) b->SetLabel2(lines[1]);
 
     int line_height = app->ts->GetHeight();
+    if (line_height < 10)
+      line_height = 10;
     int button_height = 34;
     if (lines.size() == 2)
       button_height = 8 + 2 * line_height;

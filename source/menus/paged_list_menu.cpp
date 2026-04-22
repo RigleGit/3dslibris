@@ -118,6 +118,8 @@ void PagedListMenu::Init() {
     int line_height = 14;
     if (app && app->ts)
       line_height = app->ts->GetHeight();
+    if (line_height < 10)
+      line_height = 10;
     int button_height = LIST_ROW_H;
     if (line_count > 2)
       button_height = 8 + line_count * line_height;
