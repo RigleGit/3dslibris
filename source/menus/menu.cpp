@@ -24,18 +24,18 @@ Menu::Menu(App *_app) {
 
 Menu::~Menu() {}
 
-u8 Menu::GetCurrentPage() const {
+u16 Menu::GetCurrentPage() const {
     return selected / pagesize + 1; // Pages are 1-indexed
 }
 
-u8 Menu::GetPageCount() const {
+u16 Menu::GetPageCount() const {
     if (pagesize == 0 || buttons.empty()) {
         return 1;
     }
-    return (buttons.size() + pagesize - 1) / pagesize;
+    return (u16)((buttons.size() + pagesize - 1) / pagesize);
 }
 
-void Menu::SelectItem(u8 index) {
+void Menu::SelectItem(u16 index) {
     if (index >= buttons.size()) {
         return; // Invalid index
     }
