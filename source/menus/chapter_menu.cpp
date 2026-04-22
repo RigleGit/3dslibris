@@ -51,6 +51,8 @@ static std::vector<std::string> WrapTextToLines(Text *ts,
 
     size_t bytes =
         text_unicode_utils::Utf8BytesForDisplayChars(remaining.c_str(), chars_fit);
+    if (bytes == 0)
+      bytes = 1;
     if (bytes > remaining.size())
       bytes = remaining.size();
 
@@ -60,6 +62,8 @@ static std::vector<std::string> WrapTextToLines(Text *ts,
       if (chars_fit > 4) {
         size_t text_bytes = text_unicode_utils::Utf8BytesForDisplayChars(
             remaining.c_str(), chars_fit - 3);
+        if (text_bytes == 0)
+          text_bytes = 1;
         line_text = remaining.substr(0, text_bytes) + "...";
       }
     }
