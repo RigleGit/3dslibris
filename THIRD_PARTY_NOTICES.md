@@ -5,11 +5,11 @@ redistributing source or binary builds.
 
 ## Project licensing summary
 
-- Legacy and non-PDF 3dslibris code is distributed under `GNU GPL v2 or later`.
-- The PDF-enabled variant in this branch links against MuPDF.
+- Inherited `3dslibris` code remains under `GNU GPL v2 or later`.
+- This repository's distributed builds link against MuPDF.
 - MuPDF open-source editions are distributed under `GNU AGPL v3 or later`.
-- When you distribute a build that includes MuPDF PDF support, you must satisfy
-  the AGPL obligations for the combined work, including corresponding source
+- When you distribute the combined application, you must satisfy the AGPL
+  obligations for that combined work, including corresponding source
   availability and preservation of notices.
 
 See:
@@ -29,8 +29,8 @@ See:
 - Repository text: `third_party/mupdf/COPYING`
 
 This branch uses MuPDF only for PDF document opening, outline loading, and page
-rendering. If you distribute a PDF-enabled binary, you must make the
-corresponding source for that binary available.
+rendering. If you distribute a binary built from this repository, you must make
+the corresponding source for that binary available.
 
 ### utf8proc
 

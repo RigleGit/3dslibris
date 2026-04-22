@@ -1,17 +1,17 @@
 # PDF Source Release and Installation Information
 
 This document describes how to satisfy the corresponding-source obligations for
-`3dslibris` builds that include PDF support via MuPDF.
+distributed `3dslibris` builds that include MuPDF-based document rendering.
 
 ## Scope
 
-These instructions apply to builds that link the PDF viewer in
-`source/formats/pdf/` against MuPDF from `third_party/mupdf/`.
+These instructions apply to builds that link project document viewers against
+MuPDF from `third_party/mupdf/`.
 
 ## Corresponding source
 
-For a PDF-enabled release, the corresponding source is the exact tagged source
-tree used to build that release, including:
+For a distributed release from this repository, the corresponding source is the
+exact tagged source tree used to build that release, including:
 
 - project source under `source/`, `include/`, `assets/`, `resources/`, `sdmc/`
 - vendored MuPDF under `third_party/mupdf/`
@@ -21,7 +21,7 @@ tree used to build that release, including:
 - the license and notice files in `LICENSE`, `LICENSES/`, and
   `THIRD_PARTY_NOTICES.md`
 
-GitHub release assets for PDF-enabled tags should include:
+GitHub release assets should include:
 
 - `3dslibris.cia`
 - `3dslibris.3dsx`
@@ -74,6 +74,6 @@ homebrew-enabled devices.
 ## Notes
 
 - PDF support is viewer-only in this branch.
-- MuPDF is included only in the PDF-enabled build path.
-- Non-PDF releases should continue to preserve the GPL notices already present
-  in the inherited source tree.
+- MuPDF is part of the distributed build path used by this repository.
+- Preserve the GPL notices already present in the inherited source tree
+  alongside the AGPL obligations that apply to the combined distributed work.
