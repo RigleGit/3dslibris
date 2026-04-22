@@ -22,7 +22,7 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 </table>
 
 ## Project status
-- Current app version: `2.4.0`
+- Current app version: `2.4.1`
 - Focus: stable daily reading on 3DS hardware and Azahar
 - Repository status: public release available and under active maintenance
 - Latest downloadable binaries and SD package: [GitHub Releases](https://github.com/RigleGit/3dslibris/releases)
@@ -30,6 +30,7 @@ The current `.cia` packaging flow is based on the same `makerom`/`bannertool` pr
 - Releases also include `3dslibris-debug.cia` for the same debug-oriented build on installed-title setups
 - Supported install paths: `.3dsx` plus `3dslibris-sdmc.zip`, or `3dslibris.cia` with books stored on SD and optional bundled books in RomFS.
 - Main reading focus in `2.4.0`: six-color theme system, dark/light splash variants, improved menus (bookmarks, chapters, font), gradient reader backgrounds, EPUB chapter detection fixes, and browser warmup re-enabled.
+- `2.4.1`: crash-at-boot fix.
 
 ## Install
 
