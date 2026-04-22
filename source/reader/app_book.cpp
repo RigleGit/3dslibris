@@ -285,7 +285,8 @@ OpenBookRelayoutState CaptureRelayoutState(Book *book, bool needs_relayout) {
   return state;
 }
 
-void DrawOpeningSplash(App *app) {
+static void DrawOpeningSplashImpl(App *app, unsigned spine_done,
+                                   unsigned spine_total) {
   Book *selected = app ? app->GetSelectedBook() : NULL;
   if (!app || !app->ts || !selected)
     return;
@@ -316,6 +317,15 @@ void DrawOpeningSplash(App *app) {
     }
   }
 
+  if (spine_total > 0) {
+    unsigned pct = spine_done * 100u / spine_total;
+    char progress[32];
+    snprintf(progress, sizeof(progress), "%u / %u  (%u%%)", spine_done,
+             spine_total, pct);
+    app->ts->SetPen(12, 106);
+    app->ts->PrintString(progress);
+  }
+
   app->ts->SetStyle(savedStyle);
   app->ts->SetColorMode(savedColorMode);
   app->ts->SetScreen(savedScreen);
@@ -325,6 +335,8 @@ void DrawOpeningSplash(App *app) {
     gfxSwapBuffers();
   }
 }
+
+void DrawOpeningSplash(App *app) { DrawOpeningSplashImpl(app, 0, 0); }
 
 void ResetOpeningState(App *app) {
   if (!app)
@@ -408,6 +420,11 @@ void EnsureBookMode(App *app, const char *log_message) {
 }
 
 } // namespace
+
+void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
+                                   void *user_data) {
+  DrawOpeningSplashImpl(static_cast<App *>(user_data), done, total);
+}
 
 void ReaderController::ClearDeferredRelayoutState() {
   app_.SetDeferredRelayoutPending(false);

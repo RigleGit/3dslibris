@@ -5,6 +5,10 @@
 #include <strings.h>
 #include <vector>
 
+// Forward declared from app_book.cpp
+void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
+                                   void *user_data);
+
 #include <3ds.h>
 
 #include "app/app.h"
@@ -134,6 +138,8 @@ static void AppendBookFromFilename(App *app, const std::string &source_dir,
   ctx.draw_background_user_data = app;
   ctx.draw_top_background = &DrawTopGradientFromApp;
   ctx.draw_top_background_user_data = app;
+  ctx.on_spine_progress = &DrawOpeningSplashWithProgress;
+  ctx.on_spine_progress_user_data = app;
   Book *book = new Book(ctx);
   book->SetFolderName(source_dir.c_str());
   book->SetFileName(io_name.c_str());

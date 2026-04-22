@@ -322,6 +322,12 @@ void Book::DrawTopGradientBackground()
     ctx.draw_top_background(ctx.draw_top_background_user_data);
 }
 
+void Book::NotifySpineProgress(unsigned done, unsigned total)
+{
+  if (ctx.on_spine_progress)
+    ctx.on_spine_progress(done, total, ctx.on_spine_progress_user_data);
+}
+
 void Book::SetFolderName(const char *name) { foldername = name; }
 
 void Book::SetFileName(const char *name)

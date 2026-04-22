@@ -183,6 +183,7 @@ public:
   int GetOrientation();
   void DrawBottomGradientBackground();
   void DrawTopGradientBackground();
+  void NotifySpineProgress(unsigned done, unsigned total);
   inline const std::string &GetAuthor() const { return author; }
   inline bool HasBrowserDisplayNameCache() const
   {

@@ -23,6 +23,8 @@ struct BookContext {
   void *draw_background_user_data;    //! Non-owning callback user data.
   void (*draw_top_background)(void *); //! Non-owning callback (top screen).
   void *draw_top_background_user_data; //! Non-owning callback user data.
+  void (*on_spine_progress)(unsigned done, unsigned total, void *user_data); //! Non-owning; called during EPUB spine parse.
+  void *on_spine_progress_user_data;   //! Non-owning callback user data.
 
   BookContext()
       : text(nullptr),
@@ -34,5 +36,7 @@ struct BookContext {
         draw_background(nullptr),
         draw_background_user_data(nullptr),
         draw_top_background(nullptr),
-        draw_top_background_user_data(nullptr) {}
+        draw_top_background_user_data(nullptr),
+        on_spine_progress(nullptr),
+        on_spine_progress_user_data(nullptr) {}
 };

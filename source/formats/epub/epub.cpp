@@ -339,6 +339,9 @@ static int ParseEpubSpineDocuments(
                  (unsigned)osGetMemRegionFree(MEMREGION_ALL));
       }
 #endif
+      if (spine_doc_index % 20 == 0 || spine_doc_index == 1)
+        book->NotifySpineProgress((unsigned)spine_doc_index,
+                                  (unsigned)hrefs.size());
 #ifdef DSLIBRIS_DEBUG
       if (app) {
         u64 doc_ms = osGetTime() - t_doc_begin;
