@@ -827,8 +827,7 @@ void ReaderController::HandleEventInBook() {
       if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
         status_dirty = true;
     } else {
-      AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty,
-                      &deferred_pumped);
+      AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
     }
   } else if (keys & KEY_START) {
     // Return to browser without reparsing the current book later.
