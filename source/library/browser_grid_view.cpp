@@ -141,17 +141,19 @@ void DrawPage(App &app, BrowserGridMarqueeState &marquee, int page_start) {
             int saved_mr = app.ts->margin.right;
             int saved_ml = app.ts->margin.left;
             const int off_fb_stride = app.ts->display.height;
-            u32 r_acc = 0, g_acc = 0, b_acc = 0;
             int bg_pixels = vis_w * sh;
-            for (int i = 0; i < bg_pixels; i++) {
-              u16 c = marquee.bg_strip[i];
-              r_acc += ((c >> 11) & 0x1F) << 3 | ((c >> 11) & 0x1F) >> 2;
-              g_acc += ((c >> 5) & 0x3F) << 2 | ((c >> 5) & 0x3F) >> 4;
-              b_acc += (c & 0x1F) << 3 | (c & 0x1F) >> 2;
+            if (bg_pixels > 0) {
+              u32 r_acc = 0, g_acc = 0, b_acc = 0;
+              for (int i = 0; i < bg_pixels; i++) {
+                u16 c = marquee.bg_strip[i];
+                r_acc += ((c >> 11) & 0x1F) << 3 | ((c >> 11) & 0x1F) >> 2;
+                g_acc += ((c >> 5) & 0x3F) << 2 | ((c >> 5) & 0x3F) >> 4;
+                b_acc += (c & 0x1F) << 3 | (c & 0x1F) >> 2;
+              }
+              marquee.bg_color = (u16)(((r_acc / bg_pixels) >> 3 << 11) |
+                                       ((g_acc / bg_pixels) >> 2 << 5) |
+                                       ((b_acc / bg_pixels) >> 3));
             }
-            marquee.bg_color = (u16)(((r_acc / bg_pixels) >> 3 << 11) |
-                                     ((g_acc / bg_pixels) >> 2 << 5) |
-                                     ((b_acc / bg_pixels) >> 3));
 
             for (int r = 0; r < sh; r++) {
               for (int c = 0; c < capture_w; c++) {
