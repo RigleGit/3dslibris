@@ -99,7 +99,7 @@ bool ShapeTextRunUtf8(const char *s, size_t len, const char *lang,
     return false;
 
   out->clear();
-  std::vector<text_unicode_utils::TextCodepoint> text_run;
+  static std::vector<text_unicode_utils::TextCodepoint> text_run;
   if (!text_unicode_utils::BuildTextRunUtf8(s, len, lang, &text_run))
     return false;
 
