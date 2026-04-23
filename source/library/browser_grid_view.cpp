@@ -31,6 +31,56 @@ void BrowserGridMarqueeState::Reset() {
 
 namespace browser_grid_view {
 
+namespace {
+
+static bool RoundedRectContains(int x, int y, int w, int h, int radius) {
+  if (w <= 0 || h <= 0)
+    return false;
+  if (radius <= 0)
+    return x >= 0 && y >= 0 && x < w && y < h;
+  if (x < 0 || y < 0 || x >= w || y >= h)
+    return false;
+
+  const int r = radius;
+  if ((x >= r && x < w - r) || (y >= r && y < h - r))
+    return true;
+
+  int cx = (x < r) ? r - 1 : w - r;
+  int cy = (y < r) ? r - 1 : h - r;
+  const int dx = x - cx;
+  const int dy = y - cy;
+  return dx * dx + dy * dy <= r * r;
+}
+
+static void FitRectPreserveAspect(int src_w, int src_h, int box_w, int box_h,
+                                  int *out_w, int *out_h) {
+  if (!out_w || !out_h) {
+    return;
+  }
+  if (src_w <= 0 || src_h <= 0 || box_w <= 0 || box_h <= 0) {
+    *out_w = 0;
+    *out_h = 0;
+    return;
+  }
+
+  const long long lhs = (long long)box_w * (long long)src_h;
+  const long long rhs = (long long)box_h * (long long)src_w;
+  if (lhs <= rhs) {
+    *out_w = box_w;
+    *out_h = (int)((long long)src_h * (long long)box_w / (long long)src_w);
+  } else {
+    *out_h = box_h;
+    *out_w = (int)((long long)src_w * (long long)box_h / (long long)src_h);
+  }
+
+  if (*out_w < 1)
+    *out_w = 1;
+  if (*out_h < 1)
+    *out_h = 1;
+}
+
+} // namespace
+
 int HitTestBookIndex(int x, int y, int page_start, int book_count) {
   return browser_presentation_hit_utils::HitTestGridBookIndex(
       x, y, page_start, book_count, kGridX0, kGridY0, kCellW, kCellH, kGridCols,
@@ -40,25 +90,44 @@ int HitTestBookIndex(int x, int y, int page_start, int book_count) {
 void DrawPage(App &app, BrowserGridMarqueeState &marquee, int page_start) {
   for (int i = page_start;
        i < app.BookCount() && i < page_start + APP_BROWSER_BUTTON_COUNT; i++) {
-    app.buttons[i]->Draw(app.ts->screenright, app.books[i] == app.GetSelectedBook());
-
     int page_idx = i % APP_BROWSER_BUTTON_COUNT;
     int col = page_idx % kGridCols;
     int row = page_idx / kGridCols;
     int btnX = kGridX0 + col * kCellW;
     int btnY = kGridY0 + row * kCellH;
 
-    if (app.books[i]->coverPixels) {
-      int cx = btnX + 2 + (kCoverW - app.books[i]->coverWidth) / 2;
-      int cy = btnY + 2 + (kCoverH - app.books[i]->coverHeight) / 2;
+    app.buttons[i]->Draw(app.ts->screenright,
+                         app.books[i] == app.GetSelectedBook());
+
+    const bool has_cover = app.books[i]->coverPixels != NULL;
+
+    if (has_cover) {
+      const int inner_pad_x = 4;
+      const int inner_pad_y = 4;
+      const int inner_w = kCoverW - inner_pad_x * 2;
+      const int inner_h = kCoverH - inner_pad_y * 2;
+      int draw_w = 0;
+      int draw_h = 0;
+      FitRectPreserveAspect(app.books[i]->coverWidth, app.books[i]->coverHeight,
+                            inner_w, inner_h, &draw_w, &draw_h);
+      int cx = btnX + 2 + inner_pad_x + (inner_w - draw_w) / 2;
+      int cy = btnY + 2 + inner_pad_y + (inner_h - draw_h) / 2;
       int w = app.ts->display.height;
       app.ts->MarkScreenDirtyRect(app.ts->screenright, cx, cy,
-                                  cx + app.books[i]->coverWidth,
-                                  cy + app.books[i]->coverHeight);
-      for (int py = 0; py < app.books[i]->coverHeight && (cy + py) < 320; py++) {
-        for (int px = 0; px < app.books[i]->coverWidth && (cx + px) < 240; px++) {
+                                  cx + draw_w, cy + draw_h);
+      for (int py = 0; py < draw_h && (cy + py) < 320; py++) {
+        const int src_y =
+            (int)((long long)py * (long long)app.books[i]->coverHeight /
+                  (long long)draw_h);
+        for (int px = 0; px < draw_w && (cx + px) < 240; px++) {
+          const int src_x =
+              (int)((long long)px * (long long)app.books[i]->coverWidth /
+                    (long long)draw_w);
+          if (!RoundedRectContains(px, py, draw_w, draw_h, 5))
+            continue;
           app.ts->screenright[(cy + py) * w + (cx + px)] =
-              app.books[i]->coverPixels[py * app.books[i]->coverWidth + px];
+              app.books[i]
+                  ->coverPixels[src_y * app.books[i]->coverWidth + src_x];
         }
       }
     }
@@ -76,7 +145,7 @@ void DrawPage(App &app, BrowserGridMarqueeState &marquee, int page_start) {
     app.ts->SetPixelSize(10);
     std::string display_name =
         browser_presentation_utils::BuildBrowserDisplayName(app.books[i]);
-    if (app.books[i]->coverPixels) {
+    if (has_cover) {
       if (!display_name.empty()) {
         const char *dname = display_name.c_str();
         unsigned char cur_style = (unsigned char)app.ts->GetStyle();
