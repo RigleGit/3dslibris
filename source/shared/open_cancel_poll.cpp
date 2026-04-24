@@ -1,20 +1,11 @@
 #include "shared/open_cancel_poll.h"
 
-#include <3ds.h>
-
 #include "book/book.h"
-#include "debug_log.h"
 #include "shared/status_reporter.h"
 
 namespace open_cancel_poll {
-namespace {
 
-static u64 g_last_poll_ms = 0;
-static const u32 kOpenPollIntervalMs = 48;
-
-} // namespace
-
-void Reset() { g_last_poll_ms = 0; }
+void Reset() {}
 
 bool Poll(Book *book, IStatusReporter *reporter, const char *stage) {
   (void)stage;
@@ -23,14 +14,9 @@ bool Poll(Book *book, IStatusReporter *reporter, const char *stage) {
   if ((reporter && reporter->ShouldAbortWork()) || book->IsOpenAbortRequested())
     return true;
 
-  // This helper may run inside long-lived parser/layout code and, in newer
-  // branches, on worker threads. Keep it side-effect free and rely on
-  // ShouldAbortWork()/RequestAbortOpen() to propagate suspend or cancel.
-  const u64 now = osGetTime();
-  if (g_last_poll_ms != 0 && now >= g_last_poll_ms &&
-      (now - g_last_poll_ms) < kOpenPollIntervalMs)
-    return false;
-  g_last_poll_ms = now;
+  // This helper may run inside worker threads. Keep it side-effect free and
+  // stateless so callers can poll aggressively without touching libctru state
+  // or sharing mutable globals across threads.
 
   return (reporter && reporter->ShouldAbortWork()) ||
          book->IsOpenAbortRequested();
