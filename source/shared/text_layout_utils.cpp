@@ -92,12 +92,14 @@ static LineBreakMeasureResult FindLineBreakImpl(
 bool ShapeTextRunUtf8(const char *s, size_t len, const char *lang,
                       MeasureCodepointFn measure_codepoint, void *measure_ctx,
                       std::vector<ShapedGlyph> *out) {
+#ifdef DSLIBRIS_DEBUG
   const uint64_t t_begin = PerfNowMs();
+#endif
   if (!out || !measure_codepoint)
     return false;
 
   out->clear();
-  std::vector<text_unicode_utils::TextCodepoint> text_run;
+  static std::vector<text_unicode_utils::TextCodepoint> text_run;
   if (!text_unicode_utils::BuildTextRunUtf8(s, len, lang, &text_run))
     return false;
 
@@ -110,9 +112,11 @@ bool ShapeTextRunUtf8(const char *s, size_t len, const char *lang,
     glyph.bidi_level = 0;
     out->push_back(glyph);
   }
+#ifdef DSLIBRIS_DEBUG
   g_perf_stats.shape_calls++;
   g_perf_stats.shaped_glyphs += (uint32_t)text_run.size();
   g_perf_stats.shape_ms += PerfNowMs() - t_begin;
+#endif
   return true;
 }
 
@@ -122,55 +126,75 @@ void ResetPerfStats() { g_perf_stats = PerfStats(); }
 
 int MeasureTextRun(const std::vector<ShapedGlyph> &run, size_t start,
                    size_t end) {
+#ifdef DSLIBRIS_DEBUG
   const uint64_t t_begin = PerfNowMs();
+#endif
   int width = 0;
   if (end > run.size())
     end = run.size();
   for (size_t i = start; i < end; i++)
     width += run[i].advance;
+#ifdef DSLIBRIS_DEBUG
   g_perf_stats.measure_calls++;
   g_perf_stats.measure_ms += PerfNowMs() - t_begin;
+#endif
   return width;
 }
 
 size_t FindLineBreak(const std::vector<ShapedGlyph> &run, size_t start,
                      int max_width) {
+#ifdef DSLIBRIS_DEBUG
   const uint64_t t_begin = PerfNowMs();
+#endif
   const LineBreakMeasureResult result =
       FindLineBreakImpl(run, start, max_width, false);
+#ifdef DSLIBRIS_DEBUG
   g_perf_stats.line_break_calls++;
   g_perf_stats.line_break_ms += PerfNowMs() - t_begin;
+#endif
   return result.end_index;
 }
 
 size_t FindPreformattedLineBreak(const std::vector<ShapedGlyph> &run,
                                  size_t start, int max_width) {
+#ifdef DSLIBRIS_DEBUG
   const uint64_t t_begin = PerfNowMs();
+#endif
   const LineBreakMeasureResult result =
       FindLineBreakImpl(run, start, max_width, true);
+#ifdef DSLIBRIS_DEBUG
   g_perf_stats.pre_line_break_calls++;
   g_perf_stats.pre_line_break_ms += PerfNowMs() - t_begin;
+#endif
   return result.end_index;
 }
 
 LineBreakMeasureResult
 FindLineBreakAndMeasure(const std::vector<ShapedGlyph> &run, size_t start,
                         int max_width) {
+#ifdef DSLIBRIS_DEBUG
   const uint64_t t_begin = PerfNowMs();
+#endif
   const LineBreakMeasureResult result =
       FindLineBreakImpl(run, start, max_width, false);
+#ifdef DSLIBRIS_DEBUG
   g_perf_stats.line_break_calls++;
   g_perf_stats.line_break_ms += PerfNowMs() - t_begin;
+#endif
   return result;
 }
 
 LineBreakMeasureResult FindPreformattedLineBreakAndMeasure(
     const std::vector<ShapedGlyph> &run, size_t start, int max_width) {
+#ifdef DSLIBRIS_DEBUG
   const uint64_t t_begin = PerfNowMs();
+#endif
   const LineBreakMeasureResult result =
       FindLineBreakImpl(run, start, max_width, true);
+#ifdef DSLIBRIS_DEBUG
   g_perf_stats.pre_line_break_calls++;
   g_perf_stats.pre_line_break_ms += PerfNowMs() - t_begin;
+#endif
   return result;
 }
 

@@ -7,6 +7,7 @@
 #include "formats/mupdf/mupdf_render.h"
 #include "formats/mupdf/mupdf_worker.h"
 #include "formats/common/pdf_view_utils.h"
+#include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
 
 #include "debug_log.h"
@@ -60,6 +61,10 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
   if (!book || !path)
     return 255;
 
+  // Yield to APT before starting MuPDF — handles HOME pressed just before open.
+  if (open_cancel_poll::Poll(book, book->GetStatusReporter(), "pdf-pre"))
+    return BOOK_ERR_CANCELLED;
+
   const bool is_new_3ds = DetectNew3ds();
   const app_flow_utils::MuPdfDocumentKind document_kind =
       app_flow_utils::DetectMuPdfDocumentKind(path);
@@ -78,22 +83,15 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
 
   fz_set_aa_level(ctx, kMuPdfAaLevel);
 
+  // Step 1: open the document.
   fz_var(doc);
-  fz_var(outline);
   fz_try(ctx) {
     fz_register_document_handlers(ctx);
     doc = fz_open_document(ctx, path);
     if (!doc)
       fz_throw(ctx, FZ_ERROR_FORMAT, "unable to open document");
-    if (fz_needs_password(ctx, doc)) {
+    if (fz_needs_password(ctx, doc))
       rc = BOOK_ERR_PASSWORD;
-    } else {
-      page_count = fz_count_pages(ctx, doc);
-      if (page_count <= 0)
-        rc = BOOK_ERR_CORRUPT;
-      else
-        outline = fz_load_outline(ctx, doc);
-    }
   }
   fz_catch(ctx) {
     IStatusReporter *reporter = book->GetStatusReporter();
@@ -104,10 +102,49 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
   }
 
   if (rc != 0) {
-    fz_drop_outline(ctx, outline);
     fz_drop_document(ctx, doc);
     fz_drop_context(ctx);
     return rc;
+  }
+
+  // Yield between steps — handles HOME pressed during fz_open_document.
+  if (open_cancel_poll::Poll(book, book->GetStatusReporter(), "pdf-open")) {
+    fz_drop_document(ctx, doc);
+    fz_drop_context(ctx);
+    return BOOK_ERR_CANCELLED;
+  }
+
+  // Step 2: count pages.
+  fz_try(ctx) {
+    page_count = fz_count_pages(ctx, doc);
+    if (page_count <= 0)
+      rc = BOOK_ERR_CORRUPT;
+  }
+  fz_catch(ctx) {
+    if (rc == 0)
+      rc = BOOK_ERR_CORRUPT;
+  }
+
+  if (rc != 0) {
+    fz_drop_document(ctx, doc);
+    fz_drop_context(ctx);
+    return rc;
+  }
+
+  // Yield before loading the outline (TOC can be large in some PDFs).
+  if (open_cancel_poll::Poll(book, book->GetStatusReporter(), "pdf-pages")) {
+    fz_drop_document(ctx, doc);
+    fz_drop_context(ctx);
+    return BOOK_ERR_CANCELLED;
+  }
+
+  // Step 3: load outline (non-fatal if it fails).
+  fz_var(outline);
+  fz_try(ctx) {
+    outline = fz_load_outline(ctx, doc);
+  }
+  fz_catch(ctx) {
+    outline = NULL;
   }
 
   book->ClearChapters();

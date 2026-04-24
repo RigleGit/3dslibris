@@ -14,7 +14,8 @@ void epub_container_start(void *data, const char *el, const char **attr);
 void epub_rootfile_start(void *data, const char *el, const char **attr);
 void epub_rootfile_end(void *data, const char *el);
 void epub_rootfile_char(void *data, const XML_Char *txt, int len);
-int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps);
+int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
+                           unzFile css_scan_uf = NULL);
 int LoadEpubPackageData(unzFile uf, Book *book, epub_data_t *parsedata,
                         std::string *opf_folder, const EpubDeps &deps);
 int LoadEpubPackageForParse(unzFile uf, Book *book, epub_data_t *parsedata,

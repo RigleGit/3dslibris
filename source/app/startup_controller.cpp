@@ -81,19 +81,15 @@ namespace
     return FileReadable(probe.c_str());
   }
 
-  // Resolves the default font directory, preferring the SD card but falling back to ROMFS if necessary, ensuring that the app can find fonts regardless of installation method.
-  // TODO: Deduplicate default font directory resolution with the equivalent
-  // startup/app bootstrap logic so sdmc:/ vs romfs:/ fallback behavior lives
-  // in a single shared helper.
+  // Resolves the default font directory, preferring the SD card but falling back
+  // to ROMFS if necessary, so the app can find fonts regardless of install method.
   static std::string ResolveDefaultFontDir()
   {
-    static const char *kSdmcFontDir = paths::kFontDir;
-    static const char *kRomfsFontDir = "romfs:/3ds/3dslibris/font"; // TODO: unify with paths::kDefaultFonts entries.
-    if (FontDirLooksUsable(kSdmcFontDir))
-      return std::string(kSdmcFontDir);
-    if (FontDirLooksUsable(kRomfsFontDir))
-      return std::string(kRomfsFontDir);
-    return std::string(kSdmcFontDir);
+    if (FontDirLooksUsable(paths::kFontDir))
+      return std::string(paths::kFontDir);
+    if (FontDirLooksUsable(paths::kRomfsFontDir))
+      return std::string(paths::kRomfsFontDir);
+    return std::string(paths::kFontDir);
   }
 
   // Normalizes runtime asset paths, ensuring that the app can find necessary resources even if the SD card installation is incomplete, and providing a fallback mechanism for fonts.
@@ -105,10 +101,9 @@ namespace
       app->fontdir = ResolveDefaultFontDir();
   }
 
-  // Collects any missing runtime files and prints instructions to the console if the SD card installation is incomplete, guiding the user to properly set up the app.
-  // TODO: Move required runtime asset definitions (fonts/resources/book dir)
-  // into a shared manifest/helper to avoid drift between boot validation and
-  // the runtime fallback paths actually used by the app.
+  // Collects any missing runtime files. Checks the book directory and the
+  // bundled fonts against both sdmc:/ and romfs:/ so a partial install is
+  // reported accurately regardless of install method.
   static void CollectMissingRuntimeFiles(std::vector<std::string> *missing)
   {
     if (!missing)
@@ -118,25 +113,17 @@ namespace
     if (!RuntimePathExistsEither(paths::kBookDir, paths::kRomfsBookDir, true))
       missing->push_back("book/ (sdmc or romfs)");
 
-    struct RuntimeFallbackFile
+    // Check the first 5 bundled fonts (the ones shipped with every release).
+    // Romfs paths are derived from paths::kRomfsFontDir to stay in sync with
+    // the rest of the path constants.
+    static const size_t kBundledFontCount = 5;
+    for (size_t i = 0; i < kBundledFontCount; i++)
     {
-      const char *sdmc_path;
-      const char *romfs_path;
-      const char *label;
-    };
-    static const RuntimeFallbackFile kBundled[] = {
-        {paths::kDefaultFonts[0][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Regular.ttf", paths::kDefaultFonts[0][0]},
-        {paths::kDefaultFonts[1][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Bold.ttf", paths::kDefaultFonts[1][0]},
-        {paths::kDefaultFonts[2][1], "romfs:/3ds/3dslibris/font/LiberationSerif-Italic.ttf", paths::kDefaultFonts[2][0]},
-        {paths::kDefaultFonts[3][1], "romfs:/3ds/3dslibris/font/LiberationSerif-BoldItalic.ttf", paths::kDefaultFonts[3][0]},
-        {paths::kDefaultFonts[4][1], "romfs:/3ds/3dslibris/font/LiberationSans-Regular.ttf", paths::kDefaultFonts[4][0]},
-    };
-
-    for (size_t i = 0; i < sizeof(kBundled) / sizeof(kBundled[0]); i++)
-    {
-      if (!RuntimePathExistsEither(kBundled[i].sdmc_path, kBundled[i].romfs_path,
-                                   false))
-        missing->push_back(kBundled[i].label);
+      const char *filename = paths::kDefaultFonts[i][0];
+      const char *sdmc_path = paths::kDefaultFonts[i][1];
+      std::string romfs_path = std::string(paths::kRomfsFontDir) + "/" + filename;
+      if (!RuntimePathExistsEither(sdmc_path, romfs_path.c_str(), false))
+        missing->push_back(filename);
     }
   }
 

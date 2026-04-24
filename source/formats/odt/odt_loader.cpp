@@ -194,8 +194,8 @@ static void odt_chardata(void *userdata, const char *txt, int txtlen) {
   if (!s || s->office_text_depth <= 0 || !txt || txtlen <= 0)
     return;
 
-  std::string out;
-  out.reserve((size_t)txtlen + 1);
+  static std::string out;
+  out.clear();
   for (int i = 0; i < txtlen; i++) {
     unsigned char c = (unsigned char)txt[i];
     bool is_space = (c == ' ' || c == '\n' || c == '\r' || c == '\t');

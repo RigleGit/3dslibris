@@ -130,11 +130,53 @@ std::string ExtractLinkStylesheetHref(const std::string &xhtml_text) {
   return "";
 }
 
+// Reads an XHTML zip entry in 4KB chunks and returns the href of the first
+// <link rel="stylesheet"> found. Stops reading at </head> or after 8KB,
+// so only the head section is decompressed rather than the full document.
+std::string ScanXhtmlHeadForCssHref(unzFile uf, const std::string &xhtml_path,
+                                     IStatusReporter *reporter) {
+  DBG_LOGF(reporter, "EPUB: CSS-SCAN read begin %s", xhtml_path.c_str());
+  epub_zip_utils::ZipEntryIndex zip_index;
+  if (!epub_zip_utils::LocateSafe(uf, xhtml_path, &zip_index)) {
+    DBG_LOG(reporter, "EPUB: CSS-SCAN locate fail");
+    return "";
+  }
+  DBG_LOG(reporter, "EPUB: CSS-SCAN locate ok");
+
+  if (unzOpenCurrentFile(uf) != UNZ_OK)
+    return "";
+
+  static const size_t kChunkSize = 4096;
+  static const size_t kMaxScanBytes = 8192;
+  char chunk[kChunkSize];
+  std::string buf;
+  buf.reserve(kMaxScanBytes);
+  std::string href;
+
+  while (buf.size() < kMaxScanBytes) {
+    int n = unzReadCurrentFile(uf, chunk, (unsigned)kChunkSize);
+    if (n <= 0)
+      break;
+    buf.append(chunk, (size_t)n);
+    href = ExtractLinkStylesheetHref(buf);
+    if (!href.empty())
+      break;
+    if (buf.find("</head>") != std::string::npos ||
+        buf.find("</HEAD>") != std::string::npos)
+      break;
+  }
+
+  unzCloseCurrentFile(uf);
+  DBG_LOGF(reporter, "EPUB: CSS-SCAN read ok bytes=%u", (unsigned)buf.size());
+  return href;
+}
+
 void LoadCssClassMapForDoc(const std::string &archive_path,
                            const std::string &xhtml_path,
                            IStatusReporter *reporter,
                            epub_data_t *epd,
-                           epub_css_class_map::CssClassMap *out) {
+                           epub_css_class_map::CssClassMap *out,
+                           unzFile external_scan_uf) {
   out->clear();
   if (archive_path.empty() || xhtml_path.empty())
     return;
@@ -154,23 +196,18 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
     }
   }
 
-  unzFile scan_uf = unzOpen(archive_path.c_str());
+  // Use a caller-provided handle if available to avoid opening the zip for
+  // every spine document. Fall back to opening our own handle if not provided.
+  const bool owns_scan_uf = (external_scan_uf == NULL);
+  unzFile scan_uf = owns_scan_uf ? unzOpen(archive_path.c_str()) : external_scan_uf;
   if (!scan_uf)
     return;
 
-  std::string xhtml_text;
-  epub_zip_utils::ZipEntryIndex zip_index;
-  bool ok = ReadZipEntryText(scan_uf, xhtml_path, xhtml_text, reporter, "CSS-SCAN", &zip_index);
-  if (!ok || xhtml_text.empty()) {
-    unzClose(scan_uf);
-    return;
-  }
-
-  std::string css_href = ExtractLinkStylesheetHref(xhtml_text);
+  std::string css_href = ScanXhtmlHeadForCssHref(scan_uf, xhtml_path, reporter);
   if (css_href.empty()) {
     if (epd)
       epd->css_href_by_doc[xhtml_path] = "";
-    unzClose(scan_uf);
+    if (owns_scan_uf) unzClose(scan_uf);
     return;
   }
 
@@ -186,15 +223,15 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
         css_it = epd->css_class_map_by_path.find(css_path);
     if (css_it != epd->css_class_map_by_path.end()) {
       *out = css_it->second;
-      unzClose(scan_uf);
+      if (owns_scan_uf) unzClose(scan_uf);
       return;
     }
   }
 
   std::string css_text;
   epub_zip_utils::ZipEntryIndex css_index;
-  ok = ReadZipEntryText(scan_uf, css_path, css_text, reporter, "CSS-LOAD", &css_index);
-  unzClose(scan_uf);
+  bool ok = ReadZipEntryText(scan_uf, css_path, css_text, reporter, "CSS-LOAD", &css_index);
+  if (owns_scan_uf) unzClose(scan_uf);
   if (!ok || css_text.empty())
     return;
 
@@ -369,9 +406,11 @@ static void InitParsedataWithEpubDeps(parsedata_t *parsedata, Book *book,
   parsedata->prefs = deps.prefs;
 }
 
-int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
+int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
+                           unzFile css_scan_uf) {
   int rc = 0;
   parsedata_t pd;
+#ifdef DSLIBRIS_DEBUG
   bool log_content_layout = false;
   u64 t_content_begin = 0;
   u16 pages_before = 0;
@@ -379,6 +418,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
   u64 chardata_ms_before = 0;
   u32 overflow_before = 0;
   text_layout_utils::PerfStats layout_before;
+#endif
   xml_parse_utils::XmlParserOptions options;
   if (epd->type == PARSE_CONTAINER) {
     options.user_data = epd;
@@ -414,7 +454,8 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
     pd.docpath = epd->docpath;
     if (!epd->archive_path.empty())
       LoadCssClassMapForDoc(epd->archive_path, epd->docpath, deps.reporter,
-                            epd, &pd.css_class_map);
+                            epd, &pd.css_class_map, css_scan_uf);
+#ifdef DSLIBRIS_DEBUG
     log_content_layout = deps.reporter && epd->book;
     if (log_content_layout) {
       t_content_begin = osGetTime();
@@ -424,6 +465,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps) {
       overflow_before = pd.perf_page_overflows;
       layout_before = text_layout_utils::GetPerfStats();
     }
+#endif
     options.user_data = &pd;
     options.abort_parse = [](void *user_data) {
       parsedata_t *parsedata = static_cast<parsedata_t *>(user_data);

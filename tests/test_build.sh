@@ -4,13 +4,18 @@
 
 set -eu
 
-TEST_ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+if [ -n "${BASH_SOURCE:-}" ]; then
+  TEST_ROOT="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+else
+  TEST_ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
+fi
 TEST_OUTDIR="${TMPDIR:-/tmp}/3dslibris-tests"
 mkdir -p "$TEST_OUTDIR"
 
 # Compile third-party C dependencies once
 _build_third_party_objs() {
   local -a objs
+  objs=()
 
   # utf8proc
   if [ -f "$TEST_ROOT/third_party/utf8proc/utf8proc.c" ]; then
@@ -35,7 +40,9 @@ _build_third_party_objs() {
     done
   fi
 
-  printf '%s\n' "${objs[@]}"
+  for obj in "${objs[@]}"; do
+    printf '%s\n' "$obj"
+  done
 }
 
 THIRD_PARTY_OBJS=()

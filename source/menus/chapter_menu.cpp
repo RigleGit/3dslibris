@@ -541,7 +541,7 @@ void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
   }
 }
 
-bool ChapterMenu::ResolveTargetPage(u8 index, u16 *page_out) {
+bool ChapterMenu::ResolveTargetPage(u16 index, u16 *page_out) {
   if (!PagedListMenu::ResolveTargetPage(index, page_out)) {
     if (app) {
       DBG_LOGF(app, "INDEX resolve base failed idx=%u", (unsigned)index);

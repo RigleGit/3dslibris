@@ -113,8 +113,8 @@ std::string DecodeRtfToUtf8(const std::string &rtf) {
   std::string out;
   out.reserve(rtf.size());
 
-  std::vector<bool> skip_stack;
-  skip_stack.push_back(false);
+  std::vector<uint8_t> skip_stack;
+  skip_stack.push_back(0);
 
   for (size_t i = 0; i < rtf.size();) {
     bool skip = skip_stack.back();

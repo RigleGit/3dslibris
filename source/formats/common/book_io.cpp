@@ -13,7 +13,6 @@
 
 #include "formats/common/plain_parser.h"
 #include "formats/mobi/mobi_book_hooks.h"
-#include "formats/mobi/mobi_deferred_runtime.h"
 #include "formats/mobi/mobi_parser.h"
 #include "formats/common/xml_book_parser.h"
 #include "formats/pdf/pdf.h"
@@ -66,13 +65,3 @@ u8 Book::Parse(bool fulltext) {
   return rc;
 }
 
-bool Book::HasDeferredMobiParse() const {
-  return mobi_deferred_runtime::Has(this);
-}
-
-bool Book::ContinueDeferredMobiParse(u32 budget_ms, u16 page_budget) {
-  return mobi_parser::ContinueDeferredParse(this, budget_ms, page_budget,
-                                            SharedMobiHooks());
-}
-
-void Book::CancelDeferredMobiParse() { mobi_deferred_runtime::Erase(this); }

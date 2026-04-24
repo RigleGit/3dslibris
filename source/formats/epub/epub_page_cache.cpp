@@ -217,7 +217,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
   }
   if (hdr.magic != kEpubPageCacheMagic ||
       hdr.version != kEpubPageCacheVersion || hdr.page_count == 0 ||
-      hdr.page_count > 20000 || hdr.chapter_count > 4000 ||
+      hdr.page_count > 50000 || hdr.chapter_count > 4000 ||
       hdr.title_len > 1000 || hdr.doc_start_count > 4000 ||
       hdr.image_count > 65535) {
     fclose(fp);

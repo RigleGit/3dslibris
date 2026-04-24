@@ -728,6 +728,7 @@ static void AdvanceParsedPageOnOverflowThunk(parsedata_t *p, int lineheight,
   AdvanceParsedPageOnOverflow(p, lineheight);
 }
 
+#ifdef DSLIBRIS_DEBUG
 struct ChardataPerfScope {
   parsedata_t *parsedata;
   u64 t_begin;
@@ -742,6 +743,11 @@ struct ChardataPerfScope {
     parsedata->perf_chardata_ms += (u64)(osGetTime() - t_begin);
   }
 };
+#else
+struct ChardataPerfScope {
+  explicit ChardataPerfScope(parsedata_t *) {}
+};
+#endif
 
 static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
                                   int txtlen) {
@@ -1702,6 +1708,14 @@ void start(void *data, const char *el, const char **attr) {
     p->paragraph_has_content = false;
     p->last_p_style = ExtractStyleAttr(attr);
     p->last_p_class = ExtractClassAttr(attr);
+    const book_xml_css_style_utils::TextAlign align = book_xml_css_style_utils::ParseTextAlign(p->last_p_style.c_str());
+    if (align == book_xml_css_style_utils::TextAlign::Center) {
+      AppendParsedByte(p, TEXT_PARAGRAPH_CENTER);
+    } else if (align == book_xml_css_style_utils::TextAlign::Right) {
+      AppendParsedByte(p, TEXT_PARAGRAPH_RIGHT);
+    } else {
+      AppendParsedByte(p, TEXT_PARAGRAPH_LEFT);
+    }
     const bool inside_list_item = book_xml_list_utils::IsInsideListItem(p);
     const bool tight_list_paragraph =
         book_xml_list_utils::HasPendingListItemContent(p);
@@ -1747,8 +1761,14 @@ void start(void *data, const char *el, const char **attr) {
                            p->last_hr_class, mtr, line_h, default_lf,
                            lf_count);
     EmitAdditionalTopLinefeeds(p, lf_count);
-    if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class))
+    if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
       AppendParsedByte(p, TEXT_HR);
+      // The renderer calls PrintNewLine() for TEXT_HR, advancing pen.y by one
+      // line. Mirror that here so the parser's overflow tracking stays in sync.
+      p->pen.y += ts->GetHeight() + ts->linespacing;
+      p->pen.x = ts->margin.left;
+      p->linebegan = false;
+    }
   } else if (!strcmp(el, "pre")) {
     parse_push(p, TAG_PRE);
     p->preformatted_wrap_enabled = true;
@@ -2291,8 +2311,18 @@ void end(void *data, const char *el) {
       LogResolvedBlockMargin(p, "hr", "bottom", p->last_hr_style,
                              p->last_hr_class, mbr, line_h, default_lf,
                              lf_count);
-      for (int i = 0; i < lf_count; i++)
-        linefeed(p);
+      if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
+        // TEXT_HR was emitted, so the renderer has linebegan=false.  It will
+        // never call PrintNewLine() for these \n bytes — only the WouldOverflow
+        // path fires to advance screens.  Emit the bytes for that check but do
+        // NOT advance pen.y: doing so would diverge from the renderer and
+        // cause premature page/screen breaks (Bug: text cut off midline).
+        for (int i = 0; i < lf_count; i++)
+          AppendParsedByte(p, '\n');
+      } else {
+        for (int i = 0; i < lf_count; i++)
+          linefeed(p);
+      }
     } else {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =

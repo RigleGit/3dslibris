@@ -21,26 +21,20 @@ void ExpectFalse(const char *label, bool value) {
     Fail(std::string(label) + ": expected false");
 }
 
-void TestNonTextLayoutNeverUsesWorker() {
-  ExpectFalse("fixed layout disables worker",
-              reader::ShouldUseAsyncReflowOpen(false, false));
+void TestNonTextLayoutUsesWorker() {
+  ExpectTrue("fixed layout uses worker",
+             reader::ShouldUseAsyncReflowOpen(false));
 }
 
-void TestTextLayoutNonMobiUsesWorker() {
-  ExpectTrue("reflowable non-mobi keeps worker",
-             reader::ShouldUseAsyncReflowOpen(true, false));
-}
-
-void TestMobiDisablesWorker() {
-  ExpectFalse("mobi disables worker",
-              reader::ShouldUseAsyncReflowOpen(true, true));
+void TestTextLayoutUsesWorker() {
+  ExpectTrue("reflowable keeps worker",
+             reader::ShouldUseAsyncReflowOpen(true));
 }
 
 } // namespace
 
 int main() {
-  TestNonTextLayoutNeverUsesWorker();
-  TestTextLayoutNonMobiUsesWorker();
-  TestMobiDisablesWorker();
+  TestNonTextLayoutUsesWorker();
+  TestTextLayoutUsesWorker();
   return 0;
 }

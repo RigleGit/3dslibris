@@ -177,7 +177,7 @@ void ShutdownCbzWorker(Book::CbzState *cbz_state) {
   __atomic_store_n(&w->shutdown_requested, true, __ATOMIC_RELEASE);
   LightEvent_Signal(&w->submit_event);
   if (w->thread_handle) {
-    threadJoin(w->thread_handle, U64_MAX);
+    threadJoin(w->thread_handle, 500 * 1000000ULL);
     threadFree(w->thread_handle);
     w->thread_handle = NULL;
   }

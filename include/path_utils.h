@@ -26,6 +26,7 @@ static const char *kRomfsBase       = "romfs:/3ds/3dslibris";
 static const char *kBookDir         = "sdmc:/3ds/3dslibris/book";
 static const char *kRomfsBookDir    = "romfs:/3ds/3dslibris/book";
 static const char *kFontDir         = "sdmc:/3ds/3dslibris/font";
+static const char *kRomfsFontDir    = "romfs:/3ds/3dslibris/font";
 static const char *kResourceDir     = "sdmc:/3ds/3dslibris/resources";
 static const char *kCacheBaseDir    = "sdmc:/3ds/3dslibris/cache";
 

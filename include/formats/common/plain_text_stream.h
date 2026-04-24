@@ -17,8 +17,12 @@
 
 namespace plain_text_stream {
 
+// A view into a line of text inside the source text_utf8 buffer.
+// The data/size pointers are valid as long as the source string is alive and
+// unmodified. No heap allocation — assign-by-value is a cheap struct copy.
 struct PlainLineChunk {
-  std::string text;
+  const char *data;
+  size_t size;
   bool has_newline;
   bool valid;
 };

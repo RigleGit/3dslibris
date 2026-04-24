@@ -139,8 +139,7 @@ u8 Book::OpenPrepared() {
 }
 
 bool Book::SupportsAsyncReflowOpen() const {
-  return reader::ShouldUseAsyncReflowOpen(UsesTextLayoutSettings(),
-                                          IsMobiFile());
+  return reader::ShouldUseAsyncReflowOpen(UsesTextLayoutSettings());
 }
 
 bool Book::StartAsyncReflowOpen(unsigned int session_id) {
@@ -182,6 +181,24 @@ bool Book::StartAsyncReflowOpen(unsigned int session_id) {
   }
   if (!reflow_worker_state->worker)
     return false;
+
+  // If a previous worker was abandoned during applet suspension, clean it up
+  // now (non-blocking) before starting a new open.
+  Book::ReflowWorkerState::Worker *old_w = reflow_worker_state->worker;
+  if (old_w->thread_handle &&
+      __atomic_load_n(&old_w->shutdown_requested, __ATOMIC_ACQUIRE)) {
+    Result join_rc = threadJoin(old_w->thread_handle, 0);
+    if (R_SUCCEEDED(join_rc)) {
+      threadFree(old_w->thread_handle);
+      delete old_w;
+      reflow_worker_state->worker = NULL;
+      reflow_worker_state->worker_init_attempted = false;
+      return false;
+    }
+    // Worker is still finishing its last parse after a previous cancel;
+    // can't reuse it yet. Fall back to synchronous open.
+    return false;
+  }
 
   Book::ReflowWorkerState::Worker *w = reflow_worker_state->worker;
   if (w->job_submitted || __atomic_load_n(&w->job_pending, __ATOMIC_ACQUIRE))
@@ -255,13 +272,21 @@ void Book::CancelAsyncReflowOpen() {
                "REFLOW cancel: joining thread session=%u book=%s",
                (unsigned)w->session_id, GetFileName() ? GetFileName() : "");
 #endif
-    threadJoin(w->thread_handle, U64_MAX);
-    threadFree(w->thread_handle);
-    w->thread_handle = NULL;
+    // Use a short timeout instead of U64_MAX. If the main thread is blocked
+    // here during applet suspension, the system may panic because the app
+    // cannot respond to APT messages while waiting for the worker to finish
+    // a long parse.
+    Result join_rc = threadJoin(w->thread_handle, 100 * 1000000ULL);
+    if (R_SUCCEEDED(join_rc)) {
+      threadFree(w->thread_handle);
+      w->thread_handle = NULL;
+    }
   }
-  delete w;
-  reflow_worker_state->worker = NULL;
-  reflow_worker_state->worker_init_attempted = false;
+  if (!w->thread_handle) {
+    delete w;
+    reflow_worker_state->worker = NULL;
+    reflow_worker_state->worker_init_attempted = false;
+  }
 }
 
 void Book::ResetReflowWorkerState() {

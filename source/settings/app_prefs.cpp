@@ -45,7 +45,6 @@ static const int PREFS_LIBRARY_BTN_H = 26;
 static const int PREFS_ROW_X = 5;
 static const int PREFS_ROW_W = 230;
 static const u32 kGoToPageCoarseStep = 10;
-static const u32 kGoToPageMobiDeferredDelayMs = 120;
 
 static bool CurrentBookShowsLineWrapFix(App *app);
 
@@ -296,9 +295,6 @@ bool SettingsController::ConfirmGoToPageSelection() {
       (book->IsFixedLayout() && book->HasPendingFixedLayoutDeferredWork())
           ? (osGetTime() + book->GetFixedLayoutDeferredDelayMs())
           : 0);
-  app_.SetMobiDeferredReadyAtMs(
-      book->HasDeferredMobiParse() ? (osGetTime() + kGoToPageMobiDeferredDelayMs)
-                                   : 0);
   app_.RequestStatusRedraw();
   go_to_page_popup_open_ = false;
   return true;

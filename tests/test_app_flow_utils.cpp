@@ -268,44 +268,44 @@ void TestComputeStatusSnapshot() {
   using app_flow_utils::StatusSnapshotInput;
 
   StatusSnapshot normal = app_flow_utils::ComputeStatusSnapshot(
-      StatusSnapshotInput{reinterpret_cast<const void *>(1), 2, 10, false,
+      StatusSnapshotInput{reinterpret_cast<const Book *>(1), 2, 10, false,
                           nullptr, 0});
   ExpectTrue("normal has progress", normal.has_progress);
   ExpectEq("normal draw page count", normal.draw_page_count, 10);
   ExpectEq("normal percent tenths", normal.percent_tenths, 222);
   ExpectEq("normal lock book", normal.next_locked_book,
-           reinterpret_cast<const void *>(1));
+           reinterpret_cast<const Book *>(1));
   ExpectEq("normal lock pagecount", normal.next_locked_pagecount, 0);
 
   StatusSnapshot deferred = app_flow_utils::ComputeStatusSnapshot(
-      StatusSnapshotInput{reinterpret_cast<const void *>(2), 3, 5, true,
-                          reinterpret_cast<const void *>(2), 0});
+      StatusSnapshotInput{reinterpret_cast<const Book *>(2), 3, 5, true,
+                          reinterpret_cast<const Book *>(2), 0});
   ExpectFalse("deferred hides progress", deferred.has_progress);
   ExpectEq("deferred uses live count as initial lock",
            deferred.next_locked_pagecount, 5);
   ExpectEq("deferred keeps book lock", deferred.next_locked_book,
-           reinterpret_cast<const void *>(2));
+           reinterpret_cast<const Book *>(2));
 
   StatusSnapshot deferred_grow = app_flow_utils::ComputeStatusSnapshot(
-      StatusSnapshotInput{reinterpret_cast<const void *>(2), 7, 5, true,
-                          reinterpret_cast<const void *>(2), 5});
+      StatusSnapshotInput{reinterpret_cast<const Book *>(2), 7, 5, true,
+                          reinterpret_cast<const Book *>(2), 5});
   ExpectEq("deferred lock follows current page", deferred_grow.next_locked_pagecount,
            8);
 
   StatusSnapshot changed_book = app_flow_utils::ComputeStatusSnapshot(
-      StatusSnapshotInput{reinterpret_cast<const void *>(3), 0, 4, true,
-                          reinterpret_cast<const void *>(2), 9});
+      StatusSnapshotInput{reinterpret_cast<const Book *>(3), 0, 4, true,
+                          reinterpret_cast<const Book *>(2), 9});
   ExpectEq("book change resets lock then seeds live count",
            changed_book.next_locked_pagecount, 4);
   ExpectEq("book change updates lock book", changed_book.next_locked_book,
-           reinterpret_cast<const void *>(3));
+           reinterpret_cast<const Book *>(3));
 
   StatusSnapshot no_book = app_flow_utils::ComputeStatusSnapshot(
-      StatusSnapshotInput{nullptr, 0, 0, false, reinterpret_cast<const void *>(4),
+      StatusSnapshotInput{nullptr, 0, 0, false, reinterpret_cast<const Book *>(4),
                           7});
   ExpectFalse("no book no progress", no_book.has_progress);
   ExpectEq("no book clears lock book", no_book.next_locked_book,
-           static_cast<const void *>(nullptr));
+           static_cast<const Book *>(nullptr));
   ExpectEq("no book clears lock pagecount", no_book.next_locked_pagecount, 0);
 }
 

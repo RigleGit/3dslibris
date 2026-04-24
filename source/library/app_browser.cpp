@@ -392,8 +392,13 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   }
 
   size_t count = (size_t)w * (size_t)h;
-  std::vector<u16> pixels(count);
-  if (fread(pixels.data(), sizeof(u16), count, fp) != count) {
+  u16 *pixels = new u16[count];
+  if (!pixels) {
+    fclose(fp);
+    return false;
+  }
+  if (fread(pixels, sizeof(u16), count, fp) != count) {
+    delete[] pixels;
     fclose(fp);
 #ifdef DSLIBRIS_DEBUG
     if (book->GetStatusReporter()) {
@@ -412,10 +417,7 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
     delete[] book->coverPixels;
     book->coverPixels = nullptr;
   }
-  book->coverPixels = new u16[count];
-  if (!book->coverPixels)
-    return false;
-  memcpy(book->coverPixels, pixels.data(), count * sizeof(u16));
+  book->coverPixels = pixels;
   book->coverWidth = w;
   book->coverHeight = h;
 #ifdef DSLIBRIS_DEBUG
@@ -802,7 +804,9 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
 
     Book *book = job.book;
     int rc = 0;
+#ifdef DSLIBRIS_DEBUG
     u64 t0 = osGetTime();
+#endif
 
     if (job.type == APP_JOB_EXTRACT_COVER && app_.GetMode() == AppMode::Browser &&
         !ShouldCurrentBrowserLoadCovers(app_)) {
@@ -976,18 +980,22 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
       }
     }
 
-    u64 elapsed = osGetTime() - t0;
-    char msg[256];
-    if (const char *tag = BookOpenErrorTag(rc)) {
-      snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%s ms=%llums book=%s",
-               job_name(job.type), tag, (unsigned long long)elapsed,
-               book->GetFileName() ? book->GetFileName() : "(null)");
-    } else {
-      snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%d ms=%llums book=%s",
-               job_name(job.type), rc, (unsigned long long)elapsed,
-               book->GetFileName() ? book->GetFileName() : "(null)");
+#ifdef DSLIBRIS_DEBUG
+    {
+      u64 elapsed = osGetTime() - t0;
+      char msg[256];
+      if (const char *tag = BookOpenErrorTag(rc)) {
+        snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%s ms=%llums book=%s",
+                 job_name(job.type), tag, (unsigned long long)elapsed,
+                 book->GetFileName() ? book->GetFileName() : "(null)");
+      } else {
+        snprintf(msg, sizeof(msg), "TIMING: job=%s rc=%d ms=%llums book=%s",
+                 job_name(job.type), rc, (unsigned long long)elapsed,
+                 book->GetFileName() ? book->GetFileName() : "(null)");
+      }
+      DBG_LOG(&app_, msg);
     }
-    DBG_LOG(&app_, msg);
+#endif
 
     if (app_.ShouldAbortWork())
       break;

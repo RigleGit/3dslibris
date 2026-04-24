@@ -18,23 +18,19 @@ using plain_text_perf_utils::PlainTextPerfBaseline;
 using plain_text_perf_utils::PlainTextStreamPerf;
 
 static PlainLineChunk ReadNextLineChunk(const std::string &text, size_t *cursor) {
-  PlainLineChunk out;
-  out.text.clear();
-  out.has_newline = false;
-  out.valid = false;
-  if (!cursor)
-    return out;
-  if (*cursor > text.size())
+  PlainLineChunk out = {nullptr, 0, false, false};
+  if (!cursor || *cursor > text.size())
     return out;
 
-  size_t start = *cursor;
-  size_t end = text.find('\n', start);
+  const size_t start = *cursor;
+  const size_t end = text.find('\n', start);
+  out.data = text.data() + start;
   if (end == std::string::npos) {
-    out.text = text.substr(start);
+    out.size = text.size() - start;
     out.has_newline = false;
     *cursor = text.size() + 1;
   } else {
-    out.text = text.substr(start, end - start);
+    out.size = end - start;
     out.has_newline = true;
     *cursor = end + 1;
   }
@@ -54,12 +50,8 @@ void InitState(State *state, const parsedata_t &base_parsedata,
   state->initialized = false;
   state->completed = false;
   state->text_bytes_fed = 0;
-  state->curr.text.clear();
-  state->curr.has_newline = false;
-  state->curr.valid = false;
-  state->next.text.clear();
-  state->next.has_newline = false;
-  state->next.valid = false;
+  state->curr = {nullptr, 0, false, false};
+  state->next = {nullptr, 0, false, false};
   parse_push(&state->parsedata, TAG_PRE);
 
   state->curr = ReadNextLineChunk(text_utf8, &state->cursor);
@@ -96,31 +88,39 @@ bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
     const bool heuristic_headings = state->detect_heuristic_headings;
     bool curr_keep_with_next = false;
     if (heuristic_headings) {
-      curr_blank = callbacks.is_blank_line(state->curr.text);
-      next_blank = !state->next.valid || callbacks.is_blank_line(state->next.text);
+      // Construct temporary strings only for the heuristic heading path (TXT
+      // format). For MOBI, detect_heuristic_headings is false so this is skipped.
+      static std::string curr_str;
+      curr_str.assign(state->curr.data, state->curr.size);
+      static std::string next_str;
+      if (state->next.valid)
+        next_str.assign(state->next.data, state->next.size);
+      else
+        next_str.clear();
+      curr_blank = callbacks.is_blank_line(curr_str);
+      next_blank = !state->next.valid || callbacks.is_blank_line(next_str);
 
       bool curr_strong = false;
       curr_candidate =
-          callbacks.looks_like_plain_chapter_heading(state->curr.text, &curr_strong);
+          callbacks.looks_like_plain_chapter_heading(curr_str, &curr_strong);
       bool next_strong = false;
       bool next_candidate =
           state->next.valid &&
-          callbacks.looks_like_plain_chapter_heading(state->next.text, &next_strong);
+          callbacks.looks_like_plain_chapter_heading(next_str, &next_strong);
       curr_keep_with_next = callbacks.should_accept_heuristic_heading(
-          state->curr.text, state->prev_blank, next_blank, state->prev_candidate,
+          curr_str, state->prev_blank, next_blank, state->prev_candidate,
           next_candidate, curr_strong);
-    }
 
-    if (heuristic_headings && curr_keep_with_next) {
-      callbacks.add_chapter_if_unique(state->parsedata.book, state->curr.text, 0);
+      if (curr_keep_with_next)
+        callbacks.add_chapter_if_unique(state->parsedata.book, curr_str, 0);
     }
 
     const size_t bytes_before = state->text_bytes_fed;
-    if (!state->curr.text.empty()) {
+    if (state->curr.size > 0) {
       size_t segment_start = 0;
       size_t pos = 0;
-      while (pos < state->curr.text.size()) {
-        unsigned char c = (unsigned char)state->curr.text[pos];
+      while (pos < state->curr.size) {
+        unsigned char c = (unsigned char)state->curr.data[pos];
         const InlineImageContext image_context =
             (c == TEXT_IMAGE_CONTEXT_DEFAULT)
                 ? INLINE_IMAGE_CONTEXT_DEFAULT
@@ -136,13 +136,13 @@ bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
         const int heading_level = mobi_heading_markers::HeadingLevelFromMarker(c);
         const bool image_marker =
             (c == TEXT_IMAGE) ||
-            (context_marker && pos + 1 < state->curr.text.size() &&
-             (unsigned char)state->curr.text[pos + 1] == TEXT_IMAGE);
+            (context_marker && pos + 1 < state->curr.size &&
+             (unsigned char)state->curr.data[pos + 1] == TEXT_IMAGE);
         if (heading_level > 0) {
           if (pos > segment_start) {
             const size_t len = pos - segment_start;
             xml::book::chardata(&state->parsedata,
-                                state->curr.text.data() + segment_start, (int)len);
+                                state->curr.data + segment_start, (int)len);
             state->text_bytes_fed += len;
           }
           callbacks.apply_heading_keep_with_next(&state->parsedata, heading_level);
@@ -159,19 +159,19 @@ bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
         if (pos > segment_start) {
           const size_t len = pos - segment_start;
           xml::book::chardata(&state->parsedata,
-                              state->curr.text.data() + segment_start, (int)len);
+                              state->curr.data + segment_start, (int)len);
           state->text_bytes_fed += len;
         }
 
         size_t image_pos = pos + (context_marker ? 1 : 0);
-        if (image_pos + 2 >= state->curr.text.size()) {
-          state->text_bytes_fed += state->curr.text.size() - pos;
-          segment_start = state->curr.text.size();
+        if (image_pos + 2 >= state->curr.size) {
+          state->text_bytes_fed += state->curr.size - pos;
+          segment_start = state->curr.size;
           break;
         }
 
-        u16 image_id = (u16)(((u8)state->curr.text[image_pos + 1] << 8) |
-                             (u8)state->curr.text[image_pos + 2]);
+        u16 image_id = (u16)(((u8)state->curr.data[image_pos + 1] << 8) |
+                             (u8)state->curr.data[image_pos + 2]);
         callbacks.append_inline_image_to_parsedata(&state->parsedata, image_id,
                                                    image_context);
         size_t consumed = context_marker ? 4 : 3;
@@ -180,10 +180,10 @@ bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
         segment_start = pos;
       }
 
-      if (segment_start < state->curr.text.size()) {
-        const size_t len = state->curr.text.size() - segment_start;
+      if (segment_start < state->curr.size) {
+        const size_t len = state->curr.size - segment_start;
         xml::book::chardata(&state->parsedata,
-                            state->curr.text.data() + segment_start, (int)len);
+                            state->curr.data + segment_start, (int)len);
         state->text_bytes_fed += len;
       }
     }

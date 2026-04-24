@@ -322,6 +322,12 @@ void Book::DrawTopGradientBackground()
     ctx.draw_top_background(ctx.draw_top_background_user_data);
 }
 
+void Book::NotifySpineProgress(unsigned done, unsigned total)
+{
+  if (ctx.on_spine_progress)
+    ctx.on_spine_progress(done, total, ctx.on_spine_progress_user_data);
+}
+
 void Book::SetFolderName(const char *name) { foldername = name; }
 
 void Book::SetFileName(const char *name)
@@ -708,8 +714,6 @@ void Book::Close()
     DBG_LOGF(r, "BOOK close: save-epub-cache done book=%s", filename.c_str());
   }
   epub_page_cache_save_pending = false;
-  DBG_LOGF(r, "BOOK close: cancel-mobi-parse book=%s", filename.c_str());
-  CancelDeferredMobiParse();
   DBG_LOGF(r, "BOOK close: clear-pages count=%d book=%s", (int)pages.size(), filename.c_str());
   std::vector<Page *>::iterator it = pages.begin();
   while (it != pages.end())

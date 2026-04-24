@@ -141,8 +141,10 @@ bool BuildTextRunUtf8(const char *s, size_t len, const char *lang,
     return false;
 
   out->clear();
-  std::string normalized;
-  normalized.reserve(len * 2);
+  static std::string normalized;
+  normalized.clear();
+  if (normalized.capacity() < len * 2)
+    normalized.reserve(len * 2);
 
   size_t offset = 0;
   uint32_t prev_cp = 0;
@@ -183,7 +185,8 @@ bool BuildTextRunUtf8(const char *s, size_t len, const char *lang,
   if (out->empty())
     return true;
 
-  std::vector<char> breaks(out->size(), LINEBREAK_NOBREAK);
+  static std::vector<char> breaks;
+  breaks.assign(out->size(), LINEBREAK_NOBREAK);
   size_t count = set_linebreaks_utf8_per_code_point(
       (const utf8_t *)normalized.data(), normalized.size(), lang, breaks.data());
   if (count != out->size())

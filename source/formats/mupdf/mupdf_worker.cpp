@@ -12,10 +12,17 @@ void CancelMuPdfIncrementalRenderState(Book::MuPdfState *mupdf_state) {
     return;
   if (mupdf_state->worker && mupdf_state->worker->job_submitted) {
     if (__atomic_load_n(&mupdf_state->worker->job_pending, __ATOMIC_ACQUIRE)) {
-      LightEvent_Wait(&mupdf_state->worker->done_event);
+      // Wait briefly for the current strip render (typically < 50ms).
+      // Bounded to avoid blocking HOME button acknowledgment indefinitely.
+      const u64 deadline_ms = osGetTime() + 100;
+      while (__atomic_load_n(&mupdf_state->worker->job_pending, __ATOMIC_ACQUIRE) &&
+             osGetTime() < deadline_ms) {
+        svcSleepThread(2000000LL); // 2ms
+      }
+      // Force-clear pending in case of timeout so the next render can start.
+      __atomic_store_n(&mupdf_state->worker->job_pending, false, __ATOMIC_RELEASE);
     }
     LightEvent_Clear(&mupdf_state->worker->done_event);
-    __atomic_store_n(&mupdf_state->worker->job_pending, false, __ATOMIC_RELEASE);
     mupdf_state->worker->job_submitted = false;
     mupdf_state->worker->job_strip_y0 = 0;
     mupdf_state->worker->job_strip_y1 = 0;
@@ -325,7 +332,7 @@ void ShutdownMuPdfWorker(Book::MuPdfState *mupdf_state) {
   LightEvent_Signal(&w->submit_event);
 
   if (w->thread_handle) {
-    threadJoin(w->thread_handle, U64_MAX);
+    threadJoin(w->thread_handle, 500 * 1000000ULL);
     threadFree(w->thread_handle);
     w->thread_handle = NULL;
   }

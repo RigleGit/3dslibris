@@ -132,7 +132,7 @@ void PagedListMenu::Init() {
 
   page_sizes.clear();
   int current_y = LIST_ROW_Y0;
-  u8 items_on_page = 0;
+  u16 items_on_page = 0;
   for (size_t i = 0; i < buttons.size(); i++) {
     int h = buttons[i]->GetHeight();
     if (items_on_page > 0 && current_y + LIST_ROW_GAP + h > LIST_FOOTER_Y) {
@@ -182,8 +182,8 @@ void PagedListMenu::Draw() {
   app->ts->SetPen(LIST_HEADER_X, LIST_HEADER_Y);
   app->ts->PrintString(header_title.c_str());
 
-  u8 start = GetPageStart(page);
-  u8 end = std::min<u8>((u8)buttons.size(), (u8)(start + GetPageSize(page)));
+  u16 start = GetPageStart(page);
+  u16 end = (u16)std::min(buttons.size(), (size_t)(start + GetPageSize(page)));
 #ifdef DSLIBRIS_DEBUG
   static int s_draw_trace_budget = 48;
   if (app && s_draw_trace_budget > 0) {
@@ -195,12 +195,12 @@ void PagedListMenu::Draw() {
     s_draw_trace_budget--;
   }
 #endif
-  for (u8 i = start; i < end; i++) {
+  for (u16 i = start; i < end; i++) {
     buttons[i]->Draw(i == selected);
   }
 
   char label[32];
-  u8 total_pages = page_sizes.empty() ? GetPageCount() : (u8)page_sizes.size();
+  u16 total_pages = page_sizes.empty() ? GetPageCount() : (u16)page_sizes.size();
   snprintf(label, sizeof(label), "Pg %d/%d", GetCurrentPage(), total_pages);
   app->ts->SetPen(6, 282);
   app->ts->PrintString(label);
@@ -345,9 +345,9 @@ void PagedListMenu::NextPage() {
   if (page < GetPageCount() - 1) {
     page++;
     UpdatePageSize();
-    u8 next_selected = GetPageStart(page);
+    u16 next_selected = GetPageStart(page);
     selected = (next_selected < buttons.size()) ? next_selected
-                                                : (u8)(buttons.size() - 1);
+                                                : (u16)(buttons.size() - 1);
     dirty = true;
 #ifdef DSLIBRIS_DEBUG
     if (app) {
@@ -421,7 +421,7 @@ void PagedListMenu::ActivateSelected() {
   app->RequestStatusRedraw();
 }
 
-bool PagedListMenu::ResolveTargetPage(u8 index, u16 *page_out) {
+bool PagedListMenu::ResolveTargetPage(u16 index, u16 *page_out) {
   if (!page_out)
     return false;
   if (index >= target_pages.size())
@@ -430,22 +430,22 @@ bool PagedListMenu::ResolveTargetPage(u8 index, u16 *page_out) {
   return true;
 }
 
-u8 PagedListMenu::GetPageStart(u8 page_index) const {
-  u8 start = 0;
-  for (u8 i = 0; i < page_index && i < page_sizes.size(); i++)
+u16 PagedListMenu::GetPageStart(u16 page_index) const {
+  u16 start = 0;
+  for (u16 i = 0; i < page_index && i < page_sizes.size(); i++)
     start += page_sizes[i];
   return start;
 }
 
-u8 PagedListMenu::GetPageSize(u8 page_index) const {
+u16 PagedListMenu::GetPageSize(u16 page_index) const {
   if (page_index < page_sizes.size())
     return page_sizes[page_index];
   return pagesize;
 }
 
-u8 PagedListMenu::GetPageForIndex(u8 index) const {
-  u8 start = 0;
-  for (u8 i = 0; i < page_sizes.size(); i++) {
+u16 PagedListMenu::GetPageForIndex(u16 index) const {
+  u16 start = 0;
+  for (u16 i = 0; i < page_sizes.size(); i++) {
     if (index < start + page_sizes[i])
       return i;
     start += page_sizes[i];
@@ -458,17 +458,17 @@ void PagedListMenu::UpdatePageSize() {
     pagesize = page_sizes[page];
 }
 
-u8 PagedListMenu::GetCurrentPage() const {
+u16 PagedListMenu::GetCurrentPage() const {
   return page + 1;
 }
 
-u8 PagedListMenu::GetPageCount() const {
+u16 PagedListMenu::GetPageCount() const {
   if (!page_sizes.empty())
-    return (u8)page_sizes.size();
+    return (u16)page_sizes.size();
   return Menu::GetPageCount();
 }
 
-void PagedListMenu::SelectItem(u8 index) {
+void PagedListMenu::SelectItem(u16 index) {
   if (index >= buttons.size())
     return;
   selected = index;
@@ -516,9 +516,9 @@ void PagedListMenu::HandleTouchInput() {
   for (int i = 0; i < TouchCandidates::kCount; i++) {
     int x = candidates.points[i].x;
     int y = candidates.points[i].y;
-    u8 page_start = GetPageStart(page);
-    u8 page_end = page_start + GetPageSize(page);
-    for (u8 idx = page_start; idx < page_end; idx++) {
+    u16 page_start = GetPageStart(page);
+    u16 page_end = page_start + GetPageSize(page);
+    for (u16 idx = page_start; idx < page_end; idx++) {
       if (buttons[idx]->EnclosesPoint((u16)x, (u16)y)) {
         selected = idx;
         ActivateSelected();
@@ -571,9 +571,9 @@ void PagedListMenu::HandleTouchInput() {
     return;
   }
 
-  u8 start = GetPageStart(page);
-  u8 end = std::min<u8>((u8)buttons.size(), (u8)(start + GetPageSize(page)));
-  for (u8 i = start; i < end; i++) {
+  u16 start = GetPageStart(page);
+  u16 end = (u16)std::min(buttons.size(), (size_t)(start + GetPageSize(page)));
+  for (u16 i = start; i < end; i++) {
     if (touch::HitsButton(candidates, buttons[i], 4)) {
       selected = i;
 #ifdef DSLIBRIS_DEBUG
