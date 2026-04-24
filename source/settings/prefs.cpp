@@ -260,7 +260,7 @@ Prefs::~Prefs() {}
 int Prefs::Read() {
   int err = 0;
 
-  FILE *fp = fopen(paths::kPrefsFile, "r");
+  FILE *fp = fopen(paths::GetPrefsFile().c_str(), "r");
   if (!fp) {
     err = 255;
     return err;
@@ -302,7 +302,7 @@ int Prefs::Write() {
   if (app)
     colorMode = app->ts->GetColorMode();
 
-  FILE *fp = fopen(paths::kPrefsFile, "w");
+  FILE *fp = fopen(paths::GetPrefsFile().c_str(), "w");
   if (!fp)
     return 255;
 

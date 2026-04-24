@@ -64,6 +64,7 @@ Notes:
 
 - The `.cia` includes default `font/` and `resources/` assets in `RomFS`.
 - Books are read from `sdmc:/3ds/3dslibris/book/` and optionally `romfs:/3ds/3dslibris/book/`.
+- Runtime data can also be installed under `sdmc:/config/3dslibris/` (for example `book/`, `font/`, `resources/`, cache, prefs, and log files).
 - If the same filename exists in both places, the SD version wins.
 - Releases also provide `3dslibris-debug.3dsx` and `3dslibris-debug.cia`, which enable verbose logging to `sdmc:/3ds/3dslibris/3dslibris.log`.
 
@@ -90,9 +91,9 @@ Fixed-layout documents (`PDF` / `CBZ` / `XPS`):
 
 - `A`: zoom in
 - `B`: zoom out
-- `Left` / `Right`: previous or next page
+- `Left`, `L`, `ZR` / `Right`, `R`, `ZL`: previous or next page
 - `Up` / `Down`: next or previous chapter when available, otherwise page navigation
-- `Touch`: move the viewport on the page preview
+- `Touch` / `Circle Pad` / `C-Stick`: move the viewport on the page preview
 - `SELECT`: open `BOOK` settings
 - `START`: return to library
 

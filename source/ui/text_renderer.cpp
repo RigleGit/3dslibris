@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdio.h>
+#include <vector>
 
 #include "3ds.h"
 #include "app/app.h"
@@ -632,27 +633,26 @@ bool TextRenderer::EnsureSplashLoaded(bool dark) {
     return loaded;
   attempted = true;
 
-  static const char *kSplashLight[] = {
-      "romfs:/3ds/3dslibris/resources/3DSLibris_light_small.jpg",
-      "sdmc:/3ds/3dslibris/resources/3DSLibris_light_small.jpg",
-      paths::kSplashPaths[0],
-      paths::kSplashPaths[1],
-      nullptr,
-  };
-  static const char *kSplashDark[] = {
-      "romfs:/3ds/3dslibris/resources/3DSLibris_dark_small.jpg",
-      "sdmc:/3ds/3dslibris/resources/3DSLibris_dark_small.jpg",
-      nullptr,
-  };
-
-  const char **candidates = dark ? kSplashDark : kSplashLight;
+  const std::string sdmc_resource_dir = paths::GetResourceDir();
+  const std::vector<std::string> splash_paths = paths::GetSplashPathList();
+  const std::vector<std::string> candidates = dark
+      ? std::vector<std::string>{
+            "romfs:/3ds/3dslibris/resources/3DSLibris_dark_small.jpg",
+            sdmc_resource_dir + "/3DSLibris_dark_small.jpg",
+        }
+      : std::vector<std::string>{
+            "romfs:/3ds/3dslibris/resources/3DSLibris_light_small.jpg",
+            sdmc_resource_dir + "/3DSLibris_light_small.jpg",
+            splash_paths[0],
+            splash_paths[1],
+        };
 
   int srcW = 0;
   int srcH = 0;
   int srcChannels = 0;
   unsigned char *srcRgb = nullptr;
-  for (int i = 0; candidates[i] != nullptr; i++) {
-    FILE *fp = fopen(candidates[i], "rb");
+  for (size_t i = 0; i < candidates.size(); i++) {
+    FILE *fp = fopen(candidates[i].c_str(), "rb");
     if (!fp)
       continue;
     fseek(fp, 0, SEEK_END);

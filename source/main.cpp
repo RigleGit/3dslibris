@@ -156,12 +156,13 @@ int main(int argc, char **argv)
 
   // Create book directory if it doesn't exist
   mkdir("sdmc:/3ds", 0777);
-  mkdir(paths::kSdmcBase, 0777);
-  mkdir(paths::kBookDir, 0777);
-  mkdir(paths::kFontDir, 0777);
-  mkdir(paths::kResourceDir, 0777);
-  mkdir(paths::kCacheBaseDir, 0777);
-  mkdir(paths::kCoverCacheDir, 0777);
+  mkdir("sdmc:/config", 0777);
+  mkdir(paths::GetSdmcBase().c_str(), 0777);
+  mkdir(paths::GetBookDir().c_str(), 0777);
+  mkdir(paths::GetFontDir().c_str(), 0777);
+  mkdir(paths::GetResourceDir().c_str(), 0777);
+  mkdir(paths::GetCacheBaseDir().c_str(), 0777);
+  mkdir(paths::GetCoverCacheDir().c_str(), 0777);
 
   // Run the app, which takes over the main loop until exit.
   App *app = new App();

@@ -197,7 +197,7 @@ void FontMenu::Open(AppMode requested_mode) {
 
 void FontMenu::findFiles() {
   std::vector<std::string> search_dirs;
-  GetFallbackFontSearchDirs(dir, paths::kFontDir, &search_dirs);
+  GetFallbackFontSearchDirs(dir, paths::GetFontDir().c_str(), &search_dirs);
 
   std::vector<std::string> seen;
   for (size_t d = 0; d < search_dirs.size(); d++) {

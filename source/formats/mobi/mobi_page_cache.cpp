@@ -40,8 +40,8 @@ static void EnsureCacheDirs() {
   static bool initialized = false;
   if (initialized)
     return;
-  mkdir(paths::kCacheBaseDir, 0777);
-  mkdir(paths::kMobiCacheDir, 0777);
+  mkdir(paths::GetCacheBaseDir().c_str(), 0777);
+  mkdir(paths::GetMobiCacheDir().c_str(), 0777);
   initialized = true;
 }
 
@@ -74,7 +74,7 @@ static std::string BuildCachePath(const char *book_path,
   params.variant_token = line_wrap_fix_enabled ? "1" : "0";
 
   return page_cache_utils::BuildPageCachePath(
-      paths::kMobiCacheDir, ".mpc", book_path, params);
+      paths::GetMobiCacheDir().c_str(), ".mpc", book_path, params);
 }
 
 static bool WritePagesFromBook(FILE *fp, Book *book,

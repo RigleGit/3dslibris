@@ -21,8 +21,8 @@
 
 namespace {
 
-static const char *kEpubCacheBaseDir = paths::kCacheBaseDir;
-static const char *kEpubCacheDir = paths::kEpubCacheDir;
+static const std::string &kEpubCacheBaseDir = paths::GetCacheBaseDir();
+static const std::string &kEpubCacheDir = paths::GetEpubCacheDir();
 static const u32 kEpubPageCacheMagic = 0x45504347U;
 static const u16 kEpubPageCacheVersion = 3;
 static const u16 kPageCacheTitleMaxBytes = 1000;

@@ -67,7 +67,7 @@ namespace
 
   static std::string ResolveDefaultFontDir()
   {
-    return std::string(paths::kFontDir);
+    return paths::GetFontDir();
   }
 
 #if ORIENTATION_DIAG
@@ -97,7 +97,7 @@ App::App()
 {
   // Initialize paths and state.
   fontdir = ResolveDefaultFontDir();
-  bookdir = std::string(paths::kBookDir);
+  bookdir = paths::GetBookDir();
   reader_state_.bookcurrent = nullptr;
   reopen = true; // Reopen last book on startup by default.
   nav_.mode = AppMode::Browser;
@@ -1216,7 +1216,7 @@ void App::PrintStatus(const char *msg)
 
   if (!status_log_file_)
   {
-    status_log_file_ = fopen(paths::kLogFile, "a");
+    status_log_file_ = fopen(paths::GetLogFile().c_str(), "a");
     if (status_log_file_)
       setvbuf(status_log_file_, NULL, _IOFBF, 4096);
   }

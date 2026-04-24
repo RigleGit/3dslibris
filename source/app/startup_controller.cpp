@@ -85,11 +85,11 @@ namespace
   // to ROMFS if necessary, so the app can find fonts regardless of install method.
   static std::string ResolveDefaultFontDir()
   {
-    if (FontDirLooksUsable(paths::kFontDir))
-      return std::string(paths::kFontDir);
+    if (FontDirLooksUsable(paths::GetFontDir()))
+      return paths::GetFontDir();
     if (FontDirLooksUsable(paths::kRomfsFontDir))
       return std::string(paths::kRomfsFontDir);
-    return std::string(paths::kFontDir);
+    return paths::GetFontDir();
   }
 
   // Normalizes runtime asset paths, ensuring that the app can find necessary resources even if the SD card installation is incomplete, and providing a fallback mechanism for fonts.
@@ -110,7 +110,8 @@ namespace
       return;
     missing->clear();
 
-    if (!RuntimePathExistsEither(paths::kBookDir, paths::kRomfsBookDir, true))
+    if (!RuntimePathExistsEither(paths::GetBookDir().c_str(),
+                                 paths::kRomfsBookDir, true))
       missing->push_back("book/ (sdmc or romfs)");
 
     // Check the first 5 bundled fonts (the ones shipped with every release).
@@ -120,9 +121,9 @@ namespace
     for (size_t i = 0; i < kBundledFontCount; i++)
     {
       const char *filename = paths::kDefaultFonts[i][0];
-      const char *sdmc_path = paths::kDefaultFonts[i][1];
+      std::string sdmc_path = paths::GetFontDir() + "/" + filename;
       std::string romfs_path = std::string(paths::kRomfsFontDir) + "/" + filename;
-      if (!RuntimePathExistsEither(sdmc_path, romfs_path.c_str(), false))
+      if (!RuntimePathExistsEither(sdmc_path.c_str(), romfs_path.c_str(), false))
         missing->push_back(filename);
     }
   }
@@ -139,7 +140,9 @@ namespace
     printf("  sdmc:/3ds/3dslibris/3dslibris.3dsx\n");
     printf("  sdmc:/3ds/3dslibris/book/\n");
     printf("  sdmc:/3ds/3dslibris/font/\n");
-    printf("  sdmc:/3ds/3dslibris/resources/\n\n");
+    printf("  sdmc:/3ds/3dslibris/resources/\n");
+    printf("Data files are also accepted under:\n");
+    printf("  sdmc:/config/3dslibris/\n\n");
     if (!missing.empty())
     {
       printf("Missing files:\n");
@@ -245,6 +248,7 @@ int StartupController::RunBootSequence()
     lines.push_back("Download 3dslibris-sdmc.zip");
     lines.push_back("and extract it to sdmc:/");
     lines.push_back("Expected path: sdmc:/3ds/3dslibris/");
+    lines.push_back("or sdmc:/config/3dslibris/");
     lines.push_back("Missing files from the SD package");
     lines.push_back(missing_runtime[0]);
     if (missing_runtime.size() > 1)
@@ -269,6 +273,7 @@ int StartupController::RunBootSequence()
                    {"Download 3dslibris-sdmc.zip",
                     "and extract it to sdmc:/",
                     "Expected folder: sdmc:/3ds/3dslibris/book",
+                    "or sdmc:/config/3dslibris/book",
                     "or include books in romfs:/3ds/3dslibris/book"},
                    true);
     return HaltOnFatalBootStatus();
@@ -280,7 +285,8 @@ int StartupController::RunBootSequence()
     app_.PrintStatus("error: no epub files found");
     DrawBootStatus("No books found",
                    {"Copy your EPUB/FB2/TXT/RTF/ODT files",
-                    "to sdmc:/3ds/3dslibris/book"},
+                    "to sdmc:/3ds/3dslibris/book",
+                    "or sdmc:/config/3dslibris/book"},
                    true);
     return HaltOnFatalBootStatus();
   }

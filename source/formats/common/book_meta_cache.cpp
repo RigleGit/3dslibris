@@ -56,7 +56,7 @@ std::string BuildPath(const std::string &book_path, long long file_size,
   key += std::to_string(file_mtime);
   uint64_t h = Fnv1a64(key);
   char out[256];
-  snprintf(out, sizeof(out), "%s/%016llx.bmc", paths::kMetaCacheDir,
+  snprintf(out, sizeof(out), "%s/%016llx.bmc", paths::GetMetaCacheDir().c_str(),
            (unsigned long long)h);
   return std::string(out);
 }
@@ -115,8 +115,8 @@ void EnsureDir() {
   static bool initialized = false;
   if (initialized)
     return;
-  mkdir(paths::kCacheBaseDir, 0777);
-  mkdir(paths::kMetaCacheDir, 0777);
+  mkdir(paths::GetCacheBaseDir().c_str(), 0777);
+  mkdir(paths::GetMetaCacheDir().c_str(), 0777);
   initialized = true;
 }
 

@@ -32,8 +32,8 @@ namespace {
 
 static const size_t kMobiCoverRecordMaxBytes = 8 * 1024 * 1024;
 static const int kMobiCoverMaxDimension = 2048;
-static const char *kMobiCoverMetaCacheBaseDir = paths::kCacheBaseDir;
-static const char *kMobiCoverMetaCacheDir = paths::kMobiCoverMetaCacheDir;
+static const std::string &kMobiCoverMetaCacheBaseDir = paths::GetCacheBaseDir();
+static const std::string &kMobiCoverMetaCacheDir = paths::GetMobiCoverMetaCacheDir();
 
 struct MobiCoverCandidate {
   u32 record_idx;

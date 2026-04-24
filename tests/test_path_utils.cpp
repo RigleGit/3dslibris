@@ -26,6 +26,8 @@ void ExpectFontEntry(const char *label, const char *name, const char *path) {
 
 int main() {
   ExpectNonEmpty("kSdmcBase exists", paths::kSdmcBase);
+  ExpectNonEmpty("kLegacySdmcBase exists", paths::kLegacySdmcBase);
+  ExpectNonEmpty("kConfigSdmcBase exists", paths::kConfigSdmcBase);
   ExpectNonEmpty("kRomfsBase exists", paths::kRomfsBase);
   ExpectNonEmpty("kBookDir exists", paths::kBookDir);
   ExpectNonEmpty("kRomfsBookDir exists", paths::kRomfsBookDir);
@@ -50,6 +52,19 @@ int main() {
   ExpectPathPrefix("cache dir prefix", paths::kCacheBaseDir, "sdmc:/3ds/3dslibris/");
   ExpectPathPrefix("log file prefix", paths::kLogFile, "sdmc:/3ds/3dslibris/");
   ExpectPathPrefix("prefs file prefix", paths::kPrefsFile, "sdmc:/3ds/3dslibris/");
+
+  {
+    const std::string active_base = paths::GetSdmcBase();
+    test::ExpectTrue("active sdmc base is legacy or config",
+                     active_base == paths::kLegacySdmcBase ||
+                         active_base == paths::kConfigSdmcBase);
+    test::ExpectTrue("active book dir suffix",
+                     paths::GetBookDir().find("/book") != std::string::npos);
+    test::ExpectTrue("active font dir suffix",
+                     paths::GetFontDir().find("/font") != std::string::npos);
+    test::ExpectTrue("active prefs file suffix",
+                     paths::GetPrefsFile().find("/3dslibris.xml") != std::string::npos);
+  }
 
   test::ExpectEq("splash path count", paths::kSplashPathCount, 4);
   for (int i = 0; i < paths::kSplashPathCount; ++i) {

@@ -40,12 +40,12 @@ static std::string ResolveFontPath(const App *app, const std::string &filename) 
     return filename;
 
   const std::string configured_dir =
-      (app && !app->fontdir.empty()) ? app->fontdir : std::string(paths::kFontDir);
+      (app && !app->fontdir.empty()) ? app->fontdir : paths::GetFontDir();
   const std::string configured = configured_dir + "/" + filename;
   if (FileReadable(configured.c_str()))
     return configured;
 
-  const std::string sdmc = std::string(paths::kFontDir) + "/" + filename;
+  const std::string sdmc = paths::GetFontDir() + "/" + filename;
   if (FileReadable(sdmc.c_str()))
     return sdmc;
 
@@ -761,7 +761,7 @@ void FontManager::AutoLoadCjkFallbackFonts() {
           ? parent->app->fontdir
           : std::string();
   std::vector<std::string> search_dirs;
-  GetFallbackFontSearchDirs(font_dir, paths::kFontDir, &search_dirs);
+  GetFallbackFontSearchDirs(font_dir, paths::GetFontDir().c_str(), &search_dirs);
   int loaded = 0;
   for (size_t i = 0; i < search_dirs.size() && loaded < kMaxFallbackFaces; i++)
     AutoLoadFallbackFontsFromDir(this, search_dirs[i], &loaded);

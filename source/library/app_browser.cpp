@@ -63,8 +63,8 @@
 
 namespace {
 
-static const char *kCoverCacheBaseDir = paths::kCacheBaseDir;
-static const char *kCoverCacheDir = paths::kCoverCacheDir;
+static const std::string &kCoverCacheBaseDir = paths::GetCacheBaseDir();
+static const std::string &kCoverCacheDir = paths::GetCoverCacheDir();
 static const char *kCoverCacheMagic = "CVR3";
 static const size_t kCoverCacheMaxFiles = 512;
 static const size_t kCoverCacheMaxBytes = 16 * 1024 * 1024;
@@ -219,7 +219,7 @@ static void PruneCoverCache(bool force) {
       alive.insert(BasenamePath(it->path));
     }
     std::vector<std::string> kept;
-    FILE *rf = fopen(paths::kCoverCacheManifest, "r");
+    FILE *rf = fopen(paths::GetCoverCacheManifest().c_str(), "r");
     if (rf) {
       char line[1024];
       while (fgets(line, sizeof(line), rf)) {
@@ -233,7 +233,7 @@ static void PruneCoverCache(bool force) {
       }
       fclose(rf);
     }
-    FILE *wf = fopen(paths::kCoverCacheManifest, "w");
+    FILE *wf = fopen(paths::GetCoverCacheManifest().c_str(), "w");
     if (wf) {
       for (size_t i = 0; i < kept.size(); i++)
         fputs(kept[i].c_str(), wf);
@@ -246,8 +246,8 @@ static void EnsureCoverCacheDirs() {
   static bool initialized = false;
   if (initialized)
     return;
-  mkdir(kCoverCacheBaseDir, 0777);
-  mkdir(kCoverCacheDir, 0777);
+  mkdir(kCoverCacheBaseDir.c_str(), 0777);
+  mkdir(kCoverCacheDir.c_str(), 0777);
 
   // One-time cleanup: remove legacy CVR2 cache files whose names are bare
   // 16-hex-digit hashes (e.g., "a1b2c3d4e5f6g7h8.cvr").
@@ -464,7 +464,7 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
   }
   fclose(fp);
   if (ok) {
-    FILE *mf = fopen(paths::kCoverCacheManifest, "a");
+    FILE *mf = fopen(paths::GetCoverCacheManifest().c_str(), "a");
     if (mf) {
       const char *t = book->GetTitle();
       const char *f = book->GetFileName();

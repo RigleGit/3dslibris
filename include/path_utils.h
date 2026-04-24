@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <ctype.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -21,6 +22,8 @@
 namespace paths {
 
 // Base directories
+static const char *kLegacySdmcBase  = "sdmc:/3ds/3dslibris";
+static const char *kConfigSdmcBase  = "sdmc:/config/3dslibris";
 static const char *kSdmcBase        = "sdmc:/3ds/3dslibris";
 static const char *kRomfsBase       = "romfs:/3ds/3dslibris";
 static const char *kBookDir         = "sdmc:/3ds/3dslibris/book";
@@ -105,6 +108,127 @@ static const char *kCjkFontPatterns[] = {
     "Baekmuk",
 };
 static const int kCjkFontPatternCount = 25;
+
+inline bool PathExists(const char *path, bool expect_directory = false) {
+  if (!path || !*path)
+    return false;
+  struct stat st;
+  if (stat(path, &st) != 0)
+    return false;
+  if (expect_directory)
+    return S_ISDIR(st.st_mode);
+  return true;
+}
+
+inline bool HasSdmcInstallMarkers(const char *base_path) {
+  if (!base_path || !*base_path)
+    return false;
+  const std::string base(base_path);
+  return PathExists((base + "/book").c_str(), true) ||
+         PathExists((base + "/font").c_str(), true) ||
+         PathExists((base + "/resources").c_str(), true) ||
+         PathExists((base + "/3dslibris.xml").c_str(), false);
+}
+
+inline const std::string &GetSdmcBase() {
+  static const std::string path =
+      HasSdmcInstallMarkers(kLegacySdmcBase)
+          ? std::string(kLegacySdmcBase)
+          : (HasSdmcInstallMarkers(kConfigSdmcBase)
+                 ? std::string(kConfigSdmcBase)
+                 : std::string(kLegacySdmcBase));
+  return path;
+}
+
+inline const std::string &GetBookDir() {
+  static const std::string path = GetSdmcBase() + "/book";
+  return path;
+}
+
+inline const std::string &GetFontDir() {
+  static const std::string path = GetSdmcBase() + "/font";
+  return path;
+}
+
+inline const std::string &GetResourceDir() {
+  static const std::string path = GetSdmcBase() + "/resources";
+  return path;
+}
+
+inline const std::string &GetCacheBaseDir() {
+  static const std::string path = GetSdmcBase() + "/cache";
+  return path;
+}
+
+inline const std::string &GetCoverCacheDir() {
+  static const std::string path = GetCacheBaseDir() + "/covers";
+  return path;
+}
+
+inline const std::string &GetCoverCacheManifest() {
+  static const std::string path = GetCoverCacheDir() + "/manifest.txt";
+  return path;
+}
+
+inline const std::string &GetEpubCacheDir() {
+  static const std::string path = GetCacheBaseDir() + "/epub";
+  return path;
+}
+
+inline const std::string &GetMobiCacheDir() {
+  static const std::string path = GetCacheBaseDir() + "/mobi";
+  return path;
+}
+
+inline const std::string &GetMobiCoverMetaCacheDir() {
+  static const std::string path = GetCacheBaseDir() + "/mobi-cover";
+  return path;
+}
+
+inline const std::string &GetMetaCacheDir() {
+  static const std::string path = GetCacheBaseDir() + "/meta";
+  return path;
+}
+
+inline const std::string &GetLogFile() {
+  static const std::string path = GetSdmcBase() + "/3dslibris.log";
+  return path;
+}
+
+inline const std::string &GetPrefsFile() {
+  static const std::string path = GetSdmcBase() + "/3dslibris.xml";
+  return path;
+}
+
+inline const std::string &GetIconPngDir() {
+  static const std::string path = GetResourceDir() + "/ui/icons/png";
+  return path;
+}
+
+inline const std::string &GetIconDir() {
+  static const std::string path = GetResourceDir() + "/ui/icons";
+  return path;
+}
+
+inline const std::string &GetResourceBase() {
+  return GetResourceDir();
+}
+
+inline std::vector<std::string> GetSplashPathList() {
+  const std::string &base = GetSdmcBase();
+  std::vector<std::string> paths;
+  paths.push_back(base + "/resources/splash.jpg");
+  paths.push_back(base + "/resources/splash.jpeg");
+  paths.push_back(base + "/splash.jpg");
+  paths.push_back(base + "/splash.jpeg");
+  if (base != kLegacySdmcBase) {
+    paths.push_back(std::string(kLegacySdmcBase) + "/resources/splash.jpg");
+    paths.push_back(std::string(kLegacySdmcBase) + "/resources/splash.jpeg");
+    paths.push_back(std::string(kLegacySdmcBase) + "/splash.jpg");
+    paths.push_back(std::string(kLegacySdmcBase) + "/splash.jpeg");
+  }
+  return paths;
+}
 
 } // namespace paths
 

@@ -174,26 +174,25 @@ static void try_load_icons_once() {
       {UI_BUTTON_ICON_HOME, "home.png"},
   };
 
-  const char *dirs[] = {
-      paths::kIconPngDir,
-      paths::kIconDir,
+  const std::vector<std::string> dirs = {
+      paths::GetIconPngDir(),
+      paths::GetIconDir(),
       "romfs:/3ds/3dslibris/resources/ui/icons/png",
       "romfs:/3ds/3dslibris/resources/ui/icons",
       "resources/ui/icons/png",
       "resources/ui/icons",
-      paths::kResourceBase,
+      paths::GetResourceBase(),
       "data/ui/icons/png",
       "./data/ui/icons/png",
-      nullptr,
   };
 
   char path[512];
-  for (int d = 0; dirs[d]; d++) {
+  for (size_t d = 0; d < dirs.size(); d++) {
     for (size_t i = 0; i < sizeof(specs) / sizeof(specs[0]); i++) {
       IconBitmap &icon = g_icons[(int)specs[i].id];
       if (icon.loaded)
         continue;
-      snprintf(path, sizeof(path), "%s/%s", dirs[d], specs[i].filename);
+      snprintf(path, sizeof(path), "%s/%s", dirs[d].c_str(), specs[i].filename);
       load_icon_png(&icon, path);
     }
   }

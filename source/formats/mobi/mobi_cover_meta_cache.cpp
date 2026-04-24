@@ -11,7 +11,7 @@ namespace {
 
 static const uint32_t kMagic = 0x4D434D43U; // MCMC
 static const uint16_t kVersion = 1;
-static const char *kBaseDir = paths::kMobiCoverMetaCacheDir;
+static const std::string &kBaseDir = paths::GetMobiCoverMetaCacheDir();
 
 struct Header {
   uint32_t magic;
@@ -37,7 +37,7 @@ std::string BuildPath(const std::string &book_path, long long file_size,
   uint64_t h = Fnv1a64(key);
   char out[192];
   snprintf(out, sizeof(out), "%s/%016llx.mcm",
-           kBaseDir, (unsigned long long)h);
+           kBaseDir.c_str(), (unsigned long long)h);
   return std::string(out);
 }
 
