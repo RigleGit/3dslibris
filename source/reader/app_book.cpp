@@ -341,6 +341,19 @@ static void DrawOpeningSplashImpl(App *app, unsigned spine_done,
 
 void DrawOpeningSplash(App *app) { DrawOpeningSplashImpl(app, 0, 0); }
 
+static void MaybeDrawOpeningSplashProgress(App *app) {
+  if (!app || !app->IsOpeningPending() || !app->GetOpeningBook())
+    return;
+
+  const unsigned int seq = app->GetOpeningProgressSeq();
+  if (seq == 0 || seq == app->GetOpeningDrawnProgressSeq())
+    return;
+
+  DrawOpeningSplashImpl(app, app->GetOpeningSpineDone(),
+                        app->GetOpeningSpineTotal());
+  app->SetOpeningDrawnProgressSeq(seq);
+}
+
 void ResetOpeningState(App *app) {
   if (!app)
     return;
@@ -350,6 +363,8 @@ void ResetOpeningState(App *app) {
   app->SetOpeningNeedsRelayout(false);
   app->SetOpeningOldPageCount(0);
   app->SetOpeningOldPosition(0);
+  app->SetOpeningSpineProgress(0, 0);
+  app->SetOpeningDrawnProgressSeq(0);
   app->MutableOpeningOldBookmarks().clear();
   app->SetOpeningStartedAtMs(0);
 }
@@ -426,7 +441,14 @@ void EnsureBookMode(App *app, const char *log_message) {
 
 void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
                                    void *user_data) {
-  DrawOpeningSplashImpl(static_cast<App *>(user_data), done, total);
+  App *app = static_cast<App *>(user_data);
+  if (!app)
+    return;
+  if (!app->IsOpeningPending()) {
+    DrawOpeningSplashImpl(app, done, total);
+    return;
+  }
+  app->SetOpeningSpineProgress(done, total);
 }
 
 void ReaderController::ClearDeferredRelayoutState() {
@@ -546,6 +568,7 @@ void ReaderController::HandleEventInOpening() {
   Text *ts = app_.ts.get();
   if (app_.ShouldAbortWork())
     return;
+  MaybeDrawOpeningSplashProgress(&app_);
   const u32 keys = hidKeysDown();
 
   if (keys & (app_.key.b | app_.key.start | app_.key.select)) {
@@ -1023,6 +1046,8 @@ u8 ReaderController::OpenBook() {
 
   // While parsing a new book, avoid displaying stale browser highlight state.
   DrawOpeningSplash(&app_);
+  app_.SetOpeningSpineProgress(0, 0);
+  app_.SetOpeningDrawnProgressSeq(0);
   if (app_.ShouldAbortWork()) {
     app_.SetMode(AppMode::Browser);
     app_.SetBrowserDirty(true);

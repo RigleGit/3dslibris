@@ -231,6 +231,12 @@ public:
   void SetOpeningOldPageCount(int old_page_count);
   int GetOpeningOldPosition() const;
   void SetOpeningOldPosition(int old_position);
+  unsigned int GetOpeningSpineDone() const;
+  unsigned int GetOpeningSpineTotal() const;
+  void SetOpeningSpineProgress(unsigned int done, unsigned int total);
+  unsigned int GetOpeningProgressSeq() const;
+  unsigned int GetOpeningDrawnProgressSeq() const;
+  void SetOpeningDrawnProgressSeq(unsigned int seq);
   std::list<int> &MutableOpeningOldBookmarks();
   u64 GetOpeningStartedAtMs() const;
   void SetOpeningStartedAtMs(u64 started_at_ms);
@@ -313,11 +319,16 @@ private:
     int old_position;
     std::list<int> old_bookmarks;
     u64 started_at_ms;
+    unsigned int spine_done;
+    unsigned int spine_total;
+    unsigned int progress_seq;
+    unsigned int drawn_progress_seq;
 
     OpeningState()
         : pending(false), book(nullptr), session_id(0), needs_relayout(false),
           old_page_count(0), old_position(0), old_bookmarks(),
-          started_at_ms(0) {}
+          started_at_ms(0), spine_done(0), spine_total(0), progress_seq(0),
+          drawn_progress_seq(0) {}
   };
 
   struct DeferredRelayoutState

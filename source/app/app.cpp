@@ -556,6 +556,38 @@ void App::SetOpeningOldPosition(int old_position)
   reader_state_.opening.old_position = old_position;
 }
 
+unsigned int App::GetOpeningSpineDone() const
+{
+  return __atomic_load_n(&reader_state_.opening.spine_done, __ATOMIC_ACQUIRE);
+}
+
+unsigned int App::GetOpeningSpineTotal() const
+{
+  return __atomic_load_n(&reader_state_.opening.spine_total, __ATOMIC_ACQUIRE);
+}
+
+void App::SetOpeningSpineProgress(unsigned int done, unsigned int total)
+{
+  __atomic_store_n(&reader_state_.opening.spine_done, done, __ATOMIC_RELEASE);
+  __atomic_store_n(&reader_state_.opening.spine_total, total, __ATOMIC_RELEASE);
+  __atomic_add_fetch(&reader_state_.opening.progress_seq, 1u, __ATOMIC_ACQ_REL);
+}
+
+unsigned int App::GetOpeningProgressSeq() const
+{
+  return __atomic_load_n(&reader_state_.opening.progress_seq, __ATOMIC_ACQUIRE);
+}
+
+unsigned int App::GetOpeningDrawnProgressSeq() const
+{
+  return reader_state_.opening.drawn_progress_seq;
+}
+
+void App::SetOpeningDrawnProgressSeq(unsigned int seq)
+{
+  reader_state_.opening.drawn_progress_seq = seq;
+}
+
 std::list<int> &App::MutableOpeningOldBookmarks()
 {
   return reader_state_.opening.old_bookmarks;
