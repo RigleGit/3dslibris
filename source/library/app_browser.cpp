@@ -93,9 +93,13 @@ static bool ShouldCurrentBrowserLoadCovers(const App &app) {
   return browser_view_utils::ShouldLoadCovers(CurrentBrowserViewMode(app));
 }
 
-static bool SupportsBrowserCoverWarmup(format_t format, const char *filename) {
-  if (format == FORMAT_EPUB || format == FORMAT_PDF || format == FORMAT_CBZ)
+static bool SupportsBrowserCoverWarmup(const App &app, format_t format,
+                                       const char *filename) {
+  if (format == FORMAT_EPUB || format == FORMAT_CBZ)
     return true;
+  if (format == FORMAT_PDF)
+    return browser_warmup_utils::ShouldAttemptPdfCoverWarmup(
+        app.IsNew3dsDevice());
   if (format != FORMAT_XHTML || !filename)
     return false;
   return HasExtCI(filename, ".fb2") || HasExtCI(filename, ".mobi");
@@ -618,7 +622,7 @@ void LibraryController::QueueBookWarmup(Book *book) {
   const bool supports_metadata =
       app_flow_utils::SupportsMetadataIndexing(format);
   const bool supports_cover =
-      SupportsBrowserCoverWarmup(book->format, book->GetFileName());
+      SupportsBrowserCoverWarmup(app_, book->format, book->GetFileName());
   const bool metadata_done =
       browser_warmup_utils::MetadataWarmupDone(supports_metadata,
                                                book->metadataIndexTried);
@@ -659,7 +663,7 @@ void LibraryController::QueueBookWarmup(Book *book) {
     if (!book->metadataIndexTried &&
         app_flow_utils::SupportsMetadataIndexing(format))
       EnqueueJob(APP_JOB_INDEX_METADATA, book);
-    if (should_load_covers && should_queue_cover)
+    if (supports_cover && should_load_covers && should_queue_cover)
       EnqueueJob(APP_JOB_EXTRACT_COVER, book);
   } else if (book->format == FORMAT_CBZ) {
     if (should_load_covers && should_queue_cover)
@@ -704,7 +708,8 @@ void LibraryController::TickBrowserWarmup() {
     const bool selected_supports_metadata =
         app_flow_utils::SupportsMetadataIndexing(selected_format);
     const bool selected_supports_cover =
-        SupportsBrowserCoverWarmup(selected->format, selected->GetFileName());
+        SupportsBrowserCoverWarmup(app_, selected->format,
+                                   selected->GetFileName());
     if (!browser_warmup_utils::BookWarmupDone(
             selected_supports_metadata, selected->metadataIndexTried,
             selected_supports_cover, selected->coverPixels != nullptr,
@@ -725,7 +730,7 @@ void LibraryController::TickBrowserWarmup() {
     const bool supports_metadata =
         app_flow_utils::SupportsMetadataIndexing(format);
     const bool supports_cover =
-        SupportsBrowserCoverWarmup(book->format, book->GetFileName());
+        SupportsBrowserCoverWarmup(app_, book->format, book->GetFileName());
     if (browser_warmup_utils::BookWarmupDone(
             supports_metadata, book->metadataIndexTried, supports_cover,
             book->coverPixels != nullptr, book->coverAttempts,
@@ -826,7 +831,8 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         const bool cover_followup_pending =
             app_.GetMode() == AppMode::Browser &&
             ShouldCurrentBrowserLoadCovers(app_) &&
-            SupportsBrowserCoverWarmup(book->format, book->GetFileName()) &&
+            SupportsBrowserCoverWarmup(app_, book->format,
+                                       book->GetFileName()) &&
             !book->coverPixels &&
             book->coverAttempts < kCoverMaxAttempts;
         if (!cover_followup_pending)
@@ -1086,9 +1092,15 @@ void LibraryController::browser_handleevent() {
                            KEY_LEFT | KEY_RIGHT | KEY_L | KEY_R | KEY_CPAD_UP |
                            KEY_CPAD_DOWN | KEY_CPAD_LEFT | KEY_CPAD_RIGHT;
   if (app_.IsBrowserWaitingInputRelease()) {
-    if (hidKeysHeld() & release_mask)
+    const u64 now = osGetTime();
+    if (hidKeysHeld() & release_mask &&
+        !browser_warmup_utils::ShouldForceClearInputRelease(
+            now, app_.GetBrowserLastInteractionMs(), true))
       return;
     app_.SetBrowserWaitingInputRelease(false);
+    if (browser_warmup_utils::ShouldForceClearInputRelease(
+            now, app_.GetBrowserLastInteractionMs(), true))
+      app_.SetBrowserLastInteractionMs(now);
     return;
   }
 

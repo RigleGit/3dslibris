@@ -7,6 +7,7 @@ namespace browser_warmup_utils {
 
 static const uint64_t kBrowserWarmupIdleDelayMs = 250;
 static const uint64_t kBrowserHeavyWarmupIdleDelayMs = 1200;
+static const uint64_t kBrowserInputReleaseMaxWaitMs = 1500;
 static const uint64_t kOld3dsSelectedCoverMinFreeBytes = 22u * 1024u * 1024u;
 static const uint64_t kOld3dsWarmCoverMinFreeBytes = 26u * 1024u * 1024u;
 static const uint64_t kOld3dsSelectedCoverRetryDelayMs = 2000;
@@ -30,6 +31,16 @@ inline bool IsBrowserHeavyWarmupIdle(uint64_t now_ms,
   if (now_ms < last_interaction_ms)
     return false;
   return (now_ms - last_interaction_ms) >= kBrowserHeavyWarmupIdleDelayMs;
+}
+
+inline bool ShouldForceClearInputRelease(uint64_t now_ms,
+                                         uint64_t last_interaction_ms,
+                                         bool wait_input_release) {
+  if (!wait_input_release)
+    return false;
+  if (now_ms < last_interaction_ms)
+    return false;
+  return (now_ms - last_interaction_ms) >= kBrowserInputReleaseMaxWaitMs;
 }
 
 inline int VisibleBrowserEntryCount(int page_size, int page_start,
@@ -67,6 +78,10 @@ inline bool HasCoverExtractionHeadroom(bool is_new_3ds, bool is_selected_book,
   const uint64_t min_bytes = is_selected_book ? kOld3dsSelectedCoverMinFreeBytes
                                               : kOld3dsWarmCoverMinFreeBytes;
   return free_bytes >= min_bytes;
+}
+
+inline bool ShouldAttemptPdfCoverWarmup(bool is_new_3ds) {
+  return is_new_3ds;
 }
 
 inline uint64_t CoverRetryDelayMs(bool is_new_3ds, bool is_selected_book,

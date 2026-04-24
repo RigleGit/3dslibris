@@ -26,6 +26,23 @@ void TestWarmupBlockedDuringReleaseWait() {
               browser_warmup_utils::IsBrowserWarmupIdle(1000, 0, true));
 }
 
+void TestReleaseWaitCanBeForcedClearAfterTimeout() {
+  ExpectFalse("release wait timeout ignores inactive state",
+              browser_warmup_utils::ShouldForceClearInputRelease(2000, 0,
+                                                                 false));
+  ExpectFalse("release wait timeout waits below threshold",
+              browser_warmup_utils::ShouldForceClearInputRelease(
+                  browser_warmup_utils::kBrowserInputReleaseMaxWaitMs - 1, 0,
+                  true));
+  ExpectTrue("release wait timeout clears at threshold",
+             browser_warmup_utils::ShouldForceClearInputRelease(
+                 browser_warmup_utils::kBrowserInputReleaseMaxWaitMs, 0,
+                 true));
+  ExpectFalse("release wait timeout rejects wrapped clock",
+              browser_warmup_utils::ShouldForceClearInputRelease(50, 100,
+                                                                 true));
+}
+
 void TestWarmupRequiresIdleDelay() {
   ExpectFalse("below idle threshold",
               browser_warmup_utils::IsBrowserWarmupIdle(
@@ -105,6 +122,13 @@ void TestOld3dsCoverMemoryGuard() {
                   browser_warmup_utils::kOld3dsWarmCoverMinFreeBytes - 1));
 }
 
+void TestOld3dsPdfCoverWarmupIsDisabled() {
+  ExpectFalse("old3ds skips pdf cover warmup",
+              browser_warmup_utils::ShouldAttemptPdfCoverWarmup(false));
+  ExpectTrue("new3ds allows pdf cover warmup",
+             browser_warmup_utils::ShouldAttemptPdfCoverWarmup(true));
+}
+
 void TestOld3dsCoverRetryBackoff() {
   ExpectTrue("selected old3ds retry delay applied",
              browser_warmup_utils::CoverRetryDelayMs(false, true, 4, false) ==
@@ -141,6 +165,7 @@ void TestWarmupCompletionState() {
 
 int main() {
   TestWarmupBlockedDuringReleaseWait();
+  TestReleaseWaitCanBeForcedClearAfterTimeout();
   TestWarmupRequiresIdleDelay();
   TestHeavyWarmupRequiresLongerIdleDelay();
   TestWarmupRejectsWrappedClock();
@@ -149,6 +174,7 @@ int main() {
   TestNonSelectedCoverWarmupUsesHeavyIdle();
   TestOld3dsWarmupQueueLimit();
   TestOld3dsCoverMemoryGuard();
+  TestOld3dsPdfCoverWarmupIsDisabled();
   TestOld3dsCoverRetryBackoff();
   TestWarmupCompletionState();
   return 0;
