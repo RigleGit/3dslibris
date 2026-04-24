@@ -11,7 +11,9 @@
 #include "formats/common/book_error.h"
 #include "formats/common/epub_image_utils.h"
 #include "formats/epub/epub.h"
+#include "formats/epub/epub_cover_decode_utils.h"
 #include "formats/epub/epub_limits.h"
+#include "formats/mupdf/mupdf_common.h"
 #include "minizip/unzip.h"
 #include "path_utils.h"
 #include "stb_image.h"
@@ -99,29 +101,6 @@ static bool LooksLikePngPayload(const std::string &path_hint,
     return true;
   }
   return buf.size() >= 8 && !png_sig_cmp((png_bytep)buf.data(), 0, 8);
-}
-
-static bool ComputeCoverThumbSize(int img_w, int img_h, int *final_w,
-                                  int *final_h, float *scale_out) {
-  if (!final_w || !final_h || !scale_out || img_w <= 0 || img_h <= 0)
-    return false;
-  const float scale_x = (float)img_w / (float)kCoverThumbMaxW;
-  const float scale_y = (float)img_h / (float)kCoverThumbMaxH;
-  const float scale = std::max(scale_x, scale_y);
-  if (scale <= 0.0f)
-    return false;
-  int thumb_w = (int)(img_w / scale);
-  int thumb_h = (int)(img_h / scale);
-  if (thumb_w > kCoverThumbMaxW)
-    thumb_w = kCoverThumbMaxW;
-  if (thumb_h > kCoverThumbMaxH)
-    thumb_h = kCoverThumbMaxH;
-  thumb_w = std::max(1, thumb_w);
-  thumb_h = std::max(1, thumb_h);
-  *final_w = thumb_w;
-  *final_h = thumb_h;
-  *scale_out = scale;
-  return true;
 }
 
 static bool AdoptCoverPixels(Book *book, const std::vector<u16> &pixels, int w,
@@ -232,8 +211,9 @@ static bool DecodePngCoverThumbnail(const std::vector<u8> &decodebuf,
   int thumb_w = 0;
   int thumb_h = 0;
   float scale = 1.0f;
-  if (!ComputeCoverThumbSize((int)img_w, (int)img_h, &thumb_w, &thumb_h,
-                             &scale)) {
+  if (!epub_cover_decode_utils::ComputeCoverThumbSize(
+          (int)img_w, (int)img_h, kCoverThumbMaxW, kCoverThumbMaxH, &thumb_w,
+          &thumb_h, &scale)) {
     png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
     return false;
   }
@@ -295,7 +275,8 @@ static bool RenderSvgCoverThumbnail(const std::vector<u8> &svg_buf,
   fz_device *device = NULL;
   bool ok = false;
 
-  ctx = fz_new_context(NULL, NULL, 4u * 1024u * 1024u);
+  InitMuPdfLocks();
+  ctx = fz_new_context(NULL, &g_mupdf_locks_ctx, FZ_STORE_DEFAULT);
   if (!ctx)
     return false;
   fz_register_document_handlers(ctx);
@@ -326,8 +307,9 @@ static bool RenderSvgCoverThumbnail(const std::vector<u8> &svg_buf,
     int thumb_w = 0;
     int thumb_h = 0;
     float scale = 1.0f;
-    if (!ComputeCoverThumbSize((int)(svg_w + 0.5f), (int)(svg_h + 0.5f),
-                               &thumb_w, &thumb_h, &scale)) {
+    if (!epub_cover_decode_utils::ComputeCoverThumbSize(
+            (int)(svg_w + 0.5f), (int)(svg_h + 0.5f), kCoverThumbMaxW,
+            kCoverThumbMaxH, &thumb_w, &thumb_h, &scale)) {
       fz_throw(ctx, FZ_ERROR_FORMAT, "invalid svg thumbnail size");
     }
 
@@ -377,6 +359,96 @@ static bool RenderSvgCoverThumbnail(const std::vector<u8> &svg_buf,
   fz_catch(ctx) { ok = false; }
   fz_drop_context(ctx);
 
+  return ok;
+}
+
+static bool DecodeImageCoverThumbnailWithMuPdf(const std::vector<u8> &decodebuf,
+                                               std::vector<u16> *thumb_pixels,
+                                               int *thumb_w_out,
+                                               int *thumb_h_out) {
+  if (!thumb_pixels || !thumb_w_out || !thumb_h_out || decodebuf.empty())
+    return false;
+
+  fz_context *ctx = NULL;
+  fz_buffer *buf = NULL;
+  fz_image *image = NULL;
+  fz_pixmap *pixmap = NULL;
+  bool ok = false;
+
+  InitMuPdfLocks();
+  ctx = fz_new_context(NULL, &g_mupdf_locks_ctx, FZ_STORE_DEFAULT);
+  if (!ctx)
+    return false;
+
+  fz_var(buf);
+  fz_var(image);
+  fz_var(pixmap);
+
+  fz_try(ctx) {
+    buf = fz_new_buffer_from_copied_data(ctx, decodebuf.data(),
+                                         decodebuf.size());
+    image = fz_new_image_from_buffer(ctx, buf);
+    if (!image || image->w <= 0 || image->h <= 0 ||
+        image->w > epub_limits::kCoverMaxDimension ||
+        image->h > epub_limits::kCoverMaxDimension) {
+      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid cover image dimensions");
+    }
+
+    int thumb_w = 0;
+    int thumb_h = 0;
+    float scale = 1.0f;
+    if (!epub_cover_decode_utils::ComputeCoverThumbSize(
+            image->w, image->h, kCoverThumbMaxW, kCoverThumbMaxH, &thumb_w,
+            &thumb_h, &scale)) {
+      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid cover thumbnail size");
+    }
+
+    int l2factor = epub_cover_decode_utils::ComputeJpegL2SubsampleFactor(
+        image->w, image->h, thumb_w, thumb_h);
+    pixmap = image->get_pixmap(ctx, image, NULL, thumb_w, thumb_h, &l2factor);
+    if (!pixmap)
+      fz_throw(ctx, FZ_ERROR_FORMAT, "image->get_pixmap failed");
+    if (l2factor > 0)
+      fz_subsample_pixmap(ctx, pixmap, l2factor);
+
+    const int pix_w = fz_pixmap_width(ctx, pixmap);
+    const int pix_h = fz_pixmap_height(ctx, pixmap);
+    const int stride = fz_pixmap_stride(ctx, pixmap);
+    const int comps = fz_pixmap_components(ctx, pixmap);
+    unsigned char *samples = fz_pixmap_samples(ctx, pixmap);
+    if (!samples || pix_w <= 0 || pix_h <= 0 || stride <= 0 || comps < 1)
+      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid cover pixmap");
+
+    thumb_pixels->assign((size_t)thumb_w * (size_t)thumb_h, 0);
+    for (int y = 0; y < thumb_h; y++) {
+      int src_y = (int)((long long)y * (long long)pix_h /
+                        (long long)thumb_h);
+      if (src_y >= pix_h)
+        src_y = pix_h - 1;
+      const unsigned char *row = samples + (size_t)src_y * (size_t)stride;
+      for (int x = 0; x < thumb_w; x++) {
+        int src_x = (int)((long long)x * (long long)pix_w /
+                          (long long)thumb_w);
+        if (src_x >= pix_w)
+          src_x = pix_w - 1;
+        const unsigned char *px = row + (size_t)src_x * (size_t)comps;
+        const unsigned char r = px[0];
+        const unsigned char g = (comps >= 3) ? px[1] : px[0];
+        const unsigned char b = (comps >= 3) ? px[2] : px[0];
+        (*thumb_pixels)[(size_t)y * (size_t)thumb_w + (size_t)x] =
+            (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+      }
+    }
+    *thumb_w_out = thumb_w;
+    *thumb_h_out = thumb_h;
+    ok = true;
+  }
+  fz_catch(ctx) { ok = false; }
+
+  fz_drop_pixmap(ctx, pixmap);
+  fz_drop_image(ctx, image);
+  fz_drop_buffer(ctx, buf);
+  fz_drop_context(ctx);
   return ok;
 }
 
@@ -488,6 +560,7 @@ int Extract(Book *book, const std::string &epubpath) {
       book->IsOpenAbortRequested())
     return BOOK_ERR_CANCELLED;
 
+  const bool jpeg_cover = IsJpegCover();
   int infoW = 0, infoH = 0, infoChannels = 0;
   bool hasInfo = stbi_info_from_memory(decodebuf.data(), (int)decodebuf.size(),
                                        &infoW, &infoH, &infoChannels) != 0;
@@ -510,6 +583,17 @@ int Extract(Book *book, const std::string &epubpath) {
           AdoptCoverPixels(book, png_pixels, png_w, png_h)) {
         return 0;
       }
+    }
+  }
+
+  if (jpeg_cover) {
+    std::vector<u16> jpg_pixels;
+    int jpg_w = 0;
+    int jpg_h = 0;
+    if (DecodeImageCoverThumbnailWithMuPdf(decodebuf, &jpg_pixels, &jpg_w,
+                                           &jpg_h) &&
+        AdoptCoverPixels(book, jpg_pixels, jpg_w, jpg_h)) {
+      return 0;
     }
   }
 
@@ -537,17 +621,15 @@ int Extract(Book *book, const std::string &epubpath) {
     return 7;
   }
 
-  int thumbW = kCoverThumbMaxW;
-  int thumbH = kCoverThumbMaxH;
-  float scaleX = (float)imgW / thumbW;
-  float scaleY = (float)imgH / thumbH;
-  float scale = (scaleX > scaleY) ? scaleX : scaleY;
-  int finalW = (int)(imgW / scale);
-  int finalH = (int)(imgH / scale);
-  if (finalW > thumbW)
-    finalW = thumbW;
-  if (finalH > thumbH)
-    finalH = thumbH;
+  int finalW = 0;
+  int finalH = 0;
+  float scale = 1.0f;
+  if (!epub_cover_decode_utils::ComputeCoverThumbSize(
+          imgW, imgH, kCoverThumbMaxW, kCoverThumbMaxH, &finalW, &finalH,
+          &scale)) {
+    stbi_image_free(pixels);
+    return 7;
+  }
 
   if (book->coverPixels) {
     delete[] book->coverPixels;
