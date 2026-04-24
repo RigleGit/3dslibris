@@ -5,6 +5,7 @@
 #include "app/app.h"
 #include "book/book.h"
 #include "debug_log.h"
+#include "library/browser_grid_geometry_utils.h"
 #include "library/browser_presentation_hit_utils.h"
 #include "library/browser_presentation_utils.h"
 #include "ui/button.h"
@@ -30,56 +31,6 @@ void BrowserGridMarqueeState::Reset() {
 }
 
 namespace browser_grid_view {
-
-namespace {
-
-static bool RoundedRectContains(int x, int y, int w, int h, int radius) {
-  if (w <= 0 || h <= 0)
-    return false;
-  if (radius <= 0)
-    return x >= 0 && y >= 0 && x < w && y < h;
-  if (x < 0 || y < 0 || x >= w || y >= h)
-    return false;
-
-  const int r = radius;
-  if ((x >= r && x < w - r) || (y >= r && y < h - r))
-    return true;
-
-  int cx = (x < r) ? r - 1 : w - r;
-  int cy = (y < r) ? r - 1 : h - r;
-  const int dx = x - cx;
-  const int dy = y - cy;
-  return dx * dx + dy * dy <= r * r;
-}
-
-static void FitRectPreserveAspect(int src_w, int src_h, int box_w, int box_h,
-                                  int *out_w, int *out_h) {
-  if (!out_w || !out_h) {
-    return;
-  }
-  if (src_w <= 0 || src_h <= 0 || box_w <= 0 || box_h <= 0) {
-    *out_w = 0;
-    *out_h = 0;
-    return;
-  }
-
-  const long long lhs = (long long)box_w * (long long)src_h;
-  const long long rhs = (long long)box_h * (long long)src_w;
-  if (lhs <= rhs) {
-    *out_w = box_w;
-    *out_h = (int)((long long)src_h * (long long)box_w / (long long)src_w);
-  } else {
-    *out_h = box_h;
-    *out_w = (int)((long long)src_w * (long long)box_h / (long long)src_h);
-  }
-
-  if (*out_w < 1)
-    *out_w = 1;
-  if (*out_h < 1)
-    *out_h = 1;
-}
-
-} // namespace
 
 int HitTestBookIndex(int x, int y, int page_start, int book_count) {
   return browser_presentation_hit_utils::HitTestGridBookIndex(
@@ -108,8 +59,9 @@ void DrawPage(App &app, BrowserGridMarqueeState &marquee, int page_start) {
       const int inner_h = kCoverH - inner_pad_y * 2;
       int draw_w = 0;
       int draw_h = 0;
-      FitRectPreserveAspect(app.books[i]->coverWidth, app.books[i]->coverHeight,
-                            inner_w, inner_h, &draw_w, &draw_h);
+      browser_grid_geometry_utils::FitRectPreserveAspect(
+          app.books[i]->coverWidth, app.books[i]->coverHeight, inner_w,
+          inner_h, &draw_w, &draw_h);
       int cx = btnX + 2 + inner_pad_x + (inner_w - draw_w) / 2;
       int cy = btnY + 2 + inner_pad_y + (inner_h - draw_h) / 2;
       int w = app.ts->display.height;
@@ -123,7 +75,8 @@ void DrawPage(App &app, BrowserGridMarqueeState &marquee, int page_start) {
           const int src_x =
               (int)((long long)px * (long long)app.books[i]->coverWidth /
                     (long long)draw_w);
-          if (!RoundedRectContains(px, py, draw_w, draw_h, 5))
+          if (!browser_grid_geometry_utils::RoundedRectContains(
+                  px, py, draw_w, draw_h, 5))
             continue;
           app.ts->screenright[(cy + py) * w + (cx + px)] =
               app.books[i]
