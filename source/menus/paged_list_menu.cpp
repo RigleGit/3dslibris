@@ -230,10 +230,11 @@ void PagedListMenu::Draw() {
 }
 
 void PagedListMenu::HandleInput(u32 keys) {
-  const u32 release_mask = KEY_TOUCH | KEY_A | KEY_B | KEY_START | KEY_SELECT |
-                           KEY_UP | KEY_DOWN | KEY_LEFT | KEY_RIGHT | KEY_L |
-                           KEY_R | KEY_CPAD_UP | KEY_CPAD_DOWN | KEY_CPAD_LEFT |
-                           KEY_CPAD_RIGHT;
+  auto key = app->key;
+  const u32 release_mask = KEY_TOUCH | key.a | key.b | key.start | key.select |
+                           key.dup | key.ddown | key.dleft | key.dright |
+                           key.up | key.down | key.left | key.right | key.l |
+                           key.r | key.zl | key.zr;
   if (wait_input_release) {
     const u32 held = hidKeysHeld() & release_mask;
     if (held) {
@@ -266,8 +267,9 @@ void PagedListMenu::HandleInput(u32 keys) {
     return;
   }
 
-  auto key = app->key;
   const u32 non_touch_keys = keys & ~KEY_TOUCH;
+  const u32 list_next_keys = key.ddown | key.dright | key.down | key.right;
+  const u32 list_prev_keys = key.dup | key.dleft | key.up | key.left;
 #ifdef DSLIBRIS_DEBUG
   static int s_input_trace_budget = 128;
   if (app && s_input_trace_budget > 0 && (keys != 0 || hidKeysHeld() != 0)) {
@@ -282,21 +284,17 @@ void PagedListMenu::HandleInput(u32 keys) {
   }
 #endif
 
-  if (non_touch_keys & KEY_A) {
+  if (non_touch_keys & key.a) {
     ActivateSelected();
-  } else if (non_touch_keys & (KEY_B | KEY_START | KEY_SELECT)) {
+  } else if (non_touch_keys & (key.b | key.start | key.select)) {
     Back();
-  } else if (non_touch_keys &
-             (key.down | KEY_DOWN | key.right | KEY_RIGHT | KEY_CPAD_DOWN |
-              KEY_CPAD_RIGHT)) {
+  } else if (non_touch_keys & list_next_keys) {
     SelectNext();
-  } else if (non_touch_keys &
-             (key.up | KEY_UP | key.left | KEY_LEFT | KEY_CPAD_UP |
-              KEY_CPAD_LEFT)) {
+  } else if (non_touch_keys & list_prev_keys) {
     SelectPrevious();
-  } else if (non_touch_keys & (key.r | KEY_R)) {
+  } else if (non_touch_keys & key.r) {
     NextPage();
-  } else if (non_touch_keys & (key.l | KEY_L)) {
+  } else if (non_touch_keys & key.l) {
     PreviousPage();
   } else if (keys & KEY_TOUCH) {
     HandleTouchInput();

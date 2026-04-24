@@ -130,7 +130,11 @@ public:
   //! key functions are remappable to support screen flipping.
   struct
   {
-    u32 up, down, left, right, l, r, zl, zr, a, b, x, y, start, select;
+    u32 up, down, left, right, // Circle Pad directions.
+         zl, zr, l, r,              // Shoulder buttons.
+         dup, ddown, dleft, dright, // D-pad directions as separate entries for remapping buttons.
+         a, b, x, y,          // Face buttons.
+         start, select;       // Start and Select buttons.
     u32 downrepeat;
   } key;
 

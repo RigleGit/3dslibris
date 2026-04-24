@@ -288,9 +288,8 @@ int Prefs::Read() {
 void Prefs::Apply() {
   //! After Read().
   if (swapshoulder) {
-    int tmp = app->key.l;
-    app->key.l = app->key.r;
-    app->key.r = tmp;
+    std::swap(app->key.l, app->key.r);
+    std::swap(app->key.zl, app->key.zr);
   }
 }
 

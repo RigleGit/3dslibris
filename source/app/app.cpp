@@ -108,20 +108,34 @@ App::App()
   colorMode = 0;
 
   // Default key mappings
-  key.down = KEY_DOWN;
-  key.up = KEY_UP;
-  key.left = KEY_LEFT;
-  key.right = KEY_RIGHT;
-  key.start = KEY_START;
-  key.select = KEY_SELECT;
-  key.l = KEY_L;
-  key.r = KEY_R;
-  key.zl = KEY_ZL;
-  key.zr = KEY_ZR;
+  // Circle Pad.
+  key.up = KEY_CPAD_UP;
+  key.down = KEY_CPAD_DOWN;
+  key.left = KEY_CPAD_LEFT;
+  key.right = KEY_CPAD_RIGHT;
+
+  // D-pad.
+  key.dup = KEY_DUP;
+  key.ddown = KEY_DDOWN;
+  key.dleft = KEY_DLEFT;
+  key.dright = KEY_DRIGHT;
+
+  // Face buttons.
   key.a = KEY_A;
   key.b = KEY_B;
   key.x = KEY_X;
   key.y = KEY_Y;
+
+  // System buttons.
+  key.start = KEY_START;
+  key.select = KEY_SELECT;
+
+  // Shoulders.
+  key.l = KEY_L;
+  key.r = KEY_R;
+  key.zl = KEY_ZL;
+  key.zr = KEY_ZR;
+  key.downrepeat = key.down | key.ddown;
 
   // TODO: add new3ds-specific keys (c-stick) to prefs and remappable key config.
 
@@ -345,7 +359,8 @@ bool App::IsPrefsDirty() const { return nav_.prefs.view_dirty; }
 
 bool App::IsBrowserDirty() const { return nav_.browser.view_dirty; }
 
-bool App::ShouldSkipNextBrowserPresent() const {
+bool App::ShouldSkipNextBrowserPresent() const
+{
   return skip_next_browser_present_;
 }
 
@@ -1142,7 +1157,9 @@ void App::UpdateStatus() { status_controller_->UpdateStatus(); }
 // Set the screen orientation (turned right or left) and update touch input mapping, button layout, and mark screens dirty for redraw.
 void App::SetOrientation(bool turned_right)
 {
-  // Keep both input remap and software render orientation in sync.
+  // Keep software render orientation in sync with the current handedness.
+  // TODO: rotating the whole console should also rotate/remap the physical
+  // D-pad semantics for reader controls, not only the shoulder buttons.
   orientation = turned_right;
   if (ts)
   {
@@ -1153,28 +1170,19 @@ void App::SetOrientation(bool turned_right)
   nav_.browser.view_dirty = true;
   nav_.prefs.view_dirty = true;
 
-  if (turned_right)
-  {
-    key.down = KEY_UP;
-    key.up = KEY_DOWN;
-    key.left = KEY_RIGHT;
-    key.right = KEY_LEFT;
-    key.l = KEY_R;
-    key.r = KEY_L;
-    key.zl = KEY_ZR;
-    key.zr = KEY_ZL;
-  }
-  else
-  {
-    key.down = KEY_DOWN;
-    key.up = KEY_UP;
-    key.left = KEY_LEFT;
-    key.right = KEY_RIGHT;
-    key.l = KEY_L;
-    key.r = KEY_R;
-    key.zl = KEY_ZL;
-    key.zr = KEY_ZR;
-  }
+  key.up = KEY_CPAD_UP;
+  key.down = KEY_CPAD_DOWN;
+  key.left = KEY_CPAD_LEFT;
+  key.right = KEY_CPAD_RIGHT;
+  key.dup = KEY_DUP;
+  key.ddown = KEY_DDOWN;
+  key.dleft = KEY_DLEFT;
+  key.dright = KEY_DRIGHT;
+  key.l = turned_right ? KEY_R : KEY_L;
+  key.r = turned_right ? KEY_L : KEY_R;
+  key.zl = turned_right ? KEY_ZR : KEY_ZL;
+  key.zr = turned_right ? KEY_ZL : KEY_ZR;
+  key.downrepeat = key.down | key.ddown;
 
 #if ORIENTATION_DIAG
   g_orientation_touch_diag_budget = 2;

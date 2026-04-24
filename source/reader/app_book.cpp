@@ -44,414 +44,506 @@
 
 //! Book-related methods for App class.
 
-namespace {
+namespace
+{
 
-static const int kPdfTouchRerenderDelta = 4;
-static const int kOpeningTitleMaxWidth = 216;
-static const int kOpeningTitleMaxLines = 3;
-static const int kOpeningTitleLineHeight = 16;
+  static const int kPdfTouchRerenderDelta = 4;
+  static const int kOpeningTitleMaxWidth = 216;
+  static const int kOpeningTitleMaxLines = 3;
+  static const int kOpeningTitleLineHeight = 16;
+  static const int kViewportStickDeadZone = 15;
+  static const int kViewportCStickDeadZone = 8;
+  static const float kViewportStickBaseScale = 0.048f / 154.0f;
+  static const int kViewportStickAccelFrames = 24;
 
-// Returns a human-readable name for the book, for debug logging.
-[[gnu::unused]] static const char *SafeBookName(Book *book) {
-  if (!book)
-    return "(null)";
-  if (book->GetFileName() && *book->GetFileName())
-    return book->GetFileName();
-  if (book->GetTitle() && *book->GetTitle())
-    return book->GetTitle();
-  return "(untitled)";
-}
-
-// Returns a copy of the bookmarks list with u16 values converted to int for easier handling in some contexts.
-std::list<int> CopyBookmarksAsInts(const std::list<u16> &bookmarks) {
-  std::list<int> out;
-  for (u16 bookmark : bookmarks)
-    out.push_back((int)bookmark);
-  return out;
-}
-
-// Applies a list of bookmarks (as ints) to the book's bookmarks list (as u16), replacing any existing bookmarks.
-void ApplyRemappedBookmarks(Book *book, const std::list<int> &bookmarks) {
-  if (!book)
-    return;
-  std::list<u16> &dst = book->GetBookmarks();
-  dst.clear();
-  for (int bookmark : bookmarks)
-    dst.push_back((u16)bookmark);
-}
-
-// State struct for tracking whether an open/reopen book operation requires a relayout and what the previous page/bookmark state was.
-struct OpenBookRelayoutState {
-  bool needs_relayout;
-  int old_page_count;
-  int old_position;
-  std::list<int> old_bookmarks;
-};
-
-std::string TrimAsciiWhitespaceLocal(const std::string &s) {
-  size_t begin = 0;
-  while (begin < s.size()) {
-    const unsigned char c = (unsigned char)s[begin];
-    if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
-      break;
-    begin++;
+  // Returns a human-readable name for the book, for debug logging.
+  [[gnu::unused]] static const char *SafeBookName(Book *book)
+  {
+    if (!book)
+      return "(null)";
+    if (book->GetFileName() && *book->GetFileName())
+      return book->GetFileName();
+    if (book->GetTitle() && *book->GetTitle())
+      return book->GetTitle();
+    return "(untitled)";
   }
-  size_t end = s.size();
-  while (end > begin) {
-    const unsigned char c = (unsigned char)s[end - 1];
-    if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
-      break;
-    end--;
+
+  // Returns a copy of the bookmarks list with u16 values converted to int for easier handling in some contexts.
+  std::list<int> CopyBookmarksAsInts(const std::list<u16> &bookmarks)
+  {
+    std::list<int> out;
+    for (u16 bookmark : bookmarks)
+      out.push_back((int)bookmark);
+    return out;
   }
-  return s.substr(begin, end - begin);
-}
 
-std::string EllipsizeToWidth(Text *ts, const std::string &text, int max_width,
-                             u8 style) {
-  if (!ts)
-    return text;
-  if ((int)ts->GetStringWidth(text.c_str(), style) <= max_width)
-    return text;
-
-  const char *ellipsis = "...";
-  if ((int)ts->GetStringWidth(ellipsis, style) > max_width)
-    return std::string();
-
-  for (size_t len = text.size(); len > 0; --len) {
-    std::string candidate = text.substr(0, len);
-    candidate += ellipsis;
-    if ((int)ts->GetStringWidth(candidate.c_str(), style) <= max_width)
-      return candidate;
+  // Applies a list of bookmarks (as ints) to the book's bookmarks list (as u16), replacing any existing bookmarks.
+  void ApplyRemappedBookmarks(Book *book, const std::list<int> &bookmarks)
+  {
+    if (!book)
+      return;
+    std::list<u16> &dst = book->GetBookmarks();
+    dst.clear();
+    for (int bookmark : bookmarks)
+      dst.push_back((u16)bookmark);
   }
-  return std::string(ellipsis);
-}
 
-std::vector<std::string> BuildOpeningTitleLines(Text *ts, const char *name,
-                                                int max_width, int max_lines,
-                                                u8 style) {
-  std::vector<std::string> lines;
-  if (!ts || !name || !*name || max_lines <= 0)
-    return lines;
+  // State struct for tracking whether an open/reopen book operation requires a relayout and what the previous page/bookmark state was.
+  struct OpenBookRelayoutState
+  {
+    bool needs_relayout;
+    int old_page_count;
+    int old_position;
+    std::list<int> old_bookmarks;
+  };
 
-  std::vector<std::string> tokens;
-  std::string current_token;
-  for (const char *p = name; *p; ++p) {
-    const unsigned char c = (unsigned char)*p;
-    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
-      if (!current_token.empty()) {
-        tokens.push_back(current_token);
-        current_token.clear();
-      }
-    } else {
-      current_token.push_back(*p);
+  std::string TrimAsciiWhitespaceLocal(const std::string &s)
+  {
+    size_t begin = 0;
+    while (begin < s.size())
+    {
+      const unsigned char c = (unsigned char)s[begin];
+      if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+        break;
+      begin++;
     }
+    size_t end = s.size();
+    while (end > begin)
+    {
+      const unsigned char c = (unsigned char)s[end - 1];
+      if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
+        break;
+      end--;
+    }
+    return s.substr(begin, end - begin);
   }
-  if (!current_token.empty())
-    tokens.push_back(current_token);
-  if (tokens.empty())
-    return lines;
 
-  std::string line;
-  for (size_t i = 0; i < tokens.size(); ++i) {
-    const std::string candidate =
-        line.empty() ? tokens[i] : (line + " " + tokens[i]);
-    if ((int)ts->GetStringWidth(candidate.c_str(), style) <= max_width) {
-      line = candidate;
-      continue;
+  float BuildViewportStickAxis(int raw_value, int dead_zone, float scale)
+  {
+    return (std::abs(raw_value) > dead_zone) ? ((float)raw_value * scale) : 0.0f;
+  }
+
+  float BuildViewportStickAccel(int active_frames)
+  {
+    if (active_frames <= 0)
+      return 1.0f;
+    const int capped_frames =
+        (active_frames < kViewportStickAccelFrames) ? active_frames
+                                                    : kViewportStickAccelFrames;
+    return 1.0f + ((float)capped_frames / (float)kViewportStickAccelFrames);
+  }
+
+  void MapViewportPanToReadingOrientation(bool turned_right, float physical_x,
+                                          float physical_y, float *screen_dx,
+                                          float *screen_dy)
+  {
+    if (!screen_dx || !screen_dy)
+      return;
+    if (!turned_right)
+    {
+      *screen_dx = physical_y;
+      *screen_dy = -physical_x;
+      return;
     }
+    *screen_dx = -physical_y;
+    *screen_dy = physical_x;
+  }
 
-    if (line.empty()) {
-      lines.push_back(EllipsizeToWidth(ts, tokens[i], max_width, style));
-    } else {
-      lines.push_back(line);
-      line = tokens[i];
+  std::string EllipsizeToWidth(Text *ts, const std::string &text, int max_width,
+                               u8 style)
+  {
+    if (!ts)
+      return text;
+    if ((int)ts->GetStringWidth(text.c_str(), style) <= max_width)
+      return text;
+
+    const char *ellipsis = "...";
+    if ((int)ts->GetStringWidth(ellipsis, style) > max_width)
+      return std::string();
+
+    for (size_t len = text.size(); len > 0; --len)
+    {
+      std::string candidate = text.substr(0, len);
+      candidate += ellipsis;
+      if ((int)ts->GetStringWidth(candidate.c_str(), style) <= max_width)
+        return candidate;
     }
+    return std::string(ellipsis);
+  }
 
-    if ((int)lines.size() >= max_lines - 1 && i + 1 < tokens.size()) {
-      std::string rest = line;
-      for (size_t j = i + 1; j < tokens.size(); ++j) {
-        if (!rest.empty())
-          rest.push_back(' ');
-        rest += tokens[j];
-      }
-      lines.push_back(EllipsizeToWidth(ts, TrimAsciiWhitespaceLocal(rest),
-                                       max_width, style));
+  std::vector<std::string> BuildOpeningTitleLines(Text *ts, const char *name,
+                                                  int max_width, int max_lines,
+                                                  u8 style)
+  {
+    std::vector<std::string> lines;
+    if (!ts || !name || !*name || max_lines <= 0)
       return lines;
+
+    std::vector<std::string> tokens;
+    std::string current_token;
+    for (const char *p = name; *p; ++p)
+    {
+      const unsigned char c = (unsigned char)*p;
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r')
+      {
+        if (!current_token.empty())
+        {
+          tokens.push_back(current_token);
+          current_token.clear();
+        }
+      }
+      else
+      {
+        current_token.push_back(*p);
+      }
     }
+    if (!current_token.empty())
+      tokens.push_back(current_token);
+    if (tokens.empty())
+      return lines;
+
+    std::string line;
+    for (size_t i = 0; i < tokens.size(); ++i)
+    {
+      const std::string candidate =
+          line.empty() ? tokens[i] : (line + " " + tokens[i]);
+      if ((int)ts->GetStringWidth(candidate.c_str(), style) <= max_width)
+      {
+        line = candidate;
+        continue;
+      }
+
+      if (line.empty())
+      {
+        lines.push_back(EllipsizeToWidth(ts, tokens[i], max_width, style));
+      }
+      else
+      {
+        lines.push_back(line);
+        line = tokens[i];
+      }
+
+      if ((int)lines.size() >= max_lines - 1 && i + 1 < tokens.size())
+      {
+        std::string rest = line;
+        for (size_t j = i + 1; j < tokens.size(); ++j)
+        {
+          if (!rest.empty())
+            rest.push_back(' ');
+          rest += tokens[j];
+        }
+        lines.push_back(EllipsizeToWidth(ts, TrimAsciiWhitespaceLocal(rest),
+                                         max_width, style));
+        return lines;
+      }
+    }
+
+    if (!line.empty() && (int)lines.size() < max_lines)
+      lines.push_back(line);
+    if ((int)lines.size() > max_lines)
+      lines.resize((size_t)max_lines);
+    return lines;
   }
 
-  if (!line.empty() && (int)lines.size() < max_lines)
-    lines.push_back(line);
-  if ((int)lines.size() > max_lines)
-    lines.resize((size_t)max_lines);
-  return lines;
-}
+  void DrawBookPage(Book *book, Text *ts)
+  {
+    if (!book || !ts || book->GetPageCount() == 0)
+      return;
+    book->DrawCurrentView(ts);
+  }
 
-void DrawBookPage(Book *book, Text *ts) {
-  if (!book || !ts || book->GetPageCount() == 0)
-    return;
-  book->DrawCurrentView(ts);
-}
+  void ResetBookRenderState(App *app, bool clear_glyph_cache,
+                            const char *reason)
+  {
+    if (!app || !app->ts.get())
+      return;
+    if (clear_glyph_cache)
+      app->ts->ClearCache();
+    app->ts->MarkAllScreensDirty();
+    app->RequestStatusRedraw();
+    if (reason)
+      DBG_LOG(app, reason);
+  }
 
-void ResetBookRenderState(App *app, bool clear_glyph_cache,
-                          const char *reason) {
-  if (!app || !app->ts.get())
-    return;
-  if (clear_glyph_cache)
-    app->ts->ClearCache();
-  app->ts->MarkAllScreensDirty();
-  app->RequestStatusRedraw();
-  if (reason)
-    DBG_LOG(app, reason);
-}
-
-bool SetBookPage(Book *book, Text *ts, u16 page) {
-  if (!book || !ts || page >= book->GetPageCount())
-    return false;
-  if (book->IsCbz())
-    book->ResetCbzFailureState();
-  if (book->IsFixedLayout())
-    book->CancelFixedLayoutDeferredWork();
-  book->SetPosition(page);
-  if (book->IsFixedLayout())
-    book->ResetFixedLayoutViewportForNavigation();
-  DrawBookPage(book, ts);
-  return true;
-}
-
-bool TurnBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 pagecount,
-                  int delta) {
-  if (!book || !ts || !pagecurrent || pagecount == 0)
-    return false;
-  if (delta < 0) {
-    if (*pagecurrent == 0)
+  bool SetBookPage(Book *book, Text *ts, u16 page)
+  {
+    if (!book || !ts || page >= book->GetPageCount())
       return false;
-  } else if (*pagecurrent >= pagecount - 1) {
-    return false;
-  }
-
-  *pagecurrent = (u16)((int)*pagecurrent + delta);
-  return SetBookPage(book, ts, *pagecurrent);
-}
-
-// Advances the book page by one.
-// Returns true if the page was advanced, false if no advancement was possible.
-bool AdvanceBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 *pagecount,
-                     bool *status_dirty) {
-  if (!book || !ts || !pagecurrent || !pagecount || !status_dirty) {
-    return false;
-  }
-  if (TurnBookPage(book, ts, pagecurrent, *pagecount, 1)) {
-    *status_dirty = true;
+    if (book->IsCbz())
+      book->ResetCbzFailureState();
+    if (book->IsFixedLayout())
+      book->CancelFixedLayoutDeferredWork();
+    book->SetPosition(page);
+    if (book->IsFixedLayout())
+      book->ResetFixedLayoutViewportForNavigation();
+    DrawBookPage(book, ts);
     return true;
   }
-  return false;
-}
 
-// Attempts to reuse the currently selected book by resetting transient state and redrawing the current page, returning whether the reuse was successful.
-bool ReuseParsedBook(App *app) {
-  Book *selected = app ? app->GetSelectedBook() : NULL;
-  if (!selected)
-    return false;
-  if (selected->IsCbz()) {
-    selected->ResetCbzFailureState();
-    selected->ResetCbzTransientViewState(true);
-    DBG_LOG(app, "BOOK reopen: state reset complete");
+  bool TurnBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 pagecount,
+                    int delta)
+  {
+    if (!book || !ts || !pagecurrent || pagecount == 0)
+      return false;
+    if (delta < 0)
+    {
+      if (*pagecurrent == 0)
+        return false;
+    }
+    else if (*pagecurrent >= pagecount - 1)
+    {
+      return false;
+    }
+
+    *pagecurrent = (u16)((int)*pagecurrent + delta);
+    return SetBookPage(book, ts, *pagecurrent);
   }
-  app->SetCurrentBook(selected);
-  if (app->GetMode() == AppMode::Browser) {
-    if (app->orientation) {
+
+  // Advances the book page by one.
+  // Returns true if the page was advanced, false if no advancement was possible.
+  bool AdvanceBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 *pagecount,
+                       bool *status_dirty)
+  {
+    if (!book || !ts || !pagecurrent || !pagecount || !status_dirty)
+    {
+      return false;
+    }
+    if (TurnBookPage(book, ts, pagecurrent, *pagecount, 1))
+    {
+      *status_dirty = true;
+      return true;
+    }
+    return false;
+  }
+
+  // Attempts to reuse the currently selected book by resetting transient state and redrawing the current page, returning whether the reuse was successful.
+  bool ReuseParsedBook(App *app)
+  {
+    Book *selected = app ? app->GetSelectedBook() : NULL;
+    if (!selected)
+      return false;
+    if (selected->IsCbz())
+    {
+      selected->ResetCbzFailureState();
+      selected->ResetCbzTransientViewState(true);
+      DBG_LOG(app, "BOOK reopen: state reset complete");
+    }
+    app->SetCurrentBook(selected);
+    if (app->GetMode() == AppMode::Browser)
+    {
+      if (app->orientation)
+      {
+        // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
+      }
+      app->ShowCurrentBookView();
+    }
+    ResetBookRenderState(app, true,
+                         "OpenBook: reset text renderer state (reuse)");
+    Book *current = app->GetCurrentBook();
+    if (current->GetPosition() >= current->GetPageCount())
+      current->SetPosition(0);
+    DrawBookPage(current, app->ts.get());
+    return true;
+  }
+
+  OpenBookRelayoutState CaptureRelayoutState(Book *book, bool needs_relayout)
+  {
+    OpenBookRelayoutState state = {needs_relayout, 0, 0, std::list<int>()};
+    if (!book || !needs_relayout)
+      return state;
+
+    state.old_page_count = book->GetPageCount();
+    state.old_position = book->GetPosition();
+    state.old_bookmarks = CopyBookmarksAsInts(book->GetBookmarks());
+    book->Close();
+    return state;
+  }
+
+  static void DrawOpeningSplashImpl(App *app, unsigned spine_done,
+                                    unsigned spine_total)
+  {
+    Book *selected = app ? app->GetSelectedBook() : NULL;
+    if (!app || !app->ts || !selected)
+      return;
+
+    int savedStyle = app->ts->GetStyle();
+    int savedColorMode = app->ts->GetColorMode();
+    u16 *savedScreen = app->ts->GetScreen();
+
+    app->ts->SetStyle(TEXT_STYLE_BROWSER);
+    app->ts->PrintSplash(app->ts->screenleft);
+
+    app->ts->SetScreen(app->ts->screenright);
+    app->ts->ClearScreen();
+    app->DrawBottomGradientBackground();
+    app->ts->SetPen(12, 28);
+    app->ts->PrintString("opening book ...");
+
+    const char *name = selected->GetFileName();
+    if (!name || !*name)
+      name = selected->GetTitle();
+    if (name && *name)
+    {
+      std::vector<std::string> lines = BuildOpeningTitleLines(
+          app->ts.get(), name, kOpeningTitleMaxWidth, kOpeningTitleMaxLines,
+          TEXT_STYLE_BROWSER);
+      for (size_t i = 0; i < lines.size(); ++i)
+      {
+        app->ts->SetPen(12, (u16)(50 + (int)i * kOpeningTitleLineHeight));
+        app->ts->PrintString(lines[i].c_str());
+      }
+    }
+
+    if (spine_total > 0)
+    {
+      unsigned pct = spine_done * 100u / spine_total;
+      char progress[32];
+      snprintf(progress, sizeof(progress), "%u / %u  (%u%%)", spine_done,
+               spine_total, pct);
+      app->ts->SetPen(12, 106);
+      app->ts->PrintString(progress);
+    }
+
+    app->ts->SetStyle(savedStyle);
+    app->ts->SetColorMode(savedColorMode);
+    app->ts->SetScreen(savedScreen);
+
+    if (app->ShouldAbortWork())
+      return;
+    if (app->ts->BlitToFramebuffer())
+    {
+      gfxFlushBuffers();
+      gfxSwapBuffers();
+    }
+  }
+
+  void DrawOpeningSplash(App *app) { DrawOpeningSplashImpl(app, 0, 0); }
+
+  static void MaybeDrawOpeningSplashProgress(App *app)
+  {
+    if (!app || !app->IsOpeningPending() || !app->GetOpeningBook())
+      return;
+
+    const unsigned int seq = app->GetOpeningProgressSeq();
+    if (seq == 0 || seq == app->GetOpeningDrawnProgressSeq())
+      return;
+
+    DrawOpeningSplashImpl(app, app->GetOpeningSpineDone(),
+                          app->GetOpeningSpineTotal());
+    app->SetOpeningDrawnProgressSeq(seq);
+  }
+
+  void ResetOpeningState(App *app)
+  {
+    if (!app)
+      return;
+    app->SetOpeningPending(false);
+    app->SetOpeningBook(NULL);
+    app->SetOpeningSessionId(0);
+    app->SetOpeningNeedsRelayout(false);
+    app->SetOpeningOldPageCount(0);
+    app->SetOpeningOldPosition(0);
+    app->SetOpeningSpineProgress(0, 0);
+    app->SetOpeningDrawnProgressSeq(0);
+    app->MutableOpeningOldBookmarks().clear();
+    app->SetOpeningStartedAtMs(0);
+  }
+
+  void DetachCurrentBookForSwitch(App *app, Book *next_book,
+                                  unsigned int next_session_id,
+                                  const char *reason)
+  {
+    if (!app)
+      return;
+    Book *current = app->GetCurrentBook();
+    if (!ShouldCloseCurrentBookForSwitch(current, next_book))
+      return;
+
+    DBG_LOGF(app,
+             "BOOK switch: close current session=%u current=%s next_session=%u next=%s reason=%s",
+             app->GetCurrentBookSessionId(), SafeBookName(current),
+             next_session_id, SafeBookName(next_book), reason ? reason : "");
+    app->SetCurrentBook(NULL);
+    app->SetCurrentBookSessionId(0);
+    app->SetPdfDeferredReadyAtMs(0);
+    current->Close();
+    DBG_LOGF(app, "BOOK switch: current closed current=%s", SafeBookName(current));
+  }
+
+  u8 OpenSelectedBook(App *app, unsigned int session_id)
+  {
+    Book *selected = app ? app->GetSelectedBook() : NULL;
+    if (!selected)
+      return 254;
+
+    DetachCurrentBookForSwitch(app, selected, session_id, "sync-open");
+    selected->SetOpenSessionId(session_id);
+    DBG_LOG(app, "BOOK open path: synchronous");
+    DBG_LOGF(app, "BOOK open begin session=%u book=%s", session_id,
+             SafeBookName(selected));
+    if (int err = selected->Open())
+    {
+      DBG_LOGF(app, "BOOK open fail session=%u rc=%d book=%s", session_id, err,
+               SafeBookName(selected));
+      if (const char *desc = DescribeBookOpenError(err))
+      {
+        app->PrintStatus(desc);
+      }
+      else
+      {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "error (%d)", err);
+        app->PrintStatus(msg);
+      }
+      return (u8)err;
+    }
+    DBG_LOGF(app, "BOOK open success session=%u book=%s", session_id,
+             SafeBookName(selected));
+    return 0;
+  }
+
+  void CloseFailedOpenBook(App *app, Book *book, unsigned int session_id,
+                           const char *reason)
+  {
+    if (!book)
+      return;
+    DBG_LOGF(app, "BOOK open cleanup: session=%u reason=%s pages=%d book=%s",
+             session_id, reason ? reason : "", book->GetPageCount(),
+             SafeBookName(book));
+    book->Close();
+  }
+
+  void EnsureBookMode(App *app, const char *log_message)
+  {
+    if (!app || app->GetMode() != AppMode::Browser || app->ShouldAbortWork())
+      return;
+    if (app->orientation)
+    {
       // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
     }
     app->ShowCurrentBookView();
+    if (log_message)
+      DBG_LOG(app, log_message);
   }
-  ResetBookRenderState(app, true,
-                       "OpenBook: reset text renderer state (reuse)");
-  Book *current = app->GetCurrentBook();
-  if (current->GetPosition() >= current->GetPageCount())
-    current->SetPosition(0);
-  DrawBookPage(current, app->ts.get());
-  return true;
-}
-
-OpenBookRelayoutState CaptureRelayoutState(Book *book, bool needs_relayout) {
-  OpenBookRelayoutState state = {needs_relayout, 0, 0, std::list<int>()};
-  if (!book || !needs_relayout)
-    return state;
-
-  state.old_page_count = book->GetPageCount();
-  state.old_position = book->GetPosition();
-  state.old_bookmarks = CopyBookmarksAsInts(book->GetBookmarks());
-  book->Close();
-  return state;
-}
-
-static void DrawOpeningSplashImpl(App *app, unsigned spine_done,
-                                   unsigned spine_total) {
-  Book *selected = app ? app->GetSelectedBook() : NULL;
-  if (!app || !app->ts || !selected)
-    return;
-
-  int savedStyle = app->ts->GetStyle();
-  int savedColorMode = app->ts->GetColorMode();
-  u16 *savedScreen = app->ts->GetScreen();
-
-  app->ts->SetStyle(TEXT_STYLE_BROWSER);
-  app->ts->PrintSplash(app->ts->screenleft);
-
-  app->ts->SetScreen(app->ts->screenright);
-  app->ts->ClearScreen();
-  app->DrawBottomGradientBackground();
-  app->ts->SetPen(12, 28);
-  app->ts->PrintString("opening book ...");
-
-  const char *name = selected->GetFileName();
-  if (!name || !*name)
-    name = selected->GetTitle();
-  if (name && *name) {
-    std::vector<std::string> lines = BuildOpeningTitleLines(
-        app->ts.get(), name, kOpeningTitleMaxWidth, kOpeningTitleMaxLines,
-        TEXT_STYLE_BROWSER);
-    for (size_t i = 0; i < lines.size(); ++i) {
-      app->ts->SetPen(12, (u16)(50 + (int)i * kOpeningTitleLineHeight));
-      app->ts->PrintString(lines[i].c_str());
-    }
-  }
-
-  if (spine_total > 0) {
-    unsigned pct = spine_done * 100u / spine_total;
-    char progress[32];
-    snprintf(progress, sizeof(progress), "%u / %u  (%u%%)", spine_done,
-             spine_total, pct);
-    app->ts->SetPen(12, 106);
-    app->ts->PrintString(progress);
-  }
-
-  app->ts->SetStyle(savedStyle);
-  app->ts->SetColorMode(savedColorMode);
-  app->ts->SetScreen(savedScreen);
-
-  if (app->ShouldAbortWork())
-    return;
-  if (app->ts->BlitToFramebuffer()) {
-    gfxFlushBuffers();
-    gfxSwapBuffers();
-  }
-}
-
-void DrawOpeningSplash(App *app) { DrawOpeningSplashImpl(app, 0, 0); }
-
-static void MaybeDrawOpeningSplashProgress(App *app) {
-  if (!app || !app->IsOpeningPending() || !app->GetOpeningBook())
-    return;
-
-  const unsigned int seq = app->GetOpeningProgressSeq();
-  if (seq == 0 || seq == app->GetOpeningDrawnProgressSeq())
-    return;
-
-  DrawOpeningSplashImpl(app, app->GetOpeningSpineDone(),
-                        app->GetOpeningSpineTotal());
-  app->SetOpeningDrawnProgressSeq(seq);
-}
-
-void ResetOpeningState(App *app) {
-  if (!app)
-    return;
-  app->SetOpeningPending(false);
-  app->SetOpeningBook(NULL);
-  app->SetOpeningSessionId(0);
-  app->SetOpeningNeedsRelayout(false);
-  app->SetOpeningOldPageCount(0);
-  app->SetOpeningOldPosition(0);
-  app->SetOpeningSpineProgress(0, 0);
-  app->SetOpeningDrawnProgressSeq(0);
-  app->MutableOpeningOldBookmarks().clear();
-  app->SetOpeningStartedAtMs(0);
-}
-
-void DetachCurrentBookForSwitch(App *app, Book *next_book,
-                                unsigned int next_session_id,
-                                const char *reason) {
-  if (!app)
-    return;
-  Book *current = app->GetCurrentBook();
-  if (!ShouldCloseCurrentBookForSwitch(current, next_book))
-    return;
-
-  DBG_LOGF(app,
-           "BOOK switch: close current session=%u current=%s next_session=%u next=%s reason=%s",
-           app->GetCurrentBookSessionId(), SafeBookName(current),
-           next_session_id, SafeBookName(next_book), reason ? reason : "");
-  app->SetCurrentBook(NULL);
-  app->SetCurrentBookSessionId(0);
-  app->SetPdfDeferredReadyAtMs(0);
-  current->Close();
-  DBG_LOGF(app, "BOOK switch: current closed current=%s", SafeBookName(current));
-}
-
-u8 OpenSelectedBook(App *app, unsigned int session_id) {
-  Book *selected = app ? app->GetSelectedBook() : NULL;
-  if (!selected)
-    return 254;
-
-  DetachCurrentBookForSwitch(app, selected, session_id, "sync-open");
-  selected->SetOpenSessionId(session_id);
-  DBG_LOG(app, "BOOK open path: synchronous");
-  DBG_LOGF(app, "BOOK open begin session=%u book=%s", session_id,
-           SafeBookName(selected));
-  if (int err = selected->Open()) {
-    DBG_LOGF(app, "BOOK open fail session=%u rc=%d book=%s", session_id, err,
-             SafeBookName(selected));
-    if (const char *desc = DescribeBookOpenError(err)) {
-      app->PrintStatus(desc);
-    } else {
-      char msg[64];
-      snprintf(msg, sizeof(msg), "error (%d)", err);
-      app->PrintStatus(msg);
-    }
-    return (u8)err;
-  }
-  DBG_LOGF(app, "BOOK open success session=%u book=%s", session_id,
-           SafeBookName(selected));
-  return 0;
-}
-
-void CloseFailedOpenBook(App *app, Book *book, unsigned int session_id,
-                         const char *reason) {
-  if (!book)
-    return;
-  DBG_LOGF(app, "BOOK open cleanup: session=%u reason=%s pages=%d book=%s",
-           session_id, reason ? reason : "", book->GetPageCount(),
-           SafeBookName(book));
-  book->Close();
-}
-
-void EnsureBookMode(App *app, const char *log_message) {
-  if (!app || app->GetMode() != AppMode::Browser || app->ShouldAbortWork())
-    return;
-  if (app->orientation) {
-    // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
-  }
-  app->ShowCurrentBookView();
-  if (log_message)
-    DBG_LOG(app, log_message);
-}
 
 } // namespace
 
 void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
-                                   void *user_data) {
+                                   void *user_data)
+{
   App *app = static_cast<App *>(user_data);
   if (!app)
     return;
-  if (!app->IsOpeningPending()) {
+  if (!app->IsOpeningPending())
+  {
     DrawOpeningSplashImpl(app, done, total);
     return;
   }
   app->SetOpeningSpineProgress(done, total);
 }
 
-void ReaderController::ClearDeferredRelayoutState() {
+void ReaderController::ClearDeferredRelayoutState()
+{
   app_.SetDeferredRelayoutPending(false);
   app_.SetDeferredRelayoutBook(NULL);
   app_.SetDeferredRelayoutOldPageCount(0);
@@ -460,7 +552,8 @@ void ReaderController::ClearDeferredRelayoutState() {
   app_.SetDeferredRelayoutInitialPosition(0);
 }
 
-void ReaderController::OnAppletSuspendRequested() {
+void ReaderController::OnAppletSuspendRequested()
+{
   Book *bookcurrent_ = app_.GetCurrentBook();
   Book *opening_book = app_.GetOpeningBook();
   app_.SetPdfTouchDragActive(false);
@@ -469,19 +562,22 @@ void ReaderController::OnAppletSuspendRequested() {
   app_.SetPdfDeferredReadyAtMs(0);
   if (bookcurrent_)
     bookcurrent_->SetFixedLayoutViewportInteraction(false);
-  if (opening_book) {
+  if (opening_book)
+  {
     opening_book->RequestAbortOpen();
   }
 }
 
-void ReaderController::OnAppletSuspended() {
+void ReaderController::OnAppletSuspended()
+{
   Book *bookcurrent_ = app_.GetCurrentBook();
   Book *opening_book = app_.GetOpeningBook();
   app_.SetPdfTouchDragActive(false);
   app_.SetPdfTouchLastX(-1);
   app_.SetPdfTouchLastY(-1);
   app_.SetPdfDeferredReadyAtMs(0);
-  if (bookcurrent_) {
+  if (bookcurrent_)
+  {
     bookcurrent_->SetFixedLayoutViewportInteraction(false);
     bookcurrent_->CancelFixedLayoutDeferredWork();
   }
@@ -489,7 +585,8 @@ void ReaderController::OnAppletSuspended() {
     return;
   opening_book->CancelFixedLayoutDeferredWork();
   if (reader_suspend_policy_utils::ShouldKeepOpeningDuringSuspend(
-          true, opening_book->IsAsyncReflowOpenPending())) {
+          true, opening_book->IsAsyncReflowOpenPending()))
+  {
     // The OS suspends all threads (including the core-1 worker) while the
     // HOME menu is active. Leave the opening in progress so it completes
     // transparently on resume — no blocking join, no state teardown.
@@ -517,37 +614,43 @@ void ReaderController::OnAppletSuspended() {
   app_.SetOpeningOldPosition(0);
   app_.MutableOpeningOldBookmarks().clear();
   app_.SetOpeningStartedAtMs(0);
-  if (app_.GetMode() == AppMode::Opening) {
+  if (app_.GetMode() == AppMode::Opening)
+  {
     app_.SetMode(AppMode::Browser);
     app_.SetBrowserDirty(true);
   }
 }
 
-void ReaderController::OnAppletResumed() {
+void ReaderController::OnAppletResumed()
+{
   Book *bookcurrent_ = app_.GetCurrentBook();
   if (!bookcurrent_)
     return;
-  if (bookcurrent_->IsFixedLayout()) {
+  if (bookcurrent_->IsFixedLayout())
+  {
     const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
     app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
   }
 }
 
-bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count) {
+bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
+{
   if (!book || !app_.IsDeferredRelayoutPending() ||
       app_.GetDeferredRelayoutBook() != book)
     return false;
 
   if (deferred_relayout_utils::ShouldCancelFinalDeferredRelayout(
           app_.IsDeferredRelayoutPending(), book->GetPosition(),
-          app_.GetDeferredRelayoutInitialPosition())) {
+          app_.GetDeferredRelayoutInitialPosition()))
+  {
     ClearDeferredRelayoutState();
     return false;
   }
 
   if (!deferred_relayout_utils::ShouldApplyFinalDeferredRelayout(
           app_.IsDeferredRelayoutPending(), false,
-          book->GetPosition(), app_.GetDeferredRelayoutInitialPosition())) {
+          book->GetPosition(), app_.GetDeferredRelayoutInitialPosition()))
+  {
     return false;
   }
 
@@ -563,7 +666,8 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
   return true;
 }
 
-void ReaderController::HandleEventInOpening() {
+void ReaderController::HandleEventInOpening()
+{
   Prefs *prefs = app_.prefs.get();
   Text *ts = app_.ts.get();
   if (app_.ShouldAbortWork())
@@ -571,9 +675,11 @@ void ReaderController::HandleEventInOpening() {
   MaybeDrawOpeningSplashProgress(&app_);
   const u32 keys = hidKeysDown();
 
-  if (keys & (app_.key.b | app_.key.start | app_.key.select)) {
+  if (keys & (app_.key.b | app_.key.start | app_.key.select))
+  {
     Book *cancel_book = app_.GetOpeningBook();
-    if (cancel_book) {
+    if (cancel_book)
+    {
 #ifdef DSLIBRIS_DEBUG
       DBG_LOGF(&app_, "BOOK open cancel: session=%u book=%s",
                app_.GetOpeningSessionId(),
@@ -595,7 +701,8 @@ void ReaderController::HandleEventInOpening() {
     return;
   }
 
-  if (!app_.IsOpeningPending() || !app_.GetOpeningBook()) {
+  if (!app_.IsOpeningPending() || !app_.GetOpeningBook())
+  {
     ResetOpeningState(&app_);
     app_.SetMode(AppMode::Browser);
     app_.SetBrowserDirty(true);
@@ -626,7 +733,8 @@ void ReaderController::HandleEventInOpening() {
 
   ResetOpeningState(&app_);
 
-  if (err) {
+  if (err)
+  {
     CloseFailedOpenBook(&app_, opening_book, opening_session_id,
                         err == BOOK_ERR_CANCELLED ? "cancelled"
                                                   : "async-open-failed");
@@ -634,14 +742,18 @@ void ReaderController::HandleEventInOpening() {
     app_.SetCurrentBookSessionId(0);
     app_.SetPdfDeferredReadyAtMs(0);
     ClearDeferredRelayoutState();
-    if (err == BOOK_ERR_CANCELLED) {
+    if (err == BOOK_ERR_CANCELLED)
+    {
       app_.SetMode(AppMode::Browser);
       app_.SetBrowserDirty(true);
       return;
     }
-    if (const char *desc = DescribeBookOpenError(err)) {
+    if (const char *desc = DescribeBookOpenError(err))
+    {
       app_.PrintStatus(desc);
-    } else {
+    }
+    else
+    {
       char msg[64];
       snprintf(msg, sizeof(msg), "error (%d)", err);
       app_.PrintStatus(msg);
@@ -655,7 +767,8 @@ void ReaderController::HandleEventInOpening() {
   if (!ShouldAttachOpeningResult(opening_session_id,
                                  opening_book->GetOpenSessionId(),
                                  opening_book->IsOpenAbortRequested(),
-                                 pageCount)) {
+                                 pageCount))
+  {
     const char *cause = DescribeOpeningFailureCause(
         opening_session_id, opening_book->GetOpenSessionId(),
         opening_book->IsOpenAbortRequested(), pageCount);
@@ -686,18 +799,22 @@ void ReaderController::HandleEventInOpening() {
           relayout_state.needs_relayout, false,
           relayout_state.old_page_count, relayout_state.old_position, pageCount,
           relayout_state.old_bookmarks);
-  if (open_plan.has_remap) {
+  if (open_plan.has_remap)
+  {
     bookcurrent_->SetPosition(open_plan.mapped_position);
     ApplyRemappedBookmarks(bookcurrent_, open_plan.mapped_bookmarks);
   }
-  if (open_plan.defer_final_remap) {
+  if (open_plan.defer_final_remap)
+  {
     app_.SetDeferredRelayoutPending(true);
     app_.SetDeferredRelayoutBook(bookcurrent_);
     app_.SetDeferredRelayoutOldPageCount(relayout_state.old_page_count);
     app_.SetDeferredRelayoutOldPosition(relayout_state.old_position);
     app_.MutableDeferredRelayoutOldBookmarks() = relayout_state.old_bookmarks;
     app_.SetDeferredRelayoutInitialPosition(open_plan.mapped_position);
-  } else {
+  }
+  else
+  {
     ClearDeferredRelayoutState();
   }
   app_.ShowCurrentBookView();
@@ -716,17 +833,39 @@ void ReaderController::HandleEventInOpening() {
   prefs->Write();
 }
 
-void ReaderController::HandleEventInBook() {
+void ReaderController::HandleEventInBook()
+{
   Book *bookcurrent_ = app_.GetCurrentBook();
   Prefs *prefs = app_.prefs.get();
   Text *ts = app_.ts.get();
   if (app_.ShouldAbortWork() || !bookcurrent_)
     return;
   decltype(App::key) &key = app_.key;
-  auto touch_read = [&]() { return app_.TouchRead(); };
-  auto request_status_redraw = [&]() { app_.RequestStatusRedraw(); };
-  auto show_library_view = [&]() { app_.ShowLibraryView(); };
-  auto show_settings_view = [&](bool from_book) { app_.ShowSettingsView(from_book); };
+
+  const u32 zoom_in_keys = key.a;
+  const u32 zoom_out_keys = key.b;
+
+  const u32 fixed_prev_page_keys = key.dleft;
+  const u32 fixed_next_page_keys = key.dright;
+  const u32 fixed_prev_chapter_keys = key.dup;
+  const u32 fixed_next_chapter_keys = key.ddown;
+
+  const u32 standard_next_page_keys = key.a | key.r | key.down | key.zl;
+  const u32 standard_prev_page_keys = key.b | key.l | key.up | key.zr;
+
+  const u32 bookmark_prev_keys = key.dright;
+  const u32 bookmark_next_keys = key.dleft;
+
+  const u32 back_to_library_keys = key.start;
+  const u32 settings_keys = key.select;
+  auto touch_read = [&]()
+  { return app_.TouchRead(); };
+  auto request_status_redraw = [&]()
+  { app_.RequestStatusRedraw(); };
+  auto show_library_view = [&]()
+  { app_.ShowLibraryView(); };
+  auto show_settings_view = [&](bool from_book)
+  { app_.ShowSettingsView(from_book); };
 
   u16 pagecurrent = bookcurrent_->GetPosition();
   u16 pagecount = bookcurrent_->GetPageCount();
@@ -737,95 +876,133 @@ void ReaderController::HandleEventInBook() {
   u32 keys = hidKeysDown();
   u32 held = hidKeysHeld();
 
-  if (bookcurrent_ && bookcurrent_->IsFixedLayout()) {
-    const auto delay_fixed_layout_deferred = [&]() {
+  if (bookcurrent_ && bookcurrent_->IsFixedLayout())
+  {
+    const auto delay_fixed_layout_deferred = [&]()
+    {
       const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
       app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
     };
-    if (keys & KEY_A) {
-      if (bookcurrent_->ChangeFixedLayoutZoom(1)) {
+    if (keys & zoom_in_keys)
+    {
+      if (bookcurrent_->ChangeFixedLayoutZoom(1))
+      {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (keys & KEY_B) {
-      if (bookcurrent_->ChangeFixedLayoutZoom(-1)) {
+    }
+    else if (keys & zoom_out_keys)
+    {
+      if (bookcurrent_->ChangeFixedLayoutZoom(-1))
+      {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (reader_input_utils::FixedLayoutSupportsShoulderPageTurn(
-                   bookcurrent_->format) &&
-               (keys & (key.r | KEY_R | key.zl | KEY_ZL))) {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1)) {
+    }
+    else if (reader_input_utils::FixedLayoutSupportsShoulderPageTurn(
+                 bookcurrent_->format) &&
+             (keys & (key.r | key.zl)))
+    {
+      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1))
+      {
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (reader_input_utils::FixedLayoutSupportsShoulderPageTurn(
-                   bookcurrent_->format) &&
-               (keys & (key.l | KEY_L | key.zr | KEY_ZR))) {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1)) {
+    }
+    else if (reader_input_utils::FixedLayoutSupportsShoulderPageTurn(
+                 bookcurrent_->format) &&
+             (keys & (key.l | key.zr)))
+    {
+      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
+      {
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (keys & (key.right | KEY_RIGHT)) {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1)) {
+    }
+    else if (keys & fixed_next_page_keys)
+    {
+      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1))
+      {
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (keys & (key.left | KEY_LEFT)) {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1)) {
+    }
+    else if (keys & fixed_prev_page_keys)
+    {
+      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
+      {
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (keys & (key.down | KEY_DOWN)) {
-      if (!bookcurrent_->GetChapters().empty()) {
-        if (bookcurrent_->JumpFixedLayoutChapter(1)) {
+    }
+    else if (keys & fixed_next_chapter_keys)
+    {
+      if (!bookcurrent_->GetChapters().empty())
+      {
+        if (bookcurrent_->JumpFixedLayoutChapter(1))
+        {
           bookcurrent_->ResetFixedLayoutViewportForNavigation();
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
           delay_fixed_layout_deferred();
         }
-      } else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1)) {
+      }
+      else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1))
+      {
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (keys & (key.up | KEY_UP)) {
-      if (!bookcurrent_->GetChapters().empty()) {
-        if (bookcurrent_->JumpFixedLayoutChapter(-1)) {
+    }
+    else if (keys & fixed_prev_chapter_keys)
+    {
+      if (!bookcurrent_->GetChapters().empty())
+      {
+        if (bookcurrent_->JumpFixedLayoutChapter(-1))
+        {
           bookcurrent_->ResetFixedLayoutViewportForNavigation();
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
           delay_fixed_layout_deferred();
         }
-      } else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1)) {
+      }
+      else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
+      {
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (keys & KEY_TOUCH) {
+    }
+    else if (keys & KEY_TOUCH)
+    {
       touchPosition mapped = touch_read();
       app_.SetPdfTouchDragActive(true);
       bookcurrent_->SetFixedLayoutViewportInteraction(true);
       app_.SetPdfTouchLastX((int)mapped.px);
       app_.SetPdfTouchLastY((int)mapped.py);
       if (bookcurrent_->MoveFixedLayoutViewportToPreview((int)mapped.px,
-                                                         (int)mapped.py)) {
+                                                         (int)mapped.py))
+      {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-    } else if (held & KEY_TOUCH) {
+    }
+    else if (held & KEY_TOUCH)
+    {
       touchPosition mapped = touch_read();
       if (!app_.IsPdfTouchDragActive() ||
           pdf_view_utils::TouchMovementExceedsThreshold(
               app_.GetPdfTouchLastX(), app_.GetPdfTouchLastY(), (int)mapped.px,
-              (int)mapped.py, kPdfTouchRerenderDelta)) {
+              (int)mapped.py, kPdfTouchRerenderDelta))
+      {
         app_.SetPdfTouchDragActive(true);
         bookcurrent_->SetFixedLayoutViewportInteraction(true);
         app_.SetPdfTouchLastX((int)mapped.px);
         app_.SetPdfTouchLastY((int)mapped.py);
         if (bookcurrent_->MoveFixedLayoutViewportToPreview((int)mapped.px,
-                                                           (int)mapped.py)) {
+                                                           (int)mapped.py))
+        {
           // DrawCurrentView now uses the full-page zoom cache for viewport
           // extraction (no MuPDF re-render), so updating both screens is fast.
           DrawBookPage(bookcurrent_, ts);
@@ -833,16 +1010,22 @@ void ReaderController::HandleEventInBook() {
           delay_fixed_layout_deferred();
         }
       }
-    } else if (keys & KEY_START) {
+    }
+    else if (keys & back_to_library_keys)
+    {
       show_library_view();
       prefs->Write();
-    } else if (keys & KEY_SELECT) {
+    }
+    else if (keys & settings_keys)
+    {
       show_settings_view(true);
       prefs->Write();
     }
 
-    if (!(held & KEY_TOUCH)) {
-      if (app_.IsPdfTouchDragActive()) {
+    if (!(held & KEY_TOUCH))
+    {
+      if (app_.IsPdfTouchDragActive())
+      {
         bookcurrent_->SetFixedLayoutViewportInteraction(false);
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
@@ -854,19 +1037,43 @@ void ReaderController::HandleEventInBook() {
       app_.SetPdfTouchLastY(-1);
     }
 
-    // Circle Pad smooth viewport pan. Only active when touch is not dragging.
-    if (!app_.IsPdfTouchDragActive()) {
-      static const int kCPadDeadZone = 15;
-      static const float kCPadScale = 0.012f / 154.0f;
+    // Circle Pad/C-Stick smooth viewport pan. Only active when touch is not
+    // dragging. Input follows the current reading orientation and ramps up
+    // slightly while held for faster long-distance traversal.
+    if (!app_.IsPdfTouchDragActive())
+    {
+      static int s_viewport_stick_active_frames = 0;
       circlePosition cpad;
+      circlePosition cstick = {0, 0};
       hidCircleRead(&cpad);
-      const float cdx =
-          (std::abs((int)cpad.dx) > kCPadDeadZone) ? cpad.dx * kCPadScale : 0.0f;
-      // Positive dy = up on the stick = viewport moves up = center_y decreases.
-      const float cdy =
-          (std::abs((int)cpad.dy) > kCPadDeadZone) ? -cpad.dy * kCPadScale : 0.0f;
-      if ((cdx != 0.0f || cdy != 0.0f) &&
-          bookcurrent_->TranslateFixedLayoutViewport(cdx, cdy)) {
+      if (app_.IsNew3dsDevice())
+        hidCstickRead(&cstick);
+
+      const float physical_x =
+          BuildViewportStickAxis((int)cpad.dx, kViewportStickDeadZone,
+                                 kViewportStickBaseScale) +
+          BuildViewportStickAxis((int)cstick.dx, kViewportCStickDeadZone,
+                                 kViewportStickBaseScale);
+      const float physical_y =
+          BuildViewportStickAxis(-(int)cpad.dy, kViewportStickDeadZone,
+                                 kViewportStickBaseScale) +
+          BuildViewportStickAxis(-(int)cstick.dy, kViewportCStickDeadZone,
+                                 kViewportStickBaseScale);
+      const bool stick_active = (physical_x != 0.0f || physical_y != 0.0f);
+      s_viewport_stick_active_frames =
+          stick_active ? (s_viewport_stick_active_frames + 1) : 0;
+
+      float viewport_dx = 0.0f;
+      float viewport_dy = 0.0f;
+      const float accel =
+          BuildViewportStickAccel(s_viewport_stick_active_frames);
+      MapViewportPanToReadingOrientation(app_.orientation, physical_x * accel,
+                                        physical_y * accel, &viewport_dx,
+                                        &viewport_dy);
+
+      if (stick_active &&
+          bookcurrent_->TranslateFixedLayoutViewport(viewport_dx, viewport_dy))
+      {
         bookcurrent_->SetFixedLayoutViewportInteraction(true);
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
@@ -874,16 +1081,20 @@ void ReaderController::HandleEventInBook() {
       }
     }
 
-    if (status_dirty) {
+    if (status_dirty)
+    {
       request_status_redraw();
-    } else if (!(held & KEY_TOUCH) && keys == 0 &&
-               bookcurrent_->HasPendingFixedLayoutDeferredWork() &&
-               osGetTime() >= app_.GetPdfDeferredReadyAtMs()) {
+    }
+    else if (!(held & KEY_TOUCH) && keys == 0 &&
+             bookcurrent_->HasPendingFixedLayoutDeferredWork() &&
+             osGetTime() >= app_.GetPdfDeferredReadyAtMs())
+    {
       const u32 budget_ms = 4;
       const bool worked = bookcurrent_->PumpDeferredFixedLayoutWork(budget_ms);
       const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
       app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
-      if (worked) {
+      if (worked)
+      {
         DrawBookPage(bookcurrent_, ts);
         request_status_redraw();
       }
@@ -891,14 +1102,19 @@ void ReaderController::HandleEventInBook() {
     return;
   }
 
-  if (keys & (KEY_A | key.r | key.down | key.zl | KEY_ZL)) {
+  if (keys & standard_next_page_keys)
+  {
     // page forward.
     AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
-  } else if (keys & (KEY_B | key.l | key.up | key.zr | KEY_ZR)) {
+  }
+  else if (keys & standard_prev_page_keys)
+  {
     // page back.
     if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
       status_dirty = true;
-  } else if (keys & KEY_X) {
+  }
+  else if (keys & key.x)
+  {
     int mode = ts->GetColorMode();
     int next = (mode + 1) % 6;
     app_.colorMode = next;
@@ -907,43 +1123,58 @@ void ReaderController::HandleEventInBook() {
     ts->MarkAllScreensDirty();
     DrawBookPage(bookcurrent_, ts);
     status_dirty = true;
-  } else if (keys & KEY_Y) {
+  }
+  else if (keys & key.y)
+  {
     ToggleBookmark();
-  } else if (keys & KEY_TOUCH) {
+  }
+  else if (keys & KEY_TOUCH)
+  {
     // Page turn split follows visual horizontal axis (left/right) in both
     // orientations after central touch un-mirroring.
     touchPosition mapped = touch_read();
     const bool forward_zone = ((int)mapped.px >= 120);
-    if (!forward_zone) {
+    if (!forward_zone)
+    {
       if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
         status_dirty = true;
-    } else {
+    }
+    else
+    {
       AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
     }
-  } else if (keys & KEY_START) {
+  }
+  else if (keys & back_to_library_keys)
+  {
     // Return to browser without reparsing the current book later.
     // Keep one parsed book resident in memory for fast reopen.
     show_library_view();
     prefs->Write();
-  } else if (keys & KEY_SELECT) {
+  }
+  else if (keys & settings_keys)
+  {
     // Go directly to settings from book.
     show_settings_view(true);
     prefs->Write();
-  } else if (keys & (key.right | key.left)) {
+  }
+  else if (keys & (bookmark_prev_keys | bookmark_next_keys))
+  {
     // Navigate bookmarks.
     app_flow_utils::BookmarkJumpResult jump = app_flow_utils::FindBookmarkJumpTarget(
         bookcurrent_->GetBookmarks(), bookcurrent_->GetPosition(),
-        (keys & key.left) ? app_flow_utils::BookmarkJumpDirection::Next
-                          : app_flow_utils::BookmarkJumpDirection::Previous);
+        (keys & bookmark_prev_keys) ? app_flow_utils::BookmarkJumpDirection::Previous
+                                    : app_flow_utils::BookmarkJumpDirection::Next);
 
-    if (jump.found) {
+    if (jump.found)
+    {
       bookcurrent_->SetPosition(jump.page);
       DrawBookPage(bookcurrent_, ts);
       status_dirty = true;
     }
   }
 
-  if (MaybeFinalizeDeferredRelayout(bookcurrent_, pagecount)) {
+  if (MaybeFinalizeDeferredRelayout(bookcurrent_, pagecount))
+  {
     DrawBookPage(bookcurrent_, ts);
     status_dirty = true;
   }
@@ -952,7 +1183,8 @@ void ReaderController::HandleEventInBook() {
     request_status_redraw();
 }
 
-void ReaderController::ToggleBookmark() {
+void ReaderController::ToggleBookmark()
+{
   Book *bookcurrent_ = app_.GetCurrentBook();
   Text *ts = app_.ts.get();
 
@@ -964,15 +1196,18 @@ void ReaderController::ToggleBookmark() {
 
   bool found = false;
   for (std::list<u16>::iterator i = bookmarks.begin(); i != bookmarks.end();
-       i++) {
-    if (*i == pagecurrent) {
+       i++)
+  {
+    if (*i == pagecurrent)
+    {
       bookmarks.erase(i);
       found = true;
       break;
     }
   }
 
-  if (!found) {
+  if (!found)
+  {
     bookmarks.push_back(pagecurrent);
     bookmarks.sort();
   }
@@ -984,10 +1219,12 @@ void ReaderController::ToggleBookmark() {
   app_.RequestStatusRedraw();
 }
 
-void ReaderController::CloseBook() {
+void ReaderController::CloseBook()
+{
   Book *bookcurrent_ = app_.GetCurrentBook();
 
-  if (bookcurrent_) {
+  if (bookcurrent_)
+  {
     DBG_LOGF(&app_, "BOOK close current session=%u book=%s",
              app_.GetCurrentBookSessionId(), SafeBookName(bookcurrent_));
     bookcurrent_->Close();
@@ -999,21 +1236,24 @@ void ReaderController::CloseBook() {
   ClearDeferredRelayoutState();
 }
 
-int ReaderController::GetBookIndex(Book *b) {
+int ReaderController::GetBookIndex(Book *b)
+{
   std::vector<Book *> &books = app_.books;
 
   if (!b)
     return -1;
   std::vector<Book *>::iterator it;
   int i = 0;
-  for (it = books.begin(); it < books.end(); it++, i++) {
+  for (it = books.begin(); it < books.end(); it++, i++)
+  {
     if (*it == b)
       return i;
   }
   return -1;
 }
 
-u8 ReaderController::OpenBook() {
+u8 ReaderController::OpenBook()
+{
   Prefs *prefs = app_.prefs.get();
   Text *ts = app_.ts.get();
   Book *selected_book = app_.GetSelectedBook();
@@ -1043,7 +1283,8 @@ u8 ReaderController::OpenBook() {
 
   // Fast path: selected book is already parsed and resident.
   if (selected_book->GetPageCount() > 0 && !needs_relayout &&
-      !selected_book->IsOpenAbortRequested()) {
+      !selected_book->IsOpenAbortRequested())
+  {
     ReuseParsedBook(&app_);
     app_.SetCurrentBookSessionId(session_id);
     if (app_.GetDeferredRelayoutBook() != app_.GetCurrentBook())
@@ -1057,7 +1298,8 @@ u8 ReaderController::OpenBook() {
   OpenBookRelayoutState relayout_state =
       CaptureRelayoutState(selected_book, needs_relayout);
   ClearDeferredRelayoutState();
-  if (app_.IsOpeningPending() && app_.GetOpeningBook()) {
+  if (app_.IsOpeningPending() && app_.GetOpeningBook())
+  {
     DBG_LOGF(&app_, "BOOK open reset: cancelling stale opening session=%u book=%s",
              app_.GetOpeningSessionId(), SafeBookName(app_.GetOpeningBook()));
     app_.GetOpeningBook()->CancelAsyncReflowOpen();
@@ -1068,18 +1310,22 @@ u8 ReaderController::OpenBook() {
   DrawOpeningSplash(&app_);
   app_.SetOpeningSpineProgress(0, 0);
   app_.SetOpeningDrawnProgressSeq(0);
-  if (app_.ShouldAbortWork()) {
+  if (app_.ShouldAbortWork())
+  {
     app_.SetMode(AppMode::Browser);
     app_.SetBrowserDirty(true);
     return BOOK_ERR_CANCELLED;
   }
 
-  if (selected_book->SupportsAsyncReflowOpen()) {
-    if (switching_books) {
+  if (selected_book->SupportsAsyncReflowOpen())
+  {
+    if (switching_books)
+    {
       app_.PauseBrowserJobs();
     }
     DetachCurrentBookForSwitch(&app_, selected_book, session_id, "async-open");
-    if (selected_book->StartAsyncReflowOpen(session_id)) {
+    if (selected_book->StartAsyncReflowOpen(session_id))
+    {
       app_.SetOpeningPending(true);
       app_.SetOpeningBook(selected_book);
       app_.SetOpeningSessionId(session_id);
@@ -1101,7 +1347,8 @@ u8 ReaderController::OpenBook() {
                  ? selected_book->GetFileName()
                  : "");
   }
-  if (u8 err = OpenSelectedBook(&app_, session_id)) {
+  if (u8 err = OpenSelectedBook(&app_, session_id))
+  {
     CloseFailedOpenBook(&app_, selected_book, session_id,
                         err == BOOK_ERR_CANCELLED ? "cancelled"
                                                   : "sync-open-failed");
@@ -1111,7 +1358,8 @@ u8 ReaderController::OpenBook() {
     app_.SetBrowserDirty(true);
     return err;
   }
-  if (app_.ShouldAbortWork() || selected_book->IsOpenAbortRequested()) {
+  if (app_.ShouldAbortWork() || selected_book->IsOpenAbortRequested())
+  {
     CloseFailedOpenBook(&app_, selected_book, session_id, "post-open-abort");
     app_.SetCurrentBook(nullptr);
     app_.SetCurrentBookSessionId(0);
@@ -1130,7 +1378,8 @@ u8 ReaderController::OpenBook() {
   int pageCount = bookcurrent_->GetPageCount();
   DBG_LOGF(&app_, "Generated %d pages", pageCount);
 
-  if (pageCount <= 0) {
+  if (pageCount <= 0)
+  {
     app_.PrintStatus("error: book has no parsed pages");
     CloseFailedOpenBook(&app_, bookcurrent_, session_id, "pages-zero");
     app_.SetCurrentBook(nullptr);
@@ -1146,23 +1395,28 @@ u8 ReaderController::OpenBook() {
           relayout_state.needs_relayout, false,
           relayout_state.old_page_count, relayout_state.old_position, pageCount,
           relayout_state.old_bookmarks);
-  if (open_plan.has_remap) {
+  if (open_plan.has_remap)
+  {
     bookcurrent_->SetPosition(open_plan.mapped_position);
     ApplyRemappedBookmarks(bookcurrent_, open_plan.mapped_bookmarks);
   }
-  if (open_plan.defer_final_remap) {
+  if (open_plan.defer_final_remap)
+  {
     app_.SetDeferredRelayoutPending(true);
     app_.SetDeferredRelayoutBook(bookcurrent_);
     app_.SetDeferredRelayoutOldPageCount(relayout_state.old_page_count);
     app_.SetDeferredRelayoutOldPosition(relayout_state.old_position);
     app_.MutableDeferredRelayoutOldBookmarks() = relayout_state.old_bookmarks;
     app_.SetDeferredRelayoutInitialPosition(open_plan.mapped_position);
-  } else {
+  }
+  else
+  {
     ClearDeferredRelayoutState();
   }
 
   EnsureBookMode(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
-  if (app_.ShouldAbortWork()) {
+  if (app_.ShouldAbortWork())
+  {
     CloseFailedOpenBook(&app_, bookcurrent_, session_id, "post-mode-abort");
     app_.SetCurrentBook(nullptr);
     app_.SetCurrentBookSessionId(0);
@@ -1185,7 +1439,8 @@ u8 ReaderController::OpenBook() {
   return 0;
 }
 
-void App::parse_error(XML_Parser p) {
+void App::parse_error(XML_Parser p)
+{
   char msg[128];
   snprintf(msg, sizeof(msg), "%d:%d: %s\n",
            (int)XML_GetCurrentLineNumber(p),

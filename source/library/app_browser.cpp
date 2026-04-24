@@ -1066,24 +1066,28 @@ void LibraryController::browser_handleevent() {
   }
 #endif
   auto map_grid_nav = [&](u32 key_down, BrowserNavMove *move) -> bool {
+    const u32 nav_down = app_.key.ddown | app_.key.down;
+    const u32 nav_up = app_.key.dup | app_.key.up;
+    const u32 nav_left = app_.key.dleft | app_.key.left;
+    const u32 nav_right = app_.key.dright | app_.key.right;
     if (!move)
       return false;
     if (!app_.orientation) {
       // Turned Left (right-handed): rotate d-pad mapping so directional input
       // follows the visual page orientation.
-      if (key_down & KEY_DOWN) {
+      if (key_down & nav_down) {
         *move = BROWSER_NAV_RIGHT;
         return true;
       }
-      if (key_down & KEY_UP) {
+      if (key_down & nav_up) {
         *move = BROWSER_NAV_LEFT;
         return true;
       }
-      if (key_down & KEY_LEFT) {
+      if (key_down & nav_left) {
         *move = BROWSER_NAV_DOWN;
         return true;
       }
-      if (key_down & KEY_RIGHT) {
+      if (key_down & nav_right) {
         *move = BROWSER_NAV_UP;
         return true;
       }
@@ -1092,28 +1096,30 @@ void LibraryController::browser_handleevent() {
 
     // Turned Right (left-handed): rotate d-pad mapping so directional intent
     // matches the on-screen grid orientation.
-    if (key_down & KEY_DOWN) {
+    if (key_down & nav_down) {
       *move = BROWSER_NAV_LEFT;
       return true;
     }
-    if (key_down & KEY_UP) {
+    if (key_down & nav_up) {
       *move = BROWSER_NAV_RIGHT;
       return true;
     }
-    if (key_down & KEY_LEFT) {
+    if (key_down & nav_left) {
       *move = BROWSER_NAV_UP;
       return true;
     }
-    if (key_down & KEY_RIGHT) {
+    if (key_down & nav_right) {
       *move = BROWSER_NAV_DOWN;
       return true;
     }
     return false;
   };
-  const u32 release_mask = KEY_TOUCH | KEY_A | KEY_B | KEY_X | KEY_Y |
-                           KEY_START | KEY_SELECT | KEY_UP | KEY_DOWN |
-                           KEY_LEFT | KEY_RIGHT | KEY_L | KEY_R | KEY_CPAD_UP |
-                           KEY_CPAD_DOWN | KEY_CPAD_LEFT | KEY_CPAD_RIGHT;
+  const u32 release_mask = KEY_TOUCH | app_.key.a | app_.key.b | app_.key.x |
+                           app_.key.y | app_.key.start | app_.key.select |
+                           app_.key.dup | app_.key.ddown | app_.key.dleft |
+                           app_.key.dright | app_.key.up | app_.key.down |
+                           app_.key.left | app_.key.right | app_.key.l |
+                           app_.key.r | app_.key.zl | app_.key.zr;
   if (app_.IsBrowserWaitingInputRelease()) {
     const u64 now = osGetTime();
     if (hidKeysHeld() & release_mask &&
@@ -1187,7 +1193,7 @@ void LibraryController::browser_handleevent() {
   BrowserNavMove nav_move = BROWSER_NAV_LEFT;
   const bool has_grid_nav = map_grid_nav(keys, &nav_move);
 
-  if (keys & KEY_A) {
+  if (keys & app_.key.a) {
     app_.OpenBook();
   } else if (has_grid_nav) {
     navigateSelection(nav_move);
@@ -1197,7 +1203,7 @@ void LibraryController::browser_handleevent() {
     browser_nextpage();
   }
 
-  else if (keys & KEY_X) {
+  else if (keys & app_.key.x) {
     int mode = app_.ts->GetColorMode();
     int next = (mode + 1) % 6;
     app_.colorMode = next;
@@ -1208,7 +1214,7 @@ void LibraryController::browser_handleevent() {
     app_.SetBrowserDirty(true);
   }
 
-  else if (keys & (KEY_SELECT | KEY_Y)) {
+  else if (keys & (app_.key.select | app_.key.y)) {
     app_.ShowSettingsView(false);
   }
 

@@ -322,19 +322,19 @@ void FontMenu::handleInput(u32 keys) {
 
 void FontMenu::handleTargetInput(u32 keys) {
   auto key = app->key;
-  if (keys & KEY_B) {
+  const u32 list_next_keys = key.ddown | key.dright | key.down | key.right;
+  const u32 list_prev_keys = key.dup | key.dleft | key.up | key.left;
+  if (keys & key.b) {
     app->ShowSettingsView(app->IsBookSettingsContext());
-  } else if (keys & KEY_A) {
+  } else if (keys & key.a) {
     enterFileView();
-  } else if (keys & (key.r | KEY_R)) {
+  } else if (keys & key.r) {
     nextTargetPage();
-  } else if (keys & (key.l | KEY_L)) {
+  } else if (keys & key.l) {
     previousTargetPage();
-  } else if (keys & (key.down | KEY_DOWN | key.right | KEY_RIGHT |
-                     KEY_CPAD_DOWN | KEY_CPAD_RIGHT)) {
+  } else if (keys & list_next_keys) {
     selectNextTarget();
-  } else if (keys & (key.up | KEY_UP | key.left | KEY_LEFT | KEY_CPAD_UP |
-                     KEY_CPAD_LEFT)) {
+  } else if (keys & list_prev_keys) {
     selectPreviousTarget();
   } else if (keys & KEY_TOUCH) {
     handleTargetTouchInput();
@@ -343,19 +343,19 @@ void FontMenu::handleTargetInput(u32 keys) {
 
 void FontMenu::handleFileInput(u32 keys) {
   auto key = app->key;
-  if (keys & KEY_B) {
+  const u32 list_next_keys = key.ddown | key.dright | key.down | key.right;
+  const u32 list_prev_keys = key.dup | key.dleft | key.up | key.left;
+  if (keys & key.b) {
     enterTargetView(targetSelected);
-  } else if (keys & KEY_A) {
+  } else if (keys & key.a) {
     handleButtonPress();
-  } else if (keys & (key.down | KEY_DOWN | key.right | KEY_RIGHT |
-                     KEY_CPAD_DOWN | KEY_CPAD_RIGHT)) {
+  } else if (keys & list_next_keys) {
     selectNext();
-  } else if (keys & (key.up | KEY_UP | key.left | KEY_LEFT | KEY_CPAD_UP |
-                     KEY_CPAD_LEFT)) {
+  } else if (keys & list_prev_keys) {
     selectPrevious();
-  } else if (keys & (key.r | KEY_R)) {
+  } else if (keys & key.r) {
     nextPage();
-  } else if (keys & (key.l | KEY_L)) {
+  } else if (keys & key.l) {
     previousPage();
   } else if (keys & KEY_TOUCH) {
     handleFileTouchInput();
