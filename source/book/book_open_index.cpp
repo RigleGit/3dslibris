@@ -17,17 +17,17 @@ u8 Book::Open() {
   return OpenPrepared();
 }
 
-u8 Book::Index() {
+// Tries to populate title/author/coverImagePath from the disk cache without
+// opening the source file. Returns true on cache hit.
+bool Book::TryLoadMetadataFromCache() {
   if (metadataIndexTried)
-    return metadataIndexed ? 0 : 1;
-  metadataIndexTried = true;
+    return metadataIndexed;
 
   std::string path;
   path.append(GetFolderName());
   path.append("/");
   path.append(GetFileName());
 
-  // Check the disk cache before opening the source file.
   book_meta_cache::EnsureDir();
   struct stat st;
   long long fsize = 0, fmtime = 0;
@@ -35,20 +35,44 @@ u8 Book::Index() {
     fsize  = (long long)st.st_size;
     fmtime = (long long)st.st_mtime;
   }
-  const std::string cache_path =
-      book_meta_cache::BuildPath(path, fsize, fmtime);
   book_meta_cache::MetaEntry cached;
-  if (book_meta_cache::Load(cache_path, &cached)) {
-    if (!cached.title.empty())
-      SetTitle(cached.title.c_str());
-    if (!cached.author.empty())
-      SetAuthor(cached.author);
-    coverImagePath = cached.cover_image_path;
-    ClearBrowserDisplayNameCache();
-    metadataIndexed = true;
+  if (!book_meta_cache::Load(book_meta_cache::BuildPath(path, fsize, fmtime),
+                             &cached))
+    return false;
+
+  if (!cached.title.empty())
+    SetTitle(cached.title.c_str());
+  if (!cached.author.empty())
+    SetAuthor(cached.author);
+  coverImagePath     = cached.cover_image_path;
+  metadataIndexTried = true;
+  metadataIndexed    = true;
+  ClearBrowserDisplayNameCache();
+  return true;
+}
+
+u8 Book::Index() {
+  if (metadataIndexTried)
+    return metadataIndexed ? 0 : 1;
+
+  // Fast path: disk cache hit.
+  if (TryLoadMetadataFromCache())
     return 0;
+
+  // Cache miss: parse the source file.
+  std::string path;
+  path.append(GetFolderName());
+  path.append("/");
+  path.append(GetFileName());
+
+  struct stat st;
+  long long fsize = 0, fmtime = 0;
+  if (stat(path.c_str(), &st) == 0) {
+    fsize  = (long long)st.st_size;
+    fmtime = (long long)st.st_mtime;
   }
 
+  metadataIndexTried = true;
   int err = 1;
   if (format == FORMAT_EPUB) {
     err = epub(this, path, true);
@@ -62,7 +86,7 @@ u8 Book::Index() {
 
   if (err == BOOK_ERR_CANCELLED) {
     metadataIndexTried = false;
-    metadataIndexed = false;
+    metadataIndexed    = false;
     return err;
   }
 
@@ -72,7 +96,8 @@ u8 Book::Index() {
     entry.title            = title;
     entry.author           = author;
     entry.cover_image_path = coverImagePath;
-    book_meta_cache::Save(cache_path, entry);
+    book_meta_cache::Save(
+        book_meta_cache::BuildPath(path, fsize, fmtime), entry);
   }
 
   return err;

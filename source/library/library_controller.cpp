@@ -230,6 +230,13 @@ int LibraryController::FindBooks() {
 }
 
 void LibraryController::PrepareLibrary() {
+  // Pre-populate metadata from the disk cache before sorting so the initial
+  // sort uses real titles. Cache hits are ~2ms each; misses return quickly
+  // (no source file is opened). Books without a cache entry are left for the
+  // warmup job system to handle after the browser opens.
+  for (auto &book : app_.books)
+    book->TryLoadMetadataFromCache();
+
   std::sort(app_.books.begin(), app_.books.end(), &BookTitleLessThan);
   for (auto &book : app_.books)
     book->GetBookmarks().sort();

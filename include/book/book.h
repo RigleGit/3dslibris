@@ -258,6 +258,9 @@ public:
   const char *GetFixedLayoutLabel() const;
   bool UsesTextLayoutSettings() const;
   bool SupportsBookmarks() const;
+  // Populates title/author/coverImagePath from the disk cache without
+  // falling through to a full parse on a miss. Returns true on cache hit.
+  bool TryLoadMetadataFromCache();
   const char *GetFileName(void);
   const char *GetFolderName(void);
   Page *GetPage();
