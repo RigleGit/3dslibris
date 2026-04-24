@@ -298,7 +298,7 @@ mupdf-minimal: $(MUPDF_STAMP)
 
 $(MUPDF_STAMP): $(CURDIR)/scripts/build_mupdf_minimal.sh
 	@echo building mupdf minimal ...
-	@sh "$(CURDIR)/scripts/build_mupdf_minimal.sh"
+	+@sh "$(CURDIR)/scripts/build_mupdf_minimal.sh"
 	@touch "$@"
 
 $(MUPDF_LIB_A) $(MUPDF_LIB_THIRD_A): $(MUPDF_STAMP)
