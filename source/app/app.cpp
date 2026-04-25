@@ -719,6 +719,46 @@ void App::SetPdfDeferredReadyAtMs(u64 ready_at_ms)
   reader_state_.pdf_deferred_ready_at_ms = ready_at_ms;
 }
 
+bool App::IsInlineLinkFocusActive() const
+{
+  return reader_state_.inline_link_focus_active;
+}
+
+void App::SetInlineLinkFocusActive(bool active)
+{
+  reader_state_.inline_link_focus_active = active;
+}
+
+bool App::IsInlineLinkHoldArmed() const
+{
+  return reader_state_.inline_link_hold_armed;
+}
+
+void App::SetInlineLinkHoldArmed(bool armed)
+{
+  reader_state_.inline_link_hold_armed = armed;
+}
+
+bool App::IsInlineLinkHoldConsumed() const
+{
+  return reader_state_.inline_link_hold_consumed;
+}
+
+void App::SetInlineLinkHoldConsumed(bool consumed)
+{
+  reader_state_.inline_link_hold_consumed = consumed;
+}
+
+u64 App::GetInlineLinkHoldStartedAtMs() const
+{
+  return reader_state_.inline_link_hold_started_at_ms;
+}
+
+void App::SetInlineLinkHoldStartedAtMs(u64 started_at_ms)
+{
+  reader_state_.inline_link_hold_started_at_ms = started_at_ms;
+}
+
 bool App::IsNew3dsDevice() const { return is_new_3ds_; }
 
 bool App::IsHomebrewEnvironment() const { return is_homebrew_; }

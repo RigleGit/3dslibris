@@ -97,6 +97,8 @@ private:
   std::vector<ChapterEntry> chapters;
   std::vector<InlineImageEntry> inline_images;
   std::unordered_map<std::string, u16> inline_image_path_index;
+  std::vector<std::string> inline_link_hrefs;
+  std::unordered_map<std::string, u16> inline_link_href_index;
   std::unordered_map<std::string, u16> chapter_anchor_pages;
   std::unordered_map<std::string, u16> chapter_doc_start_pages;
   std::unordered_map<std::string, std::vector<u8>> fb2_inline_images;
@@ -125,6 +127,7 @@ private:
   unsigned int layout_revision;
   unsigned int open_session_id_;
   bool open_abort_requested_;
+  int focused_inline_link_index;
 
   void ClearInlineImageCache();
   bool LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
@@ -225,6 +228,9 @@ public:
   std::list<u16> &GetBookmarks();
   const std::list<u16> &GetBookmarks() const;
   const std::vector<ChapterEntry> &GetChapters() const;
+  u16 RegisterInlineLinkHref(const std::string &href);
+  const std::string *GetInlineLinkHref(u16 id) const;
+  void ClearInlineLinks();
   u16 RegisterInlineImage(const std::string &path);
   void AddChapterAnchor(const std::string &docpath,
                         const std::string &anchor_id);
@@ -252,6 +258,9 @@ public:
                        const InlineImageLayoutPlan *plan = NULL);
   void AddChapter(u16 page, const std::string &title, u8 level = 0);
   void ClearChapters();
+  int GetFocusedInlineLinkIndex() const;
+  void SetFocusedInlineLinkIndex(int index);
+  void ClearFocusedInlineLink();
   bool IsPdf() const;
   bool IsCbz() const;
   bool IsFixedLayout() const;

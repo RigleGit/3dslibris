@@ -159,7 +159,7 @@ static void PruneCoverCache(bool force) {
     return;
   last_prune_ms = now;
 
-  DIR *dp = opendir(kCoverCacheDir);
+  DIR *dp = opendir(kCoverCacheDir.c_str());
   if (!dp)
     return;
 
@@ -174,7 +174,7 @@ static void PruneCoverCache(bool force) {
       continue;
 
     char full[512];
-    snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir, ent->d_name);
+    snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir.c_str(), ent->d_name);
     struct stat st;
     if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
       continue;
@@ -251,7 +251,7 @@ static void EnsureCoverCacheDirs() {
 
   // One-time cleanup: remove legacy CVR2 cache files whose names are bare
   // 16-hex-digit hashes (e.g., "a1b2c3d4e5f6g7h8.cvr").
-  DIR *legacy_dp = opendir(kCoverCacheDir);
+  DIR *legacy_dp = opendir(kCoverCacheDir.c_str());
   if (legacy_dp) {
     struct dirent *ent;
     while ((ent = readdir(legacy_dp)) != NULL) {
@@ -264,7 +264,7 @@ static void EnsureCoverCacheDirs() {
           all_hex = isxdigit((unsigned char)ent->d_name[i]);
         if (all_hex) {
           char full[512];
-          snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir, ent->d_name);
+          snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir.c_str(), ent->d_name);
           remove(full);
         }
       }
@@ -307,7 +307,7 @@ static std::string BuildCoverCachePath(Book *book,
   label = SanitizeFat32Name(label, 80);
 
   char out[512];
-  snprintf(out, sizeof(out), "%s/%s_%08llx.cvr", kCoverCacheDir, label.c_str(),
+  snprintf(out, sizeof(out), "%s/%s_%08llx.cvr", kCoverCacheDir.c_str(), label.c_str(),
            (unsigned long long)(h & 0xFFFFFFFFULL));
   return std::string(out);
 }

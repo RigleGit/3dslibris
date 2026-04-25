@@ -75,6 +75,25 @@ void DrawPatternedUnderline(Text *ts, int x0, int x1, int y, u16 color,
   }
 }
 
+void ExpandLinkBounds(inline_link_utils::LinkRect *rect, int x0, int y0, int x1,
+                      int y1) {
+  if (!rect || x1 <= x0 || y1 <= y0)
+    return;
+  if (!inline_link_utils::IsValidRect(*rect)) {
+    rect->x0 = x0;
+    rect->y0 = y0;
+    rect->x1 = x1;
+    rect->y1 = y1;
+    return;
+  }
+  rect->x0 = std::min(rect->x0, x0);
+  rect->y0 = std::min(rect->y0, y0);
+  rect->x1 = std::max(rect->x1, x1);
+  rect->y1 = std::max(rect->y1, y1);
+}
+
+u16 LinkTextColor() { return 0x001F; }
+
 } // namespace
 
 Page::Page(Book *b) {
@@ -163,6 +182,10 @@ void Page::Draw(Text *ts) {
   bool superscript = false;
   bool subscript = false;
   bool mono = false;
+  bool link_active = false;
+  u16 active_link_href_id = 0;
+  int active_link_render_index = -1;
+  rendered_inline_links_.clear();
 
 #ifdef OFFSCREEN
   // Draw offscreen.
@@ -254,6 +277,34 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_PARAGRAPH_RIGHT) {
       paragraph_align = book_xml_css_style_utils::TextAlign::Right;
       i++;
+      continue;
+    } else if (c == TEXT_LINK_START) {
+      if (i + 1 < length) {
+        active_link_href_id = (u16)buf[i + 1];
+        link_active = active_link_href_id != 0;
+        active_link_render_index = -1;
+        if (link_active) {
+          InlineLinkRenderEntry entry{};
+          entry.href_id = active_link_href_id;
+          entry.screen_index = on_first_screen ? 0 : 1;
+          entry.bounds.x0 = 0;
+          entry.bounds.y0 = 0;
+          entry.bounds.x1 = 0;
+          entry.bounds.y1 = 0;
+          rendered_inline_links_.push_back(entry);
+          active_link_render_index = (int)rendered_inline_links_.size() - 1;
+        }
+        i += 2;
+      } else {
+        i++;
+      }
+      continue;
+    } else if (c == TEXT_LINK_END) {
+      i++;
+      link_active = false;
+      active_link_href_id = 0;
+      active_link_render_index = -1;
+      ts->ClearTextColorOverride();
       continue;
     } else if (c == TEXT_RTL_LINE_PX) {
       if (i + 1 < length)
@@ -534,6 +585,10 @@ void Page::Draw(Text *ts) {
 
       const int glyph_x0 = (int)ts->GetPenX();
       const int base_pen_y = (int)ts->GetPenY();
+      if (link_active)
+        ts->SetTextColorOverride(LinkTextColor());
+      else
+        ts->ClearTextColorOverride();
       if (superscript || subscript) {
         const int y_offset =
             superscript ? -std::max(2, ts->GetHeight() / 3)
@@ -559,6 +614,14 @@ void Page::Draw(Text *ts) {
         ts->PrintChar(c, TEXT_STYLE_REGULAR);
 
       const int glyph_x1 = (int)ts->GetPenX();
+      if (link_active && active_link_render_index >= 0 &&
+          active_link_render_index < (int)rendered_inline_links_.size()) {
+        InlineLinkRenderEntry &entry =
+            rendered_inline_links_[(size_t)active_link_render_index];
+        entry.screen_index = on_first_screen ? 0 : 1;
+        ExpandLinkBounds(&entry.bounds, glyph_x0, base_pen_y - ts->GetHeight(),
+                         glyph_x1, base_pen_y + 2);
+      }
       if (superscript || subscript)
         ts->SetPen((u16)glyph_x1, (u16)base_pen_y);
       const int baseline_y = (int)ts->GetPenY();
@@ -587,6 +650,31 @@ void Page::Draw(Text *ts) {
 
   if (in_preformatted_block)
     ts->SetClipToContentEnabled(saved_clip_to_content);
+  ts->ClearTextColorOverride();
+  if (book) {
+    const int focused_index = book->GetFocusedInlineLinkIndex();
+    if (focused_index >= 0 &&
+        focused_index < (int)rendered_inline_links_.size()) {
+      const InlineLinkRenderEntry &entry =
+          rendered_inline_links_[(size_t)focused_index];
+      if (inline_link_utils::IsValidRect(entry.bounds)) {
+        u16 *saved_screen = ts->GetScreen();
+        u16 *target = (entry.screen_index == 0) ? first_screen : second_screen;
+        ts->SetScreen(target);
+        const int x0 = std::max(0, entry.bounds.x0 - 1);
+        const int y0 = std::max(0, entry.bounds.y0 - 1);
+        const int x1 = std::min((int)ts->display.width, entry.bounds.x1 + 1);
+        const int max_y = (target == ts->screenleft) ? 400 : 320;
+        const int y1 = std::min(max_y, entry.bounds.y1 + 1);
+        const u16 focus_color = 0xF800;
+        ts->FillRect((u16)x0, (u16)y0, (u16)x1, (u16)(y0 + 1), focus_color);
+        ts->FillRect((u16)x0, (u16)(y1 - 1), (u16)x1, (u16)y1, focus_color);
+        ts->FillRect((u16)x0, (u16)y0, (u16)(x0 + 1), (u16)y1, focus_color);
+        ts->FillRect((u16)(x1 - 1), (u16)y0, (u16)x1, (u16)y1, focus_color);
+        ts->SetScreen(saved_screen);
+      }
+    }
+  }
   DrawNumber(ts, second_screen);
 #ifdef OFFSCREEN
   ts->SetScreen(second_screen);

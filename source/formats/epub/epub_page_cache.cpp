@@ -108,8 +108,8 @@ static void EnsureCacheDirs() {
   static bool initialized = false;
   if (initialized)
     return;
-  mkdir(kEpubCacheBaseDir, 0777);
-  mkdir(kEpubCacheDir, 0777);
+  mkdir(kEpubCacheBaseDir.c_str(), 0777);
+  mkdir(kEpubCacheDir.c_str(), 0777);
   initialized = true;
 }
 

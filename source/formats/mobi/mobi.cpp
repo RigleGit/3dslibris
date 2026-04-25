@@ -145,8 +145,8 @@ static void EnsureMobiCoverMetaCacheDirs() {
   static bool initialized = false;
   if (initialized)
     return;
-  mkdir(kMobiCoverMetaCacheBaseDir, 0777);
-  mkdir(kMobiCoverMetaCacheDir, 0777);
+  mkdir(kMobiCoverMetaCacheBaseDir.c_str(), 0777);
+  mkdir(kMobiCoverMetaCacheDir.c_str(), 0777);
   initialized = true;
 }
 

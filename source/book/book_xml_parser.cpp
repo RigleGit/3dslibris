@@ -24,6 +24,7 @@
 #include "book/book_xml_text_emit.h"
 #include "book/book_xml.h"
 #include "formats/common/html_entity_utils.h"
+#include "reader/inline_link_utils.h"
 #include "book/heading_layout.h"
 #include "formats/epub/epub.h"
 #include "formats/epub/epub_page_cache.h"
@@ -76,6 +77,8 @@ static std::string ToLowerAsciiLocal(const std::string &s) {
 static void AppendParsedByte(parsedata_t *p, u32 c) {
   parse_append_page_byte(p, c);
 }
+
+static void RestoreParsedInlineLinkMarker(parsedata_t *p);
 
 struct ParsedTextMeasureContext {
   Text *text;
@@ -713,6 +716,7 @@ static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
 
     parse_reset_page_buffer(p);
     book_xml_parser_style_utils::RestoreParsedStyleMarkers(p);
+    RestoreParsedInlineLinkMarker(p);
     p->screen = 0;
   } else {
     p->screen = 1;
@@ -1097,6 +1101,30 @@ static int EmitAdditionalTopLinefeeds(parsedata_t *p, int desired_lf) {
   return add_lf;
 }
 
+static bool GetTopActiveInlineLink(const parsedata_t *p, u16 *href_id_out) {
+  if (!p || !href_id_out)
+    return false;
+  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+    if (!p->link_active_stack[i])
+      continue;
+    if (p->link_href_id_stack[i] == 0)
+      continue;
+    *href_id_out = p->link_href_id_stack[i];
+    return true;
+  }
+  return false;
+}
+
+static void RestoreParsedInlineLinkMarker(parsedata_t *p) {
+  if (!p)
+    return;
+  u16 href_id = 0;
+  if (!GetTopActiveInlineLink(p, &href_id))
+    return;
+  AppendParsedByte(p, TEXT_LINK_START);
+  AppendParsedByte(p, (u32)href_id);
+}
+
 static void AdvanceParsedScreen(parsedata_t *p) {
   if (!p || !p->ts || !p->book)
     return;
@@ -1107,6 +1135,7 @@ static void AdvanceParsedScreen(parsedata_t *p) {
     page->SetBuffer(p->buf, p->buflen);
     parse_reset_page_buffer(p);
     book_xml_parser_style_utils::RestoreParsedStyleMarkers(p);
+    RestoreParsedInlineLinkMarker(p);
     p->screen = 0;
   } else {
     p->screen = 1;
@@ -1861,6 +1890,31 @@ void start(void *data, const char *el, const char **attr) {
       p->mono = true;
       SyncParsedTextStyle(ts, p->bold, p->italic, p->mono);
     }
+  } else if (!strcmp(el, "a")) {
+    parse_push(p, TAG_ANCHOR);
+    const u8 current = (u8)(p->stacksize - 1);
+    p->link_active_stack[current] = false;
+    p->link_href_id_stack[current] = 0;
+    const char *href = NULL;
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (XmlNameEquals(attr[i], "href")) {
+        href = attr[i + 1];
+        break;
+      }
+    }
+    const std::string resolved_href =
+        (href && *href)
+            ? inline_link_utils::ResolveInternalHref(p->docpath, href)
+            : std::string();
+    if (!resolved_href.empty() && p->book) {
+      const u16 href_id = p->book->RegisterInlineLinkHref(resolved_href);
+      if (href_id != 0) {
+        p->link_active_stack[current] = true;
+        p->link_href_id_stack[current] = href_id;
+        AppendParsedByte(p, TEXT_LINK_START);
+        AppendParsedByte(p, (u32)href_id);
+      }
+    }
   } else if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
     parse_push(p, TAG_UNKNOWN);
 
@@ -2217,6 +2271,7 @@ void end(void *data, const char *el) {
     parse_reset_page_buffer(p);
     // Retain styles across the page.
     book_xml_parser_style_utils::RestoreParsedStyleMarkers(p);
+    RestoreParsedInlineLinkMarker(p);
     parse_pop(p);
     return;
   }
@@ -2225,6 +2280,11 @@ void end(void *data, const char *el) {
     FlushInlineTailAndDeferredStyle(p, ts);
     linefeed(p);
   } else if (!strcmp(el, "a")) {
+    if (p->stacksize > 0) {
+      const u8 current = (u8)(p->stacksize - 1);
+      if (p->link_active_stack[current] && p->link_href_id_stack[current] != 0)
+        AppendParsedByte(p, TEXT_LINK_END);
+    }
     // Many EPUB TOC/Nav documents are built as dense anchor lists with little
     // structural markup; force line breaks there to keep the reading view sane.
     if (DocLooksLikeTocDoc(p) && p->linebegan && p->buflen > 0 &&

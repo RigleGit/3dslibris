@@ -271,6 +271,7 @@ Book::Book(const BookContext &c) : ctx(c)
   // Session state
   open_session_id_ = 0;
   open_abort_requested_ = false;
+  focused_inline_link_index = -1;
   ClearTocConfidence();
 }
 
@@ -350,6 +351,39 @@ std::list<u16> &Book::GetBookmarks() { return bookmarks; }
 
 const std::list<u16> &Book::GetBookmarks() const { return bookmarks; }
 const std::vector<ChapterEntry> &Book::GetChapters() const { return chapters; }
+u16 Book::RegisterInlineLinkHref(const std::string &href)
+{
+  if (href.empty())
+    return 0;
+  std::unordered_map<std::string, u16>::const_iterator hit =
+      inline_link_href_index.find(href);
+  if (hit != inline_link_href_index.end())
+    return hit->second;
+  if (inline_link_hrefs.size() >= 0xFFFFu)
+    return 0;
+  const u16 id = (u16)(inline_link_hrefs.size() + 1u);
+  inline_link_hrefs.push_back(href);
+  inline_link_href_index[href] = id;
+  return id;
+}
+
+const std::string *Book::GetInlineLinkHref(u16 id) const
+{
+  if (id == 0)
+    return NULL;
+  const size_t index = (size_t)(id - 1u);
+  if (index >= inline_link_hrefs.size())
+    return NULL;
+  return &inline_link_hrefs[index];
+}
+
+void Book::ClearInlineLinks()
+{
+  inline_link_hrefs.clear();
+  inline_link_href_index.clear();
+  focused_inline_link_index = -1;
+}
+
 // TODO: If more formats/endpoints reuse chapter href normalization logic,
 // consider moving the path/anchor normalization helpers into a small shared module. 
 void Book::AddChapterAnchor(const std::string &docpath,
@@ -655,6 +689,15 @@ const char *Book::GetFixedLayoutLabel() const
 
 bool Book::UsesTextLayoutSettings() const { return !IsFixedLayout(); }
 
+int Book::GetFocusedInlineLinkIndex() const { return focused_inline_link_index; }
+
+void Book::SetFocusedInlineLinkIndex(int index)
+{
+  focused_inline_link_index = index;
+}
+
+void Book::ClearFocusedInlineLink() { focused_inline_link_index = -1; }
+
 bool Book::SupportsBookmarks() const { return !IsFixedLayout(); }
 
 Page *Book::GetPage() { return pages[position]; }
@@ -732,6 +775,7 @@ void Book::Close()
   { std::vector<ChapterEntry>().swap(chapters); }
   ClearChapterAnchors();
   ClearChapterDocStartPages();
+  ClearInlineLinks();
   ClearInlineImages();
   ClearTocConfidence();
   open_session_id_ = 0;

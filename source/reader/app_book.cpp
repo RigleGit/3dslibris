@@ -32,6 +32,7 @@
 #include "reader/deferred_relayout_utils.h"
 #include "reader/book_switch_utils.h"
 #include "reader/fixed_layout_input_utils.h"
+#include "reader/inline_link_utils.h"
 #include "reader/suspend_policy_utils.h"
 #include "formats/common/pdf_view_utils.h"
 #include "ui/button.h"
@@ -55,6 +56,8 @@ namespace
   static const int kViewportCStickDeadZone = 8;
   static const float kViewportStickBaseScale = 0.048f / 154.0f;
   static const int kViewportStickAccelFrames = 24;
+  static const u64 kInlineLinkHoldThresholdMs = 350;
+  static const int kInlineLinkSecondScreenYOffset = 420;
 
   // Returns a human-readable name for the book, for debug logging.
   [[gnu::unused]] static const char *SafeBookName(Book *book)
@@ -274,10 +277,111 @@ namespace
     if (book->IsFixedLayout())
       book->CancelFixedLayoutDeferredWork();
     book->SetPosition(page);
+    book->ClearFocusedInlineLink();
     if (book->IsFixedLayout())
       book->ResetFixedLayoutViewportForNavigation();
     DrawBookPage(book, ts);
     return true;
+  }
+
+  const std::vector<Page::InlineLinkRenderEntry> *CurrentPageInlineLinks(Book *book)
+  {
+    if (!book || book->GetPageCount() == 0 || book->IsFixedLayout())
+      return NULL;
+    Page *page = book->GetPage();
+    if (!page)
+      return NULL;
+    return &page->GetRenderedInlineLinks();
+  }
+
+  bool CurrentPageHasInlineLinks(Book *book)
+  {
+    const std::vector<Page::InlineLinkRenderEntry> *links =
+        CurrentPageInlineLinks(book);
+    return links && !links->empty();
+  }
+
+  void ExitInlineLinkFocus(App *app, Book *book)
+  {
+    if (book)
+      book->ClearFocusedInlineLink();
+    if (app)
+      app->SetInlineLinkFocusActive(false);
+  }
+
+  bool EnterInlineLinkFocus(App *app, Book *book, Text *ts)
+  {
+    if (!app || !book || !ts)
+      return false;
+    const std::vector<Page::InlineLinkRenderEntry> *links =
+        CurrentPageInlineLinks(book);
+    if (!links || links->empty())
+      return false;
+    int focus_index = book->GetFocusedInlineLinkIndex();
+    if (focus_index < 0 || focus_index >= (int)links->size())
+      focus_index = 0;
+    book->SetFocusedInlineLinkIndex(focus_index);
+    app->SetInlineLinkFocusActive(true);
+    DrawBookPage(book, ts);
+    return true;
+  }
+
+  bool MoveInlineLinkFocus(Book *book, Text *ts,
+                           inline_link_utils::InlineLinkNavDirection direction)
+  {
+    if (!book || !ts)
+      return false;
+    const std::vector<Page::InlineLinkRenderEntry> *links =
+        CurrentPageInlineLinks(book);
+    if (!links || links->empty())
+      return false;
+
+    std::vector<inline_link_utils::LinkRect> nav_rects;
+    nav_rects.reserve(links->size());
+    for (size_t i = 0; i < links->size(); ++i)
+    {
+      inline_link_utils::LinkRect rect = (*links)[i].bounds;
+      if ((*links)[i].screen_index != 0)
+      {
+        rect.y0 += kInlineLinkSecondScreenYOffset;
+        rect.y1 += kInlineLinkSecondScreenYOffset;
+      }
+      nav_rects.push_back(rect);
+    }
+
+    int current_index = book->GetFocusedInlineLinkIndex();
+    if (current_index < 0 || current_index >= (int)nav_rects.size())
+      current_index = 0;
+    const int next_index =
+        inline_link_utils::FindNeighborIndex(nav_rects, current_index, direction);
+    if (next_index < 0 || next_index == current_index)
+      return false;
+    book->SetFocusedInlineLinkIndex(next_index);
+    DrawBookPage(book, ts);
+    return true;
+  }
+
+  bool FollowFocusedInlineLink(Book *book, Text *ts)
+  {
+    if (!book || !ts)
+      return false;
+    const std::vector<Page::InlineLinkRenderEntry> *links =
+        CurrentPageInlineLinks(book);
+    if (!links || links->empty())
+      return false;
+    const int focus_index = book->GetFocusedInlineLinkIndex();
+    if (focus_index < 0 || focus_index >= (int)links->size())
+      return false;
+    const std::string *href =
+        book->GetInlineLinkHref((*links)[(size_t)focus_index].href_id);
+    if (!href || href->empty())
+      return false;
+    u16 target_page = 0;
+    if (!book->FindChapterAnchorPage(*href, &target_page) &&
+        !book->FindChapterDocStartPage(*href, &target_page))
+      return false;
+    book->ClearFocusedInlineLink();
+    return SetBookPage(book, ts, target_page);
   }
 
   bool TurnBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 pagecount,
@@ -1102,7 +1206,80 @@ void ReaderController::HandleEventInBook()
     return;
   }
 
-  if (keys & standard_next_page_keys)
+  const bool has_inline_links = CurrentPageHasInlineLinks(bookcurrent_);
+  const u64 now_ms = osGetTime();
+  if (!app_.IsInlineLinkFocusActive() && (keys & key.y))
+  {
+    app_.SetInlineLinkHoldArmed(true);
+    app_.SetInlineLinkHoldConsumed(false);
+    app_.SetInlineLinkHoldStartedAtMs(now_ms);
+  }
+
+  if (!app_.IsInlineLinkFocusActive() && app_.IsInlineLinkHoldArmed() &&
+      (held & key.y) && !app_.IsInlineLinkHoldConsumed() && has_inline_links &&
+      now_ms >= app_.GetInlineLinkHoldStartedAtMs() + kInlineLinkHoldThresholdMs)
+  {
+    if (EnterInlineLinkFocus(&app_, bookcurrent_, ts))
+    {
+      app_.SetInlineLinkHoldConsumed(true);
+      status_dirty = true;
+    }
+  }
+
+  if (app_.IsInlineLinkFocusActive())
+  {
+    if (keys & (key.b | key.y))
+    {
+      ExitInlineLinkFocus(&app_, bookcurrent_);
+      DrawBookPage(bookcurrent_, ts);
+      status_dirty = true;
+    }
+    else if (keys & key.a)
+    {
+      if (FollowFocusedInlineLink(bookcurrent_, ts))
+      {
+        app_.SetInlineLinkFocusActive(false);
+        status_dirty = true;
+      }
+    }
+    else if (keys & key.dleft)
+    {
+      if (MoveInlineLinkFocus(bookcurrent_, ts,
+                              inline_link_utils::INLINE_LINK_NAV_LEFT))
+        status_dirty = true;
+    }
+    else if (keys & key.dright)
+    {
+      if (MoveInlineLinkFocus(bookcurrent_, ts,
+                              inline_link_utils::INLINE_LINK_NAV_RIGHT))
+        status_dirty = true;
+    }
+    else if (keys & key.dup)
+    {
+      if (MoveInlineLinkFocus(bookcurrent_, ts,
+                              inline_link_utils::INLINE_LINK_NAV_UP))
+        status_dirty = true;
+    }
+    else if (keys & key.ddown)
+    {
+      if (MoveInlineLinkFocus(bookcurrent_, ts,
+                              inline_link_utils::INLINE_LINK_NAV_DOWN))
+        status_dirty = true;
+    }
+    else if (keys & back_to_library_keys)
+    {
+      ExitInlineLinkFocus(&app_, bookcurrent_);
+      show_library_view();
+      prefs->Write();
+    }
+    else if (keys & settings_keys)
+    {
+      ExitInlineLinkFocus(&app_, bookcurrent_);
+      show_settings_view(true);
+      prefs->Write();
+    }
+  }
+  else if (keys & standard_next_page_keys)
   {
     // page forward.
     AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
@@ -1126,7 +1303,6 @@ void ReaderController::HandleEventInBook()
   }
   else if (keys & key.y)
   {
-    ToggleBookmark();
   }
   else if (keys & KEY_TOUCH)
   {
@@ -1171,6 +1347,16 @@ void ReaderController::HandleEventInBook()
       DrawBookPage(bookcurrent_, ts);
       status_dirty = true;
     }
+  }
+
+  if (app_.IsInlineLinkHoldArmed() && !(held & key.y))
+  {
+    const bool consumed = app_.IsInlineLinkHoldConsumed();
+    app_.SetInlineLinkHoldArmed(false);
+    app_.SetInlineLinkHoldStartedAtMs(0);
+    app_.SetInlineLinkHoldConsumed(false);
+    if (!consumed && !app_.IsInlineLinkFocusActive())
+      ToggleBookmark();
   }
 
   if (MaybeFinalizeDeferredRelayout(bookcurrent_, pagecount))
@@ -1222,6 +1408,10 @@ void ReaderController::ToggleBookmark()
 void ReaderController::CloseBook()
 {
   Book *bookcurrent_ = app_.GetCurrentBook();
+  app_.SetInlineLinkFocusActive(false);
+  app_.SetInlineLinkHoldArmed(false);
+  app_.SetInlineLinkHoldConsumed(false);
+  app_.SetInlineLinkHoldStartedAtMs(0);
 
   if (bookcurrent_)
   {

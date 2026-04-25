@@ -33,14 +33,24 @@ A Book contains a vector of Pages.
 
 #include <3ds.h>
 #include "book/page_buffer_utils.h"
+#include "reader/inline_link_utils.h"
 #include "ui/text.h"
 #include <vector>
 
 class Book;
 
 class Page {
+ public:
+	struct InlineLinkRenderEntry {
+		u16 href_id;
+		u8 screen_index;
+		inline_link_utils::LinkRect bounds;
+	};
+
+ private:
 	class Book *book;
 	std::vector<u32> storage;
+	std::vector<InlineLinkRenderEntry> rendered_inline_links_;
 	void DrawNumber(Text *ts, u16 *number_screen);
 	void SyncBufferAlias();
 
@@ -64,6 +74,9 @@ class Page {
 	void SetBuffer(const u32 *src, int len); 
 	void AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned);
 	void FreeBuffer();
+	const std::vector<InlineLinkRenderEntry> &GetRenderedInlineLinks() const {
+		return rendered_inline_links_;
+	}
 	//	void Draw();
 	void Draw(Text *ts);
 };
