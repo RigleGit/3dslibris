@@ -116,6 +116,94 @@ void TestParseMarginBottomZeroUnitless() {
   test::ExpectEq("bottom zero unitless value", r.value, 0);
 }
 
+void TestTryParseFontSizeAcceptsPxValues() {
+  book_xml_css_style_utils::FontSizeSpec spec{};
+  const bool ok =
+      book_xml_css_style_utils::TryParseFontSize("font-size: 21px;", &spec);
+  test::ExpectTrue("font-size px parsed", ok);
+  test::ExpectEq("font-size px unit", (int)spec.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Px);
+  test::ExpectEq("font-size px value", spec.value_x100, 2100);
+}
+
+void TestTryParseFontSizeAcceptsRelativeValues() {
+  book_xml_css_style_utils::FontSizeSpec percent{};
+  test::ExpectTrue("font-size percent parsed",
+                   book_xml_css_style_utils::TryParseFontSize(
+                       "font-size: 150%;", &percent));
+  test::ExpectEq("font-size percent unit", (int)percent.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Percent);
+  test::ExpectEq("font-size percent value", percent.value_x100, 15000);
+
+  book_xml_css_style_utils::FontSizeSpec em{};
+  test::ExpectTrue("font-size em parsed",
+                   book_xml_css_style_utils::TryParseFontSize(
+                       "font-size: 1.4em;", &em));
+  test::ExpectEq("font-size em unit", (int)em.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Em);
+  test::ExpectEq("font-size em value", em.value_x100, 140);
+
+  book_xml_css_style_utils::FontSizeSpec rem{};
+  test::ExpectTrue("font-size rem parsed",
+                   book_xml_css_style_utils::TryParseFontSize(
+                       "font-size: 1.25rem;", &rem));
+  test::ExpectEq("font-size rem unit", (int)rem.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Rem);
+  test::ExpectEq("font-size rem value", rem.value_x100, 125);
+
+  book_xml_css_style_utils::FontSizeSpec smaller{};
+  test::ExpectTrue("font-size smaller parsed",
+                   book_xml_css_style_utils::TryParseFontSize(
+                       "font-size: smaller;", &smaller));
+  test::ExpectEq("font-size smaller unit", (int)smaller.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Smaller);
+
+  book_xml_css_style_utils::FontSizeSpec larger{};
+  test::ExpectTrue("font-size larger parsed",
+                   book_xml_css_style_utils::TryParseFontSize(
+                       "font-size: larger;", &larger));
+  test::ExpectEq("font-size larger unit", (int)larger.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Larger);
+}
+
+void TestResolveFontSizePxHandlesRelativeValues() {
+  using S = book_xml_css_style_utils::FontSizeSpec;
+
+  S px{};
+  px.unit = S::Unit::Px;
+  px.value_x100 = 1950;
+  test::ExpectEq("px resolved",
+                 book_xml_css_style_utils::ResolveFontSizePx(px, 14), 20);
+
+  S percent{};
+  percent.unit = S::Unit::Percent;
+  percent.value_x100 = 15000;
+  test::ExpectEq("percent resolved",
+                 book_xml_css_style_utils::ResolveFontSizePx(percent, 14), 21);
+
+  S em{};
+  em.unit = S::Unit::Em;
+  em.value_x100 = 140;
+  test::ExpectEq("em resolved",
+                 book_xml_css_style_utils::ResolveFontSizePx(em, 14), 20);
+
+  S rem{};
+  rem.unit = S::Unit::Rem;
+  rem.value_x100 = 125;
+  test::ExpectEq("rem resolved",
+                 book_xml_css_style_utils::ResolveFontSizePx(rem, 14), 18);
+
+  S smaller{};
+  smaller.unit = S::Unit::Smaller;
+  test::ExpectEq("smaller resolved",
+                 book_xml_css_style_utils::ResolveFontSizePx(smaller, 14), 12);
+
+  S larger{};
+  larger.unit = S::Unit::Larger;
+  test::ExpectEq("larger resolved",
+                 book_xml_css_style_utils::ResolveFontSizePx(larger, 14), 17);
+}
+
 } // namespace
 
 int main() {
@@ -132,5 +220,8 @@ int main() {
   TestParseMarginTopNull();
   TestParseMarginTopEmUnit();
   TestParseMarginBottomZeroUnitless();
+  TestTryParseFontSizeAcceptsPxValues();
+  TestTryParseFontSizeAcceptsRelativeValues();
+  TestResolveFontSizePxHandlesRelativeValues();
   return 0;
 }

@@ -115,6 +115,56 @@ MarginTopResult ParseMarginShorthand(const std::string &lc,
   return tokens[0];
 }
 
+bool ParseNumberX100(const std::string &lc, size_t *pos, int *out_value_x100) {
+  if (!pos || !out_value_x100)
+    return false;
+
+  size_t p = *pos;
+  while (p < lc.size() && lc[p] == ' ')
+    p++;
+
+  int whole = 0;
+  bool have_whole = false;
+  while (p < lc.size() && lc[p] >= '0' && lc[p] <= '9') {
+    whole = whole * 10 + (lc[p] - '0');
+    have_whole = true;
+    p++;
+  }
+
+  int frac = 0;
+  int frac_digits = 0;
+  if (p < lc.size() && lc[p] == '.') {
+    p++;
+    while (p < lc.size() && lc[p] >= '0' && lc[p] <= '9') {
+      if (frac_digits < 2) {
+        frac = frac * 10 + (lc[p] - '0');
+        frac_digits++;
+      }
+      p++;
+    }
+  }
+
+  if (!have_whole && frac_digits == 0)
+    return false;
+
+  if (frac_digits == 0)
+    frac = 0;
+  else if (frac_digits == 1)
+    frac *= 10;
+
+  *out_value_x100 = whole * 100 + frac;
+  *pos = p;
+  return true;
+}
+
+int RoundDivInt(int num, int den) {
+  if (den <= 0)
+    return 0;
+  if (num >= 0)
+    return (num + den / 2) / den;
+  return (num - den / 2) / den;
+}
+
 } // namespace
 
 void ParseInlineStyleFlags(const char *style, InlineStyleFlags *out) {
@@ -235,6 +285,74 @@ MarginTopResult ParseMarginTop(const char *style) {
 
 MarginTopResult ParseMarginBottom(const char *style) {
   return ParseMarginValue(style, "margin-bottom", 2);
+}
+
+bool TryParseFontSize(const char *style, FontSizeSpec *out) {
+  if (!out || !style || !style[0])
+    return false;
+
+  const std::string lc = ToLowerAscii(std::string(style));
+  const std::string prop = "font-size:";
+  size_t pos = lc.find(prop);
+  if (pos == std::string::npos)
+    return false;
+
+  pos += prop.size();
+  while (pos < lc.size() && lc[pos] == ' ')
+    pos++;
+
+  if (lc.compare(pos, 7, "smaller") == 0) {
+    out->unit = FontSizeSpec::Unit::Smaller;
+    out->value_x100 = 0;
+    return true;
+  }
+  if (lc.compare(pos, 6, "larger") == 0) {
+    out->unit = FontSizeSpec::Unit::Larger;
+    out->value_x100 = 0;
+    return true;
+  }
+
+  int value_x100 = 0;
+  if (!ParseNumberX100(lc, &pos, &value_x100))
+    return false;
+
+  while (pos < lc.size() && lc[pos] == ' ')
+    pos++;
+
+  if (pos + 2 < lc.size() && lc[pos] == 'r' && lc[pos + 1] == 'e' &&
+      lc[pos + 2] == 'm') {
+    out->unit = FontSizeSpec::Unit::Rem;
+  } else if (pos + 1 < lc.size() && lc[pos] == 'e' && lc[pos + 1] == 'm') {
+    out->unit = FontSizeSpec::Unit::Em;
+  } else if (pos + 1 < lc.size() && lc[pos] == 'p' && lc[pos + 1] == 'x') {
+    out->unit = FontSizeSpec::Unit::Px;
+  } else if (pos < lc.size() && lc[pos] == '%') {
+    out->unit = FontSizeSpec::Unit::Percent;
+  } else {
+    return false;
+  }
+
+  out->value_x100 = value_x100;
+  return true;
+}
+
+int ResolveFontSizePx(const FontSizeSpec &spec, int base_px) {
+  switch (spec.unit) {
+  case FontSizeSpec::Unit::Px:
+    return RoundDivInt(spec.value_x100, 100);
+  case FontSizeSpec::Unit::Percent:
+    return RoundDivInt(base_px * spec.value_x100, 10000);
+  case FontSizeSpec::Unit::Em:
+  case FontSizeSpec::Unit::Rem:
+    return RoundDivInt(base_px * spec.value_x100, 100);
+  case FontSizeSpec::Unit::Smaller:
+    return RoundDivInt(base_px * 100, 120);
+  case FontSizeSpec::Unit::Larger:
+    return RoundDivInt(base_px * 120, 100);
+  case FontSizeSpec::Unit::None:
+  default:
+    return base_px;
+  }
 }
 
 bool TryParseTextAlign(const char *style, TextAlign *out) {

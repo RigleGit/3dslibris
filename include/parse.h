@@ -107,6 +107,8 @@ struct parsedata_t {
 	bool list_item_pending_stack[32];
 	unsigned int ordered_list_ordinal_stack[32];
 	u8 ordered_list_style_stack[32];
+	bool heading_font_size_emitted_stack[32];
+	u8 heading_saved_font_size_stack[32];
 	bool deferred_style_sync;
 	bool deferred_target_bold;
 	bool deferred_target_italic;

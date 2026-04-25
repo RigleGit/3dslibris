@@ -6,8 +6,14 @@
 #include "shared/text_token_constants.h"
 
 #include <algorithm>
+#include <math.h>
 
 namespace book_xml_parser_style_utils {
+
+inline int ComputeHeadingFontSize(
+    int base_px, int heading_level, const std::string &style_attr,
+    const std::string &class_attr,
+    const epub_css_class_map::CssClassMap &class_map);
 
 inline void EmitUnderlineStyleMarker(parsedata_t *p, u8 underline_style) {
   if (!p)
@@ -92,10 +98,78 @@ inline void RestoreParsedParagraphAlignmentMarker(parsedata_t *p) {
   }
 }
 
+inline int FindActiveHeadingStackIndex(const parsedata_t *p, int *heading_level) {
+  if (!p)
+    return -1;
+  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+    switch (p->stack[i]) {
+    case TAG_H1:
+      if (heading_level)
+        *heading_level = 1;
+      return i;
+    case TAG_H2:
+      if (heading_level)
+        *heading_level = 2;
+      return i;
+    case TAG_H3:
+      if (heading_level)
+        *heading_level = 3;
+      return i;
+    case TAG_H4:
+      if (heading_level)
+        *heading_level = 4;
+      return i;
+    case TAG_H5:
+      if (heading_level)
+        *heading_level = 5;
+      return i;
+    case TAG_H6:
+      if (heading_level)
+        *heading_level = 6;
+      return i;
+    default:
+      break;
+    }
+  }
+  return -1;
+}
+
+inline void RestoreParsedHeadingFontSizeMarker(parsedata_t *p) {
+  if (!p)
+    return;
+
+  int heading_level = 0;
+  const int heading_index = FindActiveHeadingStackIndex(p, &heading_level);
+  if (heading_index < 0 || heading_index >= 32 ||
+      !p->heading_font_size_emitted_stack[heading_index])
+    return;
+
+  int heading_px = p->heading_saved_font_size_stack[heading_index];
+  if (heading_level == 1) {
+    heading_px = ComputeHeadingFontSize(
+        p->heading_saved_font_size_stack[heading_index], heading_level,
+        p->last_h1_style, p->last_h1_class, p->css_class_map);
+  } else if (heading_level == 2) {
+    heading_px = ComputeHeadingFontSize(
+        p->heading_saved_font_size_stack[heading_index], heading_level,
+        p->last_h2_style, p->last_h2_class, p->css_class_map);
+  } else {
+    heading_px = ComputeHeadingFontSize(
+        p->heading_saved_font_size_stack[heading_index], heading_level,
+        p->last_h_style, p->last_h_class, p->css_class_map);
+  }
+
+  if (heading_px != p->heading_saved_font_size_stack[heading_index]) {
+    parse_append_page_byte(p, TEXT_FONT_SIZE);
+    parse_append_page_byte(p, (u32)heading_px);
+  }
+}
+
 inline void RestoreParsedStyleMarkers(parsedata_t *p) {
   if (!p)
     return;
   RestoreParsedParagraphAlignmentMarker(p);
+  RestoreParsedHeadingFontSizeMarker(p);
   if (parse_in(p, TAG_PRE))
     parse_append_page_byte(p, TEXT_PRE_ON);
   if (p->superscript)
@@ -158,6 +232,42 @@ inline int ResolveBlockBottomLinefeeds(
     return 0;
   const int css_lf = ResolveCssMarginLinefeeds(m, line_h);
   return ClampResolvedBlockLinefeeds(std::max(css_lf, default_lf + 1));
+}
+
+inline int ClampHeadingFontSize(int base_px, int px) {
+  if (base_px <= 0)
+    return px;
+  const int min_px = std::max(1, (int)floor((double)base_px * 0.75 + 0.5));
+  const int max_px = std::max(min_px, (int)floor((double)base_px * 2.0 + 0.5));
+  return std::max(min_px, std::min(px, max_px));
+}
+
+inline int DefaultHeadingFontSize(int base_px, int heading_level) {
+  double multiplier = 1.0;
+  if (heading_level == 1)
+    multiplier = 1.5;
+  else if (heading_level == 2)
+    multiplier = 1.3;
+  else if (heading_level == 3)
+    multiplier = 1.15;
+  return (int)floor((double)base_px * multiplier + 0.5);
+}
+
+inline int ComputeHeadingFontSize(
+    int base_px, int heading_level, const std::string &style_attr,
+    const std::string &class_attr,
+    const epub_css_class_map::CssClassMap &class_map) {
+  const int fallback_px = DefaultHeadingFontSize(base_px, heading_level);
+  book_xml_css_style_utils::FontSizeSpec font_size;
+  if (book_xml_css_style_utils::TryParseFontSize(style_attr.c_str(),
+                                                 &font_size) ||
+      epub_css_class_map::LookupFontSizeForClassAttr(class_attr, class_map,
+                                                     &font_size)) {
+    const int css_px =
+        book_xml_css_style_utils::ResolveFontSizePx(font_size, base_px);
+    return ClampHeadingFontSize(base_px, css_px);
+  }
+  return ClampHeadingFontSize(base_px, fallback_px);
 }
 
 } // namespace book_xml_parser_style_utils

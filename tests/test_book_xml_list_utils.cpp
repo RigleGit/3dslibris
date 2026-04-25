@@ -164,6 +164,30 @@ void TestListMarkerSuppressionUsesCssClassMap() {
                    book_xml_list_utils::HasSuppressedListMarkerContext(&p));
 }
 
+void TestParseListMarkerHiddenCssClassLooksUpMapAtLiOpen() {
+  // Verifies that ParseListMarkerHiddenCssClass checks the CSS class map so
+  // that selectors like "li.classname { list-style-type: none; }" suppress
+  // list markers without any hardcoded class names.
+  parsedata_t p{};
+  parse_init(&p);
+
+  epub_css_class_map::CssClassMargins style{};
+  style.hide_list_markers = true;
+  p.css_class_map["list-none"] = style;
+
+  const char *attrs[] = {"class", "list-none", NULL};
+  test::ExpectTrue("css class map hides markers via direct check",
+                   book_xml_list_utils::ParseListMarkerHiddenCssClass(&p, attrs));
+
+  const char *unknown_attrs[] = {"class", "ordinary", NULL};
+  test::ExpectFalse("unknown class does not hide markers",
+                    book_xml_list_utils::ParseListMarkerHiddenCssClass(
+                        &p, unknown_attrs));
+
+  test::ExpectFalse("null attrs does not crash",
+                    book_xml_list_utils::ParseListMarkerHiddenCssClass(&p, NULL));
+}
+
 void TestPendingListItemContentTracksNearestItem() {
   parsedata_t p{};
   parse_init(&p);
@@ -198,6 +222,7 @@ int main() {
   TestOrderedListStyleFollowsDepthAndTypeAttr();
   TestListMarkerSuppressionFollowsClassAndAncestors();
   TestListMarkerSuppressionUsesCssClassMap();
+  TestParseListMarkerHiddenCssClassLooksUpMapAtLiOpen();
   TestPendingListItemContentTracksNearestItem();
   return 0;
 }

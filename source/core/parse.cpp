@@ -168,6 +168,8 @@ void parse_init(parsedata_t *data) {
     data->list_item_pending_stack[i] = false;
     data->ordered_list_ordinal_stack[i] = 0;
     data->ordered_list_style_stack[i] = 0;
+    data->heading_font_size_emitted_stack[i] = false;
+    data->heading_saved_font_size_stack[i] = 0;
   }
   data->deferred_style_sync = false;
   data->deferred_target_bold = false;
@@ -251,6 +253,8 @@ void parse_push(parsedata_t *data, context_t context) {
     data->list_item_pending_stack[data->stacksize] = false;
     data->ordered_list_ordinal_stack[data->stacksize] = 0;
     data->ordered_list_style_stack[data->stacksize] = 0;
+    data->heading_font_size_emitted_stack[data->stacksize] = false;
+    data->heading_saved_font_size_stack[data->stacksize] = 0;
     data->stacksize++;
   }
 }
@@ -273,6 +277,8 @@ context_t parse_pop(parsedata_t *data) {
     data->list_item_pending_stack[data->stacksize] = false;
     data->ordered_list_ordinal_stack[data->stacksize] = 0;
     data->ordered_list_style_stack[data->stacksize] = 0;
+    data->heading_font_size_emitted_stack[data->stacksize] = false;
+    data->heading_saved_font_size_stack[data->stacksize] = 0;
   }
   return data->stack[data->stacksize];
 }

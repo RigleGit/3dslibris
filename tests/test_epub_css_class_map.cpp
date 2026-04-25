@@ -29,6 +29,7 @@ void TestParseCssIntoClassMapSupportsQualifiedAndGroupedSelectors() {
       ".mt-inline { margin-top: 24px; }\n"
       "p.mb-class { margin-bottom: 8%; }\n"
       ".align-center { text-align: center; }\n"
+      ".title { font-size: 21px; }\n"
       ".mt-group, h2.mt-heading { margin-top: 12px; }\n"
       "div.note strong { margin-top: 99px; }\n"
       ".combo.one { margin-bottom: 77px; }\n";
@@ -36,7 +37,7 @@ void TestParseCssIntoClassMapSupportsQualifiedAndGroupedSelectors() {
   CssClassMap out;
   epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
 
-  test::ExpectEq("parsed class count", (int)out.size(), 5);
+  test::ExpectEq("parsed class count", (int)out.size(), 6);
   test::ExpectTrue("simple class parsed", out.find("mt-inline") != out.end());
   test::ExpectTrue("element qualified class parsed",
                    out.find("mb-class") != out.end());
@@ -45,6 +46,7 @@ void TestParseCssIntoClassMapSupportsQualifiedAndGroupedSelectors() {
   test::ExpectTrue("grouped selector qualified class parsed",
                    out.find("mt-heading") != out.end());
   test::ExpectTrue("align class parsed", out.find("align-center") != out.end());
+  test::ExpectTrue("font-size class parsed", out.find("title") != out.end());
   test::ExpectTrue("descendant selector ignored",
                    out.find("note") == out.end());
   test::ExpectTrue("compound class selector ignored",
@@ -59,6 +61,9 @@ void TestParseCssIntoClassMapSupportsQualifiedAndGroupedSelectors() {
   test::ExpectEq("align-center value",
                  (int)out["align-center"].text_align,
                  (int)book_xml_css_style_utils::TextAlign::Center);
+  test::ExpectEq("title keeps font-size unit", (int)out["title"].font_size.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Px);
+  test::ExpectEq("title font-size value", out["title"].font_size.value_x100, 2100);
 }
 
 void TestLookupMarginsForClassAttrMergesKnownClasses() {
@@ -121,6 +126,70 @@ void TestLookupTextAlignForClassAttrUsesLastKnownMatch() {
                  (int)book_xml_css_style_utils::TextAlign::Right);
 }
 
+void TestLookupFontSizeForClassAttrUsesLastKnownMatch() {
+  CssClassMap map;
+  map["small"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Percent;
+  map["small"].font_size.value_x100 = 9000;
+  map["large"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Em;
+  map["large"].font_size.value_x100 = 140;
+
+  book_xml_css_style_utils::FontSizeSpec spec{};
+  const bool found = epub_css_class_map::LookupFontSizeForClassAttr(
+      "small large", map, &spec);
+  test::ExpectTrue("found font-size", found);
+  test::ExpectEq("last matching font-size unit", (int)spec.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Em);
+  test::ExpectEq("last matching font-size wins", spec.value_x100, 140);
+}
+
+void TestParseCssIntoClassMapDetectsSuperSubScript() {
+  const char *css =
+      ".sup { vertical-align: super; }\n"
+      "span.sub { vertical-align:sub; }\n"
+      ".normal { color: red; }\n";
+
+  CssClassMap out;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
+
+  test::ExpectTrue("sup class parsed", out.find("sup") != out.end());
+  test::ExpectTrue("sub class parsed", out.find("sub") != out.end());
+  test::ExpectFalse("normal class not parsed for super/sub",
+                    out.count("normal") && out.at("normal").superscript);
+  test::ExpectTrue("sup has superscript flag", out["sup"].superscript);
+  test::ExpectFalse("sup not subscript", out["sup"].subscript);
+  test::ExpectTrue("sub has subscript flag", out["sub"].subscript);
+  test::ExpectFalse("sub not superscript", out["sub"].superscript);
+}
+
+void TestLookupSuperSubForClassAttr() {
+  CssClassMap map;
+  map["sup"].superscript = true;
+  map["sub"].subscript = true;
+
+  bool is_super = false, is_sub = false;
+  const bool found = epub_css_class_map::LookupSuperSubForClassAttr(
+      "sup", map, &is_super, &is_sub);
+  test::ExpectTrue("found superscript class", found);
+  test::ExpectTrue("superscript set", is_super);
+  test::ExpectFalse("subscript not set", is_sub);
+
+  is_super = false;
+  is_sub = false;
+  const bool found2 = epub_css_class_map::LookupSuperSubForClassAttr(
+      "unknown sub", map, &is_super, &is_sub);
+  test::ExpectTrue("found subscript class", found2);
+  test::ExpectFalse("superscript not set", is_super);
+  test::ExpectTrue("subscript set", is_sub);
+
+  is_super = false;
+  is_sub = false;
+  const bool found3 = epub_css_class_map::LookupSuperSubForClassAttr(
+      "unknown", map, &is_super, &is_sub);
+  test::ExpectFalse("no match found", found3);
+}
+
 } // namespace
 
 int main() {
@@ -129,5 +198,8 @@ int main() {
   TestLookupMarginsForClassAttrRejectsUnknownClasses();
   TestParseCssIntoClassMapDetectsListStyleNone();
   TestLookupTextAlignForClassAttrUsesLastKnownMatch();
+  TestLookupFontSizeForClassAttrUsesLastKnownMatch();
+  TestParseCssIntoClassMapDetectsSuperSubScript();
+  TestLookupSuperSubForClassAttr();
   return 0;
 }

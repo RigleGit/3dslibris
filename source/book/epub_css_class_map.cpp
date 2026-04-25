@@ -155,27 +155,43 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     MarginTopResult mb = ParseMarginBottom(b);
     TextAlign text_align = TextAlign::Left;
     const bool has_text_align = TryParseTextAlign(b, &text_align);
+    FontSizeSpec font_size;
+    const bool has_font_size =
+        book_xml_css_style_utils::TryParseFontSize(b, &font_size);
     const bool hide_list_markers =
         ContainsNoCase(block, "list-style-type:none") ||
         ContainsNoCase(block, "list-style-type: none") ||
         ContainsNoCase(block, "list-style:none") ||
         ContainsNoCase(block, "list-style: none");
+    const bool is_superscript =
+        ContainsNoCase(block, "vertical-align:super") ||
+        ContainsNoCase(block, "vertical-align: super");
+    const bool is_subscript =
+        ContainsNoCase(block, "vertical-align:sub") ||
+        ContainsNoCase(block, "vertical-align: sub");
 
     if (mt.unit != MarginTopResult::Unit::None ||
-        mb.unit != MarginTopResult::Unit::None || hide_list_markers ||
-        has_text_align) {
+        mb.unit != MarginTopResult::Unit::None || has_font_size ||
+        hide_list_markers ||
+        has_text_align || is_superscript || is_subscript) {
       for (size_t i = 0; i < class_names.size(); i++) {
         CssClassMargins &entry = (*out)[class_names[i]];
         if (mt.unit != MarginTopResult::Unit::None)
           entry.margin_top = mt;
         if (mb.unit != MarginTopResult::Unit::None)
           entry.margin_bottom = mb;
+        if (has_font_size)
+          entry.font_size = font_size;
         if (hide_list_markers)
           entry.hide_list_markers = true;
         if (has_text_align) {
           entry.has_text_align = true;
           entry.text_align = text_align;
         }
+        if (is_superscript)
+          entry.superscript = true;
+        if (is_subscript)
+          entry.subscript = true;
       }
     }
   }
@@ -277,6 +293,78 @@ bool LookupTextAlignForClassAttr(const std::string &class_attr,
       continue;
     *out = it->second.text_align;
     found = true;
+  }
+  return found;
+}
+
+bool LookupFontSizeForClassAttr(const std::string &class_attr,
+                                const CssClassMap &class_map,
+                                FontSizeSpec *out) {
+  if (!out || class_attr.empty() || class_map.empty())
+    return false;
+
+  bool found = false;
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) {
+      if (pos < class_attr.size())
+        ++pos;
+      continue;
+    }
+
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it == class_map.end() ||
+        it->second.font_size.unit == FontSizeSpec::Unit::None)
+      continue;
+    *out = it->second.font_size;
+    found = true;
+  }
+
+  return found;
+}
+
+bool LookupSuperSubForClassAttr(const std::string &class_attr,
+                                const CssClassMap &class_map,
+                                bool *superscript_out, bool *subscript_out) {
+  if (class_attr.empty() || class_map.empty())
+    return false;
+
+  bool found = false;
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) {
+      if (pos < class_attr.size())
+        ++pos;
+      continue;
+    }
+
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it == class_map.end())
+      continue;
+    if (superscript_out && it->second.superscript) {
+      *superscript_out = true;
+      found = true;
+    }
+    if (subscript_out && it->second.subscript) {
+      *subscript_out = true;
+      found = true;
+    }
   }
   return found;
 }

@@ -15,6 +15,10 @@ enum ordered_list_style_t : u8 {
 };
 
 void ConfigureElementListSemantics(parsedata_t *p, const char **attr);
+// Returns true if the element's class attribute maps to a CSS rule that hides
+// list markers (list-style-type: none). Called at <li> open time so the check
+// happens before the marker is emitted.
+bool ParseListMarkerHiddenCssClass(const parsedata_t *p, const char **attr);
 context_t GetActiveListContext(const parsedata_t *p);
 unsigned int GetActiveListDepth(const parsedata_t *p);
 ordered_list_style_t GetActiveOrderedListStyle(const parsedata_t *p);

@@ -61,7 +61,7 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 2048) {
       i++;
       continue;
     }
-    if (c == TEXT_UNDERLINE_STYLE) {
+    if (c == TEXT_UNDERLINE_STYLE || c == TEXT_FONT_SIZE) {
       i += (i + 1 < len) ? 2 : 1;
       continue;
     }
@@ -163,7 +163,7 @@ BuildPageHeadingLines(Page *page, size_t max_lines = 12,
         c == TEXT_HR || c == TEXT_PRE_ON || c == TEXT_PRE_OFF) {
       continue;
     }
-    if (c == TEXT_UNDERLINE_STYLE) {
+    if (c == TEXT_UNDERLINE_STYLE || c == TEXT_FONT_SIZE) {
       i += (i + 1 < len) ? 1 : 0;
       continue;
     }

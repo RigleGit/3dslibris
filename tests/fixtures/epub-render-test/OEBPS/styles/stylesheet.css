@@ -64,6 +64,13 @@ pre {
   list-style-type: none;
 }
 
+/* Element-qualified selector: only suppresses markers on <li class="list-none">,
+   not on the parent list. Tests that CSS class map lookup happens at <li> open
+   time (not via inherited context from the parent element). */
+li.list-none {
+  list-style-type: none;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -158,4 +165,30 @@ p.mb-class-grouped-qualified {
 
 h2.align-center-heading {
   text-align: center;
+}
+
+/* heading font-size validation classes */
+
+.heading-size-px {
+  font-size: 24px;
+}
+
+.heading-size-percent {
+  font-size: 150%;
+}
+
+.heading-size-em {
+  font-size: 1.4em;
+}
+
+.heading-size-rem {
+  font-size: 1.25rem;
+}
+
+.heading-size-smaller {
+  font-size: smaller;
+}
+
+.heading-size-larger {
+  font-size: larger;
 }

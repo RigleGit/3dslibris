@@ -158,6 +158,7 @@ void Page::FreeBuffer() {
 void Page::Draw(Text *ts) {
   const bool saved_auto_wrap = ts->IsAutoWrapEnabled();
   const bool saved_clip_to_content = ts->IsClipToContentEnabled();
+  const u8 saved_pixel_size = ts->GetPixelSize();
   // Reflowed page buffers already carry explicit line breaks/wrap decisions.
   // Runtime per-glyph wrapping in TextRenderer breaks RTL line anchoring.
   ts->SetAutoWrapEnabled(false);
@@ -394,6 +395,10 @@ void Page::Draw(Text *ts) {
     } else if (c == TEXT_UNDERLINE_STYLE) {
       if (i + 1 < length)
         underline_style = (u8)buf[i + 1];
+      i += (i + 1 < length) ? 2 : 1;
+    } else if (c == TEXT_FONT_SIZE) {
+      if (i + 1 < length)
+        ts->SetPixelSize((u8)buf[i + 1]);
       i += (i + 1 < length) ? 2 : 1;
     } else if (c == TEXT_OVERLINE_ON) {
       i++;
@@ -675,6 +680,7 @@ void Page::Draw(Text *ts) {
       }
     }
   }
+  ts->SetPixelSize(saved_pixel_size);
   DrawNumber(ts, second_screen);
 #ifdef OFFSCREEN
   ts->SetScreen(second_screen);
@@ -683,6 +689,7 @@ void Page::Draw(Text *ts) {
 #endif
   ts->SetAutoWrapEnabled(saved_auto_wrap);
   ts->SetClipToContentEnabled(saved_clip_to_content);
+  ts->SetPixelSize(saved_pixel_size);
   ts->margin.bottom = savedBottomMargin;
 }
 

@@ -9,17 +9,21 @@ namespace epub_css_class_map {
 
 using book_xml_css_style_utils::MarginTopResult;
 using book_xml_css_style_utils::TextAlign;
+using book_xml_css_style_utils::FontSizeSpec;
 
 struct CssClassMargins {
   MarginTopResult margin_top;
   MarginTopResult margin_bottom;
+  FontSizeSpec font_size;
   bool hide_list_markers;
   bool has_text_align;
   TextAlign text_align;
+  bool superscript;
+  bool subscript;
 
   CssClassMargins()
       : hide_list_markers(false), has_text_align(false),
-        text_align(TextAlign::Left) {}
+        text_align(TextAlign::Left), superscript(false), subscript(false) {}
 };
 
 // Map: bare class name (no '.') → extracted margins.
@@ -43,5 +47,15 @@ bool LookupHideListMarkersForClassAttr(const std::string &class_attr,
 bool LookupTextAlignForClassAttr(const std::string &class_attr,
                                  const CssClassMap &class_map,
                                  TextAlign *out);
+
+bool LookupFontSizeForClassAttr(const std::string &class_attr,
+                                const CssClassMap &class_map,
+                                FontSizeSpec *out);
+
+// Returns true if any class in class_attr has a vertical-align:super/sub rule.
+// superscript_out and subscript_out are OR-accumulated (never cleared).
+bool LookupSuperSubForClassAttr(const std::string &class_attr,
+                                const CssClassMap &class_map,
+                                bool *superscript_out, bool *subscript_out);
 
 } // namespace epub_css_class_map

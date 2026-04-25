@@ -49,7 +49,7 @@ std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
       i++;
       continue;
     }
-    if (c == TEXT_UNDERLINE_STYLE) {
+    if (c == TEXT_UNDERLINE_STYLE || c == TEXT_FONT_SIZE) {
       if (i + 1 < len)
         i += 2;
       else

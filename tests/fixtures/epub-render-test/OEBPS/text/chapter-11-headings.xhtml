@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+  <title>Capítulo 11 — Headings con font-size CSS</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body epub:type="bodymatter">
+
+  <h1 id="capitulo-11" class="heading-size-px">Capítulo 11: Headings con font-size CSS</h1>
+
+  <p>Este capítulo sirve para validar visualmente el soporte de headings con tamaños distintos al cuerpo base. El párrafo actual debe verse con el tamaño normal del libro, para comprobar la restauración tras el título principal.</p>
+
+  <h2 class="heading-size-percent">H2 con font-size: 150%</h2>
+  <p>Después de este h2, el texto debe volver al tamaño base y no heredar el tamaño ampliado del encabezado.</p>
+
+  <h3 class="heading-size-em">H3 con font-size: 1.4em</h3>
+  <p>Este párrafo verifica que la negrita del heading no contamine al texto del cuerpo y que el salto de línea use la altura correcta.</p>
+
+  <h4 class="heading-size-smaller">H4 con font-size: smaller</h4>
+  <p>Este h4 debe seguir en negrita aunque su tamaño sea menor que el cuerpo base por CSS.</p>
+
+  <h5 class="heading-size-larger">H5 con font-size: larger</h5>
+  <p>Este h5 confirma que los headings bajos también aceptan un tamaño CSS distinto sin perder el cierre correcto de estilo.</p>
+
+  <h6 class="heading-size-rem">H6 con font-size: 1.25rem</h6>
+  <p>Este párrafo sirve de referencia tras el h6 con rem.</p>
+
+  <p>Las siguientes líneas de relleno empujan el heading largo hacia el final de la página para que sea más fácil comprobar un salto de página dentro del propio encabezado en la Nintendo 3DS.</p>
+  <p>Relleno uno. Este texto ocupa varias líneas y ayuda a que el encabezado largo empiece cerca del borde inferior de la pantalla. Relleno adicional para asegurar más altura consumida antes del heading de prueba.</p>
+  <p>Relleno dos. La meta es forzar un caso donde el cálculo de line-height y la restauración del tamaño sobrevivan a un cambio de página en mitad del heading.</p>
+  <p>Relleno tres. Si el libro se abre en este capítulo, basta avanzar hasta el heading largo y comprobar que su tamaño se mantiene al continuar en la página siguiente.</p>
+  <p>Relleno cuatro. También hay que revisar que el párrafo inmediatamente posterior vuelva al tamaño normal y no quede en negrita.</p>
+
+  <h1 id="heading-largo" class="heading-size-percent">Heading largo de validación manual para comprobar que un h1 muy extenso, definido mediante clase CSS con font-size relativo, mantiene el tamaño ampliado y la negrita incluso cuando el texto se parte entre páginas de la pantalla de lectura del 3DS y que, al terminar el encabezado, el párrafo siguiente recupera sin residuos el tamaño base configurado por la persona usuaria</h1>
+
+  <p>Si este párrafo aparece con tamaño base y sin negrita extra, la restauración tras un heading largo partido entre páginas está funcionando como se espera.</p>
+
+</body>
+</html>

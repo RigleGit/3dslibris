@@ -178,6 +178,87 @@ void TestResolveBlockSpacingLinefeedsKeepsSmallExplicitMarginsVisible() {
                  4);
 }
 
+void TestComputeHeadingFontSizeUsesDefaultMultipliers() {
+  epub_css_class_map::CssClassMap classes;
+  test::ExpectEq("h1 multiplier",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 1, "", "", classes),
+                 21);
+  test::ExpectEq("h2 multiplier",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 2, "", "", classes),
+                 18);
+  test::ExpectEq("h3 multiplier",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 3, "", "", classes),
+                 16);
+  test::ExpectEq("h4 stays at base",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 4, "", "", classes),
+                 14);
+}
+
+void TestComputeHeadingFontSizeUsesCssAndClamps() {
+  epub_css_class_map::CssClassMap classes;
+  classes["hero"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Px;
+  classes["hero"].font_size.value_x100 = 4000;
+  classes["tiny"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Px;
+  classes["tiny"].font_size.value_x100 = 600;
+
+  test::ExpectEq("class font-size clamped high",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 1, "", "hero", classes),
+                 28);
+  test::ExpectEq("class font-size clamped low",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 2, "", "tiny", classes),
+                 11);
+  test::ExpectEq("inline font-size overrides class",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 3, "font-size: 19px;", "tiny", classes),
+                 19);
+}
+
+void TestComputeHeadingFontSizeSupportsRelativeCssUnits() {
+  epub_css_class_map::CssClassMap classes;
+  classes["percent"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Percent;
+  classes["percent"].font_size.value_x100 = 15000;
+  classes["em"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Em;
+  classes["em"].font_size.value_x100 = 140;
+  classes["rem"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Rem;
+  classes["rem"].font_size.value_x100 = 125;
+  classes["smaller"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Smaller;
+  classes["larger"].font_size.unit =
+      book_xml_css_style_utils::FontSizeSpec::Unit::Larger;
+
+  test::ExpectEq("class percent resolved",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 2, "", "percent", classes),
+                 21);
+  test::ExpectEq("class em resolved",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 2, "", "em", classes),
+                 20);
+  test::ExpectEq("class rem resolved",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 2, "", "rem", classes),
+                 18);
+  test::ExpectEq("class smaller resolved",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 4, "", "smaller", classes),
+                 12);
+  test::ExpectEq("inline larger resolved",
+                 book_xml_parser_style_utils::ComputeHeadingFontSize(
+                     14, 4, "font-size: larger;", "smaller", classes),
+                 17);
+}
+
 } // namespace
 
 int main() {
@@ -188,5 +269,8 @@ int main() {
   TestResolveCssMarginLinefeedsUsesCeilQuantization();
   TestResolveBlockSpacingLinefeedsHonorsDefaultsAndZero();
   TestResolveBlockSpacingLinefeedsKeepsSmallExplicitMarginsVisible();
+  TestComputeHeadingFontSizeUsesDefaultMultipliers();
+  TestComputeHeadingFontSizeUsesCssAndClamps();
+  TestComputeHeadingFontSizeSupportsRelativeCssUnits();
   return 0;
 }

@@ -16,6 +16,17 @@ struct MarginTopResult {
 MarginTopResult ParseMarginTop(const char *style);
 MarginTopResult ParseMarginBottom(const char *style);
 
+struct FontSizeSpec {
+  enum class Unit { None, Px, Percent, Em, Rem, Smaller, Larger };
+  int value_x100;
+  Unit unit;
+
+  FontSizeSpec() : value_x100(0), unit(Unit::None) {}
+};
+
+bool TryParseFontSize(const char *style, FontSizeSpec *out);
+int ResolveFontSizePx(const FontSizeSpec &spec, int base_px);
+
 struct InlineStyleFlags {
   bool bold;
   bool italic;

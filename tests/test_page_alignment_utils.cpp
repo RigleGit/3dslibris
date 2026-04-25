@@ -51,11 +51,21 @@ void TestStopsAtBlockTokens() {
                  2);
 }
 
+void TestIgnoresFontSizeTokenAndPayload() {
+  const uint32_t buf[] = {'A', TEXT_FONT_SIZE, 24, ' ', 'B', '\n'};
+  test::ExpectEq("font-size token ignored",
+                 page_alignment_utils::MeasureAlignedLineWidth(
+                     buf, sizeof(buf) / sizeof(buf[0]), 0, false, false, false,
+                     MeasureGlyph, NULL),
+                 3);
+}
+
 } // namespace
 
 int main() {
   TestIgnoresControlTokensAndPayloads();
   TestTracksStyleChangesWhileMeasuring();
   TestStopsAtBlockTokens();
+  TestIgnoresFontSizeTokenAndPayload();
   return 0;
 }

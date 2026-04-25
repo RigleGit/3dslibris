@@ -142,7 +142,7 @@ static std::string ExtractPagePreview(Page *page, size_t max_chars) {
         c == TEXT_SUBSCRIPT_OFF) {
       continue;
     }
-    if (c == TEXT_UNDERLINE_STYLE) {
+    if (c == TEXT_UNDERLINE_STYLE || c == TEXT_FONT_SIZE) {
       i += (i + 1 < len) ? 1 : 0;
       continue;
     }

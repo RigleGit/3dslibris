@@ -88,5 +88,10 @@
       <navLabel><text>Capítulo 10: Pruebas de alineación</text></navLabel>
       <content src="text/chapter-10-alignment.xhtml#capitulo-10"/>
     </navPoint>
+
+    <navPoint id="nav-16" playOrder="16">
+      <navLabel><text>Capítulo 11: Headings con font-size CSS</text></navLabel>
+      <content src="text/chapter-11-headings.xhtml#capitulo-11"/>
+    </navPoint>
   </navMap>
 </ncx>
