@@ -363,6 +363,7 @@ public:
   bool IsAsyncReflowOpenPending() const;
   u8 ConsumeAsyncReflowOpenResult();
   void CancelAsyncReflowOpen();
+  void FlushPendingCacheSaves();
   bool HasPendingEpubPageCacheSave() const;
   void SetPendingEpubPageCacheSave(bool pending);
   void SetPendingEpubPageCacheSaveWithParams(

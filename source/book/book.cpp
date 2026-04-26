@@ -742,6 +742,31 @@ void Book::ReservePageCapacity(size_t incoming_pages)
     pages.reserve(required_capacity);
 }
 
+void Book::FlushPendingCacheSaves()
+{
+  IStatusReporter *r = GetStatusReporter();
+  const bool flush_epub =
+      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
+          epub_page_cache_save_pending, IsAsyncReflowOpenPending(),
+          (unsigned int)GetPageCount());
+  const bool flush_mobi =
+      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
+          mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
+          (unsigned int)GetPageCount());
+  if (flush_epub)
+  {
+    DBG_LOGF(r, "BOOK flush-cache: save-epub begin pages=%d book=%s", (int)pages.size(), filename.c_str());
+    epub_page_cache::SavePending(this, true);
+    DBG_LOGF(r, "BOOK flush-cache: save-epub done book=%s", filename.c_str());
+  }
+  if (flush_mobi)
+  {
+    DBG_LOGF(r, "BOOK flush-cache: save-mobi begin pages=%d book=%s", (int)pages.size(), filename.c_str());
+    mobi_page_cache::SavePending(this);
+    DBG_LOGF(r, "BOOK flush-cache: save-mobi done book=%s", filename.c_str());
+  }
+}
+
 void Book::Close()
 {
   IStatusReporter *r = GetStatusReporter();

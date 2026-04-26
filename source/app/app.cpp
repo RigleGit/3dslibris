@@ -1065,6 +1065,10 @@ void App::ShowLibraryView()
   buttonprefs.Resize(96, 22);
   buttonprefs.Label("settings");
 
+  Book *bookcurrent_ = GetCurrentBook();
+  if (bookcurrent_)
+    bookcurrent_->FlushPendingCacheSaves();
+
   ResetBrowserMarquee();
   nav_.mode = AppMode::Browser;
   ts->SetScreen(ts->screenright);

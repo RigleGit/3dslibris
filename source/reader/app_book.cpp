@@ -464,7 +464,8 @@ namespace
   }
 
   static void DrawOpeningSplashImpl(App *app, unsigned spine_done,
-                                    unsigned spine_total)
+                                    unsigned spine_total,
+                                    const char *label = "opening book ...")
   {
     Book *selected = app ? app->GetSelectedBook() : NULL;
     if (!app || !app->ts || !selected)
@@ -481,7 +482,7 @@ namespace
     app->ts->ClearScreen();
     app->DrawBottomGradientBackground();
     app->ts->SetPen(12, 28);
-    app->ts->PrintString("opening book ...");
+    app->ts->PrintString(label ? label : "opening book ...");
 
     const char *name = selected->GetFileName();
     if (!name || !*name)
@@ -921,6 +922,13 @@ void ReaderController::HandleEventInOpening()
   {
     ClearDeferredRelayoutState();
   }
+  if (bookcurrent_->HasPendingEpubPageCacheSave() ||
+      bookcurrent_->HasPendingMobiPageCacheSave())
+  {
+    DrawOpeningSplashImpl(&app_, 0, 0, "saving cache...");
+    bookcurrent_->FlushPendingCacheSaves();
+  }
+
   app_.ShowCurrentBookView();
   DBG_LOG(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
 
@@ -1621,6 +1629,13 @@ u8 ReaderController::OpenBook()
     app_.SetMode(AppMode::Browser);
     app_.SetBrowserDirty(true);
     return BOOK_ERR_CANCELLED;
+  }
+
+  if (bookcurrent_->HasPendingEpubPageCacheSave() ||
+      bookcurrent_->HasPendingMobiPageCacheSave())
+  {
+    DrawOpeningSplashImpl(&app_, 0, 0, "saving cache...");
+    bookcurrent_->FlushPendingCacheSaves();
   }
 
   if (bookcurrent_->GetPosition() >= pageCount)

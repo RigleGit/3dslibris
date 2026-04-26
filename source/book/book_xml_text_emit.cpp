@@ -230,7 +230,7 @@ void EmitFlowedShapedText(
         p->pen.x += metrics.spaceadvance;
       } else if (!unit.text.breakable_space) {
         u16 unit_advance = (u16)unit.advance;
-        if ((p->pen.x + unit_advance) >
+        if ((p->pen.x + unit_advance) >=
             (metrics.display_width - metrics.margin_right)) {
           parse_append_page_byte(p, '\n');
           p->pen.x = metrics.margin_left;
@@ -265,7 +265,7 @@ void EmitFlowedShapedText(
     const bool attached_closing_punctuation =
         SegmentIsOnlyClosingAttachedPunctuation(run, unit_index,
                                                 segment_end_index);
-    if ((p->pen.x + advance) > (metrics.display_width - metrics.margin_right) &&
+    if ((p->pen.x + advance) >= (metrics.display_width - metrics.margin_right) &&
         !(p->linebegan && attached_closing_punctuation)) {
       parse_append_page_byte(p, '\n');
       p->pen.x = metrics.margin_left;

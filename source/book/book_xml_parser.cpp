@@ -904,7 +904,7 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
           }
         }
 
-        if ((p->pen.x + advance) > (ts->display.width - ts->margin.right)) {
+        if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
           AppendParsedByte(p, '\n');
           p->pen.x = ts->margin.left;
           p->pen.y += (lineheight + linespacing);
@@ -977,7 +977,7 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
           pre_run[segment_end_index - 1].text.byte_length;
       const int advance = segment.width;
 
-      if ((p->pen.x + advance) > (ts->display.width - ts->margin.right)) {
+      if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
         AppendParsedByte(p, '\n');
         p->pen.x = ts->margin.left;
         p->pen.y += (lineheight + linespacing);
