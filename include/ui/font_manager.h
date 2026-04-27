@@ -60,6 +60,7 @@ public:
   void ClearCache();
   void ClearCache(u8 style);
   void ClearCache(FT_Face face);
+  void ClearRenderCache(FT_Face face);
   int GetGlyphBitmap(u32 ucs, FTC_SBit *sbit, FTC_Node *anode = nullptr);
 
   // Font fallback for CJK/Hebrew/Arabic scripts.

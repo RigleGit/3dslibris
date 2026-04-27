@@ -393,13 +393,10 @@ void FontManager::ClearCache() {
 
 void FontManager::ClearCache(u8 style) { ClearCache(GetFace(style)); }
 
-void FontManager::ClearCache(FT_Face face) {
+void FontManager::ClearRenderCache(FT_Face face) {
   Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
-  if (!face_cache) {
-    advanceCache.erase(face);
+  if (!face_cache)
     return;
-  }
-
   for (auto iter = face_cache->cacheMap.begin();
        iter != face_cache->cacheMap.end(); iter++) {
     delete[] iter->second->bitmap.buffer;
@@ -407,6 +404,10 @@ void FontManager::ClearCache(FT_Face face) {
   }
   face_cache->cacheMap.clear();
   face_cache->lru.Clear();
+}
+
+void FontManager::ClearCache(FT_Face face) {
+  ClearRenderCache(face);
   advanceCache.erase(face);
 }
 
@@ -441,8 +442,9 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       }
     }
 #else
+    const u32 cache_key = ((u32)pixelsize << 24) | (ucs & 0x00FFFFFFu);
     auto &faceAdvanceCache = advanceCache[face];
-    auto iter = faceAdvanceCache.find(ucs);
+    auto iter = faceAdvanceCache.find(cache_key);
     if (iter != faceAdvanceCache.end())
       return iter->second;
 
@@ -456,7 +458,7 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
                      face->glyph->outline.n_contours == 0;
         if (!ghost) {
           u8 advance = face->glyph->advance.x >> 6;
-          faceAdvanceCache.insert(std::make_pair(ucs, advance));
+          faceAdvanceCache.insert(std::make_pair(cache_key, advance));
           return advance;
         }
         needs_fallback = true;
@@ -473,17 +475,17 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
           return fb->glyph->advance.x >> 6;
 #else
         auto &fbAdvanceCache = advanceCache[fb];
-        auto fb_iter = fbAdvanceCache.find(ucs);
+        auto fb_iter = fbAdvanceCache.find(cache_key);
         if (fb_iter != fbAdvanceCache.end()) {
-          faceAdvanceCache.insert(std::make_pair(ucs, fb_iter->second));
+          faceAdvanceCache.insert(std::make_pair(cache_key, fb_iter->second));
           return fb_iter->second;
         }
 
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
         if (!error) {
           u8 advance = fb->glyph->advance.x >> 6;
-          fbAdvanceCache.insert(std::make_pair(ucs, advance));
-          faceAdvanceCache.insert(std::make_pair(ucs, advance));
+          fbAdvanceCache.insert(std::make_pair(cache_key, advance));
+          faceAdvanceCache.insert(std::make_pair(cache_key, advance));
           return advance;
         }
 #endif
@@ -577,7 +579,7 @@ void FontManager::SetPixelSize(u8 size) {
       if (it.first == TEXT_STYLE_BROWSER)
         continue;
       FT_Set_Pixel_Sizes(it.second, 0, pixelsize);
-      ClearCache(it.second);
+      ClearRenderCache(it.second);
     }
   }
 }
