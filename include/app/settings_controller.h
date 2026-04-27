@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ui/button.h"
+
 class App;
 
 class SettingsController {
@@ -25,6 +27,8 @@ private:
   App &app_;
   bool go_to_page_popup_open_;
   int go_to_page_target_page_;
+  Button button_reset_;
+  Button button_clear_cache_;
 
   void OpenGoToPagePopup();
   void CloseGoToPagePopup();
@@ -33,4 +37,6 @@ private:
   bool ConfirmGoToPageSelection();
   void DrawGoToPagePopup();
   void HandleGoToPagePopupTouch(bool touch_down);
+  void ResetToDefaults();
+  void ClearAllCaches();
 };

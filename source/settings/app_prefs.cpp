@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <dirent.h>
+#include <sys/types.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,6 +33,7 @@
 #include "ui/theme_colors.h"
 #include "debug_log.h"
 #include "parse.h"
+#include "path_utils.h"
 #include "settings/prefs.h"
 #include "settings/prefs_button_context_utils.h"
 #include "settings/go_to_page_slider_utils.h"
@@ -42,6 +44,10 @@ static const int PREFS_LIBRARY_BTN_X = 130;
 static const int PREFS_LIBRARY_BTN_Y = 286;
 static const int PREFS_LIBRARY_BTN_W = 104;
 static const int PREFS_LIBRARY_BTN_H = 26;
+static const int PREFS_RESET_BTN_X = 4;
+static const int PREFS_RESET_BTN_W = 58;
+static const int PREFS_CLEAR_BTN_X = 65;
+static const int PREFS_CLEAR_BTN_W = 62;
 static const int PREFS_ROW_X = 5;
 static const int PREFS_ROW_W = 230;
 static const u32 kGoToPageCoarseStep = 10;
@@ -437,6 +443,18 @@ void SettingsController::PrefsInit() {
   }
 
   app->SetPrefsSelectedIndex(PREFS_BUTTON_FONT_CONFIG);
+
+  button_reset_.Init(app->ts.get());
+  button_reset_.SetStyle(BUTTON_STYLE_SETTING);
+  button_reset_.Move(PREFS_RESET_BTN_X, PREFS_LIBRARY_BTN_Y);
+  button_reset_.Resize(PREFS_RESET_BTN_W, PREFS_LIBRARY_BTN_H);
+  button_reset_.Label("reset");
+
+  button_clear_cache_.Init(app->ts.get());
+  button_clear_cache_.SetStyle(BUTTON_STYLE_SETTING);
+  button_clear_cache_.Move(PREFS_CLEAR_BTN_X, PREFS_LIBRARY_BTN_Y);
+  button_clear_cache_.Resize(PREFS_CLEAR_BTN_W, PREFS_LIBRARY_BTN_H);
+  button_clear_cache_.Label("clear cache");
 }
 
 void SettingsController::PrefsDraw() {
@@ -475,6 +493,10 @@ void SettingsController::PrefsDraw() {
 
   SyncLibraryButtonLayout(&app->buttonprefs);
   app->buttonprefs.Draw(app->ts->screenright);
+  if (!app->IsBookSettingsContext()) {
+    button_reset_.Draw(app->ts->screenright);
+    button_clear_cache_.Draw(app->ts->screenright);
+  }
 
   app->ts->PrintSplash(app->ts->screenleft);
   if (app->IsBookSettingsContext() && app->IsPrefsLayoutNoticePending() &&
@@ -628,6 +650,17 @@ void SettingsController::PrefsHandleTouch() {
   if (enclosesWithSlack(app->buttonprefs, footerX, footerY)) {
     app->ShowLibraryView();
     return;
+  }
+
+  if (!app->IsBookSettingsContext()) {
+    if (enclosesWithSlack(button_reset_, footerX, footerY)) {
+      ResetToDefaults();
+      return;
+    }
+    if (enclosesWithSlack(button_clear_cache_, footerX, footerY)) {
+      ClearAllCaches();
+      return;
+    }
   }
 
   u8 visibleCount = NormalizeVisibleCount(PrefsVisibleButtonCount());
@@ -846,6 +879,55 @@ void SettingsController::PrefsRefreshButton(int index) {
     break;
   }
   app->MarkPrefsDirty();
+}
+
+static void DeleteDirContents(const char *dir) {
+  DIR *d = opendir(dir);
+  if (!d)
+    return;
+  char path[512];
+  struct dirent *ent;
+  while ((ent = readdir(d)) != NULL) {
+    if (ent->d_name[0] == '.')
+      continue;
+    snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
+    remove(path);
+  }
+  closedir(d);
+}
+
+void SettingsController::ClearAllCaches() {
+  DeleteDirContents(paths::GetEpubCacheDir().c_str());
+  DeleteDirContents(paths::GetMobiCacheDir().c_str());
+  DeleteDirContents(paths::GetMobiCoverMetaCacheDir().c_str());
+  DeleteDirContents(paths::GetMetaCacheDir().c_str());
+  DeleteDirContents(paths::GetCoverCacheDir().c_str());
+  App *app = App::GetInstance();
+  if (app)
+    app->PrintStatus("Cache cleared");
+}
+
+void SettingsController::ResetToDefaults() {
+  App *app = App::GetInstance();
+  if (!app || !app->prefs)
+    return;
+  app->ts->SetPixelSize(12);
+  app->paraspacing = 1;
+  app->paraindent = 0;
+  if (app->orientation)
+    app->SetOrientation(false);
+  app->ts->SetColorMode(0);
+  UiButtonSkin_SetColorMode(0);
+  app->prefs->time24h = true;
+  app->prefs->swapshoulder = false;
+  app->prefs->browser_view_mode = BROWSER_VIEW_GALLERY;
+  app->prefs->fixed_layout_rtl = false;
+  app->MarkBookLayoutDirty();
+  app->prefs->Write();
+  for (int i = 0; i < PREFS_BUTTON_COUNT; i++)
+    PrefsRefreshButton(i);
+  app->MarkPrefsDirty();
+  app->PrintStatus("Settings reset to defaults");
 }
 
 void SettingsController::PrefsHandlePress() {
