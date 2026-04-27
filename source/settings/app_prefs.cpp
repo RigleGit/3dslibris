@@ -44,13 +44,14 @@ static const int PREFS_LIBRARY_BTN_X = 130;
 static const int PREFS_LIBRARY_BTN_Y = 286;
 static const int PREFS_LIBRARY_BTN_W = 104;
 static const int PREFS_LIBRARY_BTN_H = 26;
-// Paged general-settings footer: matches paged_list_menu (x=6/86/166, y=292, w=68, h=22)
-static const int PREFS_FOOTER_BTN_W  = 68;
+// Paged general-settings footer: matches library browser (x=2/72/172, y=296, h=22)
+static const int PREFS_FOOTER_NAV_W  = 66;
+static const int PREFS_FOOTER_MID_W  = 96;
 static const int PREFS_FOOTER_BTN_H  = 22;
-static const int PREFS_FOOTER_Y      = 292;
-static const int PREFS_FOOTER_LEFT_X = 6;
-static const int PREFS_FOOTER_MID_X  = 86;
-static const int PREFS_FOOTER_RIGHT_X = 166;
+static const int PREFS_FOOTER_Y      = 296;
+static const int PREFS_FOOTER_LEFT_X = 2;
+static const int PREFS_FOOTER_MID_X  = 72;
+static const int PREFS_FOOTER_RIGHT_X = 172;
 
 static const int kPage2Buttons[] = {
     PREFS_BUTTON_RESET_DEFAULTS,
@@ -106,10 +107,9 @@ static void SyncLibraryButtonLayout(Button *button, bool paged) {
     return;
   if (paged) {
     button->Move(PREFS_FOOTER_MID_X, PREFS_FOOTER_Y);
-    button->Resize(PREFS_FOOTER_BTN_W, PREFS_FOOTER_BTN_H);
-    // "library" text + HOME icon overflows 68 px; show icon-only at this size
-    button->Label("");
-    button->SetIcon(UI_BUTTON_ICON_HOME);
+    button->Resize(PREFS_FOOTER_MID_W, PREFS_FOOTER_BTN_H);
+    button->Label("library");
+    button->SetIcon(UI_BUTTON_ICON_NONE);
   } else {
     button->Move(PREFS_LIBRARY_BTN_X, PREFS_LIBRARY_BTN_Y);
     button->Resize(PREFS_LIBRARY_BTN_W, PREFS_LIBRARY_BTN_H);
@@ -487,8 +487,8 @@ void SettingsController::PrefsInit() {
   prefs_general_page_ = 0;
 
   button_prefs_page_nav_.Init(app->ts.get());
-  button_prefs_page_nav_.SetStyle(BUTTON_STYLE_SETTING);
-  button_prefs_page_nav_.Resize(PREFS_FOOTER_BTN_W, PREFS_FOOTER_BTN_H);
+  button_prefs_page_nav_.SetStyle(BUTTON_STYLE_BOOK);
+  button_prefs_page_nav_.Resize(PREFS_FOOTER_NAV_W, PREFS_FOOTER_BTN_H);
 }
 
 void SettingsController::PrefsDraw() {
