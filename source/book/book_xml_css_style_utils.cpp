@@ -63,6 +63,19 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
   }
   if (!has_digit)
     return result;
+  // Consume optional fractional part; track whether it is non-zero.
+  int frac_x10 = 0;
+  bool has_decimal = false;
+  if (p < lc.size() && lc[p] == '.') {
+    p++;
+    has_decimal = true;
+    if (p < lc.size() && lc[p] >= '0' && lc[p] <= '9') {
+      frac_x10 = lc[p] - '0';
+      p++;
+      while (p < lc.size() && lc[p] >= '0' && lc[p] <= '9')
+        p++;
+    }
+  }
   while (p < lc.size() && lc[p] == ' ')
     p++;
   if (p < lc.size() && lc[p] == '%') {
@@ -75,8 +88,17 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
     result.unit = MarginTopResult::Unit::Px;
     result.negative = negative;
     p += 2;
-  } else if (value == 0) {
-    // CSS allows unitless zero for lengths.
+  } else if ((p + 1 < lc.size() && lc[p] == 'e' && lc[p + 1] == 'm') ||
+             (p + 2 < lc.size() && lc[p] == 'r' && lc[p + 1] == 'e' &&
+              lc[p + 2] == 'm')) {
+    // Convert em/rem to approximate pixels (base: 12px).
+    const int unit_len = (lc[p] == 'r') ? 3 : 2;
+    result.value = value * 12 + (frac_x10 * 12 + 9) / 10;
+    result.unit = MarginTopResult::Unit::Px;
+    result.negative = negative;
+    p += unit_len;
+  } else if (value == 0 && !has_decimal) {
+    // CSS allows bare unitless zero for lengths (e.g. "margin: 0").
     result.value = 0;
     result.unit = MarginTopResult::Unit::Px;
     result.negative = negative;

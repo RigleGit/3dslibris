@@ -2469,8 +2469,12 @@ void end(void *data, const char *el) {
       LogResolvedBlockMargin(p, "p", "bottom", p->last_p_style,
                              p->last_p_class, mbr, line_h, default_lf,
                              lf_count);
-      for (int i = 0; i < lf_count; i++)
+      if (lf_count > 0) {
+        for (int i = 0; i < lf_count; i++)
+          linefeed(p);
+      } else if (p->linebegan) {
         linefeed(p);
+      }
     }
     AppendParagraphAlignMarker(p, book_xml_css_style_utils::TextAlign::Left);
     p->in_paragraph = false;
