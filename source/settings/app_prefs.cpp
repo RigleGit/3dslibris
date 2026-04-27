@@ -44,10 +44,14 @@ static const int PREFS_LIBRARY_BTN_X = 130;
 static const int PREFS_LIBRARY_BTN_Y = 286;
 static const int PREFS_LIBRARY_BTN_W = 104;
 static const int PREFS_LIBRARY_BTN_H = 26;
-static const int PREFS_RESET_BTN_X = 4;
-static const int PREFS_RESET_BTN_W = 58;
-static const int PREFS_CLEAR_BTN_X = 65;
-static const int PREFS_CLEAR_BTN_W = 62;
+static const int PREFS_PAGE_NAV_BTN_X = 4;
+static const int PREFS_PAGE_NAV_BTN_W = 72;
+
+static const int kPage2Buttons[] = {
+    PREFS_BUTTON_RESET_DEFAULTS,
+    PREFS_BUTTON_CLEAR_CACHE,
+};
+static const int kPage2ButtonCount = 2;
 static const int PREFS_ROW_X = 5;
 static const int PREFS_ROW_W = 230;
 static const u32 kGoToPageCoarseStep = 10;
@@ -219,9 +223,32 @@ static bool PointInRect(int x, int y, int rx, int ry, int rw, int rh) {
   return x >= rx && y >= ry && x < rx + rw && y < ry + rh;
 }
 SettingsController::SettingsController(App &app)
-    : app_(app), go_to_page_popup_open_(false), go_to_page_target_page_(0) {}
+    : app_(app), go_to_page_popup_open_(false), go_to_page_target_page_(0),
+      prefs_general_page_(0) {}
+
+int SettingsController::EffectiveVisibleCount() const {
+  if (!app_.IsBookSettingsContext() && prefs_general_page_ == 1)
+    return kPage2ButtonCount;
+  return (int)VisiblePrefsButtonCountForApp(const_cast<App *>(&app_));
+}
+
+int SettingsController::EffectiveButtonForSlot(int slot) const {
+  if (!app_.IsBookSettingsContext() && prefs_general_page_ == 1)
+    return (slot >= 0 && slot < kPage2ButtonCount) ? kPage2Buttons[slot] : kPage2Buttons[0];
+  return VisiblePrefsButtonIdForSlot(const_cast<App *>(&app_), (u8)slot);
+}
+
+void SettingsController::GoToPrefsPage(int page) {
+  App *app = App::GetInstance();
+  prefs_general_page_ = page;
+  const int new_count = EffectiveVisibleCount();
+  int new_sel = page == 1 ? 0 : (new_count > 0 ? new_count - 1 : 0);
+  app->SetPrefsSelectedIndex(new_sel);
+  app->MarkPrefsDirty();
+}
 
 void SettingsController::ShowSettingsView(bool from_book) {
+  prefs_general_page_ = 0;
   CloseGoToPagePopup();
   app_.SetBookSettingsContext(from_book);
   app_.SetPrefsLayoutNoticePending(
@@ -422,7 +449,7 @@ void SettingsController::HandleGoToPagePopupTouch(bool touch_down) {
 }
 
 u8 SettingsController::PrefsVisibleButtonCount() const {
-  return VisiblePrefsButtonCountForApp(&app_);
+  return (u8)EffectiveVisibleCount();
 }
 
 void SettingsController::PrefsInit() {
@@ -430,8 +457,7 @@ void SettingsController::PrefsInit() {
   const std::vector<std::string> labels{
       "font configuration", "font size",    "paragraph spacing",
       "screen orientation", "clock format", "color mode", "library view",
-      "index",
-      "bookmarks"};
+      "index",              "bookmarks",    "reset settings", "clear cache"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app->prefsButtons[i].Init(app->ts.get());
@@ -443,18 +469,13 @@ void SettingsController::PrefsInit() {
   }
 
   app->SetPrefsSelectedIndex(PREFS_BUTTON_FONT_CONFIG);
+  prefs_general_page_ = 0;
 
-  button_reset_.Init(app->ts.get());
-  button_reset_.SetStyle(BUTTON_STYLE_SETTING);
-  button_reset_.Move(PREFS_RESET_BTN_X, PREFS_LIBRARY_BTN_Y);
-  button_reset_.Resize(PREFS_RESET_BTN_W, PREFS_LIBRARY_BTN_H);
-  button_reset_.Label("reset");
-
-  button_clear_cache_.Init(app->ts.get());
-  button_clear_cache_.SetStyle(BUTTON_STYLE_SETTING);
-  button_clear_cache_.Move(PREFS_CLEAR_BTN_X, PREFS_LIBRARY_BTN_Y);
-  button_clear_cache_.Resize(PREFS_CLEAR_BTN_W, PREFS_LIBRARY_BTN_H);
-  button_clear_cache_.Label("clear cache");
+  button_prefs_page_nav_.Init(app->ts.get());
+  button_prefs_page_nav_.SetStyle(BUTTON_STYLE_SETTING);
+  button_prefs_page_nav_.Move(PREFS_PAGE_NAV_BTN_X, PREFS_LIBRARY_BTN_Y);
+  button_prefs_page_nav_.Resize(PREFS_PAGE_NAV_BTN_W, PREFS_LIBRARY_BTN_H);
+  button_prefs_page_nav_.Label("next");
 }
 
 void SettingsController::PrefsDraw() {
@@ -482,7 +503,7 @@ void SettingsController::PrefsDraw() {
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
 
   for (int slot = 0; slot < visibleCount; slot++) {
-    const int button_id = VisiblePrefsButtonIdForSlot(app, (u8)slot);
+    const int button_id = EffectiveButtonForSlot(slot);
     app->prefsButtons[button_id].Move(5, slot * 38);
     app->prefsButtons[button_id].Draw(app->ts->screenright,
                                       slot == app->GetPrefsSelectedIndex());
@@ -494,8 +515,8 @@ void SettingsController::PrefsDraw() {
   SyncLibraryButtonLayout(&app->buttonprefs);
   app->buttonprefs.Draw(app->ts->screenright);
   if (!app->IsBookSettingsContext()) {
-    button_reset_.Draw(app->ts->screenright);
-    button_clear_cache_.Draw(app->ts->screenright);
+    button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "next" : "back");
+    button_prefs_page_nav_.Draw(app->ts->screenright);
   }
 
   app->ts->PrintSplash(app->ts->screenleft);
@@ -562,8 +583,7 @@ void SettingsController::PrefsHandleEvent() {
   int selected_index = app->GetPrefsSelectedIndex();
   ClampSelectedIndex(&selected_index, visibleCount);
   app->SetPrefsSelectedIndex(selected_index);
-  const int selected_button = VisiblePrefsButtonIdForSlot(
-      app, (u8)app->GetPrefsSelectedIndex());
+  const int selected_button = EffectiveButtonForSlot(app->GetPrefsSelectedIndex());
 
   if (go_to_page_popup_open_) {
     if (keys & KEY_A) {
@@ -602,11 +622,15 @@ void SettingsController::PrefsHandleEvent() {
     if (app->GetPrefsSelectedIndex() > 0) {
       app->SetPrefsSelectedIndex(app->GetPrefsSelectedIndex() - 1);
       app->MarkPrefsDirty();
+    } else if (!app->IsBookSettingsContext() && prefs_general_page_ == 1) {
+      GoToPrefsPage(0);
     }
   } else if (keys & (app->key.right | app->key.r)) {
     if (app->GetPrefsSelectedIndex() < visibleCount - 1) {
       app->SetPrefsSelectedIndex(app->GetPrefsSelectedIndex() + 1);
       app->MarkPrefsDirty();
+    } else if (!app->IsBookSettingsContext() && prefs_general_page_ == 0) {
+      GoToPrefsPage(1);
     }
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
              (keys & app->key.up)) {
@@ -652,15 +676,10 @@ void SettingsController::PrefsHandleTouch() {
     return;
   }
 
-  if (!app->IsBookSettingsContext()) {
-    if (enclosesWithSlack(button_reset_, footerX, footerY)) {
-      ResetToDefaults();
-      return;
-    }
-    if (enclosesWithSlack(button_clear_cache_, footerX, footerY)) {
-      ClearAllCaches();
-      return;
-    }
+  if (!app->IsBookSettingsContext() &&
+      enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) {
+    GoToPrefsPage(prefs_general_page_ == 0 ? 1 : 0);
+    return;
   }
 
   u8 visibleCount = NormalizeVisibleCount(PrefsVisibleButtonCount());
@@ -668,7 +687,7 @@ void SettingsController::PrefsHandleTouch() {
   ClampSelectedIndex(&selected_index, visibleCount);
   app->SetPrefsSelectedIndex(selected_index);
   for (u8 i = 0; i < visibleCount; i++) {
-    const int button_id = VisiblePrefsButtonIdForSlot(app, i);
+    const int button_id = EffectiveButtonForSlot(i);
     if (app->prefsButtons[button_id].EnclosesPoint(coord.px, coord.py)) {
       if (i != app->GetPrefsSelectedIndex())
         app->SetPrefsSelectedIndex(i);
@@ -877,6 +896,12 @@ void SettingsController::PrefsRefreshButton(int index) {
               : std::string("(open selected book)"));
     }
     break;
+  case PREFS_BUTTON_RESET_DEFAULTS:
+    app->prefsButtons[PREFS_BUTTON_RESET_DEFAULTS].SetLabel2(std::string("restore defaults >"));
+    break;
+  case PREFS_BUTTON_CLEAR_CACHE:
+    app->prefsButtons[PREFS_BUTTON_CLEAR_CACHE].SetLabel2(std::string("delete all caches >"));
+    break;
   }
   app->MarkPrefsDirty();
 }
@@ -932,8 +957,7 @@ void SettingsController::ResetToDefaults() {
 
 void SettingsController::PrefsHandlePress() {
   App *app = App::GetInstance();
-  const int selected_button = VisiblePrefsButtonIdForSlot(
-      app, (u8)app->GetPrefsSelectedIndex());
+  const int selected_button = EffectiveButtonForSlot(app->GetPrefsSelectedIndex());
 
   if (selected_button == PREFS_BUTTON_ORIENTATION) {
     PrefsFlipOrientation();
@@ -1030,6 +1054,16 @@ void SettingsController::PrefsHandlePress() {
 
   if (selected_button == PREFS_BUTTON_FONT_CONFIG) {
     app->ShowFontView(AppMode::PrefsFont);
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_RESET_DEFAULTS) {
+    ResetToDefaults();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_CLEAR_CACHE) {
+    ClearAllCaches();
     return;
   }
 }
