@@ -11,8 +11,12 @@ void ExpectNonEmpty(const char *label, const char *value) {
   test::ExpectTrue(label, std::strlen(value) > 0);
 }
 
-void ExpectPathPrefix(const char *label, const char *value, const char *prefix) {
-  test::ExpectStrContains(label, value, prefix);
+void ExpectNonEmpty(const char *label, const std::string &value) {
+  test::ExpectTrue(label, !value.empty());
+}
+
+void ExpectPathPrefix(const char *label, const std::string &value, const char *prefix) {
+  test::ExpectStrContains(label, value.c_str(), prefix);
 }
 
 void ExpectFontEntry(const char *label, const char *name, const char *path) {
@@ -25,33 +29,32 @@ void ExpectFontEntry(const char *label, const char *name, const char *path) {
 }
 
 int main() {
-  ExpectNonEmpty("kSdmcBase exists", paths::kSdmcBase);
+  ExpectNonEmpty("GetSdmcBase exists", paths::GetSdmcBase());
   ExpectNonEmpty("kLegacySdmcBase exists", paths::kLegacySdmcBase);
   ExpectNonEmpty("kConfigSdmcBase exists", paths::kConfigSdmcBase);
-  ExpectNonEmpty("kRomfsBase exists", paths::kRomfsBase);
-  ExpectNonEmpty("kBookDir exists", paths::kBookDir);
   ExpectNonEmpty("kRomfsBookDir exists", paths::kRomfsBookDir);
-  ExpectNonEmpty("kFontDir exists", paths::kFontDir);
-  ExpectNonEmpty("kCacheBaseDir exists", paths::kCacheBaseDir);
-  ExpectNonEmpty("kCoverCacheDir exists", paths::kCoverCacheDir);
-  ExpectNonEmpty("kCoverCacheManifest exists", paths::kCoverCacheManifest);
-  ExpectNonEmpty("kEpubCacheDir exists", paths::kEpubCacheDir);
-  ExpectNonEmpty("kMobiCacheDir exists", paths::kMobiCacheDir);
-  ExpectNonEmpty("kMobiCoverMetaCacheDir exists", paths::kMobiCoverMetaCacheDir);
+  ExpectNonEmpty("GetBookDir exists", paths::GetBookDir());
+  ExpectNonEmpty("GetFontDir exists", paths::GetFontDir());
+  ExpectNonEmpty("GetCacheBaseDir exists", paths::GetCacheBaseDir());
+  ExpectNonEmpty("GetCoverCacheDir exists", paths::GetCoverCacheDir());
+  ExpectNonEmpty("GetCoverCacheManifest exists", paths::GetCoverCacheManifest());
+  ExpectNonEmpty("GetEpubCacheDir exists", paths::GetEpubCacheDir());
+  ExpectNonEmpty("GetMobiCacheDir exists", paths::GetMobiCacheDir());
+  ExpectNonEmpty("GetMobiCoverMetaCacheDir exists", paths::GetMobiCoverMetaCacheDir());
   ExpectNonEmpty("kLogFile exists", paths::kLogFile);
-  ExpectNonEmpty("kPrefsFile exists", paths::kPrefsFile);
-  ExpectNonEmpty("kResourceDir exists", paths::kResourceDir);
-  ExpectNonEmpty("kIconPngDir exists", paths::kIconPngDir);
-  ExpectNonEmpty("kIconDir exists", paths::kIconDir);
-  ExpectNonEmpty("kResourceBase exists", paths::kResourceBase);
+  ExpectNonEmpty("GetPrefsFile exists", paths::GetPrefsFile());
+  ExpectNonEmpty("GetResourceDir exists", paths::GetResourceDir());
+  ExpectNonEmpty("GetIconPngDir exists", paths::GetIconPngDir());
+  ExpectNonEmpty("GetIconDir exists", paths::GetIconDir());
+  ExpectNonEmpty("GetResourceBase exists", paths::GetResourceBase());
 
-  ExpectPathPrefix("book dir prefix", paths::kBookDir, "sdmc:/3ds/3dslibris/");
+  ExpectPathPrefix("book dir prefix", paths::GetBookDir(), "sdmc:/3ds/3dslibris/");
   ExpectPathPrefix("romfs book dir prefix", paths::kRomfsBookDir, "romfs:/3ds/3dslibris/");
-  ExpectPathPrefix("font dir prefix", paths::kFontDir, "sdmc:/3ds/3dslibris/");
-  ExpectPathPrefix("resource dir prefix", paths::kResourceDir, "sdmc:/3ds/3dslibris/");
-  ExpectPathPrefix("cache dir prefix", paths::kCacheBaseDir, "sdmc:/3ds/3dslibris/");
-  ExpectPathPrefix("log file prefix", paths::kLogFile, "sdmc:/3ds/3dslibris/");
-  ExpectPathPrefix("prefs file prefix", paths::kPrefsFile, "sdmc:/3ds/3dslibris/");
+  ExpectPathPrefix("font dir prefix", paths::GetFontDir(), "sdmc:/3ds/3dslibris/");
+  ExpectPathPrefix("resource dir prefix", paths::GetResourceDir(), "sdmc:/3ds/3dslibris/");
+  ExpectPathPrefix("cache dir prefix", paths::GetCacheBaseDir(), "sdmc:/3ds/3dslibris/");
+  ExpectPathPrefix("log file prefix", paths::GetLogFile(), "sdmc:/3ds/3dslibris/");
+  ExpectPathPrefix("prefs file prefix", paths::GetPrefsFile(), "sdmc:/3ds/3dslibris/");
 
   {
     const std::string active_base = paths::GetSdmcBase();
@@ -66,19 +69,24 @@ int main() {
                      paths::GetPrefsFile().find("/3dslibris.xml") != std::string::npos);
   }
 
-  test::ExpectEq("splash path count", paths::kSplashPathCount, 4);
-  for (int i = 0; i < paths::kSplashPathCount; ++i) {
-    ExpectNonEmpty("splash path exists", paths::kSplashPaths[i]);
-    test::ExpectStrContains("splash path prefix", paths::kSplashPaths[i], "sdmc:/3ds/3dslibris/");
-    test::ExpectStrContains("splash path suffix", paths::kSplashPaths[i], "splash.");
+  {
+    std::vector<std::string> splash = paths::GetSplashPathList();
+    test::ExpectTrue("splash path count >= 4", (int)splash.size() >= 4);
+    for (size_t i = 0; i < splash.size(); ++i) {
+      ExpectNonEmpty("splash path exists", splash[i]);
+      test::ExpectStrContains("splash path sdmc prefix", splash[i].c_str(), "sdmc:/");
+      test::ExpectStrContains("splash path suffix", splash[i].c_str(), "splash.");
+    }
   }
 
-  test::ExpectEq("default font count", paths::kDefaultFontCount, 9);
+  const int kDefaultFontCount =
+      (int)(sizeof(paths::kDefaultFonts) / sizeof(paths::kDefaultFonts[0]));
+  test::ExpectEq("default font count", kDefaultFontCount, 9);
   bool hasMonoFont = false;
   bool hasMonoBoldFont = false;
   bool hasMonoItalicFont = false;
   bool hasMonoBoldItalicFont = false;
-  for (int i = 0; i < paths::kDefaultFontCount; ++i) {
+  for (int i = 0; i < kDefaultFontCount; ++i) {
     ExpectFontEntry("default font entry", paths::kDefaultFonts[i][0], paths::kDefaultFonts[i][1]);
     if (std::strcmp(paths::kDefaultFonts[i][0], "LiberationMono-Regular.ttf") == 0)
       hasMonoFont = true;
