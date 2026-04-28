@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <dirent.h>
+#include <set>
+#include <stdio.h>
+#include <sys/stat.h>
 #include <strings.h>
 #include <vector>
 
@@ -19,6 +22,7 @@ void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
 #include "shared/path_constants.h"
 #include "shared/app_flow_utils.h"
 #include "shared/utf8_utils.h"
+#include "stb_image.h"
 
 #ifndef UTF8_FILENAME_DIAG
 #define UTF8_FILENAME_DIAG 0
@@ -27,7 +31,26 @@ void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
 namespace {
 
 static bool BookTitleLessThan(Book *a, Book *b) {
+  if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
+    return a->IsBrowserFolder();
   return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
+}
+
+static std::string ToLowerAscii(const std::string &s) {
+  std::string out = s;
+  std::transform(out.begin(), out.end(), out.begin(),
+                 [](unsigned char c) { return (char)tolower(c); });
+  return out;
+}
+
+static bool PathIsDirectory(const std::string &path) {
+  struct stat st;
+  return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static bool PathIsRegularFile(const std::string &path) {
+  struct stat st;
+  return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
 #if UTF8_FILENAME_DIAG
@@ -103,6 +126,17 @@ static bool HasBookWithFileName(const std::vector<Book *> &books,
   return false;
 }
 
+static bool HasBrowserEntryKey(std::set<std::string> *seen,
+                               const std::string &key) {
+  if (!seen)
+    return false;
+  const std::string normalized = ToLowerAscii(key);
+  if (seen->find(normalized) != seen->end())
+    return true;
+  seen->insert(normalized);
+  return false;
+}
+
 static void DrawBottomGradientFromApp(void *user_data) {
   const LibraryGradientContext *ctx =
       static_cast<const LibraryGradientContext *>(user_data);
@@ -121,7 +155,8 @@ static void DrawTopGradientFromApp(void *user_data) {
 
 static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ctx,
                                    const std::string &source_dir,
-                                   const char *filename) {
+                                   const char *filename,
+                                   std::set<std::string> *seen_keys = NULL) {
   if (!app || !app_flow_utils::ShouldIndexBookFilename(filename))
     return;
   format_t format = app_flow_utils::DetectBookFormat(filename);
@@ -130,7 +165,9 @@ static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ct
 
   std::string raw_name(filename);
   std::string io_name = NormalizeFsFilenameForIo(filename);
-  if (HasBookWithFileName(app->books, io_name.c_str()))
+  if (seen_keys && HasBrowserEntryKey(seen_keys, std::string("book:") + io_name))
+    return;
+  if (!seen_keys && HasBookWithFileName(app->books, io_name.c_str()))
     return;
   LogFilenameStage(app, "d_name", raw_name.c_str());
   if (io_name != raw_name)
@@ -158,14 +195,164 @@ static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ct
   app->books.push_back(book);
 }
 
+static bool DirectoryHasDirectSupportedBook(const std::string &dir) {
+  DIR *dp = opendir(dir.c_str());
+  if (!dp)
+    return false;
+  bool found = false;
+  struct dirent *ent;
+  while ((ent = readdir(dp))) {
+    if (ent->d_name[0] == '.')
+      continue;
+    std::string child = dir + "/" + ent->d_name;
+    if (PathIsDirectory(child))
+      continue;
+    if (app_flow_utils::ShouldIndexBookFilename(ent->d_name) &&
+        app_flow_utils::DetectBookFormat(ent->d_name) != FORMAT_UNDEF) {
+      found = true;
+      break;
+    }
+  }
+  closedir(dp);
+  return found;
+}
+
+static void TryLoadFolderCover(Book *book) {
+  if (!book || book->GetBrowserFolderCoverPath().empty())
+    return;
+  FILE *fp = fopen(book->GetBrowserFolderCoverPath().c_str(), "rb");
+  if (!fp)
+    return;
+  if (fseek(fp, 0, SEEK_END) != 0) {
+    fclose(fp);
+    return;
+  }
+  long size = ftell(fp);
+  if (size <= 0 || size > 4 * 1024 * 1024) {
+    fclose(fp);
+    return;
+  }
+  rewind(fp);
+  std::vector<unsigned char> compressed((size_t)size);
+  if (fread(compressed.data(), 1, compressed.size(), fp) !=
+      compressed.size()) {
+    fclose(fp);
+    return;
+  }
+  fclose(fp);
+
+  int w = 0, h = 0, comp = 0;
+  unsigned char *pixels = stbi_load_from_memory(
+      compressed.data(), (int)compressed.size(), &w, &h, &comp, 3);
+  if (!pixels || w <= 0 || h <= 0) {
+    if (pixels)
+      stbi_image_free(pixels);
+    return;
+  }
+  const int max_w = 85;
+  const int max_h = 115;
+  int draw_w = w;
+  int draw_h = h;
+  if (draw_w > max_w || draw_h > max_h) {
+    float scale_w = (float)max_w / (float)w;
+    float scale_h = (float)max_h / (float)h;
+    float scale = scale_w < scale_h ? scale_w : scale_h;
+    draw_w = std::max(1, (int)(w * scale));
+    draw_h = std::max(1, (int)(h * scale));
+  }
+  u16 *thumb = new u16[(size_t)draw_w * (size_t)draw_h];
+  if (!thumb) {
+    stbi_image_free(pixels);
+    return;
+  }
+  for (int y = 0; y < draw_h; y++) {
+    int sy = (int)((long long)y * (long long)h / (long long)draw_h);
+    for (int x = 0; x < draw_w; x++) {
+      int sx = (int)((long long)x * (long long)w / (long long)draw_w);
+      unsigned char *p = pixels + ((size_t)sy * (size_t)w + (size_t)sx) * 3;
+      u16 r = (u16)(p[0] >> 3);
+      u16 g = (u16)(p[1] >> 2);
+      u16 b = (u16)(p[2] >> 3);
+      thumb[(size_t)y * (size_t)draw_w + (size_t)x] =
+          (u16)((r << 11) | (g << 5) | b);
+    }
+  }
+  stbi_image_free(pixels);
+  if (book->coverPixels)
+    delete[] book->coverPixels;
+  book->coverPixels = thumb;
+  book->coverWidth = draw_w;
+  book->coverHeight = draw_h;
+  book->coverAttempts = 3;
+}
+
+static void AppendFolderEntry(App *app, const std::string &source_dir,
+                              const std::string &folder_name,
+                              std::set<std::string> *seen_keys) {
+  if (!app || folder_name.empty() || folder_name[0] == '.')
+    return;
+  const std::string folder_path = source_dir + "/" + folder_name;
+  if (!PathIsDirectory(folder_path) ||
+      !DirectoryHasDirectSupportedBook(folder_path))
+    return;
+  if (HasBrowserEntryKey(seen_keys, std::string("folder:") + folder_name))
+    return;
+
+  BookContext ctx;
+  ctx.text = app->ts.get();
+  ctx.prefs = app->prefs.get();
+  ctx.paragraph_spacing = &app->paraspacing;
+  ctx.paragraph_indent = &app->paraindent;
+  ctx.orientation = &app->orientation;
+  ctx.status_reporter = app;
+  ctx.draw_background = &DrawBottomGradientFromApp;
+  ctx.draw_background_user_data = app;
+  ctx.draw_top_background = &DrawTopGradientFromApp;
+  ctx.draw_top_background_user_data = app;
+  ctx.on_spine_progress = &DrawOpeningSplashWithProgress;
+  ctx.on_spine_progress_user_data = app;
+
+  std::string cover_path = source_dir + "/" + folder_name + ".jpg";
+  if (!PathIsRegularFile(cover_path))
+    cover_path.clear();
+  Book *folder = new Book(ctx);
+  folder->SetBrowserFolderEntry(folder_path, folder_name, cover_path);
+  TryLoadFolderCover(folder);
+  app->books.push_back(folder);
+}
+
+static void ClearBrowserBooksAndButtons(App *app) {
+  if (!app)
+    return;
+  Book *current = app->GetCurrentBook();
+  if (current) {
+    for (size_t i = 0; i < app->books.size(); i++) {
+      if (app->books[i] == current) {
+        app->CloseBook();
+        break;
+      }
+    }
+  }
+  for (size_t i = 0; i < app->books.size(); i++)
+    delete app->books[i];
+  app->books.clear();
+  for (size_t i = 0; i < app->buttons.size(); i++)
+    delete app->buttons[i];
+  app->buttons.clear();
+  app->SetSelectedBook(NULL);
+  app->SetBrowserPageStart(0);
+}
+
 } // namespace
 
-LibraryController::LibraryController(App &app) : app_(app) {}
+LibraryController::LibraryController(App &app)
+    : app_(app), inside_folder_(false) {}
 
 int LibraryController::FindBooks() {
   gradient_ctx_.ts = app_.ts.get();
   gradient_ctx_.color_mode = &app_.colorMode;
 
+  std::set<std::string> seen_keys;
   auto scan_with_native_fs = [&](const std::string &dir) -> int {
     FS_Archive sdmc_archive;
     Result rc = FSUSER_OpenArchive(&sdmc_archive, ARCHIVE_SDMC,
@@ -190,14 +377,15 @@ int LibraryController::FindBooks() {
         break;
 
       for (u32 i = 0; i < read_count; i++) {
-        if (entries[i].attributes & FS_ATTRIBUTE_DIRECTORY)
-          continue;
         std::string filename;
         if (!Utf16NameToUtf8(entries[i].name, &filename))
           continue;
         if (filename.empty())
           continue;
-        AppendBookFromFilename(&app_, &gradient_ctx_, dir, filename.c_str());
+        if (entries[i].attributes & FS_ATTRIBUTE_DIRECTORY)
+          AppendFolderEntry(&app_, dir, filename, &seen_keys);
+        else
+          AppendBookFromFilename(&app_, &gradient_ctx_, dir, filename.c_str(), &seen_keys);
       }
     }
 
@@ -211,8 +399,15 @@ int LibraryController::FindBooks() {
     if (!dp)
       return 1;
     struct dirent *ent;
-    while ((ent = readdir(dp)))
-      AppendBookFromFilename(&app_, &gradient_ctx_, dir, ent->d_name);
+    while ((ent = readdir(dp))) {
+      if (ent->d_name[0] == '.')
+        continue;
+      std::string child = dir + "/" + ent->d_name;
+      if (PathIsDirectory(child))
+        AppendFolderEntry(&app_, dir, ent->d_name, &seen_keys);
+      else
+        AppendBookFromFilename(&app_, &gradient_ctx_, dir, ent->d_name, &seen_keys);
+    }
     closedir(dp);
     return 0;
   };
@@ -245,13 +440,81 @@ void LibraryController::PrepareLibrary() {
   // sort uses real titles. Cache hits are ~2ms each; misses return quickly
   // (no source file is opened). Books without a cache entry are left for the
   // warmup job system to handle after the browser opens.
-  for (auto &book : app_.books)
+  for (auto &book : app_.books) {
+    if (book->IsBrowserFolder())
+      continue;
     book->TryLoadMetadataFromCache();
+  }
 
   std::sort(app_.books.begin(), app_.books.end(), &BookTitleLessThan);
   for (auto &book : app_.books)
     book->GetBookmarks().sort();
 }
+
+void LibraryController::RebuildRoot() {
+  PauseBrowserJobs();
+  ClearBrowserBooksAndButtons(&app_);
+  inside_folder_ = false;
+  current_folder_name_.clear();
+  current_folder_path_.clear();
+  FindBooks();
+  PrepareLibrary();
+  browser_init();
+  ResetBrowserMarquee();
+  app_.ts->MarkAllScreensDirty();
+  app_.SetBrowserDirty(true);
+}
+
+void LibraryController::EnterFolder(Book *folder) {
+  if (!folder || !folder->IsBrowserFolder())
+    return;
+  const std::string folder_path = folder->GetBrowserFolderPath();
+  const std::string folder_name = folder->GetBrowserFolderDisplayName();
+  PauseBrowserJobs();
+  ClearBrowserBooksAndButtons(&app_);
+  inside_folder_ = true;
+  current_folder_path_ = folder_path;
+  current_folder_name_ = folder_name;
+
+  std::set<std::string> seen_keys;
+  DIR *dp = opendir(folder_path.c_str());
+  if (dp) {
+    struct dirent *ent;
+    while ((ent = readdir(dp))) {
+      if (ent->d_name[0] == '.')
+        continue;
+      std::string child = folder_path + "/" + ent->d_name;
+      if (PathIsDirectory(child))
+        continue;
+      AppendBookFromFilename(&app_, &gradient_ctx_, folder_path, ent->d_name, &seen_keys);
+    }
+    closedir(dp);
+  }
+  PrepareLibrary();
+  browser_init();
+  ResetBrowserMarquee();
+  app_.ts->MarkAllScreensDirty();
+  app_.SetBrowserDirty(true);
+}
+
+void LibraryController::LeaveFolder() {
+  if (!inside_folder_)
+    return;
+  RebuildRoot();
+}
+
+void LibraryController::OpenSelectedBrowserEntry() {
+  Book *selected = app_.GetSelectedBook();
+  if (!selected)
+    return;
+  if (selected->IsBrowserFolder()) {
+    EnterFolder(selected);
+    return;
+  }
+  app_.OpenBook();
+}
+
+bool LibraryController::IsInsideFolder() const { return inside_folder_; }
 
 void App::browser_draw() { library_controller_->browser_draw(); }
 
@@ -296,3 +559,7 @@ void App::QueueTocResolve(Book *book) { library_controller_->QueueTocResolve(boo
 void App::ProcessJobs(u32 budget_ms) { library_controller_->ProcessJobs(budget_ms); }
 
 size_t App::PauseBrowserJobs() { return library_controller_->PauseBrowserJobs(); }
+
+bool App::IsBrowserInsideFolder() const {
+  return library_controller_->IsInsideFolder();
+}

@@ -384,6 +384,8 @@ int Prefs::Write() {
   // Persist all known books so last page and bookmarks survive restarts.
   for (int i = 0; i < app->BookCount(); i++) {
     Book *book = app->books[i];
+    if (!book || book->IsBrowserFolder())
+      continue;
     const std::string escaped_filename = XmlEscapeAttr(book->GetFileName());
     fprintf(fp, "\t\t<book file=\"%s\" page=\"%d\"", escaped_filename.c_str(),
             book->GetPosition() + 1);

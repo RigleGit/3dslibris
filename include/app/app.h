@@ -140,7 +140,7 @@ public:
   } key;
 
   std::vector<Button *> buttons;
-  Button buttonprev, buttonnext, buttonprefs; //! Buttons on browser bottom.
+  Button buttonprev, buttonnext, buttonprefs, buttonback; //! Buttons on browser bottom.
   std::string bookdir;                        //! Search here for XHTML.
   std::vector<Book *> books;
   //! reopen book from last session on startup?
@@ -303,6 +303,7 @@ public:
   bool BookNeedsRelayout(Book *book) const;
   size_t PauseBrowserJobs();
   void LoadVisibleBrowserCoverCaches();
+  bool IsBrowserInsideFolder() const;
 
 private:
   static App *s_instance_;

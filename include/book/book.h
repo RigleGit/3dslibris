@@ -92,7 +92,11 @@ private:
   std::string title;
   std::string author;
   std::string browser_display_name_cache;
+  std::string browser_folder_path;
+  std::string browser_folder_display_name;
+  std::string browser_folder_cover_path;
   bool browser_display_name_cached;
+  bool browser_folder_entry;
   int position;             //! as page index.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
@@ -227,6 +231,22 @@ public:
   {
     browser_display_name_cache.clear();
     browser_display_name_cached = false;
+  }
+  inline bool IsBrowserFolder() const { return browser_folder_entry; }
+  void SetBrowserFolderEntry(const std::string &path,
+                             const std::string &display_name,
+                             const std::string &cover_path);
+  inline const std::string &GetBrowserFolderPath() const
+  {
+    return browser_folder_path;
+  }
+  inline const std::string &GetBrowserFolderDisplayName() const
+  {
+    return browser_folder_display_name;
+  }
+  inline const std::string &GetBrowserFolderCoverPath() const
+  {
+    return browser_folder_cover_path;
   }
   inline TocQuality GetTocQuality() const { return toc_quality; }
   inline u16 GetTocDirectCount() const { return toc_direct_count; }

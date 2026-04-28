@@ -35,9 +35,18 @@ public:
   void QueueTocResolve(Book *book);
   void ProcessJobs(u32 budget_ms);
   size_t PauseBrowserJobs();
+  bool IsInsideFolder() const;
 
 private:
   App &app_;
   std::deque<app_job_t> job_queue_;
   LibraryGradientContext gradient_ctx_;
+  bool inside_folder_;
+  std::string current_folder_name_;
+  std::string current_folder_path_;
+
+  void RebuildRoot();
+  void EnterFolder(Book *folder);
+  void LeaveFolder();
+  void OpenSelectedBrowserEntry();
 };

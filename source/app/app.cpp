@@ -1002,12 +1002,19 @@ void App::ShowLibraryView()
   buttonprev.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
   buttonprev.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
   buttonprev.Label("prev");
+  buttonprev.SetIcon(UI_BUTTON_ICON_PREV);
+  buttonback.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
+  buttonback.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  buttonback.Label("back");
+  buttonback.SetIcon(UI_BUTTON_ICON_BACK);
   buttonnext.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
   buttonnext.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
   buttonnext.Label("next");
+  buttonnext.SetIcon(UI_BUTTON_ICON_NEXT);
   buttonprefs.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
   buttonprefs.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
   buttonprefs.Label("settings");
+  buttonprefs.SetIcon(UI_BUTTON_ICON_GEAR);
 
   Book *bookcurrent_ = GetCurrentBook();
   if (bookcurrent_) {

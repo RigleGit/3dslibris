@@ -42,14 +42,16 @@ void DrawPage(const BrowserDrawContext &ctx, int page_start, int page_size) {
         ctx.ts, display_name, row_x, row_y, title_width, title_height,
         ctx.ts->GetStyle());
 
-    int pos = (*ctx.books)[i]->GetPosition();
-    char msg[16];
-    if (pos > 0)
-      snprintf(msg, sizeof(msg), "Pg %d", pos + 1);
-    else
-      snprintf(msg, sizeof(msg), "NEW");
-    ctx.ts->SetPen(progress_x, row_y + 14);
-    ctx.ts->PrintString(msg);
+    if (!(*ctx.books)[i]->IsBrowserFolder()) {
+      int pos = (*ctx.books)[i]->GetPosition();
+      char msg[16];
+      if (pos > 0)
+        snprintf(msg, sizeof(msg), "Pg %d", pos + 1);
+      else
+        snprintf(msg, sizeof(msg), "NEW");
+      ctx.ts->SetPen(progress_x, row_y + 14);
+      ctx.ts->PrintString(msg);
+    }
     ctx.ts->ClearTextColorOverride();
   }
 }

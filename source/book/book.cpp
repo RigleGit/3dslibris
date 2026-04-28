@@ -85,6 +85,7 @@ Book::Book(const BookContext &c) : ctx(c) {
   mobi_line_wrap_fix = false;
   parsed_with_mobi_line_wrap_fix = false;
   browser_display_name_cached = false;
+  browser_folder_entry = false;
   inline_image_zip_index_built = false;
   mobi_inline_index_ready = false;
   mobi_first_image_index = 0;
@@ -175,6 +176,22 @@ void Book::SetAuthor(const std::string &name) {
 
 void Book::SetFolderName(const std::string &name) {
   foldername = name;
+}
+
+void Book::SetBrowserFolderEntry(const std::string &path,
+                                 const std::string &display_name,
+                                 const std::string &cover_path)
+{
+  browser_folder_entry = true;
+  browser_folder_path = path;
+  browser_folder_display_name = display_name;
+  browser_folder_cover_path = cover_path;
+  foldername = path;
+  filename.clear();
+  title = display_name;
+  author.clear();
+  format = FORMAT_UNDEF;
+  ClearBrowserDisplayNameCache();
 }
 
 std::list<u16> &Book::GetBookmarks() {

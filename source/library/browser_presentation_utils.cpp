@@ -129,6 +129,12 @@ namespace browser_presentation_utils {
 std::string BuildBrowserDisplayName(Book *book) {
   if (!book)
     return "";
+  if (book->IsBrowserFolder()) {
+    std::string name = book->GetBrowserFolderDisplayName();
+    if (!name.empty() && name[name.size() - 1] != '/')
+      name.push_back('/');
+    return name;
+  }
   if (book->HasBrowserDisplayNameCache())
     return book->GetBrowserDisplayNameCache();
 

@@ -138,7 +138,7 @@ static bool CanOpenBookIndexInCurrentContext(Book *book, bool is_book_ctx) {
 }
 
 static bool CanOpenSelectedBookIndex(Book *book) {
-  if (!book)
+  if (!book || book->IsBrowserFolder())
     return false;
   if (!book->GetChapters().empty())
     return true;
@@ -904,7 +904,8 @@ void SettingsController::PrefsHandlePress() {
       app_.PrintStatus("Bookmarks unavailable for PDF");
     } else if (is_book_ctx && book) {
       app_.ShowBookmarksView();
-    } else if (!is_book_ctx && app_.GetSelectedBook()) {
+    } else if (!is_book_ctx && app_.GetSelectedBook() &&
+               !app_.GetSelectedBook()->IsBrowserFolder()) {
       app_.OpenBook();
     }
     return;

@@ -119,21 +119,31 @@ static size_t CountQueuedHeavyJobs(const std::deque<app_job_t> &jobs) {
 }
 
 static void LayoutBrowserNavButtons(App *app) {
+  const bool in_folder = app->IsBrowserInsideFolder();
+  app->buttonback.Move(in_folder ? 130 : screen_layout::kFooterLeftX, screen_layout::kFooterY);
+  app->buttonback.Resize(52, screen_layout::kFooterButtonH);
+  app->buttonback.Label("back");
+  app->buttonback.SetIcon(UI_BUTTON_ICON_BACK);
+
   app->buttonprev.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
-  app->buttonprev.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  app->buttonprev.Resize(in_folder ? 52 : screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
   app->buttonprev.Label("prev");
+  app->buttonprev.SetIcon(UI_BUTTON_ICON_PREV);
 
-  app->buttonnext.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
-  app->buttonnext.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  app->buttonnext.Move(in_folder ? 186 : screen_layout::kFooterRightX, screen_layout::kFooterY);
+  app->buttonnext.Resize(in_folder ? 52 : screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
   app->buttonnext.Label("next");
+  app->buttonnext.SetIcon(UI_BUTTON_ICON_NEXT);
 
-  app->buttonprefs.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
-  app->buttonprefs.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
+  app->buttonprefs.Move(in_folder ? 56 : screen_layout::kFooterMidX, screen_layout::kFooterY);
+  app->buttonprefs.Resize(in_folder ? 70 : screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
   app->buttonprefs.Label("settings");
+  app->buttonprefs.SetIcon(UI_BUTTON_ICON_GEAR);
 }
 
 static std::string BuildBookPath(Book *book) {
-  if (!book || !book->GetFolderName() || !book->GetFileName())
+  if (!book || book->IsBrowserFolder() || !book->GetFolderName() ||
+      !book->GetFileName())
     return "";
   std::string path = book->GetFolderName();
   path.push_back('/');
@@ -151,7 +161,7 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
   if (!ShouldCurrentBrowserLoadCovers(app_)) {
     for (int i = 0; i < app_.BookCount(); i++) {
       Book *book = app_.books[i];
-      if (!book || !book->coverPixels)
+      if (!book || book->IsBrowserFolder() || !book->coverPixels)
         continue;
       delete[] book->coverPixels;
       book->coverPixels = nullptr;
@@ -170,7 +180,7 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
       continue;
 
     Book *book = app_.books[i];
-    if (!book || !book->coverPixels)
+    if (!book || book->IsBrowserFolder() || !book->coverPixels)
       continue;
     delete[] book->coverPixels;
     book->coverPixels = nullptr;
@@ -197,7 +207,7 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
   const int end = visible.end;
   for (int i = start; i < end; i++) {
     Book *book = app_.books[i];
-    if (!book || book->coverPixels)
+    if (!book || book->IsBrowserFolder() || book->coverPixels)
       continue;
 
     std::string path = BuildBookPath(book);
@@ -227,7 +237,7 @@ bool LibraryController::HasQueuedJob(app_job_type_t type, Book *book) const {
 }
 
 void LibraryController::PrioritizeSelectedBookJobs(Book *selected_book) {
-  if (!selected_book || job_queue_.empty())
+  if (!selected_book || selected_book->IsBrowserFolder() || job_queue_.empty())
     return;
 
   // Move the selected book's pending jobs to the front so they run first,
@@ -259,7 +269,7 @@ void LibraryController::PrioritizeSelectedBookJobs(Book *selected_book) {
 }
 
 void LibraryController::EnqueueJob(app_job_type_t type, Book *book) {
-  if (!book)
+  if (!book || book->IsBrowserFolder())
     return;
   if (HasQueuedJob(type, book))
     return;
@@ -270,7 +280,7 @@ void LibraryController::EnqueueJob(app_job_type_t type, Book *book) {
 }
 
 void LibraryController::QueueBookWarmup(Book *book) {
-  if (!book)
+  if (!book || book->IsBrowserFolder())
     return;
   const format_t format =
       app_flow_utils::DetectBookFormat(book->GetFileName());
@@ -358,7 +368,7 @@ void LibraryController::TickBrowserWarmup() {
     return;
   }
   Book *selected = app_.GetSelectedBook();
-  if (selected) {
+  if (selected && !selected->IsBrowserFolder()) {
     const format_t selected_format =
         app_flow_utils::DetectBookFormat(selected->GetFileName());
     const bool selected_supports_metadata =
@@ -380,7 +390,7 @@ void LibraryController::TickBrowserWarmup() {
        i < page_start + visible_count;
        i++) {
     Book *book = app_.books[i];
-    if (!book || book == app_.GetSelectedBook())
+    if (!book || book->IsBrowserFolder() || book == app_.GetSelectedBook())
       continue;
     const format_t format = app_flow_utils::DetectBookFormat(book->GetFileName());
     const bool supports_metadata =
@@ -398,7 +408,8 @@ void LibraryController::TickBrowserWarmup() {
 }
 
 void LibraryController::QueueTocResolve(Book *book) {
-  if (!book || book->format != FORMAT_EPUB || book->tocResolveTried)
+  if (!book || book->IsBrowserFolder() || book->format != FORMAT_EPUB ||
+      book->tocResolveTried)
     return;
   EnqueueJob(APP_JOB_RESOLVE_TOC, book);
 }
@@ -449,7 +460,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
     app_job_t job = {};
     const bool got_job = browser_job_queue_utils::TakeFirstAllowedJob(
         &job_queue_, &job, [&](const app_job_t &candidate) {
-          if (!candidate.book)
+          if (!candidate.book || candidate.book->IsBrowserFolder())
             return false;
           if (!browser_job_queue_utils::IsHeavyBrowserJobType(
                   candidate.type, APP_JOB_INDEX_METADATA,
@@ -467,6 +478,8 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
 
 
     Book *book = job.book;
+    if (!book || book->IsBrowserFolder())
+      continue;
     int rc = 0;
 #if defined(DSLIBRIS_DEBUG) && BROWSER_JOB_TRACE
     u64 t0 = osGetTime();
@@ -850,10 +863,11 @@ void LibraryController::browser_handleevent() {
   BrowserNavMove nav_move = BROWSER_NAV_LEFT;
   const bool has_grid_nav = map_grid_nav(keys, &nav_move);
 
-  if (keys & app_.key.a) {
-    app_.OpenBook();
-  } else if (keys & app_.key.start) {
-    app_.SetMode(AppMode::Quit);
+  if (keys & app_.key.b) {
+    if (IsInsideFolder())
+      LeaveFolder();
+  } else if (keys & app_.key.a) {
+    OpenSelectedBrowserEntry();
   } else if (has_grid_nav) {
     navigateSelection(nav_move);
   } else if (keys & app_.key.l) {
@@ -910,6 +924,10 @@ void LibraryController::browser_handleevent() {
         app_.ShowSettingsView(false);
         return true;
       }
+      if (IsInsideFolder() && hitsButtonAt(app_.buttonback, x, y, 4)) {
+        LeaveFolder();
+        return true;
+      }
 
       // Prefer coarse cell hit-test (cover + title/progress area):
       // single tap selects, tapping selected book opens.
@@ -935,7 +953,7 @@ void LibraryController::browser_handleevent() {
       }
       if (book_idx >= 0 && book_idx < app_.BookCount()) {
         if (app_.GetSelectedBook() == app_.books[book_idx]) {
-          app_.OpenBook();
+          OpenSelectedBrowserEntry();
         } else {
           app_.SetSelectedBook(app_.books[book_idx]);
           g_marquee.Reset();
@@ -976,6 +994,7 @@ void LibraryController::browser_init(void) {
   app_.buttonprev.Init(app_.ts.get());
   app_.buttonnext.Init(app_.ts.get());
   app_.buttonprefs.Init(app_.ts.get());
+  app_.buttonback.Init(app_.ts.get());
   LayoutBrowserNavButtons(&app_);
 
   if (app_.BookCount() <= 0) {
@@ -1069,6 +1088,8 @@ void LibraryController::browser_draw(void) {
 
   app_.ts->SetPixelSize(savedPixelSize);
 
+  if (app_.IsBrowserInsideFolder())
+    app_.buttonback.Draw(app_.ts->screenright, false);
   if (app_.GetBrowserPageStart() >= page_size)
     app_.buttonprev.Draw(app_.ts->screenright, false);
   if (app_.BookCount() > app_.GetBrowserPageStart() + page_size)

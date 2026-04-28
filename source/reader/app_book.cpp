@@ -869,7 +869,7 @@ u8 ReaderController::OpenBook()
 
   //! Attempt to open book indicated by bookselected.
 
-  if (!selected_book)
+  if (!selected_book || selected_book->IsBrowserFolder())
     return 254;
 
   const bool needs_relayout = app_.BookNeedsRelayout(selected_book);

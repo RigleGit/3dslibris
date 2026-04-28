@@ -248,14 +248,16 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
           TEXT_STYLE_BROWSER);
     }
 
-    int pos = (*ctx.books)[i]->GetPosition();
-    char msg[16];
-    if (pos > 0)
-      snprintf(msg, sizeof(msg), "Pg %d", pos + 1);
-    else
-      snprintf(msg, sizeof(msg), "NEW");
-    ctx.ts->SetPen(btnX, btnY + kProgressOffsetY);
-    ctx.ts->PrintString(msg);
+    if (!(*ctx.books)[i]->IsBrowserFolder()) {
+      int pos = (*ctx.books)[i]->GetPosition();
+      char msg[16];
+      if (pos > 0)
+        snprintf(msg, sizeof(msg), "Pg %d", pos + 1);
+      else
+        snprintf(msg, sizeof(msg), "NEW");
+      ctx.ts->SetPen(btnX, btnY + kProgressOffsetY);
+      ctx.ts->PrintString(msg);
+    }
   }
 }
 
