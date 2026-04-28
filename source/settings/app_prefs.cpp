@@ -27,6 +27,7 @@
 #include "app/settings_controller.h"
 #include "book/book.h"
 #include "library/browser_view_utils.h"
+#include "utf8proc.h"
 #include "ui/button.h"
 #include "ui/ui_button_skin.h"
 #include "color_utils.h"
@@ -922,17 +923,44 @@ void SettingsController::PrefsRefreshButton(int index) {
   app->MarkPrefsDirty();
 }
 
+// On macOS/Azahar, APFS returns NFD filenames from readdir, but the 3DS FS
+// service stored the file under NFC UTF-16. Normalize d_name to NFC so
+// libctru's UTF-8→UTF-16 conversion produces a matching codepoint.
+static void RemoveFromDir(const char *dir, const char *name) {
+  char path[512];
+  uint8_t *nfc = nullptr;
+  utf8proc_ssize_t nfc_len = utf8proc_map(
+      (const uint8_t *)name, 0, &nfc,
+      (utf8proc_option_t)(UTF8PROC_NULLTERM | UTF8PROC_STABLE | UTF8PROC_COMPOSE));
+  const char *safe_name = (nfc_len >= 0 && nfc) ? (const char *)nfc : name;
+  snprintf(path, sizeof(path), "%s/%s", dir, safe_name);
+  int rc = remove(path);
+  free(nfc);
+#ifdef DSLIBRIS_DEBUG
+  if (rc != 0) {
+    App *app_dbg = App::GetInstance();
+    if (app_dbg)
+      DBG_LOGF(app_dbg, "DeleteDirContents: remove failed path=%s rc=%d errno=%d",
+               path, rc, errno);
+  }
+#endif
+}
+
 static void DeleteDirContents(const char *dir) {
   DIR *d = opendir(dir);
-  if (!d)
+  if (!d) {
+#ifdef DSLIBRIS_DEBUG
+    App *app_dbg = App::GetInstance();
+    if (app_dbg)
+      DBG_LOGF(app_dbg, "DeleteDirContents: opendir failed dir=%s errno=%d", dir, errno);
+#endif
     return;
-  char path[512];
+  }
   struct dirent *ent;
   while ((ent = readdir(d)) != NULL) {
     if (ent->d_name[0] == '.')
       continue;
-    snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
-    remove(path);
+    RemoveFromDir(dir, ent->d_name);
   }
   closedir(d);
 }
@@ -944,8 +972,25 @@ void SettingsController::ClearAllCaches() {
   DeleteDirContents(paths::GetMetaCacheDir().c_str());
   DeleteDirContents(paths::GetCoverCacheDir().c_str());
   App *app = App::GetInstance();
-  if (app)
-    app->PrintStatus("Cache cleared");
+  if (!app)
+    return;
+  for (int i = 0; i < app->BookCount(); i++) {
+    Book *b = app->books[i];
+    if (!b)
+      continue;
+    if (b->coverPixels) {
+      delete[] b->coverPixels;
+      b->coverPixels = nullptr;
+    }
+    b->coverWidth = 0;
+    b->coverHeight = 0;
+    b->coverAttempts = 0;
+    b->metadataIndexTried = false;
+  }
+  app->prefsButtons[PREFS_BUTTON_CLEAR_CACHE].SetLabel2("cleared!");
+  app->MarkPrefsDirty();
+  if (app->GetMode() == AppMode::Browser)
+    app->ts->MarkAllScreensDirty();
 }
 
 void SettingsController::ResetToDefaults() {
