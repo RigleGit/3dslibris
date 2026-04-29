@@ -113,5 +113,10 @@
       <navLabel><text>Capítulo 16: float y clear</text></navLabel>
       <content src="text/chapter-16-float-clear.xhtml#capitulo-16"/>
     </navPoint>
+
+    <navPoint id="nav-21" playOrder="21">
+      <navLabel><text>Capítulo 17: font-size inline y small</text></navLabel>
+      <content src="text/chapter-17-font-size.xhtml#capitulo-17"/>
+    </navPoint>
   </navMap>
 </ncx>

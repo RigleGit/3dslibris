@@ -2882,6 +2882,45 @@ void start(void *data, const char *el, const char **attr) {
     p->style_white_space_stack[current] =
         ParseElementWhiteSpace(attr, p->css_class_map);
 
+    // Font-size: <small>/<big> and CSS font-size (headings manage their own)
+    {
+      const bool is_heading_el = (el[0] == 'h' && el[1] >= '1' && el[1] <= '6' && !el[2]);
+      u8 new_font_px = 0;
+      if (!is_heading_el) {
+        book_xml_css_style_utils::FontSizeSpec spec;
+        bool has_spec = book_xml_css_style_utils::TryParseFontSize(
+            ExtractStyleAttr(attr).c_str(), &spec);
+        if (!has_spec)
+          has_spec = epub_css_class_map::LookupFontSizeForClassAttr(
+              ExtractClassAttr(attr), p->css_class_map, &spec);
+        if (!has_spec) {
+          if (!strcmp(el, "small")) {
+            spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Smaller;
+            has_spec = true;
+          } else if (!strcmp(el, "big")) {
+            spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Larger;
+            has_spec = true;
+          }
+        }
+        if (has_spec &&
+            spec.unit != book_xml_css_style_utils::FontSizeSpec::Unit::None) {
+          const int px = book_xml_css_style_utils::ResolveFontSizePx(
+              spec, (int)ts->GetPixelSize());
+          new_font_px = (u8)std::min(std::max(px, 6), 255);
+        }
+      }
+      if (new_font_px) {
+        p->style_font_size_stack[current] = new_font_px;
+        p->style_font_size_restore_stack[current] = ts->GetPixelSize();
+        ts->SetPixelSize(new_font_px);
+        AppendParsedByte(p, TEXT_FONT_SIZE);
+        AppendParsedByte(p, new_font_px);
+      } else {
+        p->style_font_size_stack[current] = 0;
+        p->style_font_size_restore_stack[current] = 0;
+      }
+    }
+
     bool style_changed = false;
     if (style_bold && !style_reset_bold && !p->bold) {
       AppendParsedByte(p, TEXT_BOLD_ON);
@@ -3276,11 +3315,13 @@ void end(void *data, const char *el) {
 
   bool restore_block_text_align = false;
   bool had_page_break_after = false;
+  u8 restore_font_size_px = 0;
   if (p->stacksize > 0) {
     const u8 current = (u8)(p->stacksize - 1);
     restore_block_text_align = p->block_text_align_stack[current];
     if (IsBlockLevelElement(el))
       had_page_break_after = p->page_break_after_stack[current];
+    restore_font_size_px = p->style_font_size_restore_stack[current];
   }
 
   parse_pop(p);
@@ -3288,6 +3329,11 @@ void end(void *data, const char *el) {
     RestoreActiveBlockTextAlignMarker(p);
   if (had_page_break_after)
     ForcePageBreak(p);
+  if (restore_font_size_px) {
+    ts->SetPixelSize(restore_font_size_px);
+    AppendParsedByte(p, TEXT_FONT_SIZE);
+    AppendParsedByte(p, restore_font_size_px);
+  }
 
   const bool any_reset_bold = HasActiveStackResetBoldStyle(p);
   const bool any_reset_italic = HasActiveStackResetItalicStyle(p);

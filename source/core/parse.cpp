@@ -170,6 +170,8 @@ void parse_init(parsedata_t *data) {
     data->style_reset_italic_stack[i] = false;
     data->style_text_transform_stack[i] = 0;
     data->style_white_space_stack[i] = 0;
+    data->style_font_size_stack[i] = 0;
+    data->style_font_size_restore_stack[i] = 0;
     data->link_active_stack[i] = false;
     data->link_href_id_stack[i] = 0;
     data->block_text_align_stack[i] = false;

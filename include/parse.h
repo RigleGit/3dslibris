@@ -106,6 +106,8 @@ struct parsedata_t {
 	bool style_reset_italic_stack[32];
 	u8 style_text_transform_stack[32];
 	u8 style_white_space_stack[32];
+	u8 style_font_size_stack[32];        // applied px for inline font-size at this depth; 0 = no change
+	u8 style_font_size_restore_stack[32]; // pre-change px to restore on element close; 0 = no change
 	bool text_transform_word_start;
 	bool link_active_stack[32];
 	u16 link_href_id_stack[32];
