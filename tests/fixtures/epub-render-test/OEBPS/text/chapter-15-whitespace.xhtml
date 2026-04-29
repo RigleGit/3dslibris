@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"
+      xmlns:epub="http://www.idpf.org/2007/ops">
+<head>
+  <title>Capítulo 15</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body epub:type="bodymatter">
+
+  <h1 id="capitulo-15">Capítulo 15</h1>
+  <h2>white-space y keep-together</h2>
+
+  <p>Este capítulo sirve para validación manual. Cada bloque describe qué debería verse en 3dslibris.</p>
+
+  <h3><code>white-space: pre</code></h3>
+  <div class="ws-pre">Línea 1
+    Línea    2    con    espacios
+Línea 3</div>
+  <p>Esperado: se conservan saltos de línea explícitos y grupos de espacios. No debería refluírse como un párrafo normal.</p>
+
+  <h3><code>white-space: nowrap</code></h3>
+  <p class="ws-nowrap">Esta línea tiene muchos espacios     internos y no debería partirse por espacios aunque exceda el ancho visible de la pantalla.</p>
+  <p>Esperado: los espacios colapsan, pero el contenido no se rompe como párrafo normal.</p>
+
+  <h3><code>white-space: pre-wrap</code></h3>
+  <div class="ws-pre-wrap">Bloque con     varios espacios
+y saltos explícitos
+que además puede envolver cuando haga falta.</div>
+  <p>Esperado: se respetan saltos y espacios, pero el texto puede continuar en la línea siguiente si no cabe.</p>
+
+  <h3><code>white-space: pre-line</code></h3>
+  <div class="ws-pre-line">Bloque con     varios espacios
+y saltos explícitos
+que debe colapsar espacios pero conservar los retornos de carro.</div>
+  <p>Esperado: los espacios múltiples se reducen, pero los saltos de línea explícitos siguen visibles.</p>
+
+  <h3><code>page-break-inside: avoid</code></h3>
+  <div class="keep-together">
+    <p>Este bloque intenta mantenerse unido. Si comienza muy abajo en una página, 3dslibris debería preferir moverlo a la siguiente antes de partirlo.</p>
+    <p>Para comprobarlo, añade o elimina texto anterior y reabre el libro hasta empujar este bloque cerca del final de página.</p>
+    <p>Si el bloque cabe entero, debería empezar en página nueva en vez de quedarse cortado al final de la anterior.</p>
+  </div>
+
+</body>
+</html>

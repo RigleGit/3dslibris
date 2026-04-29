@@ -103,5 +103,10 @@
       <navLabel><text>Capítulo 13: Saltos de página CSS</text></navLabel>
       <content src="text/chapter-13-pagebreak.xhtml#capitulo-13"/>
     </navPoint>
+
+    <navPoint id="nav-19" playOrder="19">
+      <navLabel><text>Capítulo 15: white-space y keep-together</text></navLabel>
+      <content src="text/chapter-15-whitespace.xhtml#capitulo-15"/>
+    </navPoint>
   </navMap>
 </ncx>
