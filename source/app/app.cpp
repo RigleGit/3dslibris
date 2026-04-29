@@ -767,6 +767,21 @@ bool App::ShouldAbortWork() const
   return lifecycle_state_.ShouldAbortWork(static_cast<u8>(nav_.mode));
 }
 
+void App::ResetPageRepeat()
+{
+  reader::ResetPageRepeat(&reader_state_.page_repeat);
+}
+
+bool App::ShouldFirePageRepeat(reader::PageRepeatAction action, bool down_now,
+                               bool held_now, u64 now_ms,
+                               u64 initial_delay_ms,
+                               u64 repeat_interval_ms)
+{
+  return reader::ShouldFirePageRepeat(&reader_state_.page_repeat, action,
+                                      down_now, held_now, now_ms,
+                                      initial_delay_ms, repeat_interval_ms);
+}
+
 void App::PrepareForShutdown()
 {
   if (lifecycle_state_.IsShutdownPrepared())
@@ -787,6 +802,7 @@ void App::PrepareForShutdown()
   lifecycle_state_.SetSuspendHandled(false);
   nav_.browser.wait_input_release = true;
   nav_.browser.last_interaction_ms = osGetTime();
+  ResetPageRepeat();
 
   PersistPrefs();
 
@@ -877,6 +893,7 @@ void App::HandleAppletSuspend()
   lifecycle_state_.SetSuspendHandled(true);
   nav_.browser.wait_input_release = true;
   nav_.browser.last_interaction_ms = osGetTime();
+  ResetPageRepeat();
   const size_t removed_jobs = PauseBrowserJobs();
 #ifndef DSLIBRIS_DEBUG
   (void)removed_jobs;
@@ -905,6 +922,7 @@ void App::HandleAppletResume()
   nav_.browser.wait_input_release = true;
   nav_.browser.last_interaction_ms = osGetTime();
   nav_.browser.view_dirty = true;
+  ResetPageRepeat();
   nav_.prefs.view_dirty = true;
   if (ts)
     ts->MarkAllScreensDirty();
@@ -1025,6 +1043,7 @@ void App::ShowLibraryView()
   }
 
   ResetBrowserMarquee();
+  ResetPageRepeat();
   nav_.mode = AppMode::Browser;
   ts->SetScreen(ts->screenright);
   ts->MarkAllScreensDirty();

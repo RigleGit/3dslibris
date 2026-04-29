@@ -30,6 +30,7 @@ public:
   BrowserViewMode browser_view_mode;
   bool fixed_layout_rtl;
   bool respect_publisher_font_size;
+  bool circle_pad_page_turn;
 
 private:
   App *app;

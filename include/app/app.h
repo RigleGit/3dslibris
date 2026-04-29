@@ -64,6 +64,7 @@ https://github.com/rhaleblian/dslibris
 #include "ui/button.h"
 #include "shared/main.h"
 #include "parse.h"
+#include "reader/page_repeat_utils.h"
 #include "settings/prefs_button_ids.h"
 #include "ui/text.h"
 #include "shared/status_reporter.h"
@@ -281,6 +282,10 @@ public:
   bool IsHomebrewEnvironment() const;
   bool IsAppletSuspended() const;
   bool ShouldAbortWork() const override;
+  void ResetPageRepeat();
+  bool ShouldFirePageRepeat(reader::PageRepeatAction action, bool down_now,
+                            bool held_now, u64 now_ms,
+                            u64 initial_delay_ms, u64 repeat_interval_ms);
   void PrepareForShutdown();
   void HandleAppletSuspend();
   void HandleAppletResume();
@@ -388,6 +393,7 @@ private:
     bool inline_link_hold_armed;
     bool inline_link_hold_consumed;
     u64 inline_link_hold_started_at_ms;
+    reader::PageRepeatState page_repeat;
 
     ReaderRuntimeState()
         : opening(), deferred_relayout(), bookcurrent(nullptr),
@@ -397,7 +403,7 @@ private:
           pdf_touch_last_y(-1), pdf_deferred_ready_at_ms(0),
           inline_link_focus_active(false), inline_link_hold_armed(false),
           inline_link_hold_consumed(false),
-          inline_link_hold_started_at_ms(0) {}
+          inline_link_hold_started_at_ms(0), page_repeat() {}
   };
 
   NavigationState nav_;

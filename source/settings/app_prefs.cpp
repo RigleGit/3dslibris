@@ -49,11 +49,12 @@ static const int PREFS_LIBRARY_BTN_H = 26;
 
 
 static const int kPage2Buttons[] = {
+    PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN,
     PREFS_BUTTON_PUBLISHER_FONTSIZE,
     PREFS_BUTTON_RESET_DEFAULTS,
     PREFS_BUTTON_CLEAR_CACHE,
 };
-static const int kPage2ButtonCount = 3;
+static const int kPage2ButtonCount = 4;
 static const int PREFS_ROW_X = 5;
 static const int PREFS_ROW_W = 230;
 static const u32 kGoToPageCoarseStep = 10;
@@ -169,6 +170,13 @@ static void ToggleFixedLayoutReadingDirection(Prefs *prefs) {
   if (!prefs)
     return;
   prefs->fixed_layout_rtl = !prefs->fixed_layout_rtl;
+  prefs->Write();
+}
+
+static void ToggleCirclePadPageTurnSetting(Prefs *prefs) {
+  if (!prefs)
+    return;
+  prefs->circle_pad_page_turn = !prefs->circle_pad_page_turn;
   prefs->Write();
 }
 
@@ -685,6 +693,13 @@ void SettingsController::PrefsRefreshButton(int index) {
           std::string(browser_view_utils::Label(app_.prefs->browser_view_mode)));
     }
     break;
+  case PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN:
+    app_.prefsButtons[PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN].SetLabel1(
+        std::string("circle pad pages"));
+    app_.prefsButtons[PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN].SetLabel2(
+        app_.prefs->circle_pad_page_turn ? std::string("on")
+                                         : std::string("off"));
+    break;
   case PREFS_BUTTON_INDEX:
     if (CanOpenBookIndexInCurrentContext(book, is_book_ctx)) {
       app_.prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
@@ -806,6 +821,7 @@ void SettingsController::ResetToDefaults() {
   app_.prefs->browser_view_mode = BROWSER_VIEW_GALLERY;
   app_.prefs->fixed_layout_rtl = false;
   app_.prefs->respect_publisher_font_size = false;
+  app_.prefs->circle_pad_page_turn = true;
   app_.MarkBookLayoutDirty();
   app_.prefs->Write();
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++)
@@ -864,6 +880,13 @@ void SettingsController::PrefsHandlePress() {
       PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
       app_.MarkPrefsDirty();
     }
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN) {
+    ToggleCirclePadPageTurnSetting(app_.prefs.get());
+    PrefsRefreshButton(PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN);
+    app_.MarkPrefsDirty();
     return;
   }
 
