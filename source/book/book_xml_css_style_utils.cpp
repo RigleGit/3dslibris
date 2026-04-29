@@ -411,4 +411,56 @@ TextAlign ParseTextAlign(const char *style) {
   return TextAlign::Left;
 }
 
+namespace {
+
+// Returns true if the CSS property `prop` (e.g. "page-break-before") appears
+// in `lc` with an "always/page/left/right" value. When require_not_dash_preceded
+// is true, the match is skipped if the character before the property name is '-'
+// (so "break-before" does not match inside "page-break-before").
+bool CheckCssBreakProperty(const std::string &lc, const char *prop,
+                           bool require_not_dash_preceded) {
+  const size_t prop_len = strlen(prop);
+  size_t pos = 0;
+  while (true) {
+    pos = lc.find(prop, pos);
+    if (pos == std::string::npos)
+      return false;
+    if (!require_not_dash_preceded || pos == 0 || lc[pos - 1] != '-') {
+      size_t colon = lc.find(':', pos + prop_len);
+      if (colon != std::string::npos) {
+        size_t v = colon + 1;
+        while (v < lc.size() && lc[v] == ' ')
+          v++;
+        if (lc.compare(v, 6, "always") == 0)
+          return true;
+        if (lc.compare(v, 4, "page") == 0)
+          return true;
+        if (lc.compare(v, 5, "right") == 0)
+          return true;
+        if (lc.compare(v, 4, "left") == 0)
+          return true;
+      }
+    }
+    pos++;
+  }
+}
+
+} // anonymous namespace (page-break helpers)
+
+bool HasPageBreakBefore(const char *style) {
+  if (!style || !style[0])
+    return false;
+  const std::string lc = ToLowerAscii(std::string(style));
+  return CheckCssBreakProperty(lc, "page-break-before", false) ||
+         CheckCssBreakProperty(lc, "break-before", true);
+}
+
+bool HasPageBreakAfter(const char *style) {
+  if (!style || !style[0])
+    return false;
+  const std::string lc = ToLowerAscii(std::string(style));
+  return CheckCssBreakProperty(lc, "page-break-after", false) ||
+         CheckCssBreakProperty(lc, "break-after", true);
+}
+
 } // namespace book_xml_css_style_utils

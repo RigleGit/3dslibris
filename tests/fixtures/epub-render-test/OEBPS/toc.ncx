@@ -98,5 +98,10 @@
       <navLabel><text>Capítulo 12: Imágenes ornamento con ancho explícito</text></navLabel>
       <content src="text/chapter-12-ornament-images.xhtml#capitulo-12"/>
     </navPoint>
+
+    <navPoint id="nav-18" playOrder="18">
+      <navLabel><text>Capítulo 13: Saltos de página CSS</text></navLabel>
+      <content src="text/chapter-13-pagebreak.xhtml#capitulo-13"/>
+    </navPoint>
   </navMap>
 </ncx>

@@ -193,6 +193,11 @@ h2.align-center-heading {
   font-size: larger;
 }
 
+/* page-break-before via CSS class — as reported in issue #72 */
+.chapter-start {
+  page-break-before: always;
+}
+
 /* Ornament separator — as reported in issue #74 */
 .spaceOrnament {
   display: block;

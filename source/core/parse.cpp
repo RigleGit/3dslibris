@@ -172,6 +172,7 @@ void parse_init(parsedata_t *data) {
     data->ordered_list_style_stack[i] = 0;
     data->heading_font_size_emitted_stack[i] = false;
     data->heading_saved_font_size_stack[i] = 0;
+    data->page_break_after_stack[i] = false;
   }
   data->deferred_style_sync = false;
   data->deferred_target_bold = false;
@@ -259,6 +260,7 @@ void parse_push(parsedata_t *data, context_t context) {
     data->ordered_list_style_stack[data->stacksize] = 0;
     data->heading_font_size_emitted_stack[data->stacksize] = false;
     data->heading_saved_font_size_stack[data->stacksize] = 0;
+    data->page_break_after_stack[data->stacksize] = false;
     data->stacksize++;
   }
 }
@@ -285,6 +287,7 @@ context_t parse_pop(parsedata_t *data) {
     data->ordered_list_style_stack[data->stacksize] = 0;
     data->heading_font_size_emitted_stack[data->stacksize] = false;
     data->heading_saved_font_size_stack[data->stacksize] = 0;
+    data->page_break_after_stack[data->stacksize] = false;
   }
   return data->stack[data->stacksize];
 }

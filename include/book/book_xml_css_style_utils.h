@@ -50,4 +50,7 @@ enum class TextAlign { Left, Center, Right, Justify };
 TextAlign ParseTextAlign(const char *style);
 bool TryParseTextAlign(const char *style, TextAlign *out);
 
+bool HasPageBreakBefore(const char *style);
+bool HasPageBreakAfter(const char *style);
+
 } // namespace book_xml_css_style_utils

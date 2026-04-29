@@ -20,10 +20,13 @@ struct CssClassMargins {
   TextAlign text_align;
   bool superscript;
   bool subscript;
+  bool page_break_before;
+  bool page_break_after;
 
   CssClassMargins()
       : hide_list_markers(false), has_text_align(false),
-        text_align(TextAlign::Left), superscript(false), subscript(false) {}
+        text_align(TextAlign::Left), superscript(false), subscript(false),
+        page_break_before(false), page_break_after(false) {}
 };
 
 // Map: bare class name (no '.') → extracted margins.
@@ -57,5 +60,11 @@ bool LookupFontSizeForClassAttr(const std::string &class_attr,
 bool LookupSuperSubForClassAttr(const std::string &class_attr,
                                 const CssClassMap &class_map,
                                 bool *superscript_out, bool *subscript_out);
+
+bool LookupPageBreakBeforeForClassAttr(const std::string &class_attr,
+                                       const CssClassMap &class_map);
+
+bool LookupPageBreakAfterForClassAttr(const std::string &class_attr,
+                                      const CssClassMap &class_map);
 
 } // namespace epub_css_class_map

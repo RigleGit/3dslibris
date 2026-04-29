@@ -1412,6 +1412,27 @@ static void AdvanceParsedScreen(parsedata_t *p) {
   p->linebegan = false;
 }
 
+static void ForcePageBreak(parsedata_t *p) {
+  if (!p || !p->ts || !p->book)
+    return;
+  if (p->screen == 0 && p->buflen == 0)
+    return;
+  if (p->screen == 0)
+    AdvanceParsedScreen(p);
+  AdvanceParsedScreen(p);
+}
+
+static bool IsBlockLevelElement(const char *el) {
+  return !strcmp(el, "p") || !strcmp(el, "div") ||
+         !strcmp(el, "h1") || !strcmp(el, "h2") || !strcmp(el, "h3") ||
+         !strcmp(el, "h4") || !strcmp(el, "h5") || !strcmp(el, "h6") ||
+         !strcmp(el, "section") || !strcmp(el, "article") ||
+         !strcmp(el, "aside") || !strcmp(el, "blockquote") ||
+         !strcmp(el, "header") || !strcmp(el, "footer") ||
+         !strcmp(el, "figure") || !strcmp(el, "dl") ||
+         !strcmp(el, "dt") || !strcmp(el, "dd");
+}
+
 static void ResetCapturedTable(parsedata_t *p) {
   if (!p)
     return;
@@ -1820,6 +1841,23 @@ void start(void *data, const char *el, const char **attr) {
 
   if (HandleTableStart(p, ts, el, attr))
     return;
+
+  if (IsBlockLevelElement(el)) {
+    const char *el_style = NULL;
+    const char *el_class = NULL;
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (AttrNameEquals(attr[i], "style"))
+        el_style = attr[i + 1];
+      else if (AttrNameEquals(attr[i], "class"))
+        el_class = attr[i + 1];
+    }
+    if (book_xml_css_style_utils::HasPageBreakBefore(el_style) ||
+        epub_css_class_map::LookupPageBreakBeforeForClassAttr(
+            el_class ? std::string(el_class) : std::string(),
+            p->css_class_map)) {
+      ForcePageBreak(p);
+    }
+  }
 
   if (!strcmp(el, "html"))
     parse_push(p, TAG_HTML);
@@ -2475,6 +2513,23 @@ void start(void *data, const char *el, const char **attr) {
     if (style_changed)
       SyncParsedTextStyle(ts, p->bold, p->italic, p->mono);
   }
+
+  if (IsBlockLevelElement(el) && p->stacksize > 0) {
+    const char *el_style = NULL;
+    const char *el_class = NULL;
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (AttrNameEquals(attr[i], "style"))
+        el_style = attr[i + 1];
+      else if (AttrNameEquals(attr[i], "class"))
+        el_class = attr[i + 1];
+    }
+    if (book_xml_css_style_utils::HasPageBreakAfter(el_style) ||
+        epub_css_class_map::LookupPageBreakAfterForClassAttr(
+            el_class ? std::string(el_class) : std::string(),
+            p->css_class_map)) {
+      p->page_break_after_stack[p->stacksize - 1] = true;
+    }
+  }
 }
 
 void chardata(void *data, const XML_Char *txt, int txtlen) {
@@ -2773,14 +2828,19 @@ void end(void *data, const char *el) {
   }
 
   bool restore_block_text_align = false;
+  bool had_page_break_after = false;
   if (p->stacksize > 0) {
     const u8 current = (u8)(p->stacksize - 1);
     restore_block_text_align = p->block_text_align_stack[current];
+    if (IsBlockLevelElement(el))
+      had_page_break_after = p->page_break_after_stack[current];
   }
 
   parse_pop(p);
   if (restore_block_text_align)
     RestoreActiveBlockTextAlignMarker(p);
+  if (had_page_break_after)
+    ForcePageBreak(p);
 
   const bool want_bold =
       parse_in(p, TAG_STRONG) || parse_in(p, TAG_H1) || parse_in(p, TAG_H2) ||

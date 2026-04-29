@@ -111,6 +111,7 @@ struct parsedata_t {
 	u8 ordered_list_style_stack[32];
 	bool heading_font_size_emitted_stack[32];
 	u8 heading_saved_font_size_stack[32];
+	bool page_break_after_stack[32];
 	bool deferred_style_sync;
 	bool deferred_target_bold;
 	bool deferred_target_italic;
