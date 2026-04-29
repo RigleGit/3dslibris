@@ -37,6 +37,8 @@ unsigned char ParseUnderlineStyle(const std::string &style_lc) {
     return UNDERLINE_STYLE_DASHED;
   if (style_lc.find("dotted") != std::string::npos)
     return UNDERLINE_STYLE_DOTTED;
+  if (style_lc.find("double") != std::string::npos)
+    return UNDERLINE_STYLE_DOUBLE;
   return UNDERLINE_STYLE_SOLID;
 }
 
@@ -134,11 +136,21 @@ MarginTopResult ParseMarginShorthand(const std::string &lc,
   }
   if (count == 0)
     return MarginTopResult{};
-  if (which == 0)
+  if (which == 0) {
     return tokens[0];
+  }
+  if (which == 1) {
+    if (count >= 2) return tokens[1];
+    return tokens[0];
+  }
   if (which == 2) {
     if (count >= 3) return tokens[2];
-    return tokens[0]; // 1 or 2 values: bottom equals top
+    return tokens[0];
+  }
+  if (which == 3) {
+    if (count >= 4) return tokens[3];
+    if (count >= 2) return tokens[1];
+    return tokens[0];
   }
   return tokens[0];
 }
@@ -323,6 +335,14 @@ MarginTopResult ParseMarginTop(const char *style) {
 
 MarginTopResult ParseMarginBottom(const char *style) {
   return ParseMarginValue(style, "margin-bottom", 2);
+}
+
+MarginTopResult ParseMarginLeft(const char *style) {
+  return ParseMarginValue(style, "margin-left", 3);
+}
+
+MarginTopResult ParseMarginRight(const char *style) {
+  return ParseMarginValue(style, "margin-right", 1);
 }
 
 bool TryParseFontSize(const char *style, FontSizeSpec *out) {

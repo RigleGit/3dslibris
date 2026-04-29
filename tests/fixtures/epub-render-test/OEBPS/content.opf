@@ -30,6 +30,7 @@
     <item id="img2" href="images/ornament-bar.png" media-type="image/png"/>
     <item id="ch12" href="text/chapter-12-ornament-images.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch13" href="text/chapter-13-pagebreak.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch14" href="text/chapter-14-margin-left-right.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
 
   <spine toc="ncx">
@@ -49,6 +50,7 @@
     <itemref idref="ch11"/>
     <itemref idref="ch12"/>
     <itemref idref="ch13"/>
+    <itemref idref="ch14"/>
   </spine>
 
   <guide>

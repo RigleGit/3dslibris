@@ -152,6 +152,8 @@ void parse_init(parsedata_t *data) {
   data->superscript = false;
   data->subscript = false;
   data->mono = false;
+  data->block_margin_left = 0;
+  data->block_margin_right = 0;
   for (int i = 0; i < 32; i++) {
     data->style_bold_stack[i] = false;
     data->style_italic_stack[i] = false;

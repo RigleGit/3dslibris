@@ -155,6 +155,8 @@ struct parsedata_t {
 	std::string last_h_class;
 	std::string last_hr_class;
 	epub_css_class_map::CssClassMap css_class_map;
+	int block_margin_left;
+	int block_margin_right;
 	bool collecting_fb2_binary;
 	bool fb2_binary_too_large;
 	std::string fb2_binary_id;

@@ -69,6 +69,10 @@ void DrawPatternedUnderline(Text *ts, int x0, int x1, int y, u16 color,
                    (u16)(y + y_offset + 1), color);
     }
     break;
+  case UNDERLINE_STYLE_DOUBLE:
+    DrawSolidDecoration(ts, x0, x1, y, color);
+    DrawSolidDecoration(ts, x0, x1, y + 2, color);
+    break;
   case UNDERLINE_STYLE_SOLID:
   default:
     DrawSolidDecoration(ts, x0, x1, y, color);

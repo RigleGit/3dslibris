@@ -15,6 +15,8 @@ using book_xml_css_style_utils::TextTransform;
 struct CssClassMargins {
   MarginTopResult margin_top;
   MarginTopResult margin_bottom;
+  MarginTopResult margin_left;
+  MarginTopResult margin_right;
   FontSizeSpec font_size;
   bool hide_list_markers;
   bool has_text_align;
@@ -52,6 +54,12 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out);
 bool LookupMarginsForClassAttr(const std::string &class_attr,
                                const CssClassMap &class_map,
                                CssClassMargins *out);
+
+MarginTopResult LookupMarginLeftForClassAttr(const std::string &class_attr,
+                                             const CssClassMap &class_map);
+
+MarginTopResult LookupMarginRightForClassAttr(const std::string &class_attr,
+                                              const CssClassMap &class_map);
 
 bool LookupHideListMarkersForClassAttr(const std::string &class_attr,
                                        const CssClassMap &class_map);

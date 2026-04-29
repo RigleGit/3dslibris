@@ -284,6 +284,69 @@ void TestParseCssIntoClassMapDetectsTextIndentAndTransform() {
                  (int)TextTransform::Capitalize);
 }
 
+void TestParseCssIntoClassMapDetectsMarginLeftRight() {
+  const char *css =
+      ".indent-left { margin-left: 24px; }\n"
+      ".indent-right { margin-right: 10%; }\n"
+      ".indent-both { margin-left: 8px; margin-right: 8px; }\n";
+
+  CssClassMap out;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
+
+  test::ExpectEq("parsed margin-left/right class count", (int)out.size(), 3);
+  test::ExpectTrue("indent-left parsed", out.count("indent-left") > 0);
+  test::ExpectTrue("indent-right parsed", out.count("indent-right") > 0);
+  test::ExpectTrue("indent-both parsed", out.count("indent-both") > 0);
+
+  using U = book_xml_css_style_utils::MarginTopResult::Unit;
+  test::ExpectEq("indent-left unit", (int)out["indent-left"].margin_left.unit,
+                 (int)U::Px);
+  test::ExpectEq("indent-left value", out["indent-left"].margin_left.value, 24);
+  test::ExpectEq("indent-right unit",
+                 (int)out["indent-right"].margin_right.unit, (int)U::Percent);
+  test::ExpectEq("indent-right value", out["indent-right"].margin_right.value,
+                 10);
+  test::ExpectEq("indent-both left value", out["indent-both"].margin_left.value,
+                 8);
+  test::ExpectEq("indent-both right value",
+                 out["indent-both"].margin_right.value, 8);
+}
+
+void TestLookupMarginLeftRightForClassAttr() {
+  using U = book_xml_css_style_utils::MarginTopResult::Unit;
+  CssClassMap map;
+  map["left"].margin_left.unit = U::Px;
+  map["left"].margin_left.value = 32;
+  map["right"].margin_right.unit = U::Percent;
+  map["right"].margin_right.value = 20;
+
+  CssClassMargins merged;
+  const bool found = epub_css_class_map::LookupMarginsForClassAttr(
+      "left right", map, &merged);
+  test::ExpectTrue("LookupMarginsForClassAttr finds left+right", found);
+  test::ExpectEq("merged margin-left unit", (int)merged.margin_left.unit,
+                 (int)U::Px);
+  test::ExpectEq("merged margin-left value", merged.margin_left.value, 32);
+  test::ExpectEq("merged margin-right unit", (int)merged.margin_right.unit,
+                 (int)U::Percent);
+  test::ExpectEq("merged margin-right value", merged.margin_right.value, 20);
+
+  const auto ml =
+      epub_css_class_map::LookupMarginLeftForClassAttr("left", map);
+  test::ExpectEq("LookupMarginLeft unit", (int)ml.unit, (int)U::Px);
+  test::ExpectEq("LookupMarginLeft value", ml.value, 32);
+
+  const auto mr =
+      epub_css_class_map::LookupMarginRightForClassAttr("right", map);
+  test::ExpectEq("LookupMarginRight unit", (int)mr.unit, (int)U::Percent);
+  test::ExpectEq("LookupMarginRight value", mr.value, 20);
+
+  const auto miss =
+      epub_css_class_map::LookupMarginLeftForClassAttr("right", map);
+  test::ExpectEq("LookupMarginLeft miss -> None", (int)miss.unit,
+                 (int)U::None);
+}
+
 void TestLookupTextIndentAndTransformFunctions() {
   using book_xml_css_style_utils::MarginTopResult;
   using book_xml_css_style_utils::TextTransform;
@@ -332,5 +395,7 @@ int main() {
   TestLookupResetFlagFunctions();
   TestParseCssIntoClassMapDetectsTextIndentAndTransform();
   TestLookupTextIndentAndTransformFunctions();
+  TestParseCssIntoClassMapDetectsMarginLeftRight();
+  TestLookupMarginLeftRightForClassAttr();
   return 0;
 }

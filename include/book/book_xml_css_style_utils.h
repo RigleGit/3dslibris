@@ -15,6 +15,8 @@ struct MarginTopResult {
 
 MarginTopResult ParseMarginTop(const char *style);
 MarginTopResult ParseMarginBottom(const char *style);
+MarginTopResult ParseMarginLeft(const char *style);
+MarginTopResult ParseMarginRight(const char *style);
 
 struct FontSizeSpec {
   enum class Unit { None, Px, Percent, Em, Rem, Smaller, Larger };

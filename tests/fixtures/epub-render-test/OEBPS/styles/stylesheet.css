@@ -39,6 +39,10 @@ pre {
   text-decoration: wavy underline;
 }
 
+.underline-double {
+  text-decoration: underline double;
+}
+
 .sup {
   vertical-align: super;
   font-size: smaller;
@@ -196,6 +200,30 @@ h2.align-center-heading {
 /* page-break-before via CSS class — as reported in issue #72 */
 .chapter-start {
   page-break-before: always;
+}
+
+.ml-positive-px {
+  margin-left: 48px;
+}
+
+.mr-positive-px {
+  margin-right: 48px;
+}
+
+.ml-percent {
+  margin-left: 20%;
+}
+
+.mr-percent {
+  margin-right: 20%;
+}
+
+.ml-shorthand {
+  margin: 0 24px 0 48px;
+}
+
+.mr-shorthand {
+  margin: 0 48px 0 24px;
 }
 
 /* Ornament separator — as reported in issue #74 */

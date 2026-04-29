@@ -41,6 +41,15 @@ void TestDetectsDashedAndDottedUnderlineStyles() {
                  UNDERLINE_STYLE_DOTTED);
 }
 
+void TestDetectsDoubleUnderlineStyle() {
+  book_xml_css_style_utils::InlineStyleFlags flags{};
+  book_xml_css_style_utils::ParseInlineStyleFlags(
+      "text-decoration: underline double;", &flags);
+  test::ExpectTrue("double underline detected", flags.underline);
+  test::ExpectEq("double underline style", (int)flags.underline_style,
+                 UNDERLINE_STYLE_DOUBLE);
+}
+
 void TestDetectsBoldItalicAndVerticalAlign() {
   book_xml_css_style_utils::InlineStyleFlags flags{};
   book_xml_css_style_utils::ParseInlineStyleFlags(
@@ -185,6 +194,55 @@ void TestParseMarginBottomZeroUnitless() {
   test::ExpectEq("bottom zero unitless value", r.value, 0);
 }
 
+void TestParseMarginLeftPx() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginLeft("margin-left: 32px;");
+  test::ExpectEq("left px unit", (int)r.unit, (int)R::Unit::Px);
+  test::ExpectEq("left px value", r.value, 32);
+}
+
+void TestParseMarginRightPercent() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginRight("margin-right: 10%;");
+  test::ExpectEq("right percent unit", (int)r.unit, (int)R::Unit::Percent);
+  test::ExpectEq("right percent value", r.value, 10);
+}
+
+void TestParseMarginLeftShorthand() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginLeft("margin: 8px 16px 24px 32px;");
+  test::ExpectEq("left shorthand unit", (int)r.unit, (int)R::Unit::Px);
+  test::ExpectEq("left shorthand value", r.value, 32);
+}
+
+void TestParseMarginLeftPercent() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginLeft("margin-left: 10%;");
+  test::ExpectEq("left percent unit", (int)r.unit, (int)R::Unit::Percent);
+  test::ExpectEq("left percent value", r.value, 10);
+}
+
+void TestParseMarginRightPx() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginRight("margin-right: 32px;");
+  test::ExpectEq("right px unit", (int)r.unit, (int)R::Unit::Px);
+  test::ExpectEq("right px value", r.value, 32);
+}
+
+void TestParseMarginRightShorthand() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginRight("margin: 8px 16px 24px 32px;");
+  test::ExpectEq("right shorthand unit", (int)r.unit, (int)R::Unit::Px);
+  test::ExpectEq("right shorthand value", r.value, 16);
+}
+
+void TestParseMarginRightShorthandTwoValues() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginRight("margin: 8px 16px;");
+  test::ExpectEq("right shorthand 2val unit", (int)r.unit, (int)R::Unit::Px);
+  test::ExpectEq("right shorthand 2val value", r.value, 16);
+}
+
 void TestTryParseFontSizeAcceptsPxValues() {
   book_xml_css_style_utils::FontSizeSpec spec{};
   const bool ok =
@@ -322,6 +380,7 @@ int main() {
   TestDetectsOverlineDecoration();
   TestDetectsUnderlineRegardlessOfDecorationOrder();
   TestDetectsDashedAndDottedUnderlineStyles();
+  TestDetectsDoubleUnderlineStyle();
   TestDetectsBoldItalicAndVerticalAlign();
   TestParseMarginTopPositivePx();
   TestParseMarginTopNegativePx();
@@ -333,6 +392,13 @@ int main() {
   TestParseMarginTopEmUnit();
   TestParseMarginTopPtUnit();
   TestParseMarginBottomZeroUnitless();
+  TestParseMarginLeftPx();
+  TestParseMarginLeftPercent();
+  TestParseMarginLeftShorthand();
+  TestParseMarginRightPx();
+  TestParseMarginRightPercent();
+  TestParseMarginRightShorthand();
+  TestParseMarginRightShorthandTwoValues();
   TestTryParseFontSizeAcceptsPxValues();
   TestTryParseFontSizeAcceptsRelativeValues();
   TestTryParseFontSizePt();

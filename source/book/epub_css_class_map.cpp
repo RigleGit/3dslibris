@@ -147,12 +147,16 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     const char *b = block.c_str();
 
     using book_xml_css_style_utils::ParseMarginBottom;
+    using book_xml_css_style_utils::ParseMarginLeft;
+    using book_xml_css_style_utils::ParseMarginRight;
     using book_xml_css_style_utils::ParseMarginTop;
     using book_xml_css_style_utils::TextAlign;
     using book_xml_css_style_utils::TryParseTextAlign;
 
     MarginTopResult mt = ParseMarginTop(b);
     MarginTopResult mb = ParseMarginBottom(b);
+    MarginTopResult ml = ParseMarginLeft(b);
+    MarginTopResult mr = ParseMarginRight(b);
     TextAlign text_align = TextAlign::Left;
     const bool has_text_align = TryParseTextAlign(b, &text_align);
     FontSizeSpec font_size;
@@ -185,7 +189,10 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     const bool has_text_transform = (text_transform != TextTransform::None);
 
     if (mt.unit != MarginTopResult::Unit::None ||
-        mb.unit != MarginTopResult::Unit::None || has_font_size ||
+        mb.unit != MarginTopResult::Unit::None ||
+        ml.unit != MarginTopResult::Unit::None ||
+        mr.unit != MarginTopResult::Unit::None ||
+        has_font_size ||
         hide_list_markers ||
         has_text_align || is_superscript || is_subscript ||
         has_page_break_before || has_page_break_after ||
@@ -198,6 +205,10 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
           entry.margin_top = mt;
         if (mb.unit != MarginTopResult::Unit::None)
           entry.margin_bottom = mb;
+        if (ml.unit != MarginTopResult::Unit::None)
+          entry.margin_left = ml;
+        if (mr.unit != MarginTopResult::Unit::None)
+          entry.margin_right = mr;
         if (has_font_size)
           entry.font_size = font_size;
         if (hide_list_markers)
@@ -264,6 +275,10 @@ bool LookupMarginsForClassAttr(const std::string &class_attr,
       out->margin_top = it->second.margin_top;
     if (it->second.margin_bottom.unit != MarginTopResult::Unit::None)
       out->margin_bottom = it->second.margin_bottom;
+    if (it->second.margin_left.unit != MarginTopResult::Unit::None)
+      out->margin_left = it->second.margin_left;
+    if (it->second.margin_right.unit != MarginTopResult::Unit::None)
+      out->margin_right = it->second.margin_right;
     found_any = true;
   }
 
@@ -568,6 +583,52 @@ bool LookupResetItalicForClassAttr(const std::string &class_attr,
       return true;
   }
   return false;
+}
+
+MarginTopResult LookupMarginLeftForClassAttr(const std::string &class_attr,
+                                             const CssClassMap &class_map) {
+  if (class_attr.empty() || class_map.empty())
+    return MarginTopResult{};
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() &&
+        it->second.margin_left.unit != MarginTopResult::Unit::None)
+      return it->second.margin_left;
+  }
+  return MarginTopResult{};
+}
+
+MarginTopResult LookupMarginRightForClassAttr(const std::string &class_attr,
+                                              const CssClassMap &class_map) {
+  if (class_attr.empty() || class_map.empty())
+    return MarginTopResult{};
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() &&
+        it->second.margin_right.unit != MarginTopResult::Unit::None)
+      return it->second.margin_right;
+  }
+  return MarginTopResult{};
 }
 
 } // namespace epub_css_class_map
