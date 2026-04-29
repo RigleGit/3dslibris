@@ -490,6 +490,55 @@ LookupClassMarginBottom(const std::string &class_attr,
 }
 
 static book_xml_css_style_utils::MarginTopResult
+LookupClassTextIndent(const std::string &class_attr,
+                      const epub_css_class_map::CssClassMap &class_map) {
+  return epub_css_class_map::LookupTextIndentForClassAttr(class_attr, class_map);
+}
+
+static book_xml_css_style_utils::MarginTopResult
+ParseElementTextIndentWithClass(const char **attr, const parsedata_t *p) {
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        const auto r = book_xml_css_style_utils::ParseTextIndent(attr[i + 1]);
+        if (r.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
+          return r;
+      }
+    }
+  }
+  const std::string cls = ExtractClassAttr(attr);
+  return LookupClassTextIndent(cls, p ? p->css_class_map
+                                      : epub_css_class_map::CssClassMap{});
+}
+
+static u8
+ParseElementTextTransform(const char **attr,
+                           const epub_css_class_map::CssClassMap &class_map) {
+  using book_xml_css_style_utils::TextTransform;
+  u8 result = 0;
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        const TextTransform tt =
+            book_xml_css_style_utils::ParseTextTransform(attr[i + 1]);
+        if (tt != TextTransform::None)
+          result = (u8)tt;
+      } else if (AttrNameEquals(attr[i], "class")) {
+        TextTransform tt;
+        if (epub_css_class_map::LookupTextTransformForClassAttr(
+                std::string(attr[i + 1]), class_map, &tt))
+          result = (u8)tt;
+      }
+    }
+  }
+  return result;
+}
+
+static book_xml_css_style_utils::MarginTopResult
 ParseElementMarginTopWithClass(const char **attr, const parsedata_t *p) {
   const book_xml_css_style_utils::MarginTopResult from_style =
       ParseElementMarginTopPx(attr);
@@ -2125,6 +2174,7 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_P);
     p->in_paragraph = true;
     p->paragraph_has_content = false;
+    p->text_transform_word_start = true;
     p->last_p_style = ExtractStyleAttr(attr);
     p->last_p_class = ExtractClassAttr(attr);
     const book_xml_css_style_utils::TextAlign align =
@@ -2139,6 +2189,8 @@ void start(void *data, const char *el, const char **attr) {
         !tight_list_paragraph && !tight_block_paragraph;
     const book_xml_css_style_utils::MarginTopResult mtr =
         ParseElementMarginTopWithClass(attr, p);
+    const book_xml_css_style_utils::MarginTopResult text_indent_mtr =
+        ParseElementTextIndentWithClass(attr, p);
     const int line_h = ts->GetHeight() + ts->linespacing;
     if (can_apply_top_margin) {
       const int default_lf = p->book->GetParagraphSpacing();
@@ -2148,10 +2200,21 @@ void start(void *data, const char *el, const char **attr) {
                              p->last_p_class, mtr, line_h, default_lf,
                              lf_count);
       EmitAdditionalTopLinefeeds(p, lf_count);
-      for (int i = 0; i < p->book->GetParagraphIndent() && !inside_list_item &&
-                      !parse_in(p, TAG_DD); i++) {
-        AppendParsedByte(p, ' ');
-        p->pen.x += ts->GetAdvance(' ');
+      if (!inside_list_item && !parse_in(p, TAG_DD)) {
+        int indent_spaces = 0;
+        using book_xml_css_style_utils::MarginTopResult;
+        if (text_indent_mtr.unit != MarginTopResult::Unit::None &&
+            !text_indent_mtr.negative) {
+          const int sa = ts->GetAdvance(' ');
+          if (sa > 0)
+            indent_spaces = text_indent_mtr.value / sa;
+        } else if (text_indent_mtr.unit == MarginTopResult::Unit::None) {
+          indent_spaces = p->book->GetParagraphIndent();
+        }
+        for (int i = 0; i < indent_spaces; i++) {
+          AppendParsedByte(p, ' ');
+          p->pen.x += ts->GetAdvance(' ');
+        }
       }
     } else {
       const char *phase = "top-skipped";
@@ -2521,6 +2584,8 @@ void start(void *data, const char *el, const char **attr) {
     p->style_no_underline_stack[current] = style_no_underline;
     p->style_reset_bold_stack[current] = style_reset_bold;
     p->style_reset_italic_stack[current] = style_reset_italic;
+    p->style_text_transform_stack[current] =
+        ParseElementTextTransform(attr, p->css_class_map);
 
     bool style_changed = false;
     if (style_bold && !style_reset_bold && !p->bold) {

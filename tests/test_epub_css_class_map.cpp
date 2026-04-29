@@ -249,6 +249,74 @@ void TestLookupResetFlagFunctions() {
                     epub_css_class_map::LookupResetBoldForClassAttr("unknown", map));
 }
 
+void TestParseCssIntoClassMapDetectsTextIndentAndTransform() {
+  using book_xml_css_style_utils::MarginTopResult;
+  using book_xml_css_style_utils::TextTransform;
+  const char *css =
+      ".indented { text-indent: 24px; }\n"
+      ".upper { text-transform: uppercase; }\n"
+      ".lower { text-transform: lowercase; }\n"
+      ".cap { text-transform: capitalize; }\n";
+
+  CssClassMap out;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
+
+  test::ExpectTrue("indented class parsed", out.count("indented") > 0);
+  test::ExpectEq("indented text_indent unit",
+                 (int)out["indented"].text_indent.unit,
+                 (int)MarginTopResult::Unit::Px);
+  test::ExpectEq("indented text_indent value", out["indented"].text_indent.value, 24);
+
+  test::ExpectTrue("upper class parsed", out.count("upper") > 0);
+  test::ExpectTrue("upper has_text_transform", out["upper"].has_text_transform);
+  test::ExpectEq("upper transform value",
+                 (int)out["upper"].text_transform,
+                 (int)TextTransform::Uppercase);
+
+  test::ExpectTrue("lower class parsed", out.count("lower") > 0);
+  test::ExpectEq("lower transform value",
+                 (int)out["lower"].text_transform,
+                 (int)TextTransform::Lowercase);
+
+  test::ExpectTrue("cap class parsed", out.count("cap") > 0);
+  test::ExpectEq("cap transform value",
+                 (int)out["cap"].text_transform,
+                 (int)TextTransform::Capitalize);
+}
+
+void TestLookupTextIndentAndTransformFunctions() {
+  using book_xml_css_style_utils::MarginTopResult;
+  using book_xml_css_style_utils::TextTransform;
+
+  CssClassMap map;
+  map["ind"].text_indent.unit = MarginTopResult::Unit::Px;
+  map["ind"].text_indent.value = 16;
+  map["up"].has_text_transform = true;
+  map["up"].text_transform = TextTransform::Uppercase;
+
+  const MarginTopResult ti =
+      epub_css_class_map::LookupTextIndentForClassAttr("ind", map);
+  test::ExpectEq("LookupTextIndent unit", (int)ti.unit,
+                 (int)MarginTopResult::Unit::Px);
+  test::ExpectEq("LookupTextIndent value", ti.value, 16);
+
+  const MarginTopResult ti_miss =
+      epub_css_class_map::LookupTextIndentForClassAttr("up", map);
+  test::ExpectEq("LookupTextIndent miss -> None", (int)ti_miss.unit,
+                 (int)MarginTopResult::Unit::None);
+
+  TextTransform tt = TextTransform::None;
+  const bool found =
+      epub_css_class_map::LookupTextTransformForClassAttr("up", map, &tt);
+  test::ExpectTrue("LookupTextTransform finds class", found);
+  test::ExpectEq("LookupTextTransform value", (int)tt, (int)TextTransform::Uppercase);
+
+  TextTransform tt2 = TextTransform::None;
+  const bool found2 =
+      epub_css_class_map::LookupTextTransformForClassAttr("ind", map, &tt2);
+  test::ExpectFalse("LookupTextTransform misses no-transform class", found2);
+}
+
 } // namespace
 
 int main() {
@@ -262,5 +330,7 @@ int main() {
   TestLookupSuperSubForClassAttr();
   TestParseCssIntoClassMapDetectsResetFlags();
   TestLookupResetFlagFunctions();
+  TestParseCssIntoClassMapDetectsTextIndentAndTransform();
+  TestLookupTextIndentAndTransformFunctions();
   return 0;
 }

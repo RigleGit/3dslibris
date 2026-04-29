@@ -178,13 +178,20 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     const bool no_underline = isf.no_underline;
     const bool reset_bold   = isf.reset_bold;
     const bool reset_italic = isf.reset_italic;
+    const MarginTopResult text_indent =
+        book_xml_css_style_utils::ParseTextIndent(b);
+    const TextTransform text_transform =
+        book_xml_css_style_utils::ParseTextTransform(b);
+    const bool has_text_transform = (text_transform != TextTransform::None);
 
     if (mt.unit != MarginTopResult::Unit::None ||
         mb.unit != MarginTopResult::Unit::None || has_font_size ||
         hide_list_markers ||
         has_text_align || is_superscript || is_subscript ||
         has_page_break_before || has_page_break_after ||
-        no_underline || reset_bold || reset_italic) {
+        no_underline || reset_bold || reset_italic ||
+        text_indent.unit != MarginTopResult::Unit::None ||
+        has_text_transform) {
       for (size_t i = 0; i < class_names.size(); i++) {
         CssClassMargins &entry = (*out)[class_names[i]];
         if (mt.unit != MarginTopResult::Unit::None)
@@ -213,6 +220,12 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
           entry.reset_bold = true;
         if (reset_italic)
           entry.reset_italic = true;
+        if (text_indent.unit != MarginTopResult::Unit::None)
+          entry.text_indent = text_indent;
+        if (has_text_transform) {
+          entry.has_text_transform = true;
+          entry.text_transform = text_transform;
+        }
       }
     }
   }
@@ -484,6 +497,55 @@ bool LookupResetBoldForClassAttr(const std::string &class_attr,
       return true;
   }
   return false;
+}
+
+MarginTopResult LookupTextIndentForClassAttr(const std::string &class_attr,
+                                             const CssClassMap &class_map) {
+  if (class_attr.empty() || class_map.empty())
+    return MarginTopResult{};
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() &&
+        it->second.text_indent.unit != MarginTopResult::Unit::None)
+      return it->second.text_indent;
+  }
+  return MarginTopResult{};
+}
+
+bool LookupTextTransformForClassAttr(const std::string &class_attr,
+                                     const CssClassMap &class_map,
+                                     TextTransform *out) {
+  if (!out || class_attr.empty() || class_map.empty())
+    return false;
+  bool found = false;
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() && it->second.has_text_transform) {
+      *out = it->second.text_transform;
+      found = true;
+    }
+  }
+  return found;
 }
 
 bool LookupResetItalicForClassAttr(const std::string &class_attr,

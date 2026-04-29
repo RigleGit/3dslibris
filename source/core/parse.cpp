@@ -142,6 +142,7 @@ void parse_init(parsedata_t *data) {
   data->strip_leading_list_marker = false;
   data->in_paragraph = false;
   data->paragraph_has_content = false;
+  data->text_transform_word_start = true;
   data->bold = false;
   data->italic = false;
   data->underline = false;
@@ -165,6 +166,7 @@ void parse_init(parsedata_t *data) {
     data->style_no_underline_stack[i] = false;
     data->style_reset_bold_stack[i] = false;
     data->style_reset_italic_stack[i] = false;
+    data->style_text_transform_stack[i] = 0;
     data->link_active_stack[i] = false;
     data->link_href_id_stack[i] = 0;
     data->block_text_align_stack[i] = false;
@@ -256,6 +258,7 @@ void parse_push(parsedata_t *data, context_t context) {
     data->style_no_underline_stack[data->stacksize] = false;
     data->style_reset_bold_stack[data->stacksize] = false;
     data->style_reset_italic_stack[data->stacksize] = false;
+    data->style_text_transform_stack[data->stacksize] = 0;
     data->link_active_stack[data->stacksize] = false;
     data->link_href_id_stack[data->stacksize] = 0;
     data->block_text_align_stack[data->stacksize] = false;
@@ -286,6 +289,7 @@ context_t parse_pop(parsedata_t *data) {
     data->style_no_underline_stack[data->stacksize] = false;
     data->style_reset_bold_stack[data->stacksize] = false;
     data->style_reset_italic_stack[data->stacksize] = false;
+    data->style_text_transform_stack[data->stacksize] = 0;
     data->link_active_stack[data->stacksize] = false;
     data->link_href_id_stack[data->stacksize] = 0;
     data->block_text_align_stack[data->stacksize] = false;
@@ -308,4 +312,14 @@ bool parse_in(parsedata_t *data, context_t context) {
       return true;
   }
   return false;
+}
+
+u8 parse_resolve_text_transform(const parsedata_t *data) {
+  if (!data)
+    return 0;
+  for (int i = (int)data->stacksize - 1; i >= 0; i--) {
+    if (data->style_text_transform_stack[i] != 0)
+      return data->style_text_transform_stack[i];
+  }
+  return 0;
 }

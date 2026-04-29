@@ -273,6 +273,49 @@ void TestResolveFontSizePxHandlesRelativeValues() {
                  book_xml_css_style_utils::ResolveFontSizePx(larger, 14), 17);
 }
 
+void TestParseTextIndent() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+
+  R px = book_xml_css_style_utils::ParseTextIndent("text-indent: 24px;");
+  test::ExpectEq("text-indent px -> Px unit", (int)px.unit, (int)R::Unit::Px);
+  test::ExpectEq("text-indent px value", px.value, 24);
+
+  R em = book_xml_css_style_utils::ParseTextIndent("text-indent: 2em;");
+  test::ExpectEq("text-indent em -> Px unit", (int)em.unit, (int)R::Unit::Px);
+  test::ExpectEq("text-indent 2em value (2*12)", em.value, 24);
+
+  R none = book_xml_css_style_utils::ParseTextIndent("color: red;");
+  test::ExpectEq("no text-indent -> None", (int)none.unit, (int)R::Unit::None);
+
+  R neg = book_xml_css_style_utils::ParseTextIndent("text-indent: -8px;");
+  test::ExpectEq("negative text-indent -> Px", (int)neg.unit, (int)R::Unit::Px);
+  test::ExpectTrue("negative text-indent is negative", neg.negative);
+}
+
+void TestParseTextTransform() {
+  using TT = book_xml_css_style_utils::TextTransform;
+
+  test::ExpectEq("uppercase",
+                 (int)book_xml_css_style_utils::ParseTextTransform(
+                     "text-transform: uppercase;"),
+                 (int)TT::Uppercase);
+  test::ExpectEq("lowercase",
+                 (int)book_xml_css_style_utils::ParseTextTransform(
+                     "text-transform: lowercase;"),
+                 (int)TT::Lowercase);
+  test::ExpectEq("capitalize",
+                 (int)book_xml_css_style_utils::ParseTextTransform(
+                     "text-transform: capitalize;"),
+                 (int)TT::Capitalize);
+  test::ExpectEq("none keyword",
+                 (int)book_xml_css_style_utils::ParseTextTransform(
+                     "text-transform: none;"),
+                 (int)TT::None);
+  test::ExpectEq("missing property",
+                 (int)book_xml_css_style_utils::ParseTextTransform("color: red;"),
+                 (int)TT::None);
+}
+
 } // namespace
 
 int main() {
@@ -296,5 +339,7 @@ int main() {
   TestTryParseFontSizeAbsoluteKeywords();
   TestResolveFontSizePxHandlesRelativeValues();
   TestParseInlineFlagsResets();
+  TestParseTextIndent();
+  TestParseTextTransform();
   return 0;
 }

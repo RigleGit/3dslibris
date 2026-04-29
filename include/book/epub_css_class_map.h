@@ -10,6 +10,7 @@ namespace epub_css_class_map {
 using book_xml_css_style_utils::MarginTopResult;
 using book_xml_css_style_utils::TextAlign;
 using book_xml_css_style_utils::FontSizeSpec;
+using book_xml_css_style_utils::TextTransform;
 
 struct CssClassMargins {
   MarginTopResult margin_top;
@@ -25,12 +26,16 @@ struct CssClassMargins {
   bool no_underline;   // text-decoration: none
   bool reset_bold;     // font-weight: normal/lighter/100-500
   bool reset_italic;   // font-style: normal
+  MarginTopResult text_indent;
+  bool has_text_transform;
+  TextTransform text_transform;
 
   CssClassMargins()
       : hide_list_markers(false), has_text_align(false),
         text_align(TextAlign::Left), superscript(false), subscript(false),
         page_break_before(false), page_break_after(false),
-        no_underline(false), reset_bold(false), reset_italic(false) {}
+        no_underline(false), reset_bold(false), reset_italic(false),
+        has_text_transform(false), text_transform(TextTransform::None) {}
 };
 
 // Map: bare class name (no '.') → extracted margins.
@@ -79,5 +84,14 @@ bool LookupResetBoldForClassAttr(const std::string &class_attr,
 
 bool LookupResetItalicForClassAttr(const std::string &class_attr,
                                    const CssClassMap &class_map);
+
+// Returns Unit::None if no matching class has text-indent.
+MarginTopResult LookupTextIndentForClassAttr(const std::string &class_attr,
+                                             const CssClassMap &class_map);
+
+// Returns false if no matching class specifies text-transform.
+bool LookupTextTransformForClassAttr(const std::string &class_attr,
+                                     const CssClassMap &class_map,
+                                     TextTransform *out);
 
 } // namespace epub_css_class_map

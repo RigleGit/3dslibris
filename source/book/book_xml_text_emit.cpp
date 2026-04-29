@@ -2,6 +2,7 @@
 
 #include "debug_log.h"
 #include "shared/text_token_constants.h"
+#include "utf8proc.h"
 
 #include <algorithm>
 
@@ -41,7 +42,23 @@ bool ParsedBufferEndsWithWhitespace(const parsedata_t *p) {
   return c == ' ' || c == '\n' || c == '\t';
 }
 
+static uint32_t ApplyTextTransform(uint32_t cp, u8 transform,
+                                   bool *word_start) {
+  if (transform == 1) {
+    return (uint32_t)utf8proc_toupper((utf8proc_int32_t)cp);
+  } else if (transform == 2) {
+    return (uint32_t)utf8proc_tolower((utf8proc_int32_t)cp);
+  } else if (transform == 3 && word_start) {
+    const bool was_start = *word_start;
+    *word_start = (cp == ' ' || cp == '\t' || cp == '\n');
+    if (was_start)
+      return (uint32_t)utf8proc_toupper((utf8proc_int32_t)cp);
+  }
+  return cp;
+}
+
 void AppendParsedCodepoints(parsedata_t *p, const char *utf8, size_t utf8_len) {
+  const u8 transform = parse_resolve_text_transform(p);
   size_t offset = 0;
   while (offset < utf8_len) {
     uint32_t cp = 0;
@@ -51,6 +68,8 @@ void AppendParsedCodepoints(parsedata_t *p, const char *utf8, size_t utf8_len) {
       offset++;
       continue;
     }
+    if (transform)
+      cp = ApplyTextTransform(cp, transform, &p->text_transform_word_start);
     parse_append_page_byte(p, (u32)cp);
     offset += consumed;
   }
@@ -86,8 +105,13 @@ void EmitBidiSegment(parsedata_t *p,
   }
 
   text_bidi_utils::ReorderLineForDisplay(cps, 0, cps.size(), local_runs);
-  for (size_t i = 0; i < cps.size(); i++)
-    parse_append_page_byte(p, (u32)cps[i]);
+  const u8 transform = parse_resolve_text_transform(p);
+  for (size_t i = 0; i < cps.size(); i++) {
+    uint32_t cp = cps[i];
+    if (transform)
+      cp = ApplyTextTransform(cp, transform, &p->text_transform_word_start);
+    parse_append_page_byte(p, (u32)cp);
+  }
 }
 
 bool DetectParagraphRTL(

@@ -57,4 +57,10 @@ bool TryParseTextAlign(const char *style, TextAlign *out);
 bool HasPageBreakBefore(const char *style);
 bool HasPageBreakAfter(const char *style);
 
+// Returns the text-indent length, or Unit::None if not specified.
+MarginTopResult ParseTextIndent(const char *style);
+
+enum class TextTransform { None, Uppercase, Lowercase, Capitalize };
+TextTransform ParseTextTransform(const char *style);
+
 } // namespace book_xml_css_style_utils

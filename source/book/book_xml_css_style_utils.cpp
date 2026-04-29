@@ -491,6 +491,35 @@ bool CheckCssBreakProperty(const std::string &lc, const char *prop,
 
 } // anonymous namespace (page-break helpers)
 
+MarginTopResult ParseTextIndent(const char *style) {
+  if (!style || !style[0])
+    return MarginTopResult{};
+  const std::string lc = ToLowerAscii(std::string(style));
+  const std::string key = "text-indent:";
+  size_t pos = lc.find(key);
+  if (pos == std::string::npos)
+    return MarginTopResult{};
+  pos += key.size();
+  return ParseOneLengthToken(lc, &pos);
+}
+
+TextTransform ParseTextTransform(const char *style) {
+  if (!style || !style[0])
+    return TextTransform::None;
+  const std::string lc = ToLowerAscii(std::string(style));
+  const std::string key = "text-transform:";
+  size_t pos = lc.find(key);
+  if (pos == std::string::npos)
+    return TextTransform::None;
+  pos += key.size();
+  while (pos < lc.size() && lc[pos] == ' ')
+    pos++;
+  if (lc.compare(pos, 9, "uppercase") == 0) return TextTransform::Uppercase;
+  if (lc.compare(pos, 9, "lowercase") == 0) return TextTransform::Lowercase;
+  if (lc.compare(pos, 10, "capitalize") == 0) return TextTransform::Capitalize;
+  return TextTransform::None;
+}
+
 bool HasPageBreakBefore(const char *style) {
   if (!style || !style[0])
     return false;

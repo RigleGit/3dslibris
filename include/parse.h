@@ -104,6 +104,8 @@ struct parsedata_t {
 	bool style_no_underline_stack[32];
 	bool style_reset_bold_stack[32];
 	bool style_reset_italic_stack[32];
+	u8 style_text_transform_stack[32];
+	bool text_transform_word_start;
 	bool link_active_stack[32];
 	u16 link_href_id_stack[32];
 	bool block_text_align_stack[32];
@@ -176,6 +178,7 @@ bool iswhitespace(u32 c);
 
 void parse_error(XML_ParserStruct *ps);
 void parse_init(parsedata_t *data);
+u8 parse_resolve_text_transform(const parsedata_t *data);
 bool parse_append_page_byte(parsedata_t *data, u32 c);
 bool parse_append_page_byte_soft(parsedata_t *data, u32 c,
                                  parse_page_flush_fn flush_page, void *ctx);
