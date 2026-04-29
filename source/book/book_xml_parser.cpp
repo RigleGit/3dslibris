@@ -3310,7 +3310,8 @@ void end(void *data, const char *el) {
     FlushInlineTailAndDeferredStyle(p, ts);
     if (!strcmp(el, "li"))
       p->strip_leading_list_marker = false;
-    linefeed(p);
+    if (p->linebegan)
+      linefeed(p);
   }
 
   bool restore_block_text_align = false;
