@@ -2084,6 +2084,13 @@ void start(void *data, const char *el, const char **attr) {
       else if (AttrNameEquals(attr[i], "class"))
         el_class = attr[i + 1];
     }
+    if ((book_xml_css_style_utils::HasPageBreakInsideAvoid(el_style) ||
+         epub_css_class_map::LookupPageBreakInsideAvoidForClassAttr(
+             el_class ? std::string(el_class) : std::string(),
+             p->css_class_map)) &&
+        p->buflen > 0 && !blankline(p)) {
+      ForcePageBreak(p);
+    }
     if (book_xml_css_style_utils::HasPageBreakBefore(el_style) ||
         epub_css_class_map::LookupPageBreakBeforeForClassAttr(
             el_class ? std::string(el_class) : std::string(),

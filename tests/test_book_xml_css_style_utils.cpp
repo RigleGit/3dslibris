@@ -434,6 +434,18 @@ void TestParseTextTransform() {
                  (int)TT::None);
 }
 
+void TestParsePageBreakInsideAvoid() {
+  test::ExpectTrue("page-break-inside avoid parsed",
+                   book_xml_css_style_utils::HasPageBreakInsideAvoid(
+                       "page-break-inside: avoid;"));
+  test::ExpectTrue("break-inside avoid parsed",
+                   book_xml_css_style_utils::HasPageBreakInsideAvoid(
+                       "break-inside: avoid;"));
+  test::ExpectFalse("auto not parsed as avoid",
+                    book_xml_css_style_utils::HasPageBreakInsideAvoid(
+                        "page-break-inside: auto;"));
+}
+
 } // namespace
 
 int main() {
@@ -470,5 +482,6 @@ int main() {
   TestParseWhiteSpaceModes();
   TestNormalizeWhiteSpaceText();
   TestParseTextTransform();
+  TestParsePageBreakInsideAvoid();
   return 0;
 }

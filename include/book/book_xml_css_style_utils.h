@@ -68,6 +68,7 @@ std::string NormalizeWhiteSpaceText(const char *utf8, size_t len,
 
 bool HasPageBreakBefore(const char *style);
 bool HasPageBreakAfter(const char *style);
+bool HasPageBreakInsideAvoid(const char *style);
 
 // Returns the text-indent length, or Unit::None if not specified.
 MarginTopResult ParseTextIndent(const char *style);

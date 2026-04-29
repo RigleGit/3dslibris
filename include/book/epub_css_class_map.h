@@ -28,6 +28,7 @@ struct CssClassMargins {
   bool subscript;
   bool page_break_before;
   bool page_break_after;
+  bool page_break_inside_avoid;
   bool no_underline;   // text-decoration: none
   bool reset_bold;     // font-weight: normal/lighter/100-500
   bool reset_italic;   // font-style: normal
@@ -40,6 +41,7 @@ struct CssClassMargins {
         text_align(TextAlign::Left), has_white_space(false),
         white_space(WhiteSpaceMode::Normal), superscript(false), subscript(false),
         page_break_before(false), page_break_after(false),
+        page_break_inside_avoid(false),
         no_underline(false), reset_bold(false), reset_italic(false),
         has_text_transform(false), text_transform(TextTransform::None) {}
 };
@@ -87,6 +89,8 @@ bool LookupPageBreakBeforeForClassAttr(const std::string &class_attr,
 
 bool LookupPageBreakAfterForClassAttr(const std::string &class_attr,
                                       const CssClassMap &class_map);
+bool LookupPageBreakInsideAvoidForClassAttr(const std::string &class_attr,
+                                            const CssClassMap &class_map);
 
 bool LookupNoUnderlineForClassAttr(const std::string &class_attr,
                                    const CssClassMap &class_map);

@@ -693,4 +693,44 @@ bool HasPageBreakAfter(const char *style) {
          CheckCssBreakProperty(lc, "break-after", true);
 }
 
+bool HasPageBreakInsideAvoid(const char *style) {
+  if (!style || !style[0])
+    return false;
+  const std::string lc = ToLowerAscii(std::string(style));
+  size_t pos = 0;
+  while (true) {
+    pos = lc.find("page-break-inside", pos);
+    if (pos == std::string::npos)
+      break;
+    if (pos == 0 || lc[pos - 1] != '-') {
+      size_t colon = lc.find(':', pos + 17);
+      if (colon != std::string::npos) {
+        size_t v = colon + 1;
+        while (v < lc.size() && lc[v] == ' ')
+          v++;
+        if (lc.compare(v, 5, "avoid") == 0)
+          return true;
+      }
+    }
+    pos++;
+  }
+  pos = 0;
+  while (true) {
+    pos = lc.find("break-inside", pos);
+    if (pos == std::string::npos)
+      return false;
+    if (pos == 0 || lc[pos - 1] != '-') {
+      size_t colon = lc.find(':', pos + 12);
+      if (colon != std::string::npos) {
+        size_t v = colon + 1;
+        while (v < lc.size() && lc[v] == ' ')
+          v++;
+        if (lc.compare(v, 5, "avoid") == 0)
+          return true;
+      }
+    }
+    pos++;
+  }
+}
+
 } // namespace book_xml_css_style_utils

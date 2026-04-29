@@ -148,6 +148,55 @@ void TestParseCssIntoClassMapDetectsTextAlignStartEnd() {
                  (int)book_xml_css_style_utils::TextAlign::Right);
 }
 
+void TestParseCssIntoClassMapDetectsWhiteSpaceModes() {
+  const char *css =
+      ".pre { white-space: pre; }\n"
+      ".nowrap { white-space: nowrap; }\n"
+      ".pre-wrap { white-space: pre-wrap; }\n"
+      ".pre-line { white-space: pre-line; }\n";
+
+  CssClassMap out;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
+
+  test::ExpectTrue("pre parsed", out.find("pre") != out.end());
+  test::ExpectTrue("nowrap parsed", out.find("nowrap") != out.end());
+  test::ExpectTrue("pre-wrap parsed", out.find("pre-wrap") != out.end());
+  test::ExpectTrue("pre-line parsed", out.find("pre-line") != out.end());
+
+  test::ExpectTrue("pre has white-space", out["pre"].has_white_space);
+  test::ExpectTrue("nowrap has white-space", out["nowrap"].has_white_space);
+  test::ExpectTrue("pre-wrap has white-space", out["pre-wrap"].has_white_space);
+  test::ExpectTrue("pre-line has white-space", out["pre-line"].has_white_space);
+
+  test::ExpectEq("pre white-space value", (int)out["pre"].white_space,
+                 (int)book_xml_css_style_utils::WhiteSpaceMode::Pre);
+  test::ExpectEq("nowrap white-space value", (int)out["nowrap"].white_space,
+                 (int)book_xml_css_style_utils::WhiteSpaceMode::Nowrap);
+  test::ExpectEq("pre-wrap white-space value",
+                 (int)out["pre-wrap"].white_space,
+                 (int)book_xml_css_style_utils::WhiteSpaceMode::PreWrap);
+  test::ExpectEq("pre-line white-space value",
+                 (int)out["pre-line"].white_space,
+                 (int)book_xml_css_style_utils::WhiteSpaceMode::PreLine);
+}
+
+void TestParseCssIntoClassMapDetectsPageBreakInsideAvoid() {
+  const char *css =
+      ".keep { page-break-inside: avoid; }\n";
+
+  CssClassMap out;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
+
+  test::ExpectTrue("keep parsed", out.find("keep") != out.end());
+  test::ExpectTrue("keep has avoid", out["keep"].page_break_inside_avoid);
+
+  CssClassMap map;
+  map["keep"].page_break_inside_avoid = true;
+  test::ExpectTrue("lookup page-break-inside avoid",
+                   epub_css_class_map::LookupPageBreakInsideAvoidForClassAttr(
+                       "keep", map));
+}
+
 void TestLookupFontSizeForClassAttrUsesLastKnownMatch() {
   CssClassMap map;
   map["small"].font_size.unit =
@@ -411,6 +460,8 @@ int main() {
   TestParseCssIntoClassMapDetectsListStyleNone();
   TestLookupTextAlignForClassAttrUsesLastKnownMatch();
   TestParseCssIntoClassMapDetectsTextAlignStartEnd();
+  TestParseCssIntoClassMapDetectsWhiteSpaceModes();
+  TestParseCssIntoClassMapDetectsPageBreakInsideAvoid();
   TestLookupFontSizeForClassAttrUsesLastKnownMatch();
   TestParseCssIntoClassMapDetectsSuperSubScript();
   TestLookupSuperSubForClassAttr();

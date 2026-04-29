@@ -180,6 +180,8 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         book_xml_css_style_utils::HasPageBreakBefore(b);
     const bool has_page_break_after =
         book_xml_css_style_utils::HasPageBreakAfter(b);
+    const bool has_page_break_inside_avoid =
+        book_xml_css_style_utils::HasPageBreakInsideAvoid(b);
     book_xml_css_style_utils::InlineStyleFlags isf{};
     book_xml_css_style_utils::ParseInlineStyleFlags(b, &isf);
     const bool no_underline = isf.no_underline;
@@ -200,6 +202,7 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         has_text_align || has_white_space ||
         is_superscript || is_subscript ||
         has_page_break_before || has_page_break_after ||
+        has_page_break_inside_avoid ||
         no_underline || reset_bold || reset_italic ||
         text_indent.unit != MarginTopResult::Unit::None ||
         has_text_transform) {
@@ -233,6 +236,8 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
           entry.page_break_before = true;
         if (has_page_break_after)
           entry.page_break_after = true;
+        if (has_page_break_inside_avoid)
+          entry.page_break_inside_avoid = true;
         if (no_underline)
           entry.no_underline = true;
         if (reset_bold)
@@ -473,6 +478,32 @@ bool LookupPageBreakAfterForClassAttr(const std::string &class_attr,
     const std::string class_name = class_attr.substr(start, pos - start);
     CssClassMap::const_iterator it = class_map.find(class_name);
     if (it != class_map.end() && it->second.page_break_after)
+      return true;
+  }
+  return false;
+}
+
+bool LookupPageBreakInsideAvoidForClassAttr(const std::string &class_attr,
+                                            const CssClassMap &class_map) {
+  if (class_attr.empty() || class_map.empty())
+    return false;
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) {
+      if (pos < class_attr.size())
+        ++pos;
+      continue;
+    }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() && it->second.page_break_inside_avoid)
       return true;
   }
   return false;
