@@ -2,6 +2,9 @@
 
 #include "shared/text_token_constants.h"
 
+#include <cstddef>
+#include <string>
+
 namespace book_xml_css_style_utils {
 
 struct MarginTopResult {
@@ -55,6 +58,13 @@ enum class TextAlign { Left, Center, Right, Justify };
 
 TextAlign ParseTextAlign(const char *style);
 bool TryParseTextAlign(const char *style, TextAlign *out);
+
+enum class WhiteSpaceMode { Normal, Nowrap, Pre, PreWrap, PreLine };
+
+WhiteSpaceMode ParseWhiteSpace(const char *style);
+bool TryParseWhiteSpace(const char *style, WhiteSpaceMode *out);
+std::string NormalizeWhiteSpaceText(const char *utf8, size_t len,
+                                    WhiteSpaceMode mode);
 
 bool HasPageBreakBefore(const char *style);
 bool HasPageBreakAfter(const char *style);

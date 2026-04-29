@@ -366,6 +366,50 @@ void TestParseTextAlignStartEnd() {
   test::ExpectEq("end maps to Right", (int)end, (int)TA::Right);
 }
 
+void TestParseWhiteSpaceModes() {
+  using WS = book_xml_css_style_utils::WhiteSpaceMode;
+
+  WS pre = WS::Normal;
+  test::ExpectTrue("pre parsed",
+                   book_xml_css_style_utils::TryParseWhiteSpace(
+                       "white-space: pre;", &pre));
+  test::ExpectEq("pre mode", (int)pre, (int)WS::Pre);
+
+  WS nowrap = WS::Normal;
+  test::ExpectTrue("nowrap parsed",
+                   book_xml_css_style_utils::TryParseWhiteSpace(
+                       "white-space: nowrap;", &nowrap));
+  test::ExpectEq("nowrap mode", (int)nowrap, (int)WS::Nowrap);
+
+  WS pre_wrap = WS::Normal;
+  test::ExpectTrue("pre-wrap parsed",
+                   book_xml_css_style_utils::TryParseWhiteSpace(
+                       "white-space: pre-wrap;", &pre_wrap));
+  test::ExpectEq("pre-wrap mode", (int)pre_wrap, (int)WS::PreWrap);
+
+  WS pre_line = WS::Normal;
+  test::ExpectTrue("pre-line parsed",
+                   book_xml_css_style_utils::TryParseWhiteSpace(
+                       "white-space: pre-line;", &pre_line));
+  test::ExpectEq("pre-line mode", (int)pre_line, (int)WS::PreLine);
+}
+
+void TestNormalizeWhiteSpaceText() {
+  using WS = book_xml_css_style_utils::WhiteSpaceMode;
+
+  std::string nowrap =
+      book_xml_css_style_utils::NormalizeWhiteSpaceText(
+          " Alpha\t beta \n gamma  ", 22, WS::Nowrap);
+  test::ExpectTrue("nowrap collapses whitespace",
+                   nowrap == " Alpha beta gamma ");
+
+  std::string pre_line =
+      book_xml_css_style_utils::NormalizeWhiteSpaceText(
+          " Alpha\t beta \n gamma \n\n delta ", 31, WS::PreLine);
+  test::ExpectTrue("pre-line preserves newlines and collapses spaces",
+                   pre_line == " Alpha beta\ngamma\n\ndelta");
+}
+
 void TestParseTextTransform() {
   using TT = book_xml_css_style_utils::TextTransform;
 
@@ -423,6 +467,8 @@ int main() {
   TestParseInlineFlagsResets();
   TestParseTextIndent();
   TestParseTextAlignStartEnd();
+  TestParseWhiteSpaceModes();
+  TestNormalizeWhiteSpaceText();
   TestParseTextTransform();
   return 0;
 }

@@ -598,6 +598,43 @@ ParseElementTextTransform(const char **attr,
   return result;
 }
 
+static u8 ParseElementWhiteSpace(
+    const char **attr, const epub_css_class_map::CssClassMap &class_map) {
+  using book_xml_css_style_utils::WhiteSpaceMode;
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        WhiteSpaceMode mode = WhiteSpaceMode::Normal;
+        if (book_xml_css_style_utils::TryParseWhiteSpace(attr[i + 1], &mode))
+          return (u8)mode + 1;
+      } else if (AttrNameEquals(attr[i], "class")) {
+        WhiteSpaceMode mode = WhiteSpaceMode::Normal;
+        if (epub_css_class_map::LookupWhiteSpaceForClassAttr(
+                std::string(attr[i + 1]), class_map, &mode)) {
+          return (u8)mode + 1;
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+static book_xml_css_style_utils::WhiteSpaceMode
+ResolveActiveWhiteSpace(const parsedata_t *p) {
+  using book_xml_css_style_utils::WhiteSpaceMode;
+  if (!p)
+    return WhiteSpaceMode::Normal;
+  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+    if (p->style_white_space_stack[i] != 0)
+      return (WhiteSpaceMode)(p->style_white_space_stack[i] - 1);
+  }
+  if (parse_in((parsedata_t *)p, TAG_PRE))
+    return WhiteSpaceMode::PreWrap;
+  return WhiteSpaceMode::Normal;
+}
+
 static book_xml_css_style_utils::MarginTopResult
 ParseElementMarginTopWithClass(const char **attr, const parsedata_t *p) {
   const book_xml_css_style_utils::MarginTopResult from_style =
@@ -1166,6 +1203,161 @@ struct ChardataPerfScope {
 };
 #endif
 
+static void EmitFlowedUtf8Segment(
+    parsedata_t *p, const char *txt, size_t txtlen,
+    const ParsedTextMeasureContext &measure_ctx,
+    const book_xml_text_emit::FlowEmitMetrics &emit_metrics) {
+  if (!p || !txt || txtlen == 0)
+    return;
+
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  bool has_rtl = false;
+  if (!text_layout_utils::ShapeTextRunBidi(
+          txt, txtlen, NULL, MeasureParsedTextAdvance, (void *)&measure_ctx,
+          &run, &has_rtl))
+    return;
+
+  std::vector<text_bidi_utils::BidiRun> bidi_runs;
+  if (has_rtl) {
+    std::vector<uint32_t> run_cps;
+    run_cps.reserve(run.size());
+    for (size_t ci = 0; ci < run.size(); ci++)
+      run_cps.push_back(run[ci].text.codepoint);
+    text_bidi_utils::AnalyzeBidiRuns(run_cps.data(), run_cps.size(),
+                                     &bidi_runs);
+  }
+  book_xml_text_emit::EmitFlowedShapedText(
+      p, txt, run, has_rtl, bidi_runs, emit_metrics,
+      AdvanceParsedPageOnOverflowThunk, NULL);
+}
+
+static void EmitPreformattedUtf8Segment(
+    parsedata_t *p, const char *txt, size_t txtlen,
+    const ParsedTextMeasureContext &measure_ctx, int lineheight,
+    int linespacing, bool allow_wrap) {
+  if (!p || !txt || txtlen == 0)
+    return;
+
+  Text *ts = p->ts;
+  if (!allow_wrap) {
+    size_t offset = 0;
+    while (offset < txtlen) {
+      uint32_t cp = 0;
+      const size_t step = text_unicode_utils::DecodeNextDisplayCodepoint(
+          txt + offset, txtlen - offset, &cp);
+      if (step == 0) {
+        offset++;
+        continue;
+      }
+      if (cp == '\r') {
+        offset += step;
+        continue;
+      }
+      if (cp == '\n') {
+        AppendParsedByte(p, '\n');
+        p->pen.x = ts->margin.left;
+        p->pen.y += (lineheight + linespacing);
+        p->linebegan = false;
+        AdvanceParsedPageOnOverflow(p, lineheight);
+        offset += step;
+        continue;
+      }
+
+      AdvanceParsedPageOnOverflow(p, lineheight);
+      book_xml_text_emit::AppendParsedCodepoints(p, txt + offset, step);
+      p->pen.x += ts->GetAdvance(cp, measure_ctx.style);
+      p->linebegan = true;
+      offset += step;
+    }
+    return;
+  }
+
+  std::vector<text_layout_utils::ShapedGlyph> pre_run;
+  bool pre_has_rtl = false;
+  if (!text_layout_utils::ShapeTextRunBidi(
+          txt, txtlen, NULL, MeasureParsedTextAdvance, (void *)&measure_ctx,
+          &pre_run, &pre_has_rtl)) {
+    return;
+  }
+
+  std::vector<text_bidi_utils::BidiRun> pre_bidi_runs;
+  if (pre_has_rtl) {
+    std::vector<uint32_t> pre_cps;
+    pre_cps.reserve(pre_run.size());
+    for (size_t ci = 0; ci < pre_run.size(); ci++)
+      pre_cps.push_back(pre_run[ci].text.codepoint);
+    text_bidi_utils::AnalyzeBidiRuns(pre_cps.data(), pre_cps.size(),
+                                     &pre_bidi_runs);
+    if (book_xml_text_emit::DetectParagraphRTL(pre_run))
+      AppendParsedByte(p, TEXT_PARAGRAPH_RTL);
+    else
+      AppendParsedByte(p, TEXT_PARAGRAPH_LTR);
+  }
+
+  const int max_pre_line_width =
+      ts->display.width - ts->margin.right - ts->margin.left;
+  size_t unit_index = 0;
+  while (unit_index < pre_run.size()) {
+    const text_layout_utils::ShapedGlyph &unit = pre_run[unit_index];
+    if (unit.text.codepoint == '\r') {
+      unit_index++;
+      continue;
+    }
+    if (unit.text.codepoint == '\n') {
+      AppendParsedByte(p, '\n');
+      p->pen.x = ts->margin.left;
+      p->pen.y += (lineheight + linespacing);
+      p->linebegan = false;
+      AdvanceParsedPageOnOverflow(p, lineheight);
+      unit_index++;
+      continue;
+    }
+
+    text_layout_utils::LineBreakMeasureResult segment =
+        text_layout_utils::FindPreformattedLineBreakAndMeasure(
+            pre_run, unit_index, max_pre_line_width);
+    size_t segment_end_index = segment.end_index;
+    if (segment_end_index <= unit_index)
+      segment_end_index = unit_index + 1;
+
+    size_t segment_start = pre_run[unit_index].text.byte_offset;
+    size_t segment_end =
+        pre_run[segment_end_index - 1].text.byte_offset +
+        pre_run[segment_end_index - 1].text.byte_length;
+    const int advance = segment.width;
+
+    if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
+      AppendParsedByte(p, '\n');
+      p->pen.x = ts->margin.left;
+      p->pen.y += (lineheight + linespacing);
+      p->linebegan = false;
+      AdvanceParsedPageOnOverflow(p, lineheight);
+    }
+
+    if (pre_has_rtl) {
+      AppendParsedByte(p, TEXT_RTL_LINE_PX);
+      AppendParsedByte(p, (u32)advance);
+      book_xml_text_emit::EmitBidiSegment(p, pre_run, unit_index,
+                                          segment_end_index, pre_bidi_runs);
+    } else {
+      book_xml_text_emit::AppendParsedCodepoints(
+          p, txt + segment_start, segment_end - segment_start);
+    }
+    p->pen.x += advance;
+    p->linebegan = true;
+    unit_index = segment_end_index;
+
+    if (unit_index < pre_run.size() &&
+        pre_run[unit_index].text.codepoint != '\n') {
+      AppendParsedByte(p, '\n');
+      p->pen.x = ts->margin.left;
+      p->pen.y += (lineheight + linespacing);
+      p->linebegan = false;
+      AdvanceParsedPageOnOverflow(p, lineheight);
+    }
+  }
+}
+
 static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
                                   int txtlen) {
   if (!p || !txt || txtlen <= 0)
@@ -1189,170 +1381,8 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
     p->linebegan = false;
   }
 
-  if (parse_in(p, TAG_PRE)) {
-    if (!p->preformatted_wrap_enabled) {
-      int i = 0;
-      while (i < txtlen) {
-        if (txt[i] == '\r') {
-          i++;
-          continue;
-        }
-
-        if (iswhitespace((u32)(u8)txt[i])) {
-          if (txt[i] == '\n') {
-            AppendParsedByte(p, '\n');
-            p->pen.x = ts->margin.left;
-            p->pen.y += (lineheight + linespacing);
-            p->linebegan = false;
-            AdvanceParsedPageOnOverflow(p, lineheight);
-          } else if (p->linebegan && p->buflen &&
-                     !iswhitespace(p->buf[p->buflen - 1])) {
-            AppendParsedByte(p, ' ');
-            p->pen.x += spaceadvance;
-          }
-          i++;
-          continue;
-        }
-
-        int j = i;
-        int advance = 0;
-        u8 bytes = 1;
-        for (j = i; (j < txtlen) && (!iswhitespace((u32)(u8)txt[j])); j += bytes) {
-          u32 code = (u8)txt[j];
-          bytes = 1;
-          if (code >> 7)
-            bytes =
-                ts->GetCharCode((char *)&(txt[j]), (size_t)(txtlen - j), &code);
-
-          advance += ts->GetAdvance(code, parse_text_style);
-          if (advance >
-              ts->display.width - ts->margin.right - ts->margin.left) {
-            break;
-          }
-        }
-
-        if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
-          AppendParsedByte(p, '\n');
-          p->pen.x = ts->margin.left;
-          p->pen.y += (lineheight + linespacing);
-          p->linebegan = false;
-        }
-
-        AdvanceParsedPageOnOverflow(p, lineheight);
-
-        book_xml_text_emit::AppendParsedCodepoints(p, txt + i,
-                                                   (size_t)(j - i));
-        p->linebegan = true;
-        i = j;
-        p->pen.x += advance;
-      }
-      return;
-    }
-
-    std::vector<text_layout_utils::ShapedGlyph> pre_run;
-    bool pre_has_rtl = false;
-    if (!text_layout_utils::ShapeTextRunBidi(
-            txt, (size_t)txtlen, NULL, MeasureParsedTextAdvance,
-            (void *)&measure_ctx, &pre_run, &pre_has_rtl)) {
-      return;
-    }
-
-    std::vector<text_bidi_utils::BidiRun> pre_bidi_runs;
-    if (pre_has_rtl) {
-      std::vector<uint32_t> pre_cps;
-      pre_cps.reserve(pre_run.size());
-      for (size_t ci = 0; ci < pre_run.size(); ci++)
-        pre_cps.push_back(pre_run[ci].text.codepoint);
-      text_bidi_utils::AnalyzeBidiRuns(pre_cps.data(), pre_cps.size(),
-                                       &pre_bidi_runs);
-      if (book_xml_text_emit::DetectParagraphRTL(pre_run))
-        AppendParsedByte(p, TEXT_PARAGRAPH_RTL);
-      else
-        AppendParsedByte(p, TEXT_PARAGRAPH_LTR);
-    }
-
-    const int maxPreLineWidth =
-        ts->display.width - ts->margin.right - ts->margin.left;
-    size_t unit_index = 0;
-    while (unit_index < pre_run.size()) {
-      const text_layout_utils::ShapedGlyph &unit = pre_run[unit_index];
-      if (unit.text.codepoint == '\r') {
-        unit_index++;
-        continue;
-      }
-
-      if (unit.text.codepoint == '\n') {
-        AppendParsedByte(p, '\n');
-        p->pen.x = ts->margin.left;
-        p->pen.y += (lineheight + linespacing);
-        p->linebegan = false;
-        AdvanceParsedPageOnOverflow(p, lineheight);
-        unit_index++;
-        continue;
-      }
-
-      text_layout_utils::LineBreakMeasureResult segment =
-          text_layout_utils::FindPreformattedLineBreakAndMeasure(
-              pre_run, unit_index, maxPreLineWidth);
-      size_t segment_end_index = segment.end_index;
-      if (segment_end_index <= unit_index)
-        segment_end_index = unit_index + 1;
-
-      size_t segment_start = pre_run[unit_index].text.byte_offset;
-      size_t segment_end =
-          pre_run[segment_end_index - 1].text.byte_offset +
-          pre_run[segment_end_index - 1].text.byte_length;
-      const int advance = segment.width;
-
-      if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
-        AppendParsedByte(p, '\n');
-        p->pen.x = ts->margin.left;
-        p->pen.y += (lineheight + linespacing);
-        p->linebegan = false;
-        AdvanceParsedPageOnOverflow(p, lineheight);
-      }
-
-      if (pre_has_rtl) {
-        AppendParsedByte(p, TEXT_RTL_LINE_PX);
-        AppendParsedByte(p, (u32)advance);
-        book_xml_text_emit::EmitBidiSegment(p, pre_run, unit_index,
-                                            segment_end_index, pre_bidi_runs);
-      } else {
-        book_xml_text_emit::AppendParsedCodepoints(
-            p, txt + segment_start, segment_end - segment_start);
-      }
-      p->pen.x += advance;
-      p->linebegan = true;
-      unit_index = segment_end_index;
-
-      if (unit_index < pre_run.size() &&
-          pre_run[unit_index].text.codepoint != '\n') {
-        AppendParsedByte(p, '\n');
-        p->pen.x = ts->margin.left;
-        p->pen.y += (lineheight + linespacing);
-        p->linebegan = false;
-        AdvanceParsedPageOnOverflow(p, lineheight);
-      }
-    }
-    return;
-  }
-
-  std::vector<text_layout_utils::ShapedGlyph> run;
-  bool has_rtl = false;
-  if (!text_layout_utils::ShapeTextRunBidi(
-          txt, (size_t)txtlen, NULL, MeasureParsedTextAdvance,
-          (void *)&measure_ctx, &run, &has_rtl))
-    return;
-
-  std::vector<text_bidi_utils::BidiRun> bidi_runs;
-  if (has_rtl) {
-    std::vector<uint32_t> run_cps;
-    run_cps.reserve(run.size());
-    for (size_t ci = 0; ci < run.size(); ci++)
-      run_cps.push_back(run[ci].text.codepoint);
-    text_bidi_utils::AnalyzeBidiRuns(run_cps.data(), run_cps.size(),
-                                     &bidi_runs);
-  }
+  const book_xml_css_style_utils::WhiteSpaceMode white_space =
+      ResolveActiveWhiteSpace(p);
   book_xml_text_emit::FlowEmitMetrics emit_metrics{};
   emit_metrics.display_width = ts->display.width;
   emit_metrics.margin_left = ts->margin.left + p->block_margin_left;
@@ -1360,9 +1390,65 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
   emit_metrics.lineheight = lineheight;
   emit_metrics.linespacing = linespacing;
   emit_metrics.spaceadvance = spaceadvance;
-  book_xml_text_emit::EmitFlowedShapedText(
-      p, txt, run, has_rtl, bidi_runs, emit_metrics,
-      AdvanceParsedPageOnOverflowThunk, NULL);
+
+  if (white_space == book_xml_css_style_utils::WhiteSpaceMode::Pre ||
+      white_space == book_xml_css_style_utils::WhiteSpaceMode::PreWrap) {
+    EmitPreformattedUtf8Segment(
+        p, txt, (size_t)txtlen, measure_ctx, lineheight, linespacing,
+        white_space == book_xml_css_style_utils::WhiteSpaceMode::PreWrap);
+    return;
+  }
+
+  if (white_space == book_xml_css_style_utils::WhiteSpaceMode::Nowrap) {
+    const std::string normalized =
+        book_xml_css_style_utils::NormalizeWhiteSpaceText(
+            txt, (size_t)txtlen, white_space);
+    if (!normalized.empty()) {
+      book_xml_text_emit::AppendParsedCodepoints(
+          p, normalized.c_str(), normalized.size());
+      size_t offset = 0;
+      while (offset < normalized.size()) {
+        uint32_t cp = 0;
+        const size_t step = text_unicode_utils::DecodeNextDisplayCodepoint(
+            normalized.c_str() + offset, normalized.size() - offset, &cp);
+        if (step == 0) {
+          offset++;
+          continue;
+        }
+        p->pen.x += ts->GetAdvance(cp, parse_text_style);
+        offset += step;
+      }
+      p->linebegan = !normalized.empty();
+    }
+    return;
+  }
+
+  if (white_space == book_xml_css_style_utils::WhiteSpaceMode::PreLine) {
+    const std::string normalized =
+        book_xml_css_style_utils::NormalizeWhiteSpaceText(
+            txt, (size_t)txtlen, white_space);
+    size_t start = 0;
+    while (start <= normalized.size()) {
+      const size_t nl = normalized.find('\n', start);
+      const size_t end =
+          (nl == std::string::npos) ? normalized.size() : nl;
+      if (end > start) {
+        EmitFlowedUtf8Segment(p, normalized.c_str() + start, end - start,
+                              measure_ctx, emit_metrics);
+      }
+      if (nl == std::string::npos)
+        break;
+      AppendParsedByte(p, '\n');
+      p->pen.x = ts->margin.left;
+      p->pen.y += (lineheight + linespacing);
+      p->linebegan = false;
+      AdvanceParsedPageOnOverflow(p, lineheight);
+      start = nl + 1;
+    }
+    return;
+  }
+
+  EmitFlowedUtf8Segment(p, txt, (size_t)txtlen, measure_ctx, emit_metrics);
 }
 
 static void FlushInlineTailAndDeferredStyle(parsedata_t *p, Text *ts) {
@@ -2708,6 +2794,8 @@ void start(void *data, const char *el, const char **attr) {
     p->style_reset_italic_stack[current] = style_reset_italic;
     p->style_text_transform_stack[current] =
         ParseElementTextTransform(attr, p->css_class_map);
+    p->style_white_space_stack[current] =
+        ParseElementWhiteSpace(attr, p->css_class_map);
 
     bool style_changed = false;
     if (style_bold && !style_reset_bold && !p->bold) {

@@ -1,6 +1,7 @@
 #include "book/book_xml_css_style_utils.h"
 
 #include "shared/string_utils.h"
+#include "shared/text_unicode_utils.h"
 
 #include <string>
 
@@ -483,6 +484,132 @@ TextAlign ParseTextAlign(const char *style) {
   if (TryParseTextAlign(style, &out))
     return out;
   return TextAlign::Left;
+}
+
+bool TryParseWhiteSpace(const char *style, WhiteSpaceMode *out) {
+  if (!out || !style || !style[0])
+    return false;
+  const std::string style_lc = ToLowerAscii(std::string(style));
+  if (style_lc.find("white-space: pre-wrap") != std::string::npos ||
+      style_lc.find("white-space:pre-wrap") != std::string::npos) {
+    *out = WhiteSpaceMode::PreWrap;
+    return true;
+  }
+  if (style_lc.find("white-space: pre-line") != std::string::npos ||
+      style_lc.find("white-space:pre-line") != std::string::npos) {
+    *out = WhiteSpaceMode::PreLine;
+    return true;
+  }
+  if (style_lc.find("white-space: nowrap") != std::string::npos ||
+      style_lc.find("white-space:nowrap") != std::string::npos) {
+    *out = WhiteSpaceMode::Nowrap;
+    return true;
+  }
+  if (style_lc.find("white-space: pre") != std::string::npos ||
+      style_lc.find("white-space:pre") != std::string::npos) {
+    *out = WhiteSpaceMode::Pre;
+    return true;
+  }
+  if (style_lc.find("white-space: normal") != std::string::npos ||
+      style_lc.find("white-space:normal") != std::string::npos) {
+    *out = WhiteSpaceMode::Normal;
+    return true;
+  }
+  return false;
+}
+
+WhiteSpaceMode ParseWhiteSpace(const char *style) {
+  WhiteSpaceMode out = WhiteSpaceMode::Normal;
+  if (TryParseWhiteSpace(style, &out))
+    return out;
+  return WhiteSpaceMode::Normal;
+}
+
+namespace {
+
+bool IsWhiteSpaceCodepoint(uint32_t cp) {
+  switch (cp) {
+  case '\t':
+  case '\n':
+  case '\r':
+  case 0x000B:
+  case 0x000C:
+  case 0x0085:
+  case 0x00A0:
+  case 0x2028:
+  case 0x2029:
+  case 0x202F:
+  case ' ':
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool IsLineBreakCodepoint(uint32_t cp) {
+  return cp == '\n' || cp == 0x0085 || cp == 0x2028 || cp == 0x2029;
+}
+
+} // namespace
+
+std::string NormalizeWhiteSpaceText(const char *utf8, size_t len,
+                                    WhiteSpaceMode mode) {
+  if (!utf8 || len == 0)
+    return std::string();
+  if (mode != WhiteSpaceMode::Nowrap && mode != WhiteSpaceMode::PreLine)
+    return std::string(utf8, len);
+
+  std::string out;
+  out.reserve(len);
+  bool pending_space = false;
+  bool at_line_start = false;
+
+  size_t offset = 0;
+  while (offset < len && utf8[offset] != '\0') {
+    uint32_t cp = 0;
+    const size_t step = text_unicode_utils::DecodeNextDisplayCodepoint(
+        utf8 + offset, len - offset, &cp);
+    if (step == 0) {
+      offset++;
+      continue;
+    }
+
+    if (IsLineBreakCodepoint(cp)) {
+      if (mode == WhiteSpaceMode::PreLine) {
+        if (!out.empty() && out[out.size() - 1] == ' ')
+          out.erase(out.size() - 1);
+        out.push_back('\n');
+        pending_space = false;
+        at_line_start = true;
+      } else {
+        pending_space = true;
+      }
+      offset += step;
+      continue;
+    }
+
+    if (cp == '\r') {
+      offset += step;
+      continue;
+    }
+
+    if (IsWhiteSpaceCodepoint(cp)) {
+      pending_space = true;
+      offset += step;
+      continue;
+    }
+
+    if (pending_space && !(mode == WhiteSpaceMode::PreLine && at_line_start))
+      out.push_back(' ');
+    pending_space = false;
+    at_line_start = false;
+    out.append(utf8 + offset, step);
+    offset += step;
+  }
+
+  if (pending_space && mode == WhiteSpaceMode::Nowrap)
+    out.push_back(' ');
+  return out;
 }
 
 namespace {

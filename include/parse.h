@@ -105,6 +105,7 @@ struct parsedata_t {
 	bool style_reset_bold_stack[32];
 	bool style_reset_italic_stack[32];
 	u8 style_text_transform_stack[32];
+	u8 style_white_space_stack[32];
 	bool text_transform_word_start;
 	bool link_active_stack[32];
 	u16 link_href_id_stack[32];

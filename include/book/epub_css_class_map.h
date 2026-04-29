@@ -11,6 +11,7 @@ using book_xml_css_style_utils::MarginTopResult;
 using book_xml_css_style_utils::TextAlign;
 using book_xml_css_style_utils::FontSizeSpec;
 using book_xml_css_style_utils::TextTransform;
+using book_xml_css_style_utils::WhiteSpaceMode;
 
 struct CssClassMargins {
   MarginTopResult margin_top;
@@ -21,6 +22,8 @@ struct CssClassMargins {
   bool hide_list_markers;
   bool has_text_align;
   TextAlign text_align;
+  bool has_white_space;
+  WhiteSpaceMode white_space;
   bool superscript;
   bool subscript;
   bool page_break_before;
@@ -34,7 +37,8 @@ struct CssClassMargins {
 
   CssClassMargins()
       : hide_list_markers(false), has_text_align(false),
-        text_align(TextAlign::Left), superscript(false), subscript(false),
+        text_align(TextAlign::Left), has_white_space(false),
+        white_space(WhiteSpaceMode::Normal), superscript(false), subscript(false),
         page_break_before(false), page_break_after(false),
         no_underline(false), reset_bold(false), reset_italic(false),
         has_text_transform(false), text_transform(TextTransform::None) {}
@@ -101,5 +105,9 @@ MarginTopResult LookupTextIndentForClassAttr(const std::string &class_attr,
 bool LookupTextTransformForClassAttr(const std::string &class_attr,
                                      const CssClassMap &class_map,
                                      TextTransform *out);
+
+bool LookupWhiteSpaceForClassAttr(const std::string &class_attr,
+                                  const CssClassMap &class_map,
+                                  WhiteSpaceMode *out);
 
 } // namespace epub_css_class_map

@@ -169,6 +169,7 @@ void parse_init(parsedata_t *data) {
     data->style_reset_bold_stack[i] = false;
     data->style_reset_italic_stack[i] = false;
     data->style_text_transform_stack[i] = 0;
+    data->style_white_space_stack[i] = 0;
     data->link_active_stack[i] = false;
     data->link_href_id_stack[i] = 0;
     data->block_text_align_stack[i] = false;
@@ -261,6 +262,7 @@ void parse_push(parsedata_t *data, context_t context) {
     data->style_reset_bold_stack[data->stacksize] = false;
     data->style_reset_italic_stack[data->stacksize] = false;
     data->style_text_transform_stack[data->stacksize] = 0;
+    data->style_white_space_stack[data->stacksize] = 0;
     data->link_active_stack[data->stacksize] = false;
     data->link_href_id_stack[data->stacksize] = 0;
     data->block_text_align_stack[data->stacksize] = false;
@@ -292,6 +294,7 @@ context_t parse_pop(parsedata_t *data) {
     data->style_reset_bold_stack[data->stacksize] = false;
     data->style_reset_italic_stack[data->stacksize] = false;
     data->style_text_transform_stack[data->stacksize] = 0;
+    data->style_white_space_stack[data->stacksize] = 0;
     data->link_active_stack[data->stacksize] = false;
     data->link_href_id_stack[data->stacksize] = 0;
     data->block_text_align_stack[data->stacksize] = false;

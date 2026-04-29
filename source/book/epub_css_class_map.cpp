@@ -159,6 +159,9 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     MarginTopResult mr = ParseMarginRight(b);
     TextAlign text_align = TextAlign::Left;
     const bool has_text_align = TryParseTextAlign(b, &text_align);
+    WhiteSpaceMode white_space = WhiteSpaceMode::Normal;
+    const bool has_white_space =
+        book_xml_css_style_utils::TryParseWhiteSpace(b, &white_space);
     FontSizeSpec font_size;
     const bool has_font_size =
         book_xml_css_style_utils::TryParseFontSize(b, &font_size);
@@ -194,7 +197,8 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         mr.unit != MarginTopResult::Unit::None ||
         has_font_size ||
         hide_list_markers ||
-        has_text_align || is_superscript || is_subscript ||
+        has_text_align || has_white_space ||
+        is_superscript || is_subscript ||
         has_page_break_before || has_page_break_after ||
         no_underline || reset_bold || reset_italic ||
         text_indent.unit != MarginTopResult::Unit::None ||
@@ -216,6 +220,10 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         if (has_text_align) {
           entry.has_text_align = true;
           entry.text_align = text_align;
+        }
+        if (has_white_space) {
+          entry.has_white_space = true;
+          entry.white_space = white_space;
         }
         if (is_superscript)
           entry.superscript = true;
@@ -490,6 +498,36 @@ bool LookupNoUnderlineForClassAttr(const std::string &class_attr,
       return true;
   }
   return false;
+}
+
+bool LookupWhiteSpaceForClassAttr(const std::string &class_attr,
+                                  const CssClassMap &class_map,
+                                  WhiteSpaceMode *out) {
+  if (!out || class_attr.empty() || class_map.empty())
+    return false;
+  size_t pos = 0;
+  bool found = false;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) {
+      if (pos < class_attr.size())
+        ++pos;
+      continue;
+    }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() && it->second.has_white_space) {
+      *out = it->second.white_space;
+      found = true;
+    }
+  }
+  return found;
 }
 
 bool LookupResetBoldForClassAttr(const std::string &class_attr,
