@@ -93,7 +93,18 @@ void ExpandLinkBounds(inline_link_utils::LinkRect *rect, int x0, int y0, int x1,
   rect->y1 = std::max(rect->y1, y1);
 }
 
-u16 LinkTextColor() { return 0x001F; }
+u16 LinkTextColor(Text *ts) {
+  if (!ts)
+    return 0x001F;
+  switch (ts->GetColorMode()) {
+  case 1:
+  case 4:
+  case 5:
+    return 0x7DFF;
+  default:
+    return 0x0013;
+  }
+}
 
 } // namespace
 
@@ -595,7 +606,7 @@ void Page::Draw(Text *ts) {
       const int glyph_x0 = (int)ts->GetPenX();
       const int base_pen_y = (int)ts->GetPenY();
       if (link_active)
-        ts->SetTextColorOverride(LinkTextColor());
+        ts->SetTextColorOverride(LinkTextColor(ts));
       else
         ts->ClearTextColorOverride();
       if (superscript || subscript) {
