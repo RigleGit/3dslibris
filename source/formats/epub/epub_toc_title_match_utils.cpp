@@ -50,6 +50,10 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 2048) {
       i += (i + 1 < len) ? 2 : 1;  // skip token + 1 data byte
       continue;
     }
+    if (c == TEXT_IMAGE_ALIGN) {
+      i += (i + 1 < len) ? 2 : 1;
+      continue;
+    }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
         c == TEXT_ITALIC_OFF || c == TEXT_UNDERLINE_ON ||
         c == TEXT_UNDERLINE_OFF || c == TEXT_OVERLINE_ON ||
@@ -151,6 +155,10 @@ BuildPageHeadingLines(Page *page, size_t max_lines = 12,
     }
     if (c == TEXT_RTL_LINE_PX) {
       i += (i + 1 < len) ? 1 : 0;  // skip data byte (loop i++ skips token)
+      continue;
+    }
+    if (c == TEXT_IMAGE_ALIGN) {
+      i += (i + 1 < len) ? 1 : 0;
       continue;
     }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||

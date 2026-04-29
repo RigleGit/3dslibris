@@ -133,6 +133,10 @@ static std::string ExtractPagePreview(Page *page, size_t max_chars) {
       i += (i + 1 < len) ? 1 : 0;
       continue;
     }
+    if (c == TEXT_IMAGE_ALIGN) {
+      i += (i + 1 < len) ? 1 : 0;
+      continue;
+    }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
         c == TEXT_ITALIC_OFF || c == TEXT_UNDERLINE_ON ||
         c == TEXT_UNDERLINE_OFF || c == TEXT_OVERLINE_ON ||

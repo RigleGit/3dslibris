@@ -446,6 +446,35 @@ void TestParsePageBreakInsideAvoid() {
                         "page-break-inside: auto;"));
 }
 
+void TestParseFloatAndClear() {
+  using FM = book_xml_css_style_utils::FloatMode;
+  using CM = book_xml_css_style_utils::ClearMode;
+
+  FM left = FM::None;
+  test::ExpectTrue("float left parsed",
+                   book_xml_css_style_utils::TryParseFloat(
+                       "float: left;", &left));
+  test::ExpectEq("float left value", (int)left, (int)FM::Left);
+
+  FM right = FM::None;
+  test::ExpectTrue("float right parsed",
+                   book_xml_css_style_utils::TryParseFloat(
+                       "float:right;", &right));
+  test::ExpectEq("float right value", (int)right, (int)FM::Right);
+
+  CM both = CM::None;
+  test::ExpectTrue("clear both parsed",
+                   book_xml_css_style_utils::TryParseClear(
+                       "clear: both;", &both));
+  test::ExpectEq("clear both value", (int)both, (int)CM::Both);
+
+  CM left_clear = CM::None;
+  test::ExpectTrue("clear left parsed",
+                   book_xml_css_style_utils::TryParseClear(
+                       "clear:left;", &left_clear));
+  test::ExpectEq("clear left value", (int)left_clear, (int)CM::Left);
+}
+
 } // namespace
 
 int main() {
@@ -483,5 +512,6 @@ int main() {
   TestNormalizeWhiteSpaceText();
   TestParseTextTransform();
   TestParsePageBreakInsideAvoid();
+  TestParseFloatAndClear();
   return 0;
 }

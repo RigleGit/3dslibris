@@ -662,7 +662,7 @@ bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
 
 bool Book::DrawInlineImage(Text *ts, u16 image_id,
                            const InlineImageLayoutPlan *plan_ptr,
-                           int current_screen) {
+                           int current_screen, u8 align_mode) {
   if (!ts)
     return false;
 
@@ -731,7 +731,13 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
       start_x = ts->GetPenX();
       start_y = line_top;
     } else {
-      start_x = ts->margin.left + (text_w - draw_w) / 2;
+      if (align_mode == 1) {
+        start_x = ts->margin.left;
+      } else if (align_mode == 2) {
+        start_x = screen_w - ts->margin.right - draw_w;
+      } else {
+        start_x = ts->margin.left + (text_w - draw_w) / 2;
+      }
       start_y = line_top;
     }
   }

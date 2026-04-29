@@ -197,6 +197,31 @@ void TestParseCssIntoClassMapDetectsPageBreakInsideAvoid() {
                        "keep", map));
 }
 
+void TestParseCssIntoClassMapDetectsFloatAndClear() {
+  const char *css =
+      ".flt-left { float: left; }\n"
+      ".flt-right { float: right; }\n"
+      ".clr-both { clear: both; }\n";
+
+  CssClassMap out;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
+
+  test::ExpectTrue("float-left parsed", out.find("flt-left") != out.end());
+  test::ExpectTrue("float-right parsed", out.find("flt-right") != out.end());
+  test::ExpectTrue("clear-both parsed", out.find("clr-both") != out.end());
+
+  test::ExpectTrue("float-left has float", out["flt-left"].has_float);
+  test::ExpectTrue("float-right has float", out["flt-right"].has_float);
+  test::ExpectTrue("clear-both has clear", out["clr-both"].has_clear);
+
+  test::ExpectEq("float-left value", (int)out["flt-left"].float_mode,
+                 (int)book_xml_css_style_utils::FloatMode::Left);
+  test::ExpectEq("float-right value", (int)out["flt-right"].float_mode,
+                 (int)book_xml_css_style_utils::FloatMode::Right);
+  test::ExpectEq("clear-both value", (int)out["clr-both"].clear_mode,
+                 (int)book_xml_css_style_utils::ClearMode::Both);
+}
+
 void TestLookupFontSizeForClassAttrUsesLastKnownMatch() {
   CssClassMap map;
   map["small"].font_size.unit =
@@ -462,6 +487,7 @@ int main() {
   TestParseCssIntoClassMapDetectsTextAlignStartEnd();
   TestParseCssIntoClassMapDetectsWhiteSpaceModes();
   TestParseCssIntoClassMapDetectsPageBreakInsideAvoid();
+  TestParseCssIntoClassMapDetectsFloatAndClear();
   TestLookupFontSizeForClassAttrUsesLastKnownMatch();
   TestParseCssIntoClassMapDetectsSuperSubScript();
   TestLookupSuperSubForClassAttr();

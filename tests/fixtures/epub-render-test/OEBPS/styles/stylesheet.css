@@ -135,6 +135,18 @@ li.list-none {
   page-break-inside: avoid;
 }
 
+.float-left {
+  float: left;
+}
+
+.float-right {
+  float: right;
+}
+
+.clear-both {
+  clear: both;
+}
+
 p.mt-class-qualified {
   margin-top: 48px;
 }

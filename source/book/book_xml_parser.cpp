@@ -635,6 +635,54 @@ ResolveActiveWhiteSpace(const parsedata_t *p) {
   return WhiteSpaceMode::Normal;
 }
 
+static book_xml_css_style_utils::FloatMode
+ParseElementFloat(const char **attr,
+                  const epub_css_class_map::CssClassMap &class_map) {
+  using book_xml_css_style_utils::FloatMode;
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        FloatMode mode = FloatMode::None;
+        if (book_xml_css_style_utils::TryParseFloat(attr[i + 1], &mode))
+          return mode;
+      } else if (AttrNameEquals(attr[i], "class")) {
+        FloatMode mode = FloatMode::None;
+        if (epub_css_class_map::LookupFloatForClassAttr(
+                std::string(attr[i + 1]), class_map, &mode)) {
+          return mode;
+        }
+      }
+    }
+  }
+  return FloatMode::None;
+}
+
+static book_xml_css_style_utils::ClearMode
+ParseElementClear(const char **attr,
+                  const epub_css_class_map::CssClassMap &class_map) {
+  using book_xml_css_style_utils::ClearMode;
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        ClearMode mode = ClearMode::None;
+        if (book_xml_css_style_utils::TryParseClear(attr[i + 1], &mode))
+          return mode;
+      } else if (AttrNameEquals(attr[i], "class")) {
+        ClearMode mode = ClearMode::None;
+        if (epub_css_class_map::LookupClearForClassAttr(
+                std::string(attr[i + 1]), class_map, &mode)) {
+          return mode;
+        }
+      }
+    }
+  }
+  return ClearMode::None;
+}
+
 static book_xml_css_style_utils::MarginTopResult
 ParseElementMarginTopWithClass(const char **attr, const parsedata_t *p) {
   const book_xml_css_style_utils::MarginTopResult from_style =
@@ -2084,6 +2132,11 @@ void start(void *data, const char *el, const char **attr) {
       else if (AttrNameEquals(attr[i], "class"))
         el_class = attr[i + 1];
     }
+    if (ParseElementClear(attr, p->css_class_map) !=
+        book_xml_css_style_utils::ClearMode::None) {
+      if (!blankline(p))
+        linefeed(p);
+    }
     if ((book_xml_css_style_utils::HasPageBreakInsideAvoid(el_style) ||
          epub_css_class_map::LookupPageBreakInsideAvoidForClassAttr(
              el_class ? std::string(el_class) : std::string(),
@@ -2598,6 +2651,14 @@ void start(void *data, const char *el, const char **attr) {
         img_width_attr = attr[i + 1];
     }
 
+    const book_xml_css_style_utils::FloatMode float_mode =
+        ParseElementFloat(attr, p->css_class_map);
+    if (ParseElementClear(attr, p->css_class_map) !=
+        book_xml_css_style_utils::ClearMode::None) {
+      if (!blankline(p))
+        linefeed(p);
+    }
+
     if (img_style) {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mtr =
@@ -2638,6 +2699,16 @@ void start(void *data, const char *el, const char **attr) {
                                      p->pen.y, p->linebegan,
                                      image_context, &image_plan);
 
+      if (float_mode != book_xml_css_style_utils::FloatMode::None &&
+          image_plan.mode == INLINE_IMAGE_LAYOUT_INLINE) {
+        image_plan.mode = INLINE_IMAGE_LAYOUT_BAND;
+        image_plan.line_break_before = p->linebegan;
+        image_plan.advance_before = false;
+        image_plan.consume_rest_of_screen = false;
+        image_plan.vertical_space_after_draw =
+            image_plan.draw_height + ts->linespacing;
+      }
+
       // If the image can't be decoded (e.g. a pure SVG vector without an
       // embedded raster), PAGE mode would consume a full screen worth of space
       // while drawing nothing. Emit a text placeholder instead.
@@ -2664,6 +2735,13 @@ void start(void *data, const char *el, const char **attr) {
       // concrete inline/band/page behavior from the same layout planner.
       if (leading_paragraph_image)
         AppendParsedByte(p, TEXT_IMAGE_LEADING_PARAGRAPH);
+      if (float_mode == book_xml_css_style_utils::FloatMode::Left) {
+        AppendParsedByte(p, TEXT_IMAGE_ALIGN);
+        AppendParsedByte(p, 1);
+      } else if (float_mode == book_xml_css_style_utils::FloatMode::Right) {
+        AppendParsedByte(p, TEXT_IMAGE_ALIGN);
+        AppendParsedByte(p, 2);
+      }
       AppendParsedByte(p, TEXT_IMAGE);
       AppendParsedByte(p, (u32)image_id);
 

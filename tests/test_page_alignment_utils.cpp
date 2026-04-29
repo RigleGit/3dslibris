@@ -60,6 +60,15 @@ void TestIgnoresFontSizeTokenAndPayload() {
                  3);
 }
 
+void TestIgnoresImageAlignTokenAndPayload() {
+  const uint32_t buf[] = {'A', TEXT_IMAGE_ALIGN, 2, 'B', '\n'};
+  test::ExpectEq("image-align token ignored",
+                 page_alignment_utils::MeasureAlignedLineWidth(
+                     buf, sizeof(buf) / sizeof(buf[0]), 0, false, false, false,
+                     MeasureGlyph, NULL),
+                 2);
+}
+
 } // namespace
 
 int main() {
@@ -67,5 +76,6 @@ int main() {
   TestTracksStyleChangesWhileMeasuring();
   TestStopsAtBlockTokens();
   TestIgnoresFontSizeTokenAndPayload();
+  TestIgnoresImageAlignTokenAndPayload();
   return 0;
 }

@@ -108,5 +108,10 @@
       <navLabel><text>Capítulo 15: white-space y keep-together</text></navLabel>
       <content src="text/chapter-15-whitespace.xhtml#capitulo-15"/>
     </navPoint>
+
+    <navPoint id="nav-20" playOrder="20">
+      <navLabel><text>Capítulo 16: float y clear</text></navLabel>
+      <content src="text/chapter-16-float-clear.xhtml#capitulo-16"/>
+    </navPoint>
   </navMap>
 </ncx>

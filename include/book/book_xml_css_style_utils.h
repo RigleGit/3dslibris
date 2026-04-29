@@ -66,6 +66,14 @@ bool TryParseWhiteSpace(const char *style, WhiteSpaceMode *out);
 std::string NormalizeWhiteSpaceText(const char *utf8, size_t len,
                                     WhiteSpaceMode mode);
 
+enum class FloatMode { None, Left, Right };
+FloatMode ParseFloat(const char *style);
+bool TryParseFloat(const char *style, FloatMode *out);
+
+enum class ClearMode { None, Left, Right, Both };
+ClearMode ParseClear(const char *style);
+bool TryParseClear(const char *style, ClearMode *out);
+
 bool HasPageBreakBefore(const char *style);
 bool HasPageBreakAfter(const char *style);
 bool HasPageBreakInsideAvoid(const char *style);

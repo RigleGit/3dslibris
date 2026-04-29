@@ -525,6 +525,69 @@ WhiteSpaceMode ParseWhiteSpace(const char *style) {
   return WhiteSpaceMode::Normal;
 }
 
+bool TryParseFloat(const char *style, FloatMode *out) {
+  if (!out || !style || !style[0])
+    return false;
+  const std::string style_lc = ToLowerAscii(std::string(style));
+  if (style_lc.find("float: left") != std::string::npos ||
+      style_lc.find("float:left") != std::string::npos) {
+    *out = FloatMode::Left;
+    return true;
+  }
+  if (style_lc.find("float: right") != std::string::npos ||
+      style_lc.find("float:right") != std::string::npos) {
+    *out = FloatMode::Right;
+    return true;
+  }
+  if (style_lc.find("float: none") != std::string::npos ||
+      style_lc.find("float:none") != std::string::npos) {
+    *out = FloatMode::None;
+    return true;
+  }
+  return false;
+}
+
+FloatMode ParseFloat(const char *style) {
+  FloatMode out = FloatMode::None;
+  if (TryParseFloat(style, &out))
+    return out;
+  return FloatMode::None;
+}
+
+bool TryParseClear(const char *style, ClearMode *out) {
+  if (!out || !style || !style[0])
+    return false;
+  const std::string style_lc = ToLowerAscii(std::string(style));
+  if (style_lc.find("clear: both") != std::string::npos ||
+      style_lc.find("clear:both") != std::string::npos) {
+    *out = ClearMode::Both;
+    return true;
+  }
+  if (style_lc.find("clear: left") != std::string::npos ||
+      style_lc.find("clear:left") != std::string::npos) {
+    *out = ClearMode::Left;
+    return true;
+  }
+  if (style_lc.find("clear: right") != std::string::npos ||
+      style_lc.find("clear:right") != std::string::npos) {
+    *out = ClearMode::Right;
+    return true;
+  }
+  if (style_lc.find("clear: none") != std::string::npos ||
+      style_lc.find("clear:none") != std::string::npos) {
+    *out = ClearMode::None;
+    return true;
+  }
+  return false;
+}
+
+ClearMode ParseClear(const char *style) {
+  ClearMode out = ClearMode::None;
+  if (TryParseClear(style, &out))
+    return out;
+  return ClearMode::None;
+}
+
 namespace {
 
 bool IsWhiteSpaceCodepoint(uint32_t cp) {

@@ -32,6 +32,7 @@
     <item id="ch13" href="text/chapter-13-pagebreak.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch14" href="text/chapter-14-margin-left-right.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch15" href="text/chapter-15-whitespace.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch16" href="text/chapter-16-float-clear.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
 
   <spine toc="ncx">
@@ -53,6 +54,7 @@
     <itemref idref="ch13"/>
     <itemref idref="ch14"/>
     <itemref idref="ch15"/>
+    <itemref idref="ch16"/>
   </spine>
 
   <guide>

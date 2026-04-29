@@ -272,6 +272,7 @@ void Page::Draw(Text *ts) {
 
   u16 i = 0;
   InlineImageContext next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
+  u8 next_image_align = 0;  // 0=center/default, 1=left, 2=right
   bool rtl_paragraph = false;
   u32 rtl_line_px = 0;  // parse-time line width stashed by TEXT_RTL_LINE_PX
   bool in_preformatted_block = false;
@@ -347,10 +348,16 @@ void Page::Draw(Text *ts) {
 #endif
       i += 2;
       continue;
+    } else if (c == TEXT_IMAGE_ALIGN) {
+      if (i + 1 < length)
+        next_image_align = (u8)buf[i + 1];
+      i += (i + 1 < length) ? 2 : 1;
+      continue;
     } else if (c == '\n') {
       // line break, page breaking if necessary
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
+      next_image_align = 0;
 
       const text_render_layout_utils::ReadingScreenMetrics metrics =
           text_render_layout_utils::ResolveReadingScreenMetrics(
@@ -509,7 +516,8 @@ void Page::Draw(Text *ts) {
           ts->linebegan = false;
         }
 
-        book->DrawInlineImage(ts, image_id, &image_plan, current_screen);
+        book->DrawInlineImage(ts, image_id, &image_plan, current_screen,
+                              next_image_align);
 
         bool stop_page_draw = false;
         switch (image_plan.mode) {
@@ -549,9 +557,11 @@ void Page::Draw(Text *ts) {
         }
         if (stop_page_draw)
           break;
+        next_image_align = 0;
       } else {
         i++;
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
+        next_image_align = 0;
       }
       } else {
         i++;
