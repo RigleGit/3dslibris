@@ -22,11 +22,15 @@ struct CssClassMargins {
   bool subscript;
   bool page_break_before;
   bool page_break_after;
+  bool no_underline;   // text-decoration: none
+  bool reset_bold;     // font-weight: normal/lighter/100-500
+  bool reset_italic;   // font-style: normal
 
   CssClassMargins()
       : hide_list_markers(false), has_text_align(false),
         text_align(TextAlign::Left), superscript(false), subscript(false),
-        page_break_before(false), page_break_after(false) {}
+        page_break_before(false), page_break_after(false),
+        no_underline(false), reset_bold(false), reset_italic(false) {}
 };
 
 // Map: bare class name (no '.') → extracted margins.
@@ -66,5 +70,14 @@ bool LookupPageBreakBeforeForClassAttr(const std::string &class_attr,
 
 bool LookupPageBreakAfterForClassAttr(const std::string &class_attr,
                                       const CssClassMap &class_map);
+
+bool LookupNoUnderlineForClassAttr(const std::string &class_attr,
+                                   const CssClassMap &class_map);
+
+bool LookupResetBoldForClassAttr(const std::string &class_attr,
+                                 const CssClassMap &class_map);
+
+bool LookupResetItalicForClassAttr(const std::string &class_attr,
+                                   const CssClassMap &class_map);
 
 } // namespace epub_css_class_map

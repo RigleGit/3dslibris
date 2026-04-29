@@ -173,12 +173,18 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         book_xml_css_style_utils::HasPageBreakBefore(b);
     const bool has_page_break_after =
         book_xml_css_style_utils::HasPageBreakAfter(b);
+    book_xml_css_style_utils::InlineStyleFlags isf{};
+    book_xml_css_style_utils::ParseInlineStyleFlags(b, &isf);
+    const bool no_underline = isf.no_underline;
+    const bool reset_bold   = isf.reset_bold;
+    const bool reset_italic = isf.reset_italic;
 
     if (mt.unit != MarginTopResult::Unit::None ||
         mb.unit != MarginTopResult::Unit::None || has_font_size ||
         hide_list_markers ||
         has_text_align || is_superscript || is_subscript ||
-        has_page_break_before || has_page_break_after) {
+        has_page_break_before || has_page_break_after ||
+        no_underline || reset_bold || reset_italic) {
       for (size_t i = 0; i < class_names.size(); i++) {
         CssClassMargins &entry = (*out)[class_names[i]];
         if (mt.unit != MarginTopResult::Unit::None)
@@ -201,6 +207,12 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
           entry.page_break_before = true;
         if (has_page_break_after)
           entry.page_break_after = true;
+        if (no_underline)
+          entry.no_underline = true;
+        if (reset_bold)
+          entry.reset_bold = true;
+        if (reset_italic)
+          entry.reset_italic = true;
       }
     }
   }
@@ -425,6 +437,72 @@ bool LookupPageBreakAfterForClassAttr(const std::string &class_attr,
     const std::string class_name = class_attr.substr(start, pos - start);
     CssClassMap::const_iterator it = class_map.find(class_name);
     if (it != class_map.end() && it->second.page_break_after)
+      return true;
+  }
+  return false;
+}
+
+bool LookupNoUnderlineForClassAttr(const std::string &class_attr,
+                                   const CssClassMap &class_map) {
+  if (class_attr.empty() || class_map.empty())
+    return false;
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() && it->second.no_underline)
+      return true;
+  }
+  return false;
+}
+
+bool LookupResetBoldForClassAttr(const std::string &class_attr,
+                                 const CssClassMap &class_map) {
+  if (class_attr.empty() || class_map.empty())
+    return false;
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() && it->second.reset_bold)
+      return true;
+  }
+  return false;
+}
+
+bool LookupResetItalicForClassAttr(const std::string &class_attr,
+                                   const CssClassMap &class_map) {
+  if (class_attr.empty() || class_map.empty())
+    return false;
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() && it->second.reset_italic)
       return true;
   }
   return false;

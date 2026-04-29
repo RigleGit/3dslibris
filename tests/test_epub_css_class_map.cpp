@@ -190,6 +190,65 @@ void TestLookupSuperSubForClassAttr() {
   test::ExpectFalse("no match found", found3);
 }
 
+void TestParseCssIntoClassMapDetectsResetFlags() {
+  const char *css =
+      ".no-underline { text-decoration: none; }\n"
+      ".normal-weight { font-weight: normal; }\n"
+      ".light { font-weight: 300; }\n"
+      ".normal-style { font-style: normal; }\n"
+      ".still-bold { font-weight: bold; }\n";
+
+  CssClassMap out;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
+
+  test::ExpectTrue("no-underline class parsed", out.count("no-underline") > 0);
+  test::ExpectTrue("no-underline flag set", out["no-underline"].no_underline);
+  test::ExpectFalse("no-underline does not set reset_bold",
+                    out["no-underline"].reset_bold);
+
+  test::ExpectTrue("normal-weight class parsed", out.count("normal-weight") > 0);
+  test::ExpectTrue("normal-weight reset_bold set",
+                   out["normal-weight"].reset_bold);
+
+  test::ExpectTrue("light class parsed", out.count("light") > 0);
+  test::ExpectTrue("light reset_bold set", out["light"].reset_bold);
+
+  test::ExpectTrue("normal-style class parsed", out.count("normal-style") > 0);
+  test::ExpectTrue("normal-style reset_italic set",
+                   out["normal-style"].reset_italic);
+
+  // font-weight: bold has no CssClassMargins slot; class map won't contain it.
+  // Verify LookupResetBoldForClassAttr returns false for that class attr.
+  test::ExpectFalse("still-bold not in reset_bold lookup",
+                    epub_css_class_map::LookupResetBoldForClassAttr(
+                        "still-bold", out));
+}
+
+void TestLookupResetFlagFunctions() {
+  CssClassMap map;
+  map["nd"].no_underline = true;
+  map["rb"].reset_bold = true;
+  map["ri"].reset_italic = true;
+
+  test::ExpectTrue("LookupNoUnderline finds class",
+                   epub_css_class_map::LookupNoUnderlineForClassAttr("nd", map));
+  test::ExpectFalse("LookupNoUnderline misses unrelated class",
+                    epub_css_class_map::LookupNoUnderlineForClassAttr("rb", map));
+
+  test::ExpectTrue("LookupResetBold finds class",
+                   epub_css_class_map::LookupResetBoldForClassAttr("rb", map));
+  test::ExpectFalse("LookupResetBold misses unrelated class",
+                    epub_css_class_map::LookupResetBoldForClassAttr("nd", map));
+
+  test::ExpectTrue("LookupResetItalic finds class",
+                   epub_css_class_map::LookupResetItalicForClassAttr("ri", map));
+  test::ExpectFalse("LookupResetItalic misses unrelated class",
+                    epub_css_class_map::LookupResetItalicForClassAttr("rb", map));
+
+  test::ExpectFalse("LookupResetBold unknown class returns false",
+                    epub_css_class_map::LookupResetBoldForClassAttr("unknown", map));
+}
+
 } // namespace
 
 int main() {
@@ -201,5 +260,7 @@ int main() {
   TestLookupFontSizeForClassAttrUsesLastKnownMatch();
   TestParseCssIntoClassMapDetectsSuperSubScript();
   TestLookupSuperSubForClassAttr();
+  TestParseCssIntoClassMapDetectsResetFlags();
+  TestLookupResetFlagFunctions();
   return 0;
 }

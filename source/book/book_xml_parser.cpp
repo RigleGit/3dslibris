@@ -735,8 +735,10 @@ static void ParseElementStyleFlags(const char **attr, bool *bold_out,
                                    bool *italic_out, bool *underline_out,
                                    u8 *underline_style_out,
                                    bool *overline_out, bool *strikethrough_out,
-                                   bool *superscript_out,
-                                   bool *subscript_out) {
+                                   bool *superscript_out, bool *subscript_out,
+                                   bool *no_underline_out,
+                                   bool *reset_bold_out,
+                                   bool *reset_italic_out) {
   if ((!bold_out && !italic_out && !underline_out && !overline_out &&
        !strikethrough_out &&
        !superscript_out && !subscript_out) ||
@@ -764,6 +766,12 @@ static void ParseElementStyleFlags(const char **attr, bool *bold_out,
         *superscript_out = true;
       if (subscript_out && flags.subscript)
         *subscript_out = true;
+      if (no_underline_out && flags.no_underline)
+        *no_underline_out = true;
+      if (reset_bold_out && flags.reset_bold)
+        *reset_bold_out = true;
+      if (reset_italic_out && flags.reset_italic)
+        *reset_italic_out = true;
     } else if (AttrNameEquals(attr[i], "class")) {
       ParseClassStyleFlags(attr[i + 1], bold_out, italic_out, underline_out,
                            underline_style_out, overline_out,
@@ -939,6 +947,36 @@ static bool HasActiveStackSubscriptStyle(const parsedata_t *p) {
     return false;
   for (u8 i = 0; i < p->stacksize; i++) {
     if (p->style_subscript_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackNoUnderlineStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_no_underline_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackResetBoldStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_reset_bold_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackResetItalicStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_reset_italic_stack[i])
       return true;
   }
   return false;
@@ -2438,18 +2476,34 @@ void start(void *data, const char *el, const char **attr) {
     bool style_strikethrough = false;
     bool style_superscript = false;
     bool style_subscript = false;
+    bool style_no_underline = false;
+    bool style_reset_bold = false;
+    bool style_reset_italic = false;
     bool style_hidden = false;
     ParseElementStyleFlags(attr, &style_bold, &style_italic, &style_underline,
                            &style_underline_style, &style_overline,
                            &style_strikethrough,
                            &style_superscript,
-                           &style_subscript);
-    // Also check CSS class map for vertical-align: super/sub rules.
-    if (!style_superscript || !style_subscript) {
+                           &style_subscript,
+                           &style_no_underline,
+                           &style_reset_bold,
+                           &style_reset_italic);
+    // Also check CSS class map for vertical-align, underline reset, and bold/italic reset.
+    {
       const std::string cls = ExtractClassAttr(attr);
-      epub_css_class_map::LookupSuperSubForClassAttr(cls, p->css_class_map,
-                                                     &style_superscript,
-                                                     &style_subscript);
+      if (!style_superscript || !style_subscript)
+        epub_css_class_map::LookupSuperSubForClassAttr(cls, p->css_class_map,
+                                                       &style_superscript,
+                                                       &style_subscript);
+      if (!style_no_underline)
+        style_no_underline = epub_css_class_map::LookupNoUnderlineForClassAttr(
+            cls, p->css_class_map);
+      if (!style_reset_bold)
+        style_reset_bold = epub_css_class_map::LookupResetBoldForClassAttr(
+            cls, p->css_class_map);
+      if (!style_reset_italic)
+        style_reset_italic = epub_css_class_map::LookupResetItalicForClassAttr(
+            cls, p->css_class_map);
     }
     ParseElementHiddenFlags(attr, &style_hidden);
 
@@ -2464,20 +2518,39 @@ void start(void *data, const char *el, const char **attr) {
     p->style_superscript_stack[current] = style_superscript;
     p->style_subscript_stack[current] = style_subscript;
     p->style_hidden_stack[current] = style_hidden;
+    p->style_no_underline_stack[current] = style_no_underline;
+    p->style_reset_bold_stack[current] = style_reset_bold;
+    p->style_reset_italic_stack[current] = style_reset_italic;
 
     bool style_changed = false;
-    if (style_bold && !p->bold) {
+    if (style_bold && !style_reset_bold && !p->bold) {
       AppendParsedByte(p, TEXT_BOLD_ON);
       p->pos++;
       p->bold = true;
       style_changed = true;
     }
-    if (style_italic && !p->italic) {
+    if (style_reset_bold && p->bold) {
+      AppendParsedByte(p, TEXT_BOLD_OFF);
+      p->bold = false;
+      style_changed = true;
+    }
+    if (style_italic && !style_reset_italic && !p->italic) {
       AppendParsedByte(p, TEXT_ITALIC_ON);
       p->italic = true;
       style_changed = true;
     }
-    if (style_underline && !p->underline) {
+    if (style_reset_italic && p->italic) {
+      AppendParsedByte(p, TEXT_ITALIC_OFF);
+      p->italic = false;
+      style_changed = true;
+    }
+    if (style_no_underline && p->underline) {
+      AppendParsedByte(p, TEXT_UNDERLINE_OFF);
+      p->underline = false;
+      p->underline_style = UNDERLINE_STYLE_SOLID;
+      style_changed = true;
+    }
+    if (style_underline && !style_no_underline && !p->underline) {
       AppendParsedByte(p, TEXT_UNDERLINE_ON);
       p->underline = true;
       p->underline_style = style_underline_style;
@@ -2842,14 +2915,19 @@ void end(void *data, const char *el) {
   if (had_page_break_after)
     ForcePageBreak(p);
 
+  const bool any_reset_bold = HasActiveStackResetBoldStyle(p);
+  const bool any_reset_italic = HasActiveStackResetItalicStyle(p);
+  const bool any_no_underline = HasActiveStackNoUnderlineStyle(p);
   const bool want_bold =
-      parse_in(p, TAG_STRONG) || parse_in(p, TAG_H1) || parse_in(p, TAG_H2) ||
-      parse_in(p, TAG_H3) || parse_in(p, TAG_H4) || parse_in(p, TAG_H5) ||
-      parse_in(p, TAG_H6) || HasActiveStackBoldStyle(p);
+      !any_reset_bold &&
+      (parse_in(p, TAG_STRONG) || parse_in(p, TAG_H1) || parse_in(p, TAG_H2) ||
+       parse_in(p, TAG_H3) || parse_in(p, TAG_H4) || parse_in(p, TAG_H5) ||
+       parse_in(p, TAG_H6) || HasActiveStackBoldStyle(p));
   const bool want_italic =
-      parse_in(p, TAG_EM) || HasActiveStackItalicStyle(p);
+      !any_reset_italic && (parse_in(p, TAG_EM) || HasActiveStackItalicStyle(p));
   const bool want_underline =
-      parse_in(p, TAG_UNDERLINE) || HasActiveStackUnderlineStyle(p);
+      !any_no_underline &&
+      (parse_in(p, TAG_UNDERLINE) || HasActiveStackUnderlineStyle(p));
   const u8 want_underline_style =
       want_underline ? ResolveActiveUnderlineStyle(p) : UNDERLINE_STYLE_SOLID;
   const bool want_overline = HasActiveStackOverlineStyle(p);

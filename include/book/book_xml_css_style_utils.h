@@ -36,11 +36,15 @@ struct InlineStyleFlags {
   bool strikethrough;
   bool superscript;
   bool subscript;
+  bool no_underline;  // text-decoration: none
+  bool reset_bold;    // font-weight: normal/lighter/100-500
+  bool reset_italic;  // font-style: normal
 
   InlineStyleFlags()
       : bold(false), italic(false), underline(false),
         underline_style(UNDERLINE_STYLE_SOLID), overline(false),
-        strikethrough(false), superscript(false), subscript(false) {}
+        strikethrough(false), superscript(false), subscript(false),
+        no_underline(false), reset_bold(false), reset_italic(false) {}
 };
 
 void ParseInlineStyleFlags(const char *style, InlineStyleFlags *out);

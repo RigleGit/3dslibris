@@ -105,7 +105,76 @@ void TestParseMarginTopNull() {
 void TestParseMarginTopEmUnit() {
   using R = book_xml_css_style_utils::MarginTopResult;
   R r = book_xml_css_style_utils::ParseMarginTop("margin-top: 2em;");
-  test::ExpectEq("em -> None", (int)r.unit, (int)R::Unit::None);
+  test::ExpectEq("em -> Px", (int)r.unit, (int)R::Unit::Px);
+  test::ExpectEq("em value (2 * 12px base)", r.value, 24);
+}
+
+void TestParseMarginTopPtUnit() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginTop("margin-top: 12pt;");
+  test::ExpectEq("pt -> Px", (int)r.unit, (int)R::Unit::Px);
+  test::ExpectEq("12pt -> 16px", r.value, 16);
+}
+
+void TestTryParseFontSizePt() {
+  book_xml_css_style_utils::FontSizeSpec spec{};
+  const bool ok = book_xml_css_style_utils::TryParseFontSize("font-size: 12pt;", &spec);
+  test::ExpectTrue("font-size pt parsed", ok);
+  test::ExpectEq("pt stored as Px", (int)spec.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Px);
+  // 12pt * 4/3 = 16px; value_x100 = 1600
+  test::ExpectEq("12pt -> 1600 value_x100", spec.value_x100, 1600);
+}
+
+void TestTryParseFontSizeAbsoluteKeywords() {
+  using S = book_xml_css_style_utils::FontSizeSpec;
+  struct { const char *css; int expected_x100; } cases[] = {
+    { "font-size: xx-small;", 5000 },
+    { "font-size: x-small;",  6250 },
+    { "font-size: small;",    8000 },
+    { "font-size: medium;",  10000 },
+    { "font-size: large;",   12500 },
+    { "font-size: x-large;", 15000 },
+    { "font-size: xx-large;",20000 },
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    S spec{};
+    test::ExpectTrue(cases[i].css,
+                     book_xml_css_style_utils::TryParseFontSize(cases[i].css, &spec));
+    test::ExpectEq((std::string(cases[i].css) + " unit").c_str(),
+                   (int)spec.unit, (int)S::Unit::Percent);
+    test::ExpectEq((std::string(cases[i].css) + " value").c_str(),
+                   spec.value_x100, cases[i].expected_x100);
+  }
+}
+
+void TestParseInlineFlagsResets() {
+  using book_xml_css_style_utils::InlineStyleFlags;
+  using book_xml_css_style_utils::ParseInlineStyleFlags;
+
+  InlineStyleFlags none_flags{};
+  ParseInlineStyleFlags("text-decoration: none;", &none_flags);
+  test::ExpectTrue("text-decoration:none sets no_underline", none_flags.no_underline);
+  test::ExpectFalse("text-decoration:none does not set underline", none_flags.underline);
+
+  InlineStyleFlags normal_weight{};
+  ParseInlineStyleFlags("font-weight: normal;", &normal_weight);
+  test::ExpectTrue("font-weight:normal sets reset_bold", normal_weight.reset_bold);
+  test::ExpectFalse("font-weight:normal does not set bold", normal_weight.bold);
+
+  InlineStyleFlags w400{};
+  ParseInlineStyleFlags("font-weight: 400;", &w400);
+  test::ExpectTrue("font-weight:400 sets reset_bold", w400.reset_bold);
+
+  InlineStyleFlags normal_style{};
+  ParseInlineStyleFlags("font-style: normal;", &normal_style);
+  test::ExpectTrue("font-style:normal sets reset_italic", normal_style.reset_italic);
+  test::ExpectFalse("font-style:normal does not set italic", normal_style.italic);
+
+  InlineStyleFlags bold_flags{};
+  ParseInlineStyleFlags("font-weight: bold;", &bold_flags);
+  test::ExpectTrue("font-weight:bold sets bold", bold_flags.bold);
+  test::ExpectFalse("font-weight:bold does not reset_bold", bold_flags.reset_bold);
 }
 
 void TestParseMarginBottomZeroUnitless() {
@@ -219,9 +288,13 @@ int main() {
   TestParseMarginTopMissingProperty();
   TestParseMarginTopNull();
   TestParseMarginTopEmUnit();
+  TestParseMarginTopPtUnit();
   TestParseMarginBottomZeroUnitless();
   TestTryParseFontSizeAcceptsPxValues();
   TestTryParseFontSizeAcceptsRelativeValues();
+  TestTryParseFontSizePt();
+  TestTryParseFontSizeAbsoluteKeywords();
   TestResolveFontSizePxHandlesRelativeValues();
+  TestParseInlineFlagsResets();
   return 0;
 }

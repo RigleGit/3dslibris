@@ -97,6 +97,12 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
     result.unit = MarginTopResult::Unit::Px;
     result.negative = negative;
     p += unit_len;
+  } else if (p + 1 < lc.size() && lc[p] == 'p' && lc[p + 1] == 't') {
+    // 1pt = 4/3 px (96dpi, 72pt/inch).
+    result.value = (value * 4 + 1) / 3;
+    result.unit = MarginTopResult::Unit::Px;
+    result.negative = negative;
+    p += 2;
   } else if (value == 0 && !has_decimal) {
     // CSS allows bare unitless zero for lengths (e.g. "margin: 0").
     result.value = 0;
@@ -241,6 +247,46 @@ void ParseInlineStyleFlags(const char *style, InlineStyleFlags *out) {
       ContainsNoCase(style_lc, "vertical-align: sub")) {
     out->subscript = true;
   }
+
+  // text-decoration: none (find property then check value is "none")
+  {
+    size_t p2 = 0;
+    while (p2 < style_lc.size()) {
+      p2 = style_lc.find("text-decoration", p2);
+      if (p2 == std::string::npos) break;
+      size_t colon = style_lc.find(':', p2);
+      if (colon == std::string::npos) break;
+      size_t v = colon + 1;
+      while (v < style_lc.size() && style_lc[v] == ' ') v++;
+      if (style_lc.compare(v, 4, "none") == 0) {
+        out->no_underline = true;
+        break;
+      }
+      p2++;
+    }
+  }
+
+  if (ContainsNoCase(style_lc, "font-weight:normal") ||
+      ContainsNoCase(style_lc, "font-weight: normal") ||
+      ContainsNoCase(style_lc, "font-weight:lighter") ||
+      ContainsNoCase(style_lc, "font-weight: lighter") ||
+      ContainsNoCase(style_lc, "font-weight:100") ||
+      ContainsNoCase(style_lc, "font-weight: 100") ||
+      ContainsNoCase(style_lc, "font-weight:200") ||
+      ContainsNoCase(style_lc, "font-weight: 200") ||
+      ContainsNoCase(style_lc, "font-weight:300") ||
+      ContainsNoCase(style_lc, "font-weight: 300") ||
+      ContainsNoCase(style_lc, "font-weight:400") ||
+      ContainsNoCase(style_lc, "font-weight: 400") ||
+      ContainsNoCase(style_lc, "font-weight:500") ||
+      ContainsNoCase(style_lc, "font-weight: 500")) {
+    out->reset_bold = true;
+  }
+
+  if (ContainsNoCase(style_lc, "font-style:normal") ||
+      ContainsNoCase(style_lc, "font-style: normal")) {
+    out->reset_italic = true;
+  }
 }
 
 static MarginTopResult ParseMarginValue(const char *style, const char *property,
@@ -254,39 +300,9 @@ static MarginTopResult ParseMarginValue(const char *style, const char *property,
   size_t pos = lc.find(prop_colon);
   if (pos != std::string::npos) {
     pos += prop_colon.size();
-    while (pos < lc.size() && lc[pos] == ' ')
-      pos++;
-    if (pos < lc.size() && lc[pos] == '-') {
-      result.negative = true;
-      pos++;
-    }
-    int value = 0;
-    bool has_digit = false;
-    while (pos < lc.size() && lc[pos] >= '0' && lc[pos] <= '9') {
-      value = value * 10 + (lc[pos] - '0');
-      has_digit = true;
-      pos++;
-    }
-    if (has_digit) {
-      while (pos < lc.size() && lc[pos] == ' ')
-        pos++;
-      if (pos < lc.size() && lc[pos] == '%') {
-        result.value = value;
-        result.unit = MarginTopResult::Unit::Percent;
-        return result;
-      }
-      if (pos + 1 < lc.size() && lc[pos] == 'p' && lc[pos + 1] == 'x') {
-        result.value = value;
-        result.unit = MarginTopResult::Unit::Px;
-        return result;
-      }
-      if (value == 0) {
-        result.value = 0;
-        result.unit = MarginTopResult::Unit::Px;
-        return result;
-      }
-    }
-    result = MarginTopResult{};
+    MarginTopResult r = ParseOneLengthToken(lc, &pos);
+    if (r.unit != MarginTopResult::Unit::None)
+      return r;
   }
 
   const char *shorthand = "margin:";
@@ -333,6 +349,29 @@ bool TryParseFontSize(const char *style, FontSizeSpec *out) {
     out->value_x100 = 0;
     return true;
   }
+  // Absolute keyword sizes — stored as Percent relative to base font.
+  // Order: longer prefixes first to avoid xx-large matching x-large.
+  if (lc.compare(pos, 8, "xx-large") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 20000; return true;
+  }
+  if (lc.compare(pos, 7, "x-large") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 15000; return true;
+  }
+  if (lc.compare(pos, 5, "large") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 12500; return true;
+  }
+  if (lc.compare(pos, 6, "medium") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 10000; return true;
+  }
+  if (lc.compare(pos, 8, "xx-small") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 5000;  return true;
+  }
+  if (lc.compare(pos, 7, "x-small") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 6250;  return true;
+  }
+  if (lc.compare(pos, 5, "small") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 8000;  return true;
+  }
 
   int value_x100 = 0;
   if (!ParseNumberX100(lc, &pos, &value_x100))
@@ -348,6 +387,11 @@ bool TryParseFontSize(const char *style, FontSizeSpec *out) {
     out->unit = FontSizeSpec::Unit::Em;
   } else if (pos + 1 < lc.size() && lc[pos] == 'p' && lc[pos + 1] == 'x') {
     out->unit = FontSizeSpec::Unit::Px;
+  } else if (pos + 1 < lc.size() && lc[pos] == 'p' && lc[pos + 1] == 't') {
+    // 1pt = 4/3 px; value_x100 is in units of hundredths of px.
+    out->unit = FontSizeSpec::Unit::Px;
+    out->value_x100 = (value_x100 * 4 + 1) / 3;
+    return true;
   } else if (pos < lc.size() && lc[pos] == '%') {
     out->unit = FontSizeSpec::Unit::Percent;
   } else {

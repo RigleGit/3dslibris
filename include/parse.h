@@ -101,6 +101,9 @@ struct parsedata_t {
 	bool style_subscript_stack[32];
 	bool style_mono_stack[32];
 	bool style_hidden_stack[32];
+	bool style_no_underline_stack[32];
+	bool style_reset_bold_stack[32];
+	bool style_reset_italic_stack[32];
 	bool link_active_stack[32];
 	u16 link_href_id_stack[32];
 	bool block_text_align_stack[32];
