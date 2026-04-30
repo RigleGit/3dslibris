@@ -2536,6 +2536,10 @@ void start(void *data, const char *el, const char **attr) {
     if (active_list == TAG_UL || active_list == TAG_OL) {
       if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
         linefeed(p);
+      // Prevent orphan markers: if the marker's line is the last usable line on
+      // the screen (chardata would immediately advance before the first content
+      // character), push the marker to the next screen now.
+      AdvanceParsedPageOnOverflow(p, ts->GetHeight());
       if (!suppress_marker) {
         if (active_list == TAG_UL) {
           AppendParsedByte(p, 0x2022); // bullet '•'
