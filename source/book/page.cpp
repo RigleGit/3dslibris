@@ -273,6 +273,7 @@ void Page::Draw(Text *ts) {
   u16 i = 0;
   InlineImageContext next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
   u8 next_image_align = 0;  // 0=center/default, 1=left, 2=right
+  int next_image_author_width = 0; // per-instance override; 0=use entry default
   bool rtl_paragraph = false;
   u32 rtl_line_px = 0;  // parse-time line width stashed by TEXT_RTL_LINE_PX
   bool in_preformatted_block = false;
@@ -353,11 +354,17 @@ void Page::Draw(Text *ts) {
         next_image_align = (u8)buf[i + 1];
       i += (i + 1 < length) ? 2 : 1;
       continue;
+    } else if (c == TEXT_IMAGE_AUTHOR_WIDTH) {
+      if (i + 1 < length)
+        next_image_author_width = (int)buf[i + 1];
+      i += (i + 1 < length) ? 2 : 1;
+      continue;
     } else if (c == '\n') {
       // line break, page breaking if necessary
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
       next_image_align = 0;
+      next_image_author_width = 0;
 
       const text_render_layout_utils::ReadingScreenMetrics metrics =
           text_render_layout_utils::ResolveReadingScreenMetrics(
@@ -500,8 +507,9 @@ void Page::Draw(Text *ts) {
         int current_screen = on_first_screen ? 0 : 1;
         book->PlanInlineImageLayout(ts, image_id, current_screen, ts->GetPenX(),
                                     ts->GetPenY(), ts->linebegan, next_image_context,
-                                    &image_plan);
+                                    &image_plan, next_image_author_width);
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
+        next_image_author_width = 0;
 
         if (image_plan.advance_before) {
           if (!advance_to_next_screen()) {
@@ -558,10 +566,12 @@ void Page::Draw(Text *ts) {
         if (stop_page_draw)
           break;
         next_image_align = 0;
+        next_image_author_width = 0;
       } else {
         i++;
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
         next_image_align = 0;
+        next_image_author_width = 0;
       }
       } else {
         i++;

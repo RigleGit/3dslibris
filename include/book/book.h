@@ -275,7 +275,8 @@ public:
   bool PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
                              int pen_x, int pen_y, bool line_began,
                              InlineImageContext image_context,
-                             InlineImageLayoutPlan *out);
+                             InlineImageLayoutPlan *out,
+                             int author_max_width_override = 0);
   bool DrawInlineImage(Text *ts, u16 image_id,
                        const InlineImageLayoutPlan *plan = NULL,
                        int current_screen = -1,

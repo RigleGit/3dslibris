@@ -1696,10 +1696,9 @@ static void AdvanceParsedScreen(parsedata_t *p) {
 static void ForcePageBreak(parsedata_t *p) {
   if (!p || !p->ts || !p->book)
     return;
-  if (p->screen == 0 && p->buflen == 0)
+  // If nothing is buffered yet we are already at the top of a fresh screen.
+  if (p->buflen == 0)
     return;
-  if (p->screen == 0)
-    AdvanceParsedScreen(p);
   AdvanceParsedScreen(p);
 }
 
@@ -2735,6 +2734,10 @@ void start(void *data, const char *el, const char **attr) {
       // concrete inline/band/page behavior from the same layout planner.
       if (leading_paragraph_image)
         AppendParsedByte(p, TEXT_IMAGE_LEADING_PARAGRAPH);
+      if (author_max_w > 0) {
+        AppendParsedByte(p, TEXT_IMAGE_AUTHOR_WIDTH);
+        AppendParsedByte(p, (u32)author_max_w);
+      }
       if (float_mode == book_xml_css_style_utils::FloatMode::Left) {
         AppendParsedByte(p, TEXT_IMAGE_ALIGN);
         AppendParsedByte(p, 1);

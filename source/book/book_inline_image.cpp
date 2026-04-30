@@ -625,7 +625,8 @@ bool Book::GetInlineImageMetadata(u16 id, InlineImageMetadata *out) {
 bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
                                  int pen_x, int pen_y, bool line_began,
                                  InlineImageContext image_context,
-                                 InlineImageLayoutPlan *out) {
+                                 InlineImageLayoutPlan *out,
+                                 int author_max_width_override) {
   if (!ts || !out)
     return false;
 
@@ -653,8 +654,9 @@ bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
   req.image_context = image_context;
   req.current_screen = current_screen;
   req.follow_text_lines = GetInlineImageFollowTextLines(image_id);
-  req.author_max_width_px =
-      (image_id < inline_images.size()) ? inline_images[image_id].author_max_width_px : 0;
+  req.author_max_width_px = (author_max_width_override > 0)
+      ? author_max_width_override
+      : ((image_id < inline_images.size()) ? inline_images[image_id].author_max_width_px : 0);
 
   *out = ::PlanInlineImageLayout(req, meta);
   return true;
