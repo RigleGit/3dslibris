@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Capítulo 18 — text-indent y text-transform</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body>
+
+<h1 id="capitulo-18">Capítulo 18: text-indent y text-transform</h1>
+
+<!-- ── 1. text-indent ────────────────────────────────────────────── -->
+
+<h2>1. text-indent</h2>
+
+<p>Este párrafo no tiene clase de sangría; debe usar la sangría de primera línea por defecto.</p>
+
+<p class="indent-zero">Este párrafo usa <code>text-indent: 0</code> vía clase. La primera línea no debe estar sangrada.</p>
+
+<p class="indent-negative">Este párrafo usa <code>text-indent: -1em</code> vía clase. La primera línea no debe estar sangrada (valor negativo suprime la sangría).</p>
+
+<p class="indent-2em">Este párrafo usa <code>text-indent: 2em</code> vía clase. La primera línea debe tener una sangría mayor que la normal.</p>
+
+<p style="text-indent: 0">Este párrafo suprime la sangría con <code>style="text-indent: 0"</code> inline. Sin sangría.</p>
+
+<p style="text-indent: 3em">Este párrafo usa <code>style="text-indent: 3em"</code> inline. Sangría pronunciada en la primera línea.</p>
+
+<p>Párrafo de referencia con sangría por defecto tras los casos anteriores.</p>
+
+<!-- ── 2. text-transform ──────────────────────────────────────────── -->
+
+<h2>2. text-transform</h2>
+
+<p class="transform-upper">Este párrafo usa <code>text-transform: uppercase</code> vía clase. Todo el texto debe aparecer en MAYÚSCULAS.</p>
+
+<p class="transform-lower">ESTE PÁRRAFO USA <code>text-transform: lowercase</code> VÍA CLASE. Todo el texto debe aparecer en minúsculas.</p>
+
+<p class="transform-capitalize">este párrafo usa <code>text-transform: capitalize</code> vía clase. La Primera Letra De Cada Palabra Debe Aparecer En Mayúscula.</p>
+
+<p style="text-transform: uppercase">Este párrafo usa <code>style="text-transform: uppercase"</code> inline. MAYÚSCULAS.</p>
+
+<p style="text-transform: lowercase">ESTE PÁRRAFO USA LOWERCASE INLINE. minúsculas.</p>
+
+<p style="text-transform: capitalize">este párrafo usa capitalize inline. Cada Palabra Con Mayúscula Inicial.</p>
+
+<p>Párrafo de referencia sin transformación tras los casos anteriores.</p>
+
+<!-- ── 3. text-transform en inline span ─────────────────────────── -->
+
+<h2>3. text-transform en span inline</h2>
+
+<p>Texto normal, luego <span style="text-transform: uppercase;">texto en mayúsculas</span>, luego normal de nuevo.</p>
+
+<p>Texto normal, luego <span class="transform-capitalize">texto con capitalize</span>, luego normal de nuevo.</p>
+
+</body>
+</html>

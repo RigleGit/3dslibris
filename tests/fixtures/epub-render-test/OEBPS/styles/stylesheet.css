@@ -266,6 +266,43 @@ h2.align-center-heading {
   margin: 0 48px 0 24px;
 }
 
+/* text-indent */
+.indent-zero     { text-indent: 0; }
+.indent-negative { text-indent: -1em; }
+.indent-2em      { text-indent: 2em; }
+
+/* text-transform */
+.transform-upper    { text-transform: uppercase; }
+.transform-lower    { text-transform: lowercase; }
+.transform-capitalize { text-transform: capitalize; }
+
+/* text-decoration: none reset */
+.no-underline { text-decoration: none; }
+
+/* font-weight resets */
+.fw-normal  { font-weight: normal; }
+.fw-lighter { font-weight: lighter; }
+.fw-300     { font-weight: 300; }
+
+/* font-style reset */
+.fs-normal { font-style: normal; }
+
+/* font-size: pt units and xx-small/xx-large */
+.size-10pt    { font-size: 10pt; }
+.size-14pt    { font-size: 14pt; }
+.size-xx-small { font-size: xx-small; }
+.size-xx-large { font-size: xx-large; }
+
+/* margin-top: em, rem, pt */
+.mt-1em  { margin-top: 1.5em; }
+.mt-1rem { margin-top: 1.5rem; }
+.mt-12pt { margin-top: 12pt; }
+
+/* margin-bottom: em, rem, pt */
+.mb-1em  { margin-bottom: 1.5em; }
+.mb-1rem { margin-bottom: 1.5rem; }
+.mb-12pt { margin-bottom: 12pt; }
+
 /* Ornament separator — as reported in issue #74 */
 .spaceOrnament {
   display: block;

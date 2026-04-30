@@ -34,6 +34,9 @@
     <item id="ch15" href="text/chapter-15-whitespace.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch16" href="text/chapter-16-float-clear.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch17" href="text/chapter-17-font-size.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch18" href="text/chapter-18-text-indent-transform.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch19" href="text/chapter-19-css-resets.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch20" href="text/chapter-20-nested-lists.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
 
   <spine toc="ncx">
@@ -57,6 +60,9 @@
     <itemref idref="ch15"/>
     <itemref idref="ch16"/>
     <itemref idref="ch17"/>
+    <itemref idref="ch18"/>
+    <itemref idref="ch19"/>
+    <itemref idref="ch20"/>
   </spine>
 
   <guide>

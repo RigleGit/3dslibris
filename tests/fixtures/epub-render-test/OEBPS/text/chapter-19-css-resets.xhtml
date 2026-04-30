@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Capítulo 19 — CSS resets y unidades adicionales</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body>
+
+<h1 id="capitulo-19">Capítulo 19: CSS resets y unidades adicionales</h1>
+
+<!-- ── 1. text-decoration: none ─────────────────────────────────── -->
+
+<h2>1. text-decoration: none</h2>
+
+<p>Este párrafo tiene texto normal y luego <span class="underline">texto subrayado</span> y luego texto normal.</p>
+
+<p>Aquí hay <span class="underline"><span class="no-underline">subrayado suprimido con text-decoration: none anidado</span></span> — el texto interior no debe estar subrayado.</p>
+
+<p><span style="text-decoration: none;">Este span con text-decoration: none inline no debe tener subrayado.</span></p>
+
+<p class="no-underline">Este párrafo usa la clase <code>no-underline</code>. Sin decoración de texto.</p>
+
+<!-- ── 2. font-weight: normal / lighter / valores numéricos ─────── -->
+
+<h2>2. font-weight: normal y lighter</h2>
+
+<p>Texto normal de referencia. Luego <strong>texto en negrita con strong</strong>. Luego normal.</p>
+
+<p><strong>Negrita, y dentro <span class="fw-normal">reset a font-weight: normal</span>, y de vuelta a negrita.</strong></p>
+
+<p><strong>Negrita, y dentro <span class="fw-lighter">font-weight: lighter</span>, y de vuelta a negrita.</strong></p>
+
+<p><strong>Negrita, y dentro <span class="fw-300">font-weight: 300</span>, y de vuelta a negrita.</strong></p>
+
+<p><strong>Negrita, y dentro <span style="font-weight: normal;">font-weight: normal inline</span>, y de vuelta a negrita.</strong></p>
+
+<!-- ── 3. font-style: normal ──────────────────────────────────────── -->
+
+<h2>3. font-style: normal</h2>
+
+<p>Texto normal. Luego <em>texto en cursiva con em</em>. Luego normal.</p>
+
+<p><em>Cursiva, y dentro <span class="fs-normal">font-style: normal reset</span>, y de vuelta a cursiva.</em></p>
+
+<p><em>Cursiva, y dentro <span style="font-style: normal;">font-style: normal inline</span>, y de vuelta a cursiva.</em></p>
+
+<!-- ── 4. font-size: unidades pt ─────────────────────────────────── -->
+
+<h2>4. font-size: unidades pt</h2>
+
+<p>Tamaño normal. Luego <span style="font-size: 10pt;">10pt</span>, <span style="font-size: 14pt;">14pt</span>, <span style="font-size: 18pt;">18pt</span>. De vuelta al normal.</p>
+
+<p>Vía clase: <span class="size-10pt">10pt vía clase</span>, <span class="size-14pt">14pt vía clase</span>. Normal.</p>
+
+<!-- ── 5. font-size: keywords xx-small y xx-large ────────────────── -->
+
+<h2>5. font-size: xx-small y xx-large</h2>
+
+<p>Normal, <span style="font-size: xx-small;">xx-small</span>, <span style="font-size: x-small;">x-small</span>, normal, <span style="font-size: x-large;">x-large</span>, <span style="font-size: xx-large;">xx-large</span>. De vuelta al normal.</p>
+
+<p>Vía clase: <span class="size-xx-small">xx-small clase</span> y <span class="size-xx-large">xx-large clase</span>. Normal.</p>
+
+<!-- ── 6. margin-top / margin-bottom: unidades em, rem, pt ───────── -->
+
+<h2>6. margin-top y margin-bottom: em, rem, pt</h2>
+
+<p>Párrafo de referencia antes de los casos de margen.</p>
+
+<p class="mt-1em">Este párrafo tiene <code>margin-top: 1.5em</code>. Debe haber más espacio arriba que en un párrafo normal.</p>
+
+<p class="mt-1rem">Este párrafo tiene <code>margin-top: 1.5rem</code>. Espacio superior basado en rem.</p>
+
+<p class="mt-12pt">Este párrafo tiene <code>margin-top: 12pt</code>. Espacio superior en puntos tipográficos.</p>
+
+<p class="mb-1em">Este párrafo tiene <code>margin-bottom: 1.5em</code>. Debe haber más espacio debajo.</p>
+
+<p class="mb-1rem">Este párrafo tiene <code>margin-bottom: 1.5rem</code>. Espacio inferior en rem.</p>
+
+<p class="mb-12pt">Este párrafo tiene <code>margin-bottom: 12pt</code>. Espacio inferior en puntos.</p>
+
+<p>Párrafo de referencia tras los casos de margen.</p>
+
+</body>
+</html>
