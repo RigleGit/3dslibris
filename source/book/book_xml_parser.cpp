@@ -1283,7 +1283,7 @@ static void EmitFlowedUtf8Segment(
   if (!p || !txt || txtlen == 0)
     return;
 
-  std::vector<text_layout_utils::ShapedGlyph> run;
+  std::vector<text_layout_utils::ShapedGlyph> &run = p->shaped_run;
   bool has_rtl = false;
   if (!text_layout_utils::ShapeTextRunBidi(
           txt, txtlen, NULL, MeasureParsedTextAdvance, (void *)&measure_ctx,
@@ -1348,7 +1348,7 @@ static void EmitPreformattedUtf8Segment(
     return;
   }
 
-  std::vector<text_layout_utils::ShapedGlyph> pre_run;
+  std::vector<text_layout_utils::ShapedGlyph> &pre_run = p->shaped_run;
   bool pre_has_rtl = false;
   if (!text_layout_utils::ShapeTextRunBidi(
           txt, txtlen, NULL, MeasureParsedTextAdvance, (void *)&measure_ctx,

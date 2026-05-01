@@ -19,6 +19,7 @@
 #include <vector>
 #include "book/epub_css_class_map.h"
 #include "shared/status_reporter.h"
+#include "shared/text_layout_utils.h"
 
 #define PAGEBUFSIZE 4096
 
@@ -179,6 +180,10 @@ struct parsedata_t {
 	int status;
 	int totalbytes;
 	int pagecount;
+	//! Reusable shaped glyph buffer — avoids per-token heap alloc during
+	//! pagination. Passed as `out` to ShapeTextRunBidi/ShapeTextRunUtf8,
+	//! which call clear() before filling it.
+	std::vector<text_layout_utils::ShapedGlyph> shaped_run;
 };
 
 bool iswhitespace(u32 c);
