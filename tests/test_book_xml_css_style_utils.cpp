@@ -243,6 +243,25 @@ void TestParseMarginRightShorthandTwoValues() {
   test::ExpectEq("right shorthand 2val value", r.value, 16);
 }
 
+void TestParseMarginShorthandWithAuto() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  // "margin: 0 auto" — top/bottom=0, auto skipped for left/right
+  R top = book_xml_css_style_utils::ParseMarginTop("margin: 0 auto;");
+  test::ExpectEq("0 auto top unit", (int)top.unit, (int)R::Unit::Px);
+  test::ExpectEq("0 auto top value", top.value, 0);
+  // Right side: auto → Unit::None (no override)
+  R right = book_xml_css_style_utils::ParseMarginRight("margin: 0 auto;");
+  test::ExpectEq("0 auto right is none", (int)right.unit, (int)R::Unit::None);
+  // "margin: auto 5%" — auto for top skipped, 5% for right
+  R right2 = book_xml_css_style_utils::ParseMarginRight("margin: auto 5%;");
+  test::ExpectEq("auto 5% right unit", (int)right2.unit, (int)R::Unit::Percent);
+  test::ExpectEq("auto 5% right value", right2.value, 5);
+  // "margin: 5% auto" — 5% top, auto for right
+  R top2 = book_xml_css_style_utils::ParseMarginTop("margin: 5% auto;");
+  test::ExpectEq("5% auto top unit", (int)top2.unit, (int)R::Unit::Percent);
+  test::ExpectEq("5% auto top value", top2.value, 5);
+}
+
 void TestResolveHorizontalMarginPx() {
   using R = book_xml_css_style_utils::MarginTopResult;
 
@@ -558,6 +577,7 @@ int main() {
   TestParseMarginRightPercent();
   TestParseMarginRightShorthand();
   TestParseMarginRightShorthandTwoValues();
+  TestParseMarginShorthandWithAuto();
   TestResolveHorizontalMarginPx();
   TestTryParseFontSizeAcceptsPxValues();
   TestTryParseFontSizeAcceptsRelativeValues();

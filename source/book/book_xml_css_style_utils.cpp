@@ -128,6 +128,15 @@ MarginTopResult ParseMarginShorthand(const std::string &lc,
   int count = 0;
   size_t p = start_pos;
   while (count < 4 && p < lc.size() && lc[p] != ';') {
+    while (p < lc.size() && lc[p] == ' ')
+      p++;
+    // Skip 'auto' keyword: treat as Unit::None (no explicit override).
+    if (p + 4 <= lc.size() && lc.compare(p, 4, "auto") == 0 &&
+        (p + 4 == lc.size() || lc[p + 4] == ' ' || lc[p + 4] == ';')) {
+      tokens[count++] = MarginTopResult{};
+      p += 4;
+      continue;
+    }
     MarginTopResult t = ParseOneLengthToken(lc, &p);
     if (t.unit == MarginTopResult::Unit::None)
       break;

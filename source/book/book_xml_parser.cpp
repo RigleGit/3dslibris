@@ -2432,9 +2432,10 @@ void start(void *data, const char *el, const char **attr) {
     }
   } else if (!strcmp(el, "head"))
     parse_push(p, TAG_HEAD);
-  else if (!strcmp(el, "ol"))
+  else if (!strcmp(el, "ol")) {
     parse_push(p, TAG_OL);
-  else if (!strcmp(el, "p")) {
+    book_xml_list_utils::ConfigureElementListSemantics(p, attr);
+  } else if (!strcmp(el, "p")) {
     parse_push(p, TAG_P);
     p->in_paragraph = true;
     p->paragraph_has_content = false;
@@ -2572,9 +2573,10 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_STYLE);
   else if (XmlNameEquals(el, "title"))
     parse_push(p, TAG_TITLE);
-  else if (!strcmp(el, "ul"))
+  else if (!strcmp(el, "ul")) {
     parse_push(p, TAG_UL);
-  else if (!strcmp(el, "strong") || !strcmp(el, "b")) {
+    book_xml_list_utils::ConfigureElementListSemantics(p, attr);
+  } else if (!strcmp(el, "strong") || !strcmp(el, "b")) {
     parse_push(p, TAG_STRONG);
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
