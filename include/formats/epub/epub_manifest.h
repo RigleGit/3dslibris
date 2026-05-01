@@ -19,7 +19,8 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
 int LoadEpubPackageData(unzFile uf, Book *book, epub_data_t *parsedata,
                         std::string *opf_folder, const EpubDeps &deps);
 int LoadEpubPackageForParse(unzFile uf, Book *book, epub_data_t *parsedata,
-                            std::string *folder, const EpubDeps &deps
+                            std::string *folder, bool metadataonly,
+                            const EpubDeps &deps
 #ifdef DSLIBRIS_DEBUG
                             , u64 *t_after_container, u64 *t_after_rootfile
 #endif

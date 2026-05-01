@@ -14,6 +14,7 @@
 
 #include "book/epub_css_class_map.h"
 #include "book/book.h"
+#include "parse.h"
 #include <map>
 #include <string>
 
@@ -50,6 +51,8 @@ typedef struct {
   std::string parsed_doc_title; //! per-XHTML parsed title/heading candidate
   std::map<std::string, std::string> css_href_by_doc;
   std::map<std::string, epub_css_class_map::CssClassMap> css_class_map_by_path;
+  bool metadata_parse_complete;
+  parsedata_t content_pd;
 } epub_data_t;
 
 int epub(Book *book, std::string filepath, bool metadataonly);

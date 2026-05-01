@@ -241,6 +241,7 @@ void epub_data_init(epub_data_t *d) {
   d->css_href_by_doc.clear();
   d->css_class_map_by_path.clear();
   d->metadataonly = false;
+  d->metadata_parse_complete = false;
   d->book = nullptr;
 }
 
@@ -270,6 +271,8 @@ void epub_container_start(void *data, const char *el, const char **attr) {
 
 void epub_rootfile_start(void *data, const char *el, const char **attr) {
   epub_data_t *d = (epub_data_t *)data;
+  if (d->metadata_parse_complete)
+    return;
   std::string elem = el;
   if (d->ctx.empty())
     return;
@@ -277,33 +280,63 @@ void epub_rootfile_start(void *data, const char *el, const char **attr) {
   if (!ctx)
     return;
 
+  if (d->metadataonly && (elem == "spine" || elem == "opf:spine")) {
+    d->metadata_parse_complete = true;
+    return;
+  }
+
   if ((*ctx == "manifest" || *ctx == "opf:manifest") &&
       (elem == "item" || elem == "opf:item")) {
-    epub_item *item = new epub_item;
-    d->manifest.push_back(item);
+    std::string id;
+    std::string href;
+    std::string media_type;
+    std::string properties;
     for (int i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "id"))
-        item->id = attr[i + 1];
+        id = attr[i + 1];
       if (!strcmp(attr[i], "href"))
-        item->href = attr[i + 1];
+        href = attr[i + 1];
       if (!strcmp(attr[i], "media-type"))
-        item->media_type = attr[i + 1];
+        media_type = attr[i + 1];
       if (!strcmp(attr[i], "properties"))
-        item->properties = attr[i + 1];
+        properties = attr[i + 1];
     }
-    if (!item->properties.empty() && ContainsToken(item->properties, "nav")) {
-      d->navid = item->id;
+    const bool is_image = media_type.find("image/") == 0;
+    const bool is_cover_image =
+        !properties.empty() && ContainsToken(properties, "cover-image");
+    const bool looks_like_cover =
+        ContainsNoCase(id, "cover") || ContainsNoCase(href, "cover") ||
+        ContainsNoCase(href, "portada");
+    const bool keep_manifest_item =
+        !d->metadataonly || is_image || is_cover_image || looks_like_cover;
+
+    if (keep_manifest_item) {
+      epub_item *item = new epub_item;
+      item->id = id;
+      item->href = href;
+      item->media_type = media_type;
+      item->properties = properties;
+      d->manifest.push_back(item);
     }
-    if (!item->properties.empty() &&
-        ContainsToken(item->properties, "cover-image")) {
-      d->coverid = item->id;
+
+    if (!d->metadataonly && !properties.empty() &&
+        ContainsToken(properties, "nav")) {
+      d->navid = id;
     }
-    if (d->tocid.empty() && item->media_type == "application/x-dtbncx+xml") {
-      d->tocid = item->id;
+    if (is_cover_image) {
+      d->coverid = id;
+    }
+    if (!d->metadataonly && d->tocid.empty() &&
+        media_type == "application/x-dtbncx+xml") {
+      d->tocid = id;
     }
   }
 
   else if (elem == "spine" || elem == "opf:spine") {
+    if (d->metadataonly) {
+      d->metadata_parse_complete = true;
+      return;
+    }
     for (int i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "toc"))
         d->tocid = attr[i + 1];
@@ -346,6 +379,8 @@ void epub_rootfile_start(void *data, const char *el, const char **attr) {
 
 void epub_rootfile_end(void *data, const char *el) {
   epub_data_t *d = (epub_data_t *)data;
+  if (d->metadata_parse_complete)
+    return;
   if (d->ctx.empty())
     return;
   delete d->ctx.back();
@@ -354,6 +389,8 @@ void epub_rootfile_end(void *data, const char *el) {
 
 void epub_rootfile_char(void *data, const XML_Char *txt, int len) {
   epub_data_t *d = (epub_data_t *)data;
+  if (d->metadata_parse_complete)
+    return;
   if (d->ctx.empty())
     return;
   std::string *ctx = d->ctx.back();
@@ -381,7 +418,7 @@ static void InitParsedataWithEpubDeps(parsedata_t *parsedata, Book *book,
 int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
                            unzFile css_scan_uf) {
   int rc = 0;
-  parsedata_t pd;
+  parsedata_t *pd = NULL;
 #ifdef DSLIBRIS_DEBUG
   bool log_content_layout = false;
   u64 t_content_begin = 0;
@@ -408,7 +445,12 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
   } else if (epd->type == PARSE_ROOTFILE) {
     options.user_data = epd;
     options.abort_parse = [](void *user_data) {
-      Book *book = static_cast<Book *>(user_data);
+      epub_data_t *data = static_cast<epub_data_t *>(user_data);
+      if (!data)
+        return false;
+      if (data->metadataonly && data->metadata_parse_complete)
+        return true;
+      Book *book = data->book;
       return book &&
              (open_cancel_poll::Poll(book, book->GetStatusReporter(),
                                      "epub-rootfile-parse") ||
@@ -416,29 +458,30 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
                book->GetStatusReporter()->ShouldAbortWork()) ||
               book->IsOpenAbortRequested());
     };
-    options.abort_user_data = epd->book;
+    options.abort_user_data = epd;
     options.start_element = epub_rootfile_start;
     options.end_element = epub_rootfile_end;
     options.character_data = epub_rootfile_char;
   } else if (epd->type == PARSE_CONTENT) {
     epd->parsed_doc_title.clear();
-    InitParsedataWithEpubDeps(&pd, epd->book, deps);
-    pd.docpath = epd->docpath;
+    pd = &epd->content_pd;
+    InitParsedataWithEpubDeps(pd, epd->book, deps);
+    pd->docpath = epd->docpath;
     if (!epd->archive_path.empty())
       LoadCssClassMapForDoc(epd->archive_path, epd->docpath, deps.reporter,
-                            epd, &pd.css_class_map, css_scan_uf);
+                            epd, &pd->css_class_map, css_scan_uf);
 #ifdef DSLIBRIS_DEBUG
     log_content_layout = deps.reporter && epd->book;
     if (log_content_layout) {
       t_content_begin = osGetTime();
       pages_before = epd->book->GetPageCount();
-      chardata_calls_before = pd.perf_chardata_calls;
-      chardata_ms_before = pd.perf_chardata_ms;
-      overflow_before = pd.perf_page_overflows;
+      chardata_calls_before = pd->perf_chardata_calls;
+      chardata_ms_before = pd->perf_chardata_ms;
+      overflow_before = pd->perf_page_overflows;
       layout_before = text_layout_utils::GetPerfStats();
     }
 #endif
-    options.user_data = &pd;
+    options.user_data = pd;
     options.abort_parse = [](void *user_data) {
       parsedata_t *parsedata = static_cast<parsedata_t *>(user_data);
       return parsedata &&
@@ -477,8 +520,8 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
              "shape=%llums/%u break=%llums/%u pre=%llums/%u "
              "measure=%llums/%u glyphs=%u pages=%u overflow_pages=%u path=%s",
              (unsigned long long)(osGetTime() - t_content_begin),
-             (unsigned long long)(pd.perf_chardata_ms - chardata_ms_before),
-             (unsigned)(pd.perf_chardata_calls - chardata_calls_before),
+             (unsigned long long)(pd->perf_chardata_ms - chardata_ms_before),
+             (unsigned)(pd->perf_chardata_calls - chardata_calls_before),
              (unsigned long long)(layout_after.shape_ms - layout_before.shape_ms),
              (unsigned)(layout_after.shape_calls - layout_before.shape_calls),
              (unsigned long long)(layout_after.line_break_ms -
@@ -495,18 +538,21 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
                         layout_before.measure_calls),
              (unsigned)(layout_after.shaped_glyphs - layout_before.shaped_glyphs),
              (unsigned)(epd->book->GetPageCount() - pages_before),
-             (unsigned)(pd.perf_page_overflows - overflow_before),
+             (unsigned)(pd->perf_page_overflows - overflow_before),
              epd->docpath.c_str());
   }
 #endif
   if (!parse_result.ok)
     rc = (parse_result.error_code == XML_ERROR_ABORTED)
-             ? BOOK_ERR_CANCELLED
+             ? ((epd->type == PARSE_ROOTFILE && epd->metadataonly &&
+                 epd->metadata_parse_complete)
+                    ? 0
+                    : BOOK_ERR_CANCELLED)
              : (int)parse_result.error_code;
   if (epd->type == PARSE_CONTENT) {
-    epd->parsed_doc_title = Trim(pd.doc_heading);
+    epd->parsed_doc_title = Trim(pd->doc_heading);
     if (epd->parsed_doc_title.empty())
-      epd->parsed_doc_title = Trim(pd.doc_title);
+      epd->parsed_doc_title = Trim(pd->doc_title);
   }
   return (rc);
 }
@@ -561,7 +607,7 @@ int LoadEpubPackageData(unzFile uf, Book *book, epub_data_t *parsedata,
 
 int LoadEpubPackageForParse(
     unzFile uf, Book *book, epub_data_t *parsedata, std::string *folder,
-    const EpubDeps &deps
+    bool metadataonly, const EpubDeps &deps
 #ifdef DSLIBRIS_DEBUG
     ,
     u64 *t_after_container, u64 *t_after_rootfile
@@ -605,6 +651,7 @@ int LoadEpubPackageForParse(
     epub_data_init(parsedata);
     parsedata->book = book;
     parsedata->type = PARSE_ROOTFILE;
+    parsedata->metadataonly = metadataonly;
     const int parse_rc = epub_parse_currentfile(uf, parsedata, deps);
     const int close_rc = unzCloseCurrentFile(uf);
     rc = (parse_rc != 0) ? parse_rc : close_rc;

@@ -417,7 +417,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
 
   std::string folder;
   rc = LoadEpubPackageForParse(
-      uf, book, &parsedata, &folder, deps
+      uf, book, &parsedata, &folder, metadataonly, deps
 #ifdef DSLIBRIS_DEBUG
       ,
       &t_after_container, &t_after_rootfile
