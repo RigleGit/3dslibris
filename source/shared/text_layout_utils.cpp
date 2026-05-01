@@ -212,8 +212,10 @@ LineBreakMeasureResult FindPreformattedLineBreakAndMeasure(
 }
 
 bool ShapeTextRunBidi(const char *s, size_t len, const char *lang,
-                      MeasureCodepointFn measure_codepoint, void *measure_ctx,
-                      std::vector<ShapedGlyph> *out, bool *has_rtl) {
+                       MeasureCodepointFn measure_codepoint, void *measure_ctx,
+                       std::vector<ShapedGlyph> *out, bool *has_rtl,
+                       std::vector<uint32_t> *bidi_cps,
+                       std::vector<text_bidi_utils::BidiRun> *bidi_runs) {
   if (has_rtl)
     *has_rtl = false;
   if (!ShapeTextRunUtf8(s, len, lang, measure_codepoint, measure_ctx, out))
@@ -233,28 +235,35 @@ bool ShapeTextRunBidi(const char *s, size_t len, const char *lang,
   if (!contains_rtl)
     return true;
 
-  // Apply Arabic contextual shaping before BiDi so the analyser sees
+  // Apply Arabic contextual shaping before BiDi so the analyzer sees
   // presentation-form codepoints (still in RTL ranges, no BiDi change).
   if (contains_arabic)
     text_arabic_shaping::ApplyContextualShaping(out, measure_codepoint,
-                                                 measure_ctx);
+                                                   measure_ctx);
 
-  std::vector<uint32_t> cps;
-  cps.reserve(out->size());
+  std::vector<uint32_t> *cps = bidi_cps ? bidi_cps : nullptr;
+  if (!cps) {
+    static std::vector<uint32_t> s_cps;
+    cps = &s_cps;
+  }
+  cps->clear();
+  cps->reserve(out->size());
   for (size_t i = 0; i < out->size(); i++)
-    cps.push_back((*out)[i].text.codepoint);
-
-  if (!text_bidi_utils::ContainsRTL(cps.data(), cps.size()))
-    return true;
+    cps->push_back((*out)[i].text.codepoint);
 
   if (has_rtl)
     *has_rtl = true;
 
-  std::vector<text_bidi_utils::BidiRun> runs;
-  text_bidi_utils::AnalyzeBidiRuns(cps.data(), cps.size(), &runs);
+  std::vector<text_bidi_utils::BidiRun> *runs =
+      bidi_runs ? bidi_runs : nullptr;
+  if (!runs) {
+    static std::vector<text_bidi_utils::BidiRun> s_runs;
+    runs = &s_runs;
+  }
+  text_bidi_utils::AnalyzeBidiRuns(cps->data(), cps->size(), runs);
 
-  for (size_t r = 0; r < runs.size(); r++) {
-    const text_bidi_utils::BidiRun &run_info = runs[r];
+  for (size_t r = 0; r < runs->size(); r++) {
+    const text_bidi_utils::BidiRun &run_info = (*runs)[r];
     for (size_t j = 0; j < run_info.length; j++) {
       size_t idx = run_info.start + j;
       if (idx < out->size())

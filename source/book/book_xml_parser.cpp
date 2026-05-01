@@ -1287,20 +1287,11 @@ static void EmitFlowedUtf8Segment(
   bool has_rtl = false;
   if (!text_layout_utils::ShapeTextRunBidi(
           txt, txtlen, NULL, MeasureParsedTextAdvance, (void *)&measure_ctx,
-          &run, &has_rtl))
+          &run, &has_rtl, &p->bidi_cps, &p->bidi_runs))
     return;
 
-  std::vector<text_bidi_utils::BidiRun> bidi_runs;
-  if (has_rtl) {
-    std::vector<uint32_t> run_cps;
-    run_cps.reserve(run.size());
-    for (size_t ci = 0; ci < run.size(); ci++)
-      run_cps.push_back(run[ci].text.codepoint);
-    text_bidi_utils::AnalyzeBidiRuns(run_cps.data(), run_cps.size(),
-                                     &bidi_runs);
-  }
   book_xml_text_emit::EmitFlowedShapedText(
-      p, txt, run, has_rtl, bidi_runs, emit_metrics,
+      p, txt, run, has_rtl, p->bidi_runs, emit_metrics,
       AdvanceParsedPageOnOverflowThunk, NULL);
 }
 
@@ -1352,18 +1343,11 @@ static void EmitPreformattedUtf8Segment(
   bool pre_has_rtl = false;
   if (!text_layout_utils::ShapeTextRunBidi(
           txt, txtlen, NULL, MeasureParsedTextAdvance, (void *)&measure_ctx,
-          &pre_run, &pre_has_rtl)) {
+          &pre_run, &pre_has_rtl, &p->bidi_cps, &p->bidi_runs)) {
     return;
   }
 
-  std::vector<text_bidi_utils::BidiRun> pre_bidi_runs;
   if (pre_has_rtl) {
-    std::vector<uint32_t> pre_cps;
-    pre_cps.reserve(pre_run.size());
-    for (size_t ci = 0; ci < pre_run.size(); ci++)
-      pre_cps.push_back(pre_run[ci].text.codepoint);
-    text_bidi_utils::AnalyzeBidiRuns(pre_cps.data(), pre_cps.size(),
-                                     &pre_bidi_runs);
     if (book_xml_text_emit::DetectParagraphRTL(pre_run))
       AppendParsedByte(p, TEXT_PARAGRAPH_RTL);
     else
@@ -1414,7 +1398,7 @@ static void EmitPreformattedUtf8Segment(
       AppendParsedByte(p, TEXT_RTL_LINE_PX);
       AppendParsedByte(p, (u32)advance);
       book_xml_text_emit::EmitBidiSegment(p, pre_run, unit_index,
-                                          segment_end_index, pre_bidi_runs,
+                                          segment_end_index, p->bidi_runs,
                                           !text_already_transformed);
     } else {
       if (text_already_transformed) {

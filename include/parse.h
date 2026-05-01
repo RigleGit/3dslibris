@@ -184,6 +184,11 @@ struct parsedata_t {
 	//! pagination. Passed as `out` to ShapeTextRunBidi/ShapeTextRunUtf8,
 	//! which call clear() before filling it.
 	std::vector<text_layout_utils::ShapedGlyph> shaped_run;
+	//! Reusable codepoint buffer for BiDi analysis inside ShapeTextRunBidi.
+	//! Avoids allocating a new vector for every token during pagination.
+	std::vector<uint32_t> bidi_cps;
+	//! Reusable BiDi run buffer for ShapeTextRunBidi.
+	std::vector<text_bidi_utils::BidiRun> bidi_runs;
 };
 
 bool iswhitespace(u32 c);
