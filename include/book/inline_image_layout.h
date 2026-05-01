@@ -52,3 +52,5 @@ struct InlineImageLayoutPlan {
 
 InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
                                             const InlineImageMetadata &meta);
+void ApplyFloatImageLayoutOverride(InlineImageLayoutPlan *plan, bool line_began,
+                                   int linespacing);

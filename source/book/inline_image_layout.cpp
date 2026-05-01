@@ -337,3 +337,16 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
   FillPageMode(req, &plan);
   return plan;
 }
+
+void ApplyFloatImageLayoutOverride(InlineImageLayoutPlan *plan, bool line_began,
+                                   int linespacing) {
+  if (!plan || plan->mode != INLINE_IMAGE_LAYOUT_INLINE)
+    return;
+
+  plan->mode = INLINE_IMAGE_LAYOUT_BAND;
+  plan->line_break_before = line_began;
+  plan->advance_before = false;
+  plan->consume_rest_of_screen = false;
+  plan->vertical_space_after_draw =
+      plan->draw_height + std::max(0, linespacing);
+}

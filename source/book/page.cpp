@@ -29,6 +29,7 @@
 
 #include "app/app.h"
 #include "book/book.h"
+#include "book/inline_image_layout.h"
 #include "book/page_alignment_utils.h"
 #include "book/book_xml_css_style_utils.h"
 #include "book/page_buffer_utils.h"
@@ -525,6 +526,9 @@ void Page::Draw(Text *ts) {
         book->PlanInlineImageLayout(ts, image_id, current_screen, ts->GetPenX(),
                                     ts->GetPenY(), ts->linebegan, next_image_context,
                                     &image_plan, next_image_author_width);
+        if (next_image_align != 0)
+          ApplyFloatImageLayoutOverride(&image_plan, ts->linebegan,
+                                        ts->linespacing);
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
         next_image_author_width = 0;
 

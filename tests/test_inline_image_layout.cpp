@@ -76,6 +76,18 @@ int main() {
 
   {
     InlineImageLayoutPlan plan =
+        PlanInlineImageLayout(BaseRequest(), Metadata(12, 12));
+    ApplyFloatImageLayoutOverride(&plan, true, BaseRequest().linespacing);
+    ExpectMode("floated small image is promoted to band", plan,
+               INLINE_IMAGE_LAYOUT_BAND);
+    ExpectTrue("float band starts on its own line", plan.line_break_before);
+    ExpectFalse("float band does not advance screens", plan.advance_before);
+    ExpectEq("float band consumes image height", plan.vertical_space_after_draw,
+             plan.draw_height + BaseRequest().linespacing);
+  }
+
+  {
+    InlineImageLayoutPlan plan =
         PlanInlineImageLayout(BaseRequest(), Metadata(1000, 100));
     ExpectMode("wide thin image becomes band", plan,
                INLINE_IMAGE_LAYOUT_BAND);

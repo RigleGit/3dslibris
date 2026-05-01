@@ -23,6 +23,7 @@
 #include "book/book_xml_table_utils.h"
 #include "book/book_xml_text_emit.h"
 #include "book/book_xml.h"
+#include "book/inline_image_layout.h"
 #include "formats/common/epub_image_utils.h"
 #include "formats/common/html_entity_utils.h"
 #include "reader/inline_link_utils.h"
@@ -1660,6 +1661,12 @@ static bool blankline(parsedata_t *p) {
   return (p->buf[p->buflen - 1] == '\n') && (p->buf[p->buflen - 2] == '\n');
 }
 
+static void ApplyClearBreak(parsedata_t *p) {
+  if (!p || !p->linebegan || blankline(p))
+    return;
+  linefeed(p);
+}
+
 static int CountTrailingLinefeeds(const parsedata_t *p) {
   if (!p || p->buflen <= 0)
     return 0;
@@ -2171,8 +2178,7 @@ void start(void *data, const char *el, const char **attr) {
     }
     if (ParseElementClear(attr, p->css_class_map) !=
         book_xml_css_style_utils::ClearMode::None) {
-      if (!blankline(p))
-        linefeed(p);
+      ApplyClearBreak(p);
     }
     if ((book_xml_css_style_utils::HasPageBreakInsideAvoid(el_style) ||
          epub_css_class_map::LookupPageBreakInsideAvoidForClassAttr(
@@ -2651,8 +2657,7 @@ void start(void *data, const char *el, const char **attr) {
         ParseElementFloat(attr, p->css_class_map);
     if (ParseElementClear(attr, p->css_class_map) !=
         book_xml_css_style_utils::ClearMode::None) {
-      if (!blankline(p))
-        linefeed(p);
+      ApplyClearBreak(p);
     }
 
     if (img_style) {
@@ -2695,15 +2700,9 @@ void start(void *data, const char *el, const char **attr) {
                                      p->pen.y, p->linebegan,
                                      image_context, &image_plan);
 
-      if (float_mode != book_xml_css_style_utils::FloatMode::None &&
-          image_plan.mode == INLINE_IMAGE_LAYOUT_INLINE) {
-        image_plan.mode = INLINE_IMAGE_LAYOUT_BAND;
-        image_plan.line_break_before = p->linebegan;
-        image_plan.advance_before = false;
-        image_plan.consume_rest_of_screen = false;
-        image_plan.vertical_space_after_draw =
-            image_plan.draw_height + ts->linespacing;
-      }
+      if (float_mode != book_xml_css_style_utils::FloatMode::None)
+        ApplyFloatImageLayoutOverride(&image_plan, p->linebegan,
+                                      ts->linespacing);
 
       // If the image can't be decoded (e.g. a pure SVG vector without an
       // embedded raster), PAGE mode would consume a full screen worth of space
