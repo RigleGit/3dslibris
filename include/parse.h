@@ -110,6 +110,9 @@ struct parsedata_t {
 	u8 style_font_size_stack[32];        // applied px for inline font-size at this depth; 0 = no change
 	u8 style_font_size_restore_stack[32]; // pre-change px to restore on element close; 0 = no change
 	bool text_transform_word_start;
+	u8 base_font_size_px;
+	bool coalesce_text_segments;
+	std::string inline_text_tail;
 	bool link_active_stack[32];
 	u16 link_href_id_stack[32];
 	bool block_text_align_stack[32];
@@ -175,6 +178,10 @@ struct parsedata_t {
 	std::string fb2_title_text;
 	u64 perf_chardata_ms;
 	u32 perf_chardata_calls;
+	u64 perf_element_ms;
+	u32 perf_element_calls;
+	u64 perf_flush_ms;
+	u32 perf_flush_calls;
 	u32 perf_inline_images;
 	u32 perf_page_overflows;
 	int status;

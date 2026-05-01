@@ -289,6 +289,18 @@ void TestComputeHeadingFontSizeSupportsRelativeCssUnits() {
                  17);
 }
 
+void TestClampInlineFontSizeKeepsNestedSmallReadable() {
+  test::ExpectEq("nested small clamped against reading base",
+                 book_xml_parser_style_utils::ClampInlineFontSize(14, 9),
+                 11);
+  test::ExpectEq("normal small remains readable",
+                 book_xml_parser_style_utils::ClampInlineFontSize(14, 11),
+                 11);
+  test::ExpectEq("inline large capped against reading base",
+                 book_xml_parser_style_utils::ClampInlineFontSize(14, 40),
+                 20);
+}
+
 } // namespace
 
 int main() {
@@ -304,5 +316,6 @@ int main() {
   TestComputeHeadingFontSizeUsesDefaultMultipliers();
   TestComputeHeadingFontSizeUsesCssAndClamps();
   TestComputeHeadingFontSizeSupportsRelativeCssUnits();
+  TestClampInlineFontSizeKeepsNestedSmallReadable();
   return 0;
 }

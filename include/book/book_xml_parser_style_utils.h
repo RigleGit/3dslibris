@@ -4,6 +4,7 @@
 #include "parse.h"
 #include "screen_constants.h"
 #include "shared/text_token_constants.h"
+#include "ui/text_limits.h"
 
 #include <algorithm>
 #include <math.h>
@@ -273,6 +274,17 @@ inline int ClampHeadingFontSize(int base_px, int px) {
     return px;
   const int min_px = std::max(1, (int)floor((double)base_px * 0.75 + 0.5));
   const int max_px = std::max(min_px, (int)floor((double)base_px * 2.0 + 0.5));
+  return std::max(min_px, std::min(px, max_px));
+}
+
+inline int ClampInlineFontSize(int base_px, int px) {
+  if (base_px <= 0)
+    return ClampTextPixelSize(px);
+  const int min_px =
+      std::max(kTextPixelSizeMin, (int)floor((double)base_px * 0.75 + 0.5));
+  const int max_px = std::min(
+      kTextPixelSizeMax,
+      std::max(min_px, (int)floor((double)base_px * 2.0 + 0.5)));
   return std::max(min_px, std::min(px, max_px));
 }
 

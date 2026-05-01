@@ -143,6 +143,9 @@ void parse_init(parsedata_t *data) {
   data->in_paragraph = false;
   data->paragraph_has_content = false;
   data->text_transform_word_start = true;
+  data->base_font_size_px = 0;
+  data->coalesce_text_segments = false;
+  data->inline_text_tail.clear();
   data->bold = false;
   data->italic = false;
   data->underline = false;
@@ -236,6 +239,10 @@ void parse_init(parsedata_t *data) {
   data->fb2_title_text.clear();
   data->perf_chardata_ms = 0;
   data->perf_chardata_calls = 0;
+  data->perf_element_ms = 0;
+  data->perf_element_calls = 0;
+  data->perf_flush_ms = 0;
+  data->perf_flush_calls = 0;
   data->perf_inline_images = 0;
   data->perf_page_overflows = 0;
   parse_reset_page_buffer(data);

@@ -46,7 +46,9 @@ struct PerfStats {
 
 bool ShapeTextRunUtf8(const char *s, size_t len, const char *lang,
                       MeasureCodepointFn measure_codepoint, void *measure_ctx,
-                      std::vector<ShapedGlyph> *out);
+                      std::vector<ShapedGlyph> *out,
+                      bool *contains_rtl = nullptr,
+                      bool *contains_arabic = nullptr);
 bool ShapeTextRunBidi(const char *s, size_t len, const char *lang,
                        MeasureCodepointFn measure_codepoint, void *measure_ctx,
                        std::vector<ShapedGlyph> *out, bool *has_rtl,

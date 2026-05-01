@@ -45,6 +45,47 @@ static uint64_t PerfNowMs() {
 #endif
 }
 
+static bool IsAsciiWhitespace(uint32_t cp) {
+  return cp == ' ' || cp == '\t' || cp == '\n' || cp == '\r' ||
+         cp == 0x000B || cp == 0x000C;
+}
+
+static bool TryShapeAsciiTextRun(const char *s, size_t len,
+                                 MeasureCodepointFn measure_codepoint,
+                                 void *measure_ctx,
+                                 std::vector<ShapedGlyph> *out) {
+  if (!s || !out || !measure_codepoint)
+    return false;
+
+  out->clear();
+  out->reserve(len);
+  for (size_t i = 0; i < len; i++) {
+    const unsigned char c = (unsigned char)s[i];
+    if (c == '\0')
+      return true;
+    if (c >= 0x80 || (c < 0x20 && !IsAsciiWhitespace(c)) || c == 0x7F) {
+      out->clear();
+      return false;
+    }
+
+    ShapedGlyph glyph;
+    glyph.text.codepoint = (uint32_t)c;
+    glyph.text.byte_offset = i;
+    glyph.text.byte_length = 1;
+    glyph.text.grapheme_start = true;
+    glyph.text.whitespace = IsAsciiWhitespace(c);
+    glyph.text.breakable_space = glyph.text.whitespace;
+    glyph.text.allow_break_after =
+        glyph.text.breakable_space || c == '-' || c == '/';
+    glyph.text.must_break_after =
+        c == '\n' || c == '\r' || c == 0x000B || c == 0x000C;
+    glyph.advance = measure_codepoint((uint32_t)c, measure_ctx);
+    glyph.bidi_level = 0;
+    out->push_back(glyph);
+  }
+  return true;
+}
+
 static LineBreakMeasureResult FindLineBreakImpl(
     const std::vector<ShapedGlyph> &run, size_t start, int max_width,
     bool preformatted) {
@@ -104,24 +145,43 @@ static LineBreakMeasureResult FindLineBreakImpl(
 
 bool ShapeTextRunUtf8(const char *s, size_t len, const char *lang,
                       MeasureCodepointFn measure_codepoint, void *measure_ctx,
-                      std::vector<ShapedGlyph> *out) {
+                      std::vector<ShapedGlyph> *out, bool *contains_rtl,
+                      bool *contains_arabic) {
 #ifdef DSLIBRIS_DEBUG
   const uint64_t t_begin = PerfNowMs();
 #endif
   if (!out || !measure_codepoint)
     return false;
 
-  out->clear();
+  if (contains_rtl)
+    *contains_rtl = false;
+  if (contains_arabic)
+    *contains_arabic = false;
+
+  if (TryShapeAsciiTextRun(s, len, measure_codepoint, measure_ctx, out)) {
+#ifdef DSLIBRIS_DEBUG
+    g_perf_stats.shape_calls++;
+    g_perf_stats.shaped_glyphs += (uint32_t)out->size();
+    g_perf_stats.shape_ms += PerfNowMs() - t_begin;
+#endif
+    return true;
+  }
+
   static std::vector<text_unicode_utils::TextCodepoint> text_run;
   if (!text_unicode_utils::BuildTextRunUtf8(s, len, lang, &text_run))
     return false;
 
   out->reserve(text_run.size());
   for (size_t i = 0; i < text_run.size(); i++) {
+    const uint32_t cp = text_run[i].codepoint;
+    if (contains_rtl && IsRtlCodepoint(cp))
+      *contains_rtl = true;
+    if (contains_arabic && IsArabicCodepoint(cp))
+      *contains_arabic = true;
+
     ShapedGlyph glyph;
     glyph.text = text_run[i];
-    glyph.advance =
-        measure_codepoint(text_run[i].codepoint, measure_ctx);
+    glyph.advance = measure_codepoint(cp, measure_ctx);
     glyph.bidi_level = 0;
     out->push_back(glyph);
   }
@@ -216,22 +276,15 @@ bool ShapeTextRunBidi(const char *s, size_t len, const char *lang,
                        std::vector<ShapedGlyph> *out, bool *has_rtl,
                        std::vector<uint32_t> *bidi_cps,
                        std::vector<text_bidi_utils::BidiRun> *bidi_runs) {
+  bool contains_rtl = false;
+  bool contains_arabic = false;
   if (has_rtl)
     *has_rtl = false;
-  if (!ShapeTextRunUtf8(s, len, lang, measure_codepoint, measure_ctx, out))
+  if (!ShapeTextRunUtf8(s, len, lang, measure_codepoint, measure_ctx, out,
+                        &contains_rtl, &contains_arabic))
     return false;
   if (!out || out->empty())
     return true;
-
-  bool contains_rtl = false;
-  bool contains_arabic = false;
-  for (size_t i = 0; i < out->size(); i++) {
-    const uint32_t cp = (*out)[i].text.codepoint;
-    if (IsArabicCodepoint(cp))
-      contains_arabic = true;
-    if (IsRtlCodepoint(cp))
-      contains_rtl = true;
-  }
   if (!contains_rtl)
     return true;
 

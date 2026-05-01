@@ -128,4 +128,11 @@ bool LookupWhiteSpaceForClassAttr(const std::string &class_attr,
                                   const CssClassMap &class_map,
                                   WhiteSpaceMode *out);
 
+// Single-pass lookup of ALL CSS properties for a class="" attribute.
+// Fills *out with merged values from all matching classes. Returns true if any
+// class matched. Use this instead of calling individual Lookup* functions.
+bool LookupAllForClassAttr(const std::string &class_attr,
+                           const CssClassMap &class_map,
+                           CssClassMargins *out);
+
 } // namespace epub_css_class_map

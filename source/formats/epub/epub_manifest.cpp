@@ -413,6 +413,7 @@ static void InitParsedataWithEpubDeps(parsedata_t *parsedata, Book *book,
   parsedata->reporter = deps.reporter;
   parsedata->ts = deps.ts;
   parsedata->prefs = deps.prefs;
+  parsedata->coalesce_text_segments = true;
 }
 
 int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
@@ -425,6 +426,10 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
   u16 pages_before = 0;
   u32 chardata_calls_before = 0;
   u64 chardata_ms_before = 0;
+  u64 element_ms_before = 0;
+  u32 element_calls_before = 0;
+  u64 flush_ms_before = 0;
+  u32 flush_calls_before = 0;
   u32 overflow_before = 0;
   text_layout_utils::PerfStats layout_before;
 #endif
@@ -476,6 +481,10 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
       pages_before = epd->book->GetPageCount();
       chardata_calls_before = pd.perf_chardata_calls;
       chardata_ms_before = pd.perf_chardata_ms;
+      element_ms_before = pd.perf_element_ms;
+      element_calls_before = pd.perf_element_calls;
+      flush_ms_before = pd.perf_flush_ms;
+      flush_calls_before = pd.perf_flush_calls;
       overflow_before = pd.perf_page_overflows;
       layout_before = text_layout_utils::GetPerfStats();
     }
@@ -515,10 +524,15 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
     const text_layout_utils::PerfStats layout_after =
         text_layout_utils::GetPerfStats();
     DBG_LOGF(deps.reporter,
-             "EPUB layout: stream=%llums chardata=%llums/%u "
+             "EPUB layout: stream=%llums elem=%llums/%u flush=%llums/%u "
+             "chardata=%llums/%u "
              "shape=%llums/%u break=%llums/%u pre=%llums/%u "
              "measure=%llums/%u glyphs=%u pages=%u overflow_pages=%u path=%s",
              (unsigned long long)(osGetTime() - t_content_begin),
+             (unsigned long long)(pd.perf_element_ms - element_ms_before),
+             (unsigned)(pd.perf_element_calls - element_calls_before),
+             (unsigned long long)(pd.perf_flush_ms - flush_ms_before),
+             (unsigned)(pd.perf_flush_calls - flush_calls_before),
              (unsigned long long)(pd.perf_chardata_ms - chardata_ms_before),
              (unsigned)(pd.perf_chardata_calls - chardata_calls_before),
              (unsigned long long)(layout_after.shape_ms - layout_before.shape_ms),
