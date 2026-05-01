@@ -21,6 +21,7 @@
 #include "app/status_layout_utils.h"
 #include "book/book.h"
 #include "shared/app_flow_utils.h"
+#include "shared/battery_utils.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
 
@@ -171,6 +172,18 @@ void StatusController::UpdateStatus()
     app_.ts->PrintString(tmsg);
     int clockWidth = app_.ts->GetStringWidth(tmsg, TEXT_STYLE_BROWSER);
 
+    u8 batt_level = 0;
+    bool batt_charging = false;
+    char bmsg[12] = {};
+    int battWidth = 0;
+    if (battery_utils::ReadBatteryState(&batt_level, &batt_charging))
+    {
+      battery_utils::FormatBatteryString(bmsg, sizeof(bmsg), batt_level, batt_charging);
+      battWidth = app_.ts->GetStringWidth(bmsg, TEXT_STYLE_BROWSER);
+      app_.ts->SetPen(8 + clockWidth + 8, textY);
+      app_.ts->PrintString(bmsg);
+    }
+
     int pX = 232;
     if (mode == AppMode::Opening)
     {
@@ -188,7 +201,7 @@ void StatusController::UpdateStatus()
       app_.ts->SetPen(pX, textY);
       app_.ts->PrintString(pmsg);
 
-      int barStart = 8 + clockWidth + 12;
+      int barStart = 8 + clockWidth + (battWidth > 0 ? 8 + battWidth + 8 : 12);
       int barEnd = pX - 12;
       if (barEnd > barStart + 10)
       {
