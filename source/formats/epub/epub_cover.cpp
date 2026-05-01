@@ -34,13 +34,6 @@ namespace {
 static const int kCoverThumbMaxW = 85;
 static const int kCoverThumbMaxH = 115;
 
-static std::string BuildDocPath(const std::string &opf_folder,
-                                const std::string &href) {
-  if (opf_folder.empty())
-    return NormalizePath(UrlDecode(href));
-  return NormalizePath(opf_folder + "/" + UrlDecode(href));
-}
-
 static bool LocateZipEntrySafe(unzFile uf, const std::string &entry_path) {
   if (!uf || entry_path.empty())
     return false;
@@ -399,7 +392,8 @@ int Extract(Book *book, const std::string &epubpath) {
   }
   imgbuf.resize((size_t)total);
 
-  std::vector<u8> decodebuf = imgbuf;
+  std::vector<u8> decodebuf;
+  decodebuf.swap(imgbuf);
   std::string decode_path = book->coverImagePath;
   const bool is_svg_cover =
       epub_image_utils::LooksLikeSvgWrapper(decode_path, decodebuf);
@@ -453,6 +447,7 @@ int Extract(Book *book, const std::string &epubpath) {
     return BOOK_ERR_CANCELLED;
 
   const bool jpeg_cover = IsJpegCover();
+  const bool png_cover = LooksLikePngPayload(decode_path, decodebuf);
   int infoW = 0, infoH = 0, infoChannels = 0;
   bool hasInfo = stbi_info_from_memory(decodebuf.data(), (int)decodebuf.size(),
                                        &infoW, &infoH, &infoChannels) != 0;
@@ -463,11 +458,13 @@ int Extract(Book *book, const std::string &epubpath) {
     if (infoW <= 0 || infoH <= 0 || infoW > epub_limits::kCoverMaxDimension ||
         infoH > epub_limits::kCoverMaxDimension)
       return 7;
-    size_t decoded_bytes = (size_t)infoW * (size_t)infoH * 3;
-    if (decoded_bytes > epub_limits::kCoverMaxDecodedRgbBytes)
+    size_t decoded_bytes = 0;
+    if (!epub_cover_decode_utils::EstimateDecodedRgbBytes(
+            infoW, infoH, 3, &decoded_bytes)) {
       return 9;
-    if (LooksLikePngPayload(decode_path, decodebuf) &&
-        decoded_bytes > 4u * 1024u * 1024u) {
+    }
+
+    if (png_cover) {
       std::vector<u16> png_pixels;
       int png_w = 0;
       int png_h = 0;
@@ -476,17 +473,20 @@ int Extract(Book *book, const std::string &epubpath) {
         return 0;
       }
     }
-  }
 
-  if (jpeg_cover) {
-    std::vector<u16> jpg_pixels;
-    int jpg_w = 0;
-    int jpg_h = 0;
-    if (DecodeImageCoverThumbnailWithMuPdf(decodebuf, &jpg_pixels, &jpg_w,
-                                           &jpg_h) &&
-        AdoptCoverPixels(book, jpg_pixels, jpg_w, jpg_h)) {
-      return 0;
+    if (jpeg_cover) {
+      std::vector<u16> jpg_pixels;
+      int jpg_w = 0;
+      int jpg_h = 0;
+      if (DecodeImageCoverThumbnailWithMuPdf(decodebuf, &jpg_pixels, &jpg_w,
+                                             &jpg_h) &&
+          AdoptCoverPixels(book, jpg_pixels, jpg_w, jpg_h)) {
+        return 0;
+      }
     }
+
+    if (decoded_bytes > epub_limits::kCoverMaxDecodedRgbBytes)
+      return 9;
   }
 
   int imgW, imgH, channels;
@@ -495,7 +495,7 @@ int Extract(Book *book, const std::string &epubpath) {
                             &imgH, &channels, 3);
 
   if (!pixels) {
-    if (LooksLikePngPayload(decode_path, decodebuf)) {
+    if (png_cover) {
       std::vector<u16> png_pixels;
       int png_w = 0;
       int png_h = 0;

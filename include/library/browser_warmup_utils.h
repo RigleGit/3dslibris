@@ -7,6 +7,7 @@ namespace browser_warmup_utils {
 
 static const uint64_t kBrowserWarmupIdleDelayMs = 250;
 static const uint64_t kBrowserHeavyWarmupIdleDelayMs = 1200;
+static const uint64_t kNew3dsHeavyWarmupIdleDelayMs = 600;
 static const uint64_t kBrowserInputReleaseMaxWaitMs = 1500;
 static const uint64_t kOld3dsSelectedCoverMinFreeBytes = 22u * 1024u * 1024u;
 static const uint64_t kOld3dsWarmCoverMinFreeBytes = 26u * 1024u * 1024u;
@@ -31,6 +32,20 @@ inline bool IsBrowserHeavyWarmupIdle(uint64_t now_ms,
   if (now_ms < last_interaction_ms)
     return false;
   return (now_ms - last_interaction_ms) >= kBrowserHeavyWarmupIdleDelayMs;
+}
+
+inline bool IsBrowserHeavyWarmupIdleForDevice(bool is_new_3ds,
+                                              uint64_t now_ms,
+                                              uint64_t last_interaction_ms,
+                                              bool wait_input_release) {
+  if (wait_input_release)
+    return false;
+  if (now_ms < last_interaction_ms)
+    return false;
+  const uint64_t delay_ms =
+      is_new_3ds ? kNew3dsHeavyWarmupIdleDelayMs
+                 : kBrowserHeavyWarmupIdleDelayMs;
+  return (now_ms - last_interaction_ms) >= delay_ms;
 }
 
 inline bool ShouldForceClearInputRelease(uint64_t now_ms,

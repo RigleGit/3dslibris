@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 
 namespace epub_cover_decode_utils {
 
@@ -41,6 +42,23 @@ inline int ComputeJpegL2SubsampleFactor(int img_w, int img_h, int target_w,
     l2factor++;
   }
   return l2factor;
+}
+
+inline bool EstimateDecodedRgbBytes(int img_w, int img_h, int components,
+                                    size_t *bytes_out) {
+  if (!bytes_out || img_w <= 0 || img_h <= 0 || components <= 0)
+    return false;
+
+  const size_t w = (size_t)img_w;
+  const size_t h = (size_t)img_h;
+  const size_t comps = (size_t)components;
+  if (w > (((size_t)-1) / h))
+    return false;
+  const size_t pixels = w * h;
+  if (pixels > (((size_t)-1) / comps))
+    return false;
+  *bytes_out = pixels * comps;
+  return true;
 }
 
 } // namespace epub_cover_decode_utils

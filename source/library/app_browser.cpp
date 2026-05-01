@@ -644,7 +644,8 @@ void LibraryController::QueueBookWarmup(Book *book) {
   const bool warmup_idle = browser_warmup_utils::IsBrowserWarmupIdle(
       now_ms, app_.GetBrowserLastInteractionMs(),
       app_.IsBrowserWaitingInputRelease());
-  const bool heavy_idle = browser_warmup_utils::IsBrowserHeavyWarmupIdle(
+  const bool heavy_idle = browser_warmup_utils::IsBrowserHeavyWarmupIdleForDevice(
+      app_.IsNew3dsDevice(),
       now_ms, app_.GetBrowserLastInteractionMs(),
       app_.IsBrowserWaitingInputRelease());
   const bool should_queue_cover =
@@ -784,7 +785,8 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
             app_.IsBrowserWaitingInputRelease());
     const bool allow_heavy_browser_jobs =
         app_.GetMode() != AppMode::Browser ||
-        browser_warmup_utils::IsBrowserHeavyWarmupIdle(
+        browser_warmup_utils::IsBrowserHeavyWarmupIdleForDevice(
+            app_.IsNew3dsDevice(),
             osGetTime(), app_.GetBrowserLastInteractionMs(),
             app_.IsBrowserWaitingInputRelease());
     app_job_t job = {};

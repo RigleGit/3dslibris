@@ -278,7 +278,7 @@ static int ParseEpubSpineDocuments(
         if (app) {
           DBG_LOGF(app, "EPUB: spine doc xml-err=%d path=%s (skipped)",
                    parse_rc, path.c_str());
-        }
+      }
         rc = 0;
         // Even on recoverable XML errors the parser may have produced pages
         // before hitting the error. Register those pages so that TOC resolution
@@ -328,7 +328,7 @@ static int ParseEpubSpineDocuments(
                  (unsigned)spine_doc_index, (unsigned)hrefs.size(),
                  (unsigned)book->GetPageCount(),
                  (unsigned)osGetMemRegionFree(MEMREGION_ALL));
-      }
+        }
 #endif
       if (spine_doc_index % 20 == 0 || spine_doc_index == 1)
         book->NotifySpineProgress((unsigned)spine_doc_index,
@@ -357,7 +357,7 @@ static int ParseEpubSpineDocuments(
       char msg[256];
       sprintf(msg, "NOT FOUND IN ZIP: %s", path.c_str());
       DBG_LOG(app, msg);
-    }
+  }
   }
 
   book->SetInlineImageProbeZip(NULL);
@@ -544,7 +544,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
                                                t_parse_begin),
              (unsigned)page_start_by_href.size(),
              (unsigned)book->GetPageCount());
-  }
+    }
 
 
   ResolveEpubTocFromPackageData(uf, book, parsedata, folder, page_start_by_href,
