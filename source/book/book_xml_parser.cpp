@@ -2526,6 +2526,13 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_LI);
     book_xml_list_utils::MarkCurrentListItemPending(p, true);
     const context_t active_list = book_xml_list_utils::GetActiveListContext(p);
+    const int nested_indent = book_xml_list_utils::ResolveNestedListItemIndentPx(
+        book_xml_list_utils::GetActiveListDepth(p), ts->GetAdvance(' '));
+    if (nested_indent != 0) {
+      parse_set_current_block_margins(
+          p, parse_current_block_margin_left(p) + nested_indent,
+          parse_current_block_margin_right(p));
+    }
     // HasSuppressedListMarkerContext checks ancestor elements (e.g. ol.classname).
     // ParseListMarkerHiddenCssClass checks the <li> element's own class
     // attribute, which ConfigureElementListSemantics hasn't processed yet.
@@ -2539,6 +2546,7 @@ void start(void *data, const char *el, const char **attr) {
       // the screen (chardata would immediately advance before the first content
       // character), push the marker to the next screen now.
       AdvanceParsedPageOnOverflow(p, ts->GetHeight());
+      AlignFreshLineToBlockMargin(p, ts);
       if (!suppress_marker) {
         if (active_list == TAG_UL) {
           AppendParsedByte(p, 0x2022); // bullet '•'

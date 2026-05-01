@@ -27,6 +27,8 @@ bool IsInsideListItem(const parsedata_t *p);
 bool HasPendingListItemContent(const parsedata_t *p);
 void MarkCurrentListItemPending(parsedata_t *p, bool pending);
 void ConsumePendingListItemContent(parsedata_t *p);
+int ResolveNestedListItemIndentPx(unsigned int active_list_depth,
+                                  int space_advance);
 unsigned int AdvanceOrderedListOrdinal(parsedata_t *p);
 std::string BuildOrderedListMarker(unsigned int ordinal);
 std::string BuildOrderedListMarker(unsigned int ordinal,

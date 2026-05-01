@@ -213,6 +213,17 @@ void TestPendingListItemContentTracksNearestItem() {
                     book_xml_list_utils::HasPendingListItemContent(&p));
 }
 
+void TestNestedListIndentOnlyAddsForNestedItems() {
+  test::ExpectEq("no list has no indent",
+                 book_xml_list_utils::ResolveNestedListItemIndentPx(0, 4), 0);
+  test::ExpectEq("top-level list has no extra indent",
+                 book_xml_list_utils::ResolveNestedListItemIndentPx(1, 4), 0);
+  test::ExpectEq("nested list gets visible indent",
+                 book_xml_list_utils::ResolveNestedListItemIndentPx(2, 4), 12);
+  test::ExpectEq("indent has minimum for narrow fonts",
+                 book_xml_list_utils::ResolveNestedListItemIndentPx(2, 1), 12);
+}
+
 } // namespace
 
 int main() {
@@ -224,5 +235,6 @@ int main() {
   TestListMarkerSuppressionUsesCssClassMap();
   TestParseListMarkerHiddenCssClassLooksUpMapAtLiOpen();
   TestPendingListItemContentTracksNearestItem();
+  TestNestedListIndentOnlyAddsForNestedItems();
   return 0;
 }
