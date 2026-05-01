@@ -61,6 +61,14 @@
 #define UTF8_FILENAME_DIAG 0
 #endif
 
+#ifndef BROWSER_COVER_TRACE
+#define BROWSER_COVER_TRACE 0
+#endif
+
+#ifndef BROWSER_JOB_TRACE
+#define BROWSER_JOB_TRACE 0
+#endif
+
 namespace {
 
 static const std::string &kCoverCacheBaseDir = paths::GetCacheBaseDir();
@@ -322,7 +330,7 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   std::string cache_path = BuildCoverCachePath(book, book_path);
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp) {
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
     if (book->GetStatusReporter()) {
       DBG_LOGF(book->GetStatusReporter(), "COVER: cache miss book=%s path=%s",
                book->GetFileName() ? book->GetFileName() : "(null)",
@@ -368,7 +376,7 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   // changes, so stale covers do not survive heuristic fixes.
   if (!ok || memcmp(header, kCoverCacheMagic, 4) != 0) {
     fclose(fp);
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
     if (book->GetStatusReporter()) {
       DBG_LOGF(book->GetStatusReporter(),
                "COVER: cache corrupt (bad magic/header) book=%s path=%s",
@@ -383,7 +391,7 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   u16 h = (u16)header[6] | ((u16)header[7] << 8);
   if (w == 0 || h == 0 || w > kCoverThumbMaxW || h > kCoverThumbMaxH) {
     fclose(fp);
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
     if (book->GetStatusReporter()) {
       DBG_LOGF(book->GetStatusReporter(),
                "COVER: cache corrupt (bad dims %ux%u) book=%s path=%s",
@@ -404,7 +412,7 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   if (fread(pixels, sizeof(u16), count, fp) != count) {
     delete[] pixels;
     fclose(fp);
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
     if (book->GetStatusReporter()) {
       DBG_LOGF(book->GetStatusReporter(),
                "COVER: cache truncated (expected %zu pixels) book=%s path=%s",
@@ -424,7 +432,7 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
   book->coverPixels = pixels;
   book->coverWidth = w;
   book->coverHeight = h;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
   if (book->GetStatusReporter()) {
     DBG_LOGF(book->GetStatusReporter(),
              "COVER: cache hit book=%s path=%s size=%ux%u",
@@ -475,7 +483,7 @@ static bool SaveCoverCache(Book *book, const std::string &book_path) {
     }
     PruneCoverCache(false);
   }
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
   if (book->GetStatusReporter()) {
     DBG_LOGF(book->GetStatusReporter(),
              "COVER: cache save %s book=%s path=%s size=%dx%d",
@@ -756,6 +764,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
   if (job_queue_.empty())
     return;
 
+#if defined(DSLIBRIS_DEBUG) && BROWSER_JOB_TRACE
   auto job_name = [](app_job_type_t t) -> const char * {
     switch (t) {
     case APP_JOB_INDEX_METADATA:
@@ -768,6 +777,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
       return "unknown";
     }
   };
+#endif
 
   u64 start_ms = osGetTime();
   while (!job_queue_.empty()) {
@@ -811,7 +821,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
 
     Book *book = job.book;
     int rc = 0;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_JOB_TRACE
     u64 t0 = osGetTime();
 #endif
 
@@ -843,13 +853,15 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
     } else if (job.type == APP_JOB_EXTRACT_COVER) {
       if (!book->coverPixels && book->coverAttempts < kCoverMaxAttempts) {
         std::string path = BuildBookPath(book);
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
         const bool had_cover_pixels = (book->coverPixels != nullptr);
         const uint8_t cover_attempts_before = book->coverAttempts;
+#endif
         if (path.empty()) {
           rc = 1;
           book->coverAttempts = kCoverMaxAttempts; // path failure is permanent
         } else {
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
         DBG_LOGF(&app_, "COVER: extract start book=%s format=%d attempt=%u",
                  book->GetFileName() ? book->GetFileName() : "(null)",
                  (int)book->format, (unsigned)book->coverAttempts);
@@ -862,7 +874,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
               app_.IsNew3dsDevice(), is_selected_book, 4, false);
           if (retry_delay_ms != 0)
             book->coverRetryAfterMs = osGetTime() + retry_delay_ms;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
           DBG_LOGF(&app_,
                    "COVER: skip mem-pressure book=%s selected=%u free=%llu",
                    book->GetFileName() ? book->GetFileName() : "(null)",
@@ -947,11 +959,13 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
             book->coverAttempts = kCoverMaxAttempts;
           }
         }
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
         const bool has_cover_pixels = (book->coverPixels != nullptr);
         const bool cover_visual_changed =
             (has_cover_pixels != had_cover_pixels) ||
             (!has_cover_pixels && cover_attempts_before < kCoverMaxAttempts &&
              book->coverAttempts >= kCoverMaxAttempts);
+#endif
         if (app_.GetMode() == AppMode::Browser) {
           const browser_cover_cache_utils::VisibleRange visible =
               browser_cover_cache_utils::ComputeVisibleRange(
@@ -963,7 +977,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
             ResetBrowserMarquee();
             app_.ts->MarkAllScreensDirty();
             app_.SetBrowserDirty(true);
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
             DBG_LOGF(&app_,
                      "BROWSER: cover job redraw book=%s index=%d rc=%d attempts=%u "
                      "pixels=%u visual_changed=%u",
@@ -980,7 +994,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         if (rc != BOOK_ERR_CANCELLED && retry_delay_ms != 0 &&
             book->coverAttempts < kCoverMaxAttempts) {
           book->coverRetryAfterMs = osGetTime() + retry_delay_ms;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
           DBG_LOGF(&app_,
                    "COVER: retry deferred book=%s rc=%d delay_ms=%llu attempt=%u",
                    book->GetFileName() ? book->GetFileName() : "(null)", rc,
@@ -988,7 +1002,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
                    (unsigned)book->coverAttempts);
 #endif
         }
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
         DBG_LOGF(&app_, "COVER: extract end rc=%d book=%s pixels=%u attempts=%u",
                  rc, book->GetFileName() ? book->GetFileName() : "(null)",
                  book->coverPixels ? 1u : 0u, (unsigned)book->coverAttempts);
@@ -1011,7 +1025,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
       }
     }
 
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BROWSER_JOB_TRACE
     {
       u64 elapsed = osGetTime() - t0;
       char msg[256];

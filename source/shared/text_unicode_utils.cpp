@@ -112,6 +112,55 @@ bool IsSimpleLtrCodepoint(uint32_t cp) {
   return cp == 0x20AC || cp == 0x2122;
 }
 
+bool IsUtf8Continuation(unsigned char b) { return (b & 0xC0) == 0x80; }
+
+size_t DecodeNextSimpleDisplayCodepoint(const char *s, size_t len,
+                                        uint32_t *out) {
+  if (!s || !len || !out)
+    return 0;
+
+  const unsigned char b0 = (unsigned char)s[0];
+  if (b0 < 0x80) {
+    *out = b0;
+    return 1;
+  }
+
+  if (b0 >= 0xC2 && b0 <= 0xDF && len >= 2) {
+    const unsigned char b1 = (unsigned char)s[1];
+    if (IsUtf8Continuation(b1)) {
+      *out = ((uint32_t)(b0 & 0x1F) << 6) | (uint32_t)(b1 & 0x3F);
+      return 2;
+    }
+  } else if (b0 >= 0xE0 && b0 <= 0xEF && len >= 3) {
+    const unsigned char b1 = (unsigned char)s[1];
+    const unsigned char b2 = (unsigned char)s[2];
+    const bool valid_min = b0 != 0xE0 || b1 >= 0xA0;
+    const bool valid_surrogate = b0 != 0xED || b1 < 0xA0;
+    if (valid_min && valid_surrogate && IsUtf8Continuation(b1) &&
+        IsUtf8Continuation(b2)) {
+      *out = ((uint32_t)(b0 & 0x0F) << 12) |
+             ((uint32_t)(b1 & 0x3F) << 6) | (uint32_t)(b2 & 0x3F);
+      return 3;
+    }
+  } else if (b0 >= 0xF0 && b0 <= 0xF4 && len >= 4) {
+    const unsigned char b1 = (unsigned char)s[1];
+    const unsigned char b2 = (unsigned char)s[2];
+    const unsigned char b3 = (unsigned char)s[3];
+    const bool valid_min = b0 != 0xF0 || b1 >= 0x90;
+    const bool valid_max = b0 != 0xF4 || b1 <= 0x8F;
+    if (valid_min && valid_max && IsUtf8Continuation(b1) &&
+        IsUtf8Continuation(b2) && IsUtf8Continuation(b3)) {
+      *out = ((uint32_t)(b0 & 0x07) << 18) |
+             ((uint32_t)(b1 & 0x3F) << 12) |
+             ((uint32_t)(b2 & 0x3F) << 6) | (uint32_t)(b3 & 0x3F);
+      return 4;
+    }
+  }
+
+  *out = DecodeCp1252Byte(b0);
+  return 1;
+}
+
 bool AllowsSimpleBreakAfter(uint32_t cp) {
   return cp == '-' || cp == '/' || cp == 0x2010 || cp == 0x2013 ||
          cp == 0x2014;
@@ -126,7 +175,8 @@ bool BuildTextRunUtf8Simple(const char *s, size_t len,
   size_t offset = 0;
   while (offset < len && s[offset] != '\0') {
     uint32_t cp = 0;
-    size_t step = DecodeNextDisplayCodepoint(s + offset, len - offset, &cp);
+    size_t step =
+        DecodeNextSimpleDisplayCodepoint(s + offset, len - offset, &cp);
     if (!step)
       return false;
     if (!IsSimpleLtrCodepoint(cp))

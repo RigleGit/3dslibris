@@ -22,6 +22,7 @@
 #include "shared/text_layout_utils.h"
 
 #define PAGEBUFSIZE 4096
+static const int LATIN1_ADVANCE_CACHE_SLOTS = 4;
 
 //! Symbols for known XHTML tags.
 
@@ -113,6 +114,11 @@ struct parsedata_t {
 	u8 base_font_size_px;
 	bool coalesce_text_segments;
 	std::string inline_text_tail;
+	u8 latin1_advance_cache_next_slot;
+	u8 latin1_advance_cache_style[LATIN1_ADVANCE_CACHE_SLOTS];
+	u8 latin1_advance_cache_pixel_size[LATIN1_ADVANCE_CACHE_SLOTS];
+	u32 latin1_advance_cache_valid[LATIN1_ADVANCE_CACHE_SLOTS][8];
+	u8 latin1_advance_cache[LATIN1_ADVANCE_CACHE_SLOTS][256];
 	bool link_active_stack[32];
 	u16 link_href_id_stack[32];
 	bool block_text_align_stack[32];

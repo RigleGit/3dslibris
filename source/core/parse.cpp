@@ -146,6 +146,15 @@ void parse_init(parsedata_t *data) {
   data->base_font_size_px = 0;
   data->coalesce_text_segments = false;
   data->inline_text_tail.clear();
+  data->latin1_advance_cache_next_slot = 0;
+  for (int slot = 0; slot < LATIN1_ADVANCE_CACHE_SLOTS; slot++) {
+    data->latin1_advance_cache_style[slot] = 255;
+    data->latin1_advance_cache_pixel_size[slot] = 255;
+    for (int word = 0; word < 8; word++)
+      data->latin1_advance_cache_valid[slot][word] = 0;
+    for (int cp = 0; cp < 256; cp++)
+      data->latin1_advance_cache[slot][cp] = 0;
+  }
   data->bold = false;
   data->italic = false;
   data->underline = false;

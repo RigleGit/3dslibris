@@ -61,6 +61,14 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <unordered_map>
 #include <vector>
 
+#ifndef EPUB_CSS_TRACE
+#define EPUB_CSS_TRACE 0
+#endif
+
+#ifndef EPUB_LAYOUT_PROFILE
+#define EPUB_LAYOUT_PROFILE 0
+#endif
+
 typedef BookParseDeps EpubDeps;
 
 using epub_package_toc_utils::BuildDocPath;
@@ -107,13 +115,22 @@ std::string ExtractLinkStylesheetHref(const std::string &xhtml_text) {
 // so only the head section is decompressed rather than the full document.
 std::string ScanXhtmlHeadForCssHref(unzFile uf, const std::string &xhtml_path,
                                      IStatusReporter *reporter) {
+#if !EPUB_CSS_TRACE
+  (void)reporter;
+#endif
+#if EPUB_CSS_TRACE
   DBG_LOGF(reporter, "EPUB: CSS-SCAN read begin %s", xhtml_path.c_str());
+#endif
   epub_zip_utils::ZipEntryIndex zip_index;
   if (!epub_zip_utils::LocateSafe(uf, xhtml_path, &zip_index)) {
+#if EPUB_CSS_TRACE
     DBG_LOG(reporter, "EPUB: CSS-SCAN locate fail");
+#endif
     return "";
   }
+#if EPUB_CSS_TRACE
   DBG_LOG(reporter, "EPUB: CSS-SCAN locate ok");
+#endif
 
   if (unzOpenCurrentFile(uf) != UNZ_OK)
     return "";
@@ -139,7 +156,9 @@ std::string ScanXhtmlHeadForCssHref(unzFile uf, const std::string &xhtml_path,
   }
 
   unzCloseCurrentFile(uf);
+#if EPUB_CSS_TRACE
   DBG_LOGF(reporter, "EPUB: CSS-SCAN read ok bytes=%u", (unsigned)buf.size());
+#endif
   return href;
 }
 
@@ -202,7 +221,10 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
 
   std::string css_text;
   epub_zip_utils::ZipEntryIndex css_index;
-  bool ok = ReadZipEntryText(scan_uf, css_path, css_text, reporter, "CSS-LOAD", &css_index);
+  bool ok =
+      ReadZipEntryText(scan_uf, css_path, css_text,
+                       EPUB_CSS_TRACE ? reporter : NULL, "CSS-LOAD",
+                       &css_index);
   if (owns_scan_uf) unzClose(scan_uf);
   if (!ok || css_text.empty())
     return;
@@ -420,7 +442,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
                            unzFile css_scan_uf) {
   int rc = 0;
   parsedata_t pd;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && EPUB_LAYOUT_PROFILE
   bool log_content_layout = false;
   u64 t_content_begin = 0;
   u16 pages_before = 0;
@@ -474,7 +496,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
     if (!epd->archive_path.empty())
       LoadCssClassMapForDoc(epd->archive_path, epd->docpath, deps.reporter,
                             epd, &pd.css_class_map, css_scan_uf);
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && EPUB_LAYOUT_PROFILE
     log_content_layout = deps.reporter && epd->book;
     if (log_content_layout) {
       t_content_begin = osGetTime();
@@ -519,7 +541,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
         xml_parse_utils::ParseXmlZipEntry(uf, options,
                                           parser_limits::kXmlStreamBufferSize);
   }
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && EPUB_LAYOUT_PROFILE
   if (log_content_layout) {
     const text_layout_utils::PerfStats layout_after =
         text_layout_utils::GetPerfStats();

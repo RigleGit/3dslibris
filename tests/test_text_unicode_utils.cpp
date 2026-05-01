@@ -81,6 +81,23 @@ void TestLineBreaks() {
   ExpectFalse("no break after nbsp", run[4].allow_break_after);
 }
 
+void TestLatinUtf8SimpleRun() {
+  std::vector<text_unicode_utils::TextCodepoint> run;
+  const std::string text =
+      std::string("canci") + "\xC3\xB3" + "n" + "\xE2\x80\x94" + "m" +
+      "\xC3\xA1" + "s";
+  ExpectTrue("latin utf8 run decode",
+             text_unicode_utils::BuildTextRunUtf8(text.c_str(), text.size(),
+                                                  NULL, &run));
+  ExpectEq("latin utf8 run size", run.size(), (size_t)11);
+  ExpectEq("latin o acute codepoint", run[5].codepoint, (uint32_t)0x00F3);
+  ExpectEq("latin o acute bytes", run[5].byte_length, (size_t)2);
+  ExpectEq("latin em dash codepoint", run[7].codepoint, (uint32_t)0x2014);
+  ExpectEq("latin em dash bytes", run[7].byte_length, (size_t)3);
+  ExpectTrue("break allowed after em dash", run[7].allow_break_after);
+  ExpectEq("latin a acute codepoint", run[9].codepoint, (uint32_t)0x00E1);
+}
+
 void TestDecodeWithRemainingLength() {
   const std::string text = std::string("A") + "\xE2\x82\xAC" + "B";
   uint32_t cp = 0;
@@ -121,6 +138,7 @@ int main() {
   TestDecodeCp1252Fallback();
   TestGraphemeBoundary();
   TestLineBreaks();
+  TestLatinUtf8SimpleRun();
   TestDecodeWithRemainingLength();
   TestListMarkerNormalization();
   return 0;

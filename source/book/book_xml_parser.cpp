@@ -85,8 +85,11 @@ static void AppendParsedByte(parsedata_t *p, u32 c) {
 static void RestoreParsedInlineLinkMarker(parsedata_t *p);
 
 struct ParsedTextMeasureContext {
+  parsedata_t *parsedata;
   Text *text;
   u8 style;
+  u8 pixel_size;
+  int latin1_cache_slot;
 };
 
 static void SyncParsedTextStyle(Text *ts, bool bold, bool italic, bool mono) {
@@ -96,14 +99,49 @@ static void SyncParsedTextStyle(Text *ts, bool bold, bool italic, bool mono) {
       book_xml_parser_style_utils::ResolveParsedTextStyle(bold, italic, mono));
 }
 
-static ParsedTextMeasureContext MakeParsedTextMeasureContext(Text *text,
+static void ResetLatin1AdvanceCacheSlot(parsedata_t *p, int slot, u8 style,
+                                        u8 pixel_size) {
+  if (!p)
+    return;
+  p->latin1_advance_cache_style[slot] = style;
+  p->latin1_advance_cache_pixel_size[slot] = pixel_size;
+  for (int i = 0; i < 8; i++)
+    p->latin1_advance_cache_valid[slot][i] = 0;
+}
+
+static int FindLatin1AdvanceCacheSlot(parsedata_t *p, u8 style,
+                                      u8 pixel_size) {
+  if (!p)
+    return -1;
+
+  for (int slot = 0; slot < LATIN1_ADVANCE_CACHE_SLOTS; slot++) {
+    if (p->latin1_advance_cache_style[slot] == style &&
+        p->latin1_advance_cache_pixel_size[slot] == pixel_size)
+      return slot;
+  }
+
+  const int slot =
+      (int)(p->latin1_advance_cache_next_slot % LATIN1_ADVANCE_CACHE_SLOTS);
+  p->latin1_advance_cache_next_slot =
+      (u8)((p->latin1_advance_cache_next_slot + 1) %
+           LATIN1_ADVANCE_CACHE_SLOTS);
+  ResetLatin1AdvanceCacheSlot(p, slot, style, pixel_size);
+  return slot;
+}
+
+static ParsedTextMeasureContext MakeParsedTextMeasureContext(parsedata_t *p,
+                                                             Text *text,
                                                              bool bold,
                                                              bool italic,
                                                              bool mono) {
   ParsedTextMeasureContext ctx{};
+  ctx.parsedata = p;
   ctx.text = text;
   ctx.style =
       book_xml_parser_style_utils::ResolveParsedTextStyle(bold, italic, mono);
+  ctx.pixel_size = text ? text->GetPixelSize() : 0;
+  ctx.latin1_cache_slot =
+      text ? FindLatin1AdvanceCacheSlot(p, ctx.style, ctx.pixel_size) : -1;
   return ctx;
 }
 
@@ -111,6 +149,21 @@ static int MeasureParsedTextAdvance(uint32_t codepoint, void *ctx) {
   ParsedTextMeasureContext *measure = (ParsedTextMeasureContext *)ctx;
   if (!measure || !measure->text)
     return 0;
+  if (codepoint < 256 && measure->parsedata &&
+      measure->latin1_cache_slot >= 0) {
+    parsedata_t *p = measure->parsedata;
+    const int slot = measure->latin1_cache_slot;
+
+    const int word = (int)(codepoint >> 5);
+    const u32 mask = (u32)1 << (codepoint & 31);
+    if (p->latin1_advance_cache_valid[slot][word] & mask)
+      return p->latin1_advance_cache[slot][codepoint];
+
+    const int advance = measure->text->GetAdvance(codepoint, measure->style);
+    p->latin1_advance_cache[slot][codepoint] = (u8)advance;
+    p->latin1_advance_cache_valid[slot][word] |= mask;
+    return advance;
+  }
   return measure->text->GetAdvance(codepoint, measure->style);
 }
 
@@ -471,17 +524,6 @@ static std::string ExtractClassAttr(const char **attr) {
 }
 
 static book_xml_css_style_utils::MarginTopResult
-LookupClassMarginTop(const std::string &class_attr,
-                     const epub_css_class_map::CssClassMap &class_map) {
-  epub_css_class_map::CssClassMargins margins;
-  if (epub_css_class_map::LookupMarginsForClassAttr(class_attr, class_map,
-                                                    &margins)) {
-    return margins.margin_top;
-  }
-  return {};
-}
-
-static book_xml_css_style_utils::MarginTopResult
 LookupClassMarginBottom(const std::string &class_attr,
                         const epub_css_class_map::CssClassMap &class_map) {
   epub_css_class_map::CssClassMargins margins;
@@ -490,81 +532,6 @@ LookupClassMarginBottom(const std::string &class_attr,
     return margins.margin_bottom;
   }
   return {};
-}
-
-static book_xml_css_style_utils::MarginTopResult
-LookupClassMarginLeft(const std::string &class_attr,
-                      const epub_css_class_map::CssClassMap &class_map) {
-  return epub_css_class_map::LookupMarginLeftForClassAttr(class_attr, class_map);
-}
-
-static book_xml_css_style_utils::MarginTopResult
-LookupClassMarginRight(const std::string &class_attr,
-                       const epub_css_class_map::CssClassMap &class_map) {
-  return epub_css_class_map::LookupMarginRightForClassAttr(class_attr,
-                                                           class_map);
-}
-
-static book_xml_css_style_utils::MarginTopResult
-LookupClassTextIndent(const std::string &class_attr,
-                      const epub_css_class_map::CssClassMap &class_map) {
-  return epub_css_class_map::LookupTextIndentForClassAttr(class_attr, class_map);
-}
-
-static book_xml_css_style_utils::MarginTopResult
-ParseElementMarginLeftWithClass(const char **attr, const parsedata_t *p) {
-  if (attr) {
-    for (int i = 0; attr[i]; i += 2) {
-      if (!attr[i + 1] || !attr[i + 1][0])
-        continue;
-      if (AttrNameEquals(attr[i], "style")) {
-        const auto r = book_xml_css_style_utils::ParseMarginLeft(attr[i + 1]);
-        if (r.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
-          return r;
-      }
-    }
-  }
-  const std::string cls = ExtractClassAttr(attr);
-  return LookupClassMarginLeft(cls, p ? p->css_class_map
-                                      : epub_css_class_map::CssClassMap{});
-}
-
-static book_xml_css_style_utils::MarginTopResult
-ParseElementMarginRightWithClass(const char **attr, const parsedata_t *p) {
-  if (attr) {
-    for (int i = 0; attr[i]; i += 2) {
-      if (!attr[i + 1] || !attr[i + 1][0])
-        continue;
-      if (AttrNameEquals(attr[i], "style")) {
-        const auto r = book_xml_css_style_utils::ParseMarginRight(attr[i + 1]);
-        if (r.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
-          return r;
-      }
-    }
-  }
-  const std::string cls = ExtractClassAttr(attr);
-  return LookupClassMarginRight(cls, p ? p->css_class_map
-                                       : epub_css_class_map::CssClassMap{});
-}
-
-static void ApplyElementBlockMargins(parsedata_t *p, Text *ts,
-                                     const char **attr) {
-  if (!p || !ts)
-    return;
-
-  const int inherited_left = parse_current_block_margin_left(p);
-  const int inherited_right = parse_current_block_margin_right(p);
-  int effective_left = inherited_left;
-  int effective_right = inherited_right;
-
-  const auto ml = ParseElementMarginLeftWithClass(attr, p);
-  const auto mr = ParseElementMarginRightWithClass(attr, p);
-  if (ml.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
-    effective_left += ResolveHorizontalMarginPx(ml, ts->display.width);
-  if (mr.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
-    effective_right += ResolveHorizontalMarginPx(mr, ts->display.width);
-
-  parse_set_current_block_margins(p, effective_left, effective_right);
 }
 
 static void AlignFreshLineToBlockMargin(parsedata_t *p, Text *ts) {
@@ -580,72 +547,6 @@ static void AlignFreshLineToBlockMargin(parsedata_t *p, Text *ts) {
   }
 }
 
-static book_xml_css_style_utils::MarginTopResult
-ParseElementTextIndentWithClass(const char **attr, const parsedata_t *p) {
-  if (attr) {
-    for (int i = 0; attr[i]; i += 2) {
-      if (!attr[i + 1] || !attr[i + 1][0])
-        continue;
-      if (AttrNameEquals(attr[i], "style")) {
-        const auto r = book_xml_css_style_utils::ParseTextIndent(attr[i + 1]);
-        if (r.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
-          return r;
-      }
-    }
-  }
-  const std::string cls = ExtractClassAttr(attr);
-  return LookupClassTextIndent(cls, p ? p->css_class_map
-                                      : epub_css_class_map::CssClassMap{});
-}
-
-static u8
-ParseElementTextTransform(const char **attr,
-                           const epub_css_class_map::CssClassMap &class_map) {
-  using book_xml_css_style_utils::TextTransform;
-  u8 result = 0;
-  if (attr) {
-    for (int i = 0; attr[i]; i += 2) {
-      if (!attr[i + 1] || !attr[i + 1][0])
-        continue;
-      if (AttrNameEquals(attr[i], "style")) {
-        const TextTransform tt =
-            book_xml_css_style_utils::ParseTextTransform(attr[i + 1]);
-        if (tt != TextTransform::None)
-          result = (u8)tt;
-      } else if (AttrNameEquals(attr[i], "class")) {
-        TextTransform tt;
-        if (epub_css_class_map::LookupTextTransformForClassAttr(
-                std::string(attr[i + 1]), class_map, &tt))
-          result = (u8)tt;
-      }
-    }
-  }
-  return result;
-}
-
-static u8 ParseElementWhiteSpace(
-    const char **attr, const epub_css_class_map::CssClassMap &class_map) {
-  using book_xml_css_style_utils::WhiteSpaceMode;
-  if (attr) {
-    for (int i = 0; attr[i]; i += 2) {
-      if (!attr[i + 1] || !attr[i + 1][0])
-        continue;
-      if (AttrNameEquals(attr[i], "style")) {
-        WhiteSpaceMode mode = WhiteSpaceMode::Normal;
-        if (book_xml_css_style_utils::TryParseWhiteSpace(attr[i + 1], &mode))
-          return (u8)mode + 1;
-      } else if (AttrNameEquals(attr[i], "class")) {
-        WhiteSpaceMode mode = WhiteSpaceMode::Normal;
-        if (epub_css_class_map::LookupWhiteSpaceForClassAttr(
-                std::string(attr[i + 1]), class_map, &mode)) {
-          return (u8)mode + 1;
-        }
-      }
-    }
-  }
-  return 0;
-}
-
 static book_xml_css_style_utils::WhiteSpaceMode
 ResolveActiveWhiteSpace(const parsedata_t *p) {
   using book_xml_css_style_utils::WhiteSpaceMode;
@@ -658,64 +559,6 @@ ResolveActiveWhiteSpace(const parsedata_t *p) {
   if (parse_in((parsedata_t *)p, TAG_PRE))
     return WhiteSpaceMode::PreWrap;
   return WhiteSpaceMode::Normal;
-}
-
-static book_xml_css_style_utils::FloatMode
-ParseElementFloat(const char **attr,
-                  const epub_css_class_map::CssClassMap &class_map) {
-  using book_xml_css_style_utils::FloatMode;
-  if (attr) {
-    for (int i = 0; attr[i]; i += 2) {
-      if (!attr[i + 1] || !attr[i + 1][0])
-        continue;
-      if (AttrNameEquals(attr[i], "style")) {
-        FloatMode mode = FloatMode::None;
-        if (book_xml_css_style_utils::TryParseFloat(attr[i + 1], &mode))
-          return mode;
-      } else if (AttrNameEquals(attr[i], "class")) {
-        FloatMode mode = FloatMode::None;
-        if (epub_css_class_map::LookupFloatForClassAttr(
-                std::string(attr[i + 1]), class_map, &mode)) {
-          return mode;
-        }
-      }
-    }
-  }
-  return FloatMode::None;
-}
-
-static book_xml_css_style_utils::ClearMode
-ParseElementClear(const char **attr,
-                  const epub_css_class_map::CssClassMap &class_map) {
-  using book_xml_css_style_utils::ClearMode;
-  if (attr) {
-    for (int i = 0; attr[i]; i += 2) {
-      if (!attr[i + 1] || !attr[i + 1][0])
-        continue;
-      if (AttrNameEquals(attr[i], "style")) {
-        ClearMode mode = ClearMode::None;
-        if (book_xml_css_style_utils::TryParseClear(attr[i + 1], &mode))
-          return mode;
-      } else if (AttrNameEquals(attr[i], "class")) {
-        ClearMode mode = ClearMode::None;
-        if (epub_css_class_map::LookupClearForClassAttr(
-                std::string(attr[i + 1]), class_map, &mode)) {
-          return mode;
-        }
-      }
-    }
-  }
-  return ClearMode::None;
-}
-
-static book_xml_css_style_utils::MarginTopResult
-ParseElementMarginTopWithClass(const char **attr, const parsedata_t *p) {
-  const book_xml_css_style_utils::MarginTopResult from_style =
-      ParseElementMarginTopPx(attr);
-  if (from_style.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
-    return from_style;
-  const std::string cls = ExtractClassAttr(attr);
-  return LookupClassMarginTop(cls, p->css_class_map);
 }
 
 static book_xml_css_style_utils::MarginTopResult
@@ -801,31 +644,6 @@ static void RestoreActiveBlockTextAlignMarker(parsedata_t *p) {
     return;
   }
   AppendParagraphAlignMarker(p, book_xml_css_style_utils::TextAlign::Left);
-}
-
-static void ConfigureBlockTextAlign(parsedata_t *p, const char *el,
-                                    const char **attr) {
-  if (!p || !el || p->stacksize == 0)
-    return;
-
-  const std::string style_attr = ExtractStyleAttr(attr);
-  const std::string class_attr = ExtractClassAttr(attr);
-  if (!ElementCanCarryBlockTextAlign(el, style_attr))
-    return;
-
-  book_xml_css_style_utils::TextAlign align =
-      book_xml_css_style_utils::TextAlign::Left;
-  const bool has_align =
-      book_xml_css_style_utils::TryParseTextAlign(style_attr.c_str(), &align) ||
-      epub_css_class_map::LookupTextAlignForClassAttr(class_attr,
-                                                      p->css_class_map, &align);
-  if (!has_align)
-    return;
-
-  const u8 current = (u8)(p->stacksize - 1);
-  p->block_text_align_stack[current] = true;
-  p->block_text_align_value_stack[current] = (u8)align;
-  AppendParagraphAlignMarker(p, align);
 }
 
 static void ApplyHeadingFontSize(parsedata_t *p, Text *ts, int heading_level,
@@ -1368,7 +1186,7 @@ static void EmitPreformattedUtf8Segment(
         book_xml_text_emit::AppendParsedCodepointsRaw(p, txt + offset, step);
       else
         book_xml_text_emit::AppendParsedCodepoints(p, txt + offset, step);
-      p->pen.x += ts->GetAdvance(cp, measure_ctx.style);
+      p->pen.x += MeasureParsedTextAdvance(cp, (void *)&measure_ctx);
       p->linebegan = true;
       offset += step;
     }
@@ -1467,15 +1285,12 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
 
   Text *ts = p->ts;
   SyncParsedTextStyle(ts, p->bold, p->italic, p->mono);
-  const u8 parse_text_style =
-      book_xml_parser_style_utils::ResolveParsedTextStyle(p->bold, p->italic,
-                                                          p->mono);
   const ParsedTextMeasureContext measure_ctx =
-      MakeParsedTextMeasureContext(ts, p->bold, p->italic, p->mono);
+      MakeParsedTextMeasureContext(p, ts, p->bold, p->italic, p->mono);
 
   int lineheight = ts->GetHeight();
   int linespacing = ts->linespacing;
-  int spaceadvance = ts->GetAdvance((u16)' ', parse_text_style);
+  int spaceadvance = MeasureParsedTextAdvance((u16)' ', (void *)&measure_ctx);
 
   if (p->buflen == 0) {
     p->pen.x = ts->margin.left;
