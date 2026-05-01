@@ -82,6 +82,27 @@ inline void RestoreParsedParagraphAlignmentMarker(parsedata_t *p) {
       have_align = epub_css_class_map::LookupTextAlignForClassAttr(
           p->last_h_class, p->css_class_map, &align);
     }
+  } else {
+    for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+      if (!p->block_text_align_stack[i])
+        continue;
+      in_alignable_block = true;
+      have_align = true;
+      align = (book_xml_css_style_utils::TextAlign)
+                  p->block_text_align_value_stack[i];
+      break;
+    }
+  }
+
+  if (in_alignable_block && !have_align) {
+    for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+      if (!p->block_text_align_stack[i])
+        continue;
+      have_align = true;
+      align = (book_xml_css_style_utils::TextAlign)
+                  p->block_text_align_value_stack[i];
+      break;
+    }
   }
 
   if (!in_alignable_block)
@@ -165,11 +186,24 @@ inline void RestoreParsedHeadingFontSizeMarker(parsedata_t *p) {
   }
 }
 
+inline void RestoreParsedInlineFontSizeMarker(parsedata_t *p) {
+  if (!p)
+    return;
+  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+    if (p->style_font_size_stack[i]) {
+      parse_append_page_byte(p, TEXT_FONT_SIZE);
+      parse_append_page_byte(p, (u32)p->style_font_size_stack[i]);
+      return;
+    }
+  }
+}
+
 inline void RestoreParsedStyleMarkers(parsedata_t *p) {
   if (!p)
     return;
   RestoreParsedParagraphAlignmentMarker(p);
   RestoreParsedHeadingFontSizeMarker(p);
+  RestoreParsedInlineFontSizeMarker(p);
   if (parse_in(p, TAG_PRE))
     parse_append_page_byte(p, TEXT_PRE_ON);
   if (p->superscript)

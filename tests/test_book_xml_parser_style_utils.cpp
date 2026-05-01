@@ -85,6 +85,36 @@ void TestRestoreParsedStyleMarkersKeepsParagraphAlignmentContext() {
   test::ExpectEq("paragraph right marker", (int)p.buf[0], TEXT_PARAGRAPH_RIGHT);
 }
 
+void TestRestoreParsedStyleMarkersKeepsBlockAlignmentContext() {
+  parsedata_t p{};
+  parse_init(&p);
+  parse_push(&p, TAG_DIV);
+  p.block_text_align_stack[0] = true;
+  p.block_text_align_value_stack[0] =
+      (u8)book_xml_css_style_utils::TextAlign::Center;
+
+  book_xml_parser_style_utils::RestoreParsedStyleMarkers(&p);
+
+  test::ExpectEq("block alignment marker count", p.buflen, 1);
+  test::ExpectEq("block center marker", (int)p.buf[0], TEXT_PARAGRAPH_CENTER);
+}
+
+void TestRestoreParsedStyleMarkersInheritsBlockAlignmentInParagraph() {
+  parsedata_t p{};
+  parse_init(&p);
+  parse_push(&p, TAG_DIV);
+  p.block_text_align_stack[0] = true;
+  p.block_text_align_value_stack[0] =
+      (u8)book_xml_css_style_utils::TextAlign::Center;
+  parse_push(&p, TAG_P);
+
+  book_xml_parser_style_utils::RestoreParsedStyleMarkers(&p);
+
+  test::ExpectEq("paragraph inherits block marker count", p.buflen, 1);
+  test::ExpectEq("paragraph inherited center marker", (int)p.buf[0],
+                 TEXT_PARAGRAPH_CENTER);
+}
+
 void TestResolveCssMarginLinefeedsUsesCeilQuantization() {
   book_xml_css_style_utils::MarginTopResult m{};
   m.unit = book_xml_css_style_utils::MarginTopResult::Unit::Px;
@@ -266,6 +296,8 @@ int main() {
   TestRestoreParsedStyleMarkersReinjectsMono();
   TestRestoreParsedStyleMarkersReinjectsPreContext();
   TestRestoreParsedStyleMarkersKeepsParagraphAlignmentContext();
+  TestRestoreParsedStyleMarkersKeepsBlockAlignmentContext();
+  TestRestoreParsedStyleMarkersInheritsBlockAlignmentInParagraph();
   TestResolveCssMarginLinefeedsUsesCeilQuantization();
   TestResolveBlockSpacingLinefeedsHonorsDefaultsAndZero();
   TestResolveBlockSpacingLinefeedsKeepsSmallExplicitMarginsVisible();

@@ -2,8 +2,10 @@
 
 #include "debug_log.h"
 #include "shared/text_token_constants.h"
+#include "utf8proc.h"
 
 #include <algorithm>
+#include <string>
 
 namespace book_xml_text_emit {
 
@@ -32,6 +34,21 @@ void AdvancePageIfNeeded(parsedata_t *p, int lineheight,
     advance_page_on_overflow(p, lineheight, advance_ctx);
 }
 
+void AlignFreshLineToEffectiveLeftMargin(parsedata_t *p,
+                                         const FlowEmitMetrics &metrics) {
+  if (!p || p->linebegan)
+    return;
+  const int existing_offset = p->pen.x - metrics.base_margin_left;
+  p->pen.x = std::max(0, metrics.margin_left + existing_offset);
+}
+
+void EmitFreshLineStartX(parsedata_t *p, const FlowEmitMetrics &metrics) {
+  if (!p || p->linebegan || p->pen.x == metrics.base_margin_left)
+    return;
+  parse_append_page_byte(p, TEXT_LINE_START_X);
+  parse_append_page_byte(p, (u32)p->pen.x);
+}
+
 } // namespace
 
 bool ParsedBufferEndsWithWhitespace(const parsedata_t *p) {
@@ -41,7 +58,43 @@ bool ParsedBufferEndsWithWhitespace(const parsedata_t *p) {
   return c == ' ' || c == '\n' || c == '\t';
 }
 
-void AppendParsedCodepoints(parsedata_t *p, const char *utf8, size_t utf8_len) {
+static uint32_t ApplyTextTransform(uint32_t cp, u8 transform,
+                                   bool *word_start) {
+  if (transform == 1) {
+    return (uint32_t)utf8proc_toupper((utf8proc_int32_t)cp);
+  } else if (transform == 2) {
+    return (uint32_t)utf8proc_tolower((utf8proc_int32_t)cp);
+  } else if (transform == 3 && word_start) {
+    const bool was_start = *word_start;
+    *word_start = (cp == ' ' || cp == '\t' || cp == '\n');
+    if (was_start)
+      return (uint32_t)utf8proc_toupper((utf8proc_int32_t)cp);
+  }
+  return cp;
+}
+
+static void AppendUtf8Codepoint(std::string *out, uint32_t cp) {
+  if (!out)
+    return;
+  utf8proc_uint8_t encoded[4];
+  const utf8proc_ssize_t len =
+      utf8proc_encode_char((utf8proc_int32_t)cp, encoded);
+  if (len <= 0)
+    return;
+  out->append((const char *)encoded, (size_t)len);
+}
+
+std::string TransformUtf8ForLayout(parsedata_t *p, const char *utf8,
+                                   size_t utf8_len) {
+  if (!utf8 || utf8_len == 0)
+    return std::string();
+
+  const u8 transform = parse_resolve_text_transform(p);
+  if (!transform)
+    return std::string(utf8, utf8_len);
+
+  std::string out;
+  out.reserve(utf8_len);
   size_t offset = 0;
   while (offset < utf8_len) {
     uint32_t cp = 0;
@@ -51,15 +104,49 @@ void AppendParsedCodepoints(parsedata_t *p, const char *utf8, size_t utf8_len) {
       offset++;
       continue;
     }
+    cp = ApplyTextTransform(cp, transform,
+                            p ? &p->text_transform_word_start : NULL);
+    AppendUtf8Codepoint(&out, cp);
+    offset += consumed;
+  }
+  return out;
+}
+
+static void AppendParsedCodepointsImpl(parsedata_t *p, const char *utf8,
+                                       size_t utf8_len,
+                                       bool apply_text_transform) {
+  const u8 transform =
+      apply_text_transform ? parse_resolve_text_transform(p) : 0;
+  size_t offset = 0;
+  while (offset < utf8_len) {
+    uint32_t cp = 0;
+    size_t consumed = text_unicode_utils::DecodeNextDisplayCodepoint(
+        utf8 + offset, utf8_len - offset, &cp);
+    if (consumed == 0) {
+      offset++;
+      continue;
+    }
+    if (transform)
+      cp = ApplyTextTransform(cp, transform, &p->text_transform_word_start);
     parse_append_page_byte(p, (u32)cp);
     offset += consumed;
   }
 }
 
+void AppendParsedCodepoints(parsedata_t *p, const char *utf8, size_t utf8_len) {
+  AppendParsedCodepointsImpl(p, utf8, utf8_len, true);
+}
+
+void AppendParsedCodepointsRaw(parsedata_t *p, const char *utf8,
+                               size_t utf8_len) {
+  AppendParsedCodepointsImpl(p, utf8, utf8_len, false);
+}
+
 void EmitBidiSegment(parsedata_t *p,
                      const std::vector<text_layout_utils::ShapedGlyph> &run,
                      size_t seg_start, size_t seg_end,
-                     const std::vector<text_bidi_utils::BidiRun> &runs) {
+                     const std::vector<text_bidi_utils::BidiRun> &runs,
+                     bool apply_text_transform) {
   if (seg_start >= seg_end)
     return;
   std::vector<uint32_t> cps;
@@ -86,8 +173,14 @@ void EmitBidiSegment(parsedata_t *p,
   }
 
   text_bidi_utils::ReorderLineForDisplay(cps, 0, cps.size(), local_runs);
-  for (size_t i = 0; i < cps.size(); i++)
-    parse_append_page_byte(p, (u32)cps[i]);
+  const u8 transform =
+      apply_text_transform ? parse_resolve_text_transform(p) : 0;
+  for (size_t i = 0; i < cps.size(); i++) {
+    uint32_t cp = cps[i];
+    if (transform)
+      cp = ApplyTextTransform(cp, transform, &p->text_transform_word_start);
+    parse_append_page_byte(p, (u32)cp);
+  }
 }
 
 bool DetectParagraphRTL(
@@ -124,6 +217,7 @@ void EmitFlowedShapedText(
   const int maxLineWidth =
       metrics.display_width - metrics.margin_right - metrics.margin_left;
   size_t unit_index = 0;
+  AlignFreshLineToEffectiveLeftMargin(p, metrics);
 
   while (unit_index < run.size()) {
     const text_layout_utils::ShapedGlyph &unit = run[unit_index];
@@ -202,7 +296,8 @@ void EmitFlowedShapedText(
                           advance_ctx);
       parse_append_page_byte(p, TEXT_RTL_LINE_PX);
       parse_append_page_byte(p, (u32)line_px);
-      EmitBidiSegment(p, run, line_start, line_end, bidi_runs);
+      EmitBidiSegment(p, run, line_start, line_end, bidi_runs,
+                      !metrics.text_already_transformed);
       p->linebegan = true;
       p->pen.x = metrics.margin_left + (u16)line_px;
 
@@ -239,8 +334,14 @@ void EmitFlowedShapedText(
         }
         AdvancePageIfNeeded(p, metrics.lineheight, advance_page_on_overflow,
                             advance_ctx);
-        AppendParsedCodepoints(p, txt + unit.text.byte_offset,
-                               unit.text.byte_length);
+        EmitFreshLineStartX(p, metrics);
+        if (metrics.text_already_transformed) {
+          AppendParsedCodepointsRaw(p, txt + unit.text.byte_offset,
+                                    unit.text.byte_length);
+        } else {
+          AppendParsedCodepoints(p, txt + unit.text.byte_offset,
+                                 unit.text.byte_length);
+        }
         p->pen.x += unit_advance;
         p->linebegan = true;
       }
@@ -275,8 +376,13 @@ void EmitFlowedShapedText(
 
     AdvancePageIfNeeded(p, metrics.lineheight, advance_page_on_overflow,
                         advance_ctx);
+    EmitFreshLineStartX(p, metrics);
     if (has_rtl)
-      EmitBidiSegment(p, run, unit_index, segment_end_index, bidi_runs);
+      EmitBidiSegment(p, run, unit_index, segment_end_index, bidi_runs,
+                      !metrics.text_already_transformed);
+    else if (metrics.text_already_transformed)
+      AppendParsedCodepointsRaw(p, txt + segment_start,
+                                segment_end - segment_start);
     else
       AppendParsedCodepoints(p, txt + segment_start, segment_end - segment_start);
     p->linebegan = true;

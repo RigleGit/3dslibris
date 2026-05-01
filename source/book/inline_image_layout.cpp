@@ -124,23 +124,33 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
   if (!meta.ok || meta.width <= 0 || meta.height <= 0)
     return plan;
 
+  // Apply author-specified width constraint (e.g. width="9.38%" on img tag).
+  InlineImageMetadata eff_meta = meta;
+  if (req.author_max_width_px > 0) {
+    int max_w = std::min(req.author_max_width_px, text_width);
+    if (eff_meta.width > max_w) {
+      eff_meta.height = std::max(1, (eff_meta.height * max_w) / eff_meta.width);
+      eff_meta.width = max_w;
+    }
+  }
+
   const int inline_height = line_height;
   const int inline_width =
-      std::max(1, DivRoundNearest(meta.width * inline_height, meta.height));
+      std::max(1, DivRoundNearest(eff_meta.width * inline_height, eff_meta.height));
   // Inline is reserved for genuinely small ornament-like images.
   const bool inline_candidate =
-      meta.height <= (3 * line_height) && inline_width <= (3 * line_height);
+      eff_meta.height <= (3 * line_height) && inline_width <= (3 * line_height);
 
   const bool wide_band_candidate =
-      meta.width >= (meta.height * 3) &&
-      DivRoundUp(meta.height * text_width, meta.width) <= band_max_height;
+      eff_meta.width >= (eff_meta.height * 3) &&
+      DivRoundUp(eff_meta.height * text_width, eff_meta.width) <= band_max_height;
   const bool block_band_candidate =
-      meta.width <= (6 * line_height) && meta.height <= (6 * line_height);
+      eff_meta.width <= (6 * line_height) && eff_meta.height <= (6 * line_height);
   const bool leading_paragraph_band_candidate =
-      leading_paragraph_image && meta.width <= (8 * line_height) &&
-      meta.height <= (8 * line_height);
+      leading_paragraph_image && eff_meta.width <= (8 * line_height) &&
+      eff_meta.height <= (8 * line_height);
   const bool medium_band_candidate =
-      DivRoundUp(meta.height * text_width, meta.width) <= band_max_height;
+      DivRoundUp(eff_meta.height * text_width, eff_meta.width) <= band_max_height;
   const bool caption_friendly_start =
       leading_paragraph_image || (req.current_screen == 0 && IsAtScreenStart(req));
   int caption_baseline = req.pen_y;
@@ -162,7 +172,7 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
   const int next_follow_band_max_height =
       next_limit_y - fresh_baseline - req.linespacing - min_follow_text_height;
   const int full_width_band_height =
-      std::max(1, DivRoundUp(meta.height * text_width, meta.width));
+      std::max(1, DivRoundUp(eff_meta.height * text_width, eff_meta.width));
   const bool current_figure_band_candidate =
       figure_with_caption && caption_band_max_height >= (5 * line_height);
   const bool figure_band_candidate =
@@ -218,24 +228,31 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
     int band_width = 0;
     int band_height = 0;
     if (wide_band_candidate) {
-      band_width = text_width;
-      band_height = std::max(1, DivRoundUp(meta.height * text_width, meta.width));
+      if (req.author_max_width_px > 0) {
+        // Honor author's explicit small width; don't stretch to full text width.
+        FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height,
+                              std::min(req.author_max_width_px, text_width),
+                              band_max_height, &band_width, &band_height);
+      } else {
+        band_width = text_width;
+        band_height = std::max(1, DivRoundUp(eff_meta.height * text_width, eff_meta.width));
+      }
     } else if (block_band_candidate || leading_paragraph_band_candidate) {
-      FitWithinBoxNoUpscale(meta.width, meta.height, text_width,
+      FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height, text_width,
                             block_band_max_height, &band_width, &band_height);
     } else if (figure_band_candidate || leading_caption_band_candidate) {
       const int figure_fit_max_height =
           current_figure_band_candidate ? caption_band_max_height
                                         : next_caption_band_max_height;
-      FitWithinBoxNoUpscale(meta.width, meta.height, text_width,
+      FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height, text_width,
                             figure_fit_max_height, &band_width, &band_height);
     } else if (flow_text_band_candidate) {
-      FitWithinBoxNoUpscale(meta.width, meta.height, text_width,
+      FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height, text_width,
                             std::max(current_follow_band_max_height,
                                      next_follow_band_max_height),
                             &band_width, &band_height);
     } else {
-      FitWithinBoxNoUpscale(meta.width, meta.height, text_width,
+      FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height, text_width,
                             band_max_height, &band_width, &band_height);
     }
 
@@ -319,4 +336,17 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
 
   FillPageMode(req, &plan);
   return plan;
+}
+
+void ApplyFloatImageLayoutOverride(InlineImageLayoutPlan *plan, bool line_began,
+                                   int linespacing) {
+  if (!plan || plan->mode != INLINE_IMAGE_LAYOUT_INLINE)
+    return;
+
+  plan->mode = INLINE_IMAGE_LAYOUT_BAND;
+  plan->line_break_before = line_began;
+  plan->advance_before = false;
+  plan->consume_rest_of_screen = false;
+  plan->vertical_space_after_draw =
+      plan->draw_height + std::max(0, linespacing);
 }

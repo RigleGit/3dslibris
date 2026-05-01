@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Capítulo 13 — Saltos de página CSS</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body>
+
+<h1 id="capitulo-13">Capítulo 13: Saltos de página CSS</h1>
+
+<p>Este capítulo valida que los elementos con <code>page-break-before: always</code> y propiedades relacionadas abran una página nueva.</p>
+
+<!-- ── 1. page-break-before en inline style ───────────────────────── -->
+
+<h2>1. <code>page-break-before: always</code> inline</h2>
+
+<p>El párrafo siguiente tiene <code>style="page-break-before: always"</code>. Debe aparecer al inicio de una página nueva.</p>
+
+<p style="page-break-before: always">Este párrafo debe estar en una página nueva. Si aparece inmediatamente después del párrafo anterior sin salto de página, el fix no funcionó.</p>
+
+<p>Texto de referencia tras el salto de página.</p>
+
+<!-- ── 2. break-before: page (CSS3) inline ───────────────────────── -->
+
+<h2>2. <code>break-before: page</code> (CSS3 inline)</h2>
+
+<p>El párrafo siguiente usa la propiedad CSS3 <code>style="break-before: page"</code>. Debe abrir también una página nueva.</p>
+
+<p style="break-before: page">Este párrafo debe estar en una página nueva (CSS3 break-before).</p>
+
+<p>Texto de referencia tras el salto CSS3.</p>
+
+<!-- ── 3. page-break-before vía clase CSS ────────────────────────── -->
+
+<h2>3. <code>page-break-before</code> vía clase CSS</h2>
+
+<p>El párrafo siguiente usa la clase <code>chapter-start</code> que tiene <code>page-break-before: always</code> en la hoja de estilos. Debe aparecer en una página nueva.</p>
+
+<p class="chapter-start">Este párrafo debe estar en una página nueva (clase CSS chapter-start).</p>
+
+<p>Texto de referencia tras el salto por clase.</p>
+
+<!-- ── 4. page-break-after inline ────────────────────────────────── -->
+
+<h2>4. <code>page-break-after: always</code> inline</h2>
+
+<p>El párrafo siguiente tiene <code>style="page-break-after: always"</code>. El texto que le sigue debe aparecer en una página nueva.</p>
+
+<p style="page-break-after: always">Este párrafo obliga al siguiente a abrir página nueva (page-break-after).</p>
+
+<p>Este párrafo debe estar en una página nueva (tras page-break-after).</p>
+
+<p>Texto de referencia final.</p>
+
+</body>
+</html>

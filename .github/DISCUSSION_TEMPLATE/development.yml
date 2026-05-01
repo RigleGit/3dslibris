@@ -1,0 +1,44 @@
+title: "[Dev] "
+labels: []
+body:
+  - type: textarea
+    id: topic
+    attributes:
+      label: Topic
+      description: What are you working on or asking about?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: area
+    attributes:
+      label: Area affected
+      options:
+        - label: Rendering / text layout
+        - label: EPUB parser
+        - label: MOBI parser
+        - label: FB2 / TXT / RTF / ODT parser
+        - label: PDF / MuPDF
+        - label: CBZ / XPS
+        - label: Library UI / browser
+        - label: Input / touch / controls
+        - label: Performance
+        - label: Memory
+        - label: Build system / toolchain
+        - label: Other
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Technical context
+      description: Relevant files, data structures, or behavior to understand the topic. Include code snippets if helpful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: questions
+    attributes:
+      label: Questions or open points
+      description: What specifically are you trying to figure out or decide?
+    validations:
+      required: true

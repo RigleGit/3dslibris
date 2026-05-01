@@ -177,9 +177,18 @@ void ShutdownCbzWorker(Book::CbzState *cbz_state) {
   __atomic_store_n(&w->shutdown_requested, true, __ATOMIC_RELEASE);
   LightEvent_Signal(&w->submit_event);
   if (w->thread_handle) {
-    threadJoin(w->thread_handle, 500 * 1000000ULL);
-    threadFree(w->thread_handle);
-    w->thread_handle = NULL;
+    // Loop until joined — same as the reflow and MuPDF workers. A single
+    // timeout could expire while the CBZ decode is still running and then
+    // free memory the thread is still using (use-after-free).
+    while (true) {
+      Result join_rc = threadJoin(w->thread_handle, 500 * 1000000ULL);
+      if (R_SUCCEEDED(join_rc)) {
+        threadFree(w->thread_handle);
+        w->thread_handle = NULL;
+        break;
+      }
+      LightEvent_Signal(&w->submit_event);
+    }
   }
   delete w;
   cbz_state->worker = NULL;

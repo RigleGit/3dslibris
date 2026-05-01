@@ -463,11 +463,7 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
 
   // Pre-resolve foreground color components (constant for this character)
   int fg_r, fg_g, fg_b;
-  const u16 fg_color = (colorMode == 1) ? 0xFFFF
-                       : (colorMode == 2) ? kSepiaTextColor
-                       : (colorMode == 4) ? kTrueDarkTextColor
-                       : (colorMode == 5) ? kDarkSepiaTextColor
-                       : 0x0000;
+  const u16 fg_color = GetFgColor();
   RGB565ToU8(fg_color, &fg_r, &fg_g, &fg_b);
 
   const int screenWidth = (int)parent->display.width;

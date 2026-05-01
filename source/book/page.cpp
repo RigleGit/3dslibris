@@ -29,6 +29,7 @@
 
 #include "app/app.h"
 #include "book/book.h"
+#include "book/inline_image_layout.h"
 #include "book/page_alignment_utils.h"
 #include "book/book_xml_css_style_utils.h"
 #include "book/page_buffer_utils.h"
@@ -69,6 +70,10 @@ void DrawPatternedUnderline(Text *ts, int x0, int x1, int y, u16 color,
                    (u16)(y + y_offset + 1), color);
     }
     break;
+  case UNDERLINE_STYLE_DOUBLE:
+    DrawSolidDecoration(ts, x0, x1, y, color);
+    DrawSolidDecoration(ts, x0, x1, y + 2, color);
+    break;
   case UNDERLINE_STYLE_SOLID:
   default:
     DrawSolidDecoration(ts, x0, x1, y, color);
@@ -93,7 +98,18 @@ void ExpandLinkBounds(inline_link_utils::LinkRect *rect, int x0, int y0, int x1,
   rect->y1 = std::max(rect->y1, y1);
 }
 
-u16 LinkTextColor() { return 0x001F; }
+u16 LinkTextColor(Text *ts) {
+  if (!ts)
+    return 0x001F;
+  switch (ts->GetColorMode()) {
+  case 1:
+  case 4:
+  case 5:
+    return 0x7DFF;
+  default:
+    return 0x0013;
+  }
+}
 
 } // namespace
 
@@ -153,6 +169,10 @@ void Page::AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned) {
 void Page::FreeBuffer() {
   std::vector<u32>().swap(storage);
   SyncBufferAlias();
+}
+
+size_t Page::GetInlineLinkCount() const {
+  return inline_link_utils::CountInlineLinksInBuffer(buf, length);
 }
 
 void Page::Draw(Text *ts) {
@@ -253,6 +273,8 @@ void Page::Draw(Text *ts) {
 
   u16 i = 0;
   InlineImageContext next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
+  u8 next_image_align = 0;  // 0=center/default, 1=left, 2=right
+  int next_image_author_width = 0; // per-instance override; 0=use entry default
   bool rtl_paragraph = false;
   u32 rtl_line_px = 0;  // parse-time line width stashed by TEXT_RTL_LINE_PX
   bool in_preformatted_block = false;
@@ -328,10 +350,22 @@ void Page::Draw(Text *ts) {
 #endif
       i += 2;
       continue;
+    } else if (c == TEXT_IMAGE_ALIGN) {
+      if (i + 1 < length)
+        next_image_align = (u8)buf[i + 1];
+      i += (i + 1 < length) ? 2 : 1;
+      continue;
+    } else if (c == TEXT_IMAGE_AUTHOR_WIDTH) {
+      if (i + 1 < length)
+        next_image_author_width = (int)buf[i + 1];
+      i += (i + 1 < length) ? 2 : 1;
+      continue;
     } else if (c == '\n') {
       // line break, page breaking if necessary
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
+      next_image_align = 0;
+      next_image_author_width = 0;
 
       const text_render_layout_utils::ReadingScreenMetrics metrics =
           text_render_layout_utils::ResolveReadingScreenMetrics(
@@ -372,6 +406,23 @@ void Page::Draw(Text *ts) {
       } else if (ts->linebegan) {
         ts->PrintNewLine();
       }
+    } else if (c == TEXT_SCREEN_BREAK) {
+      i++;
+      // Forced screen break emitted by ForcePageBreak (CSS page-break-before).
+      // On the first screen: advance to second screen so break-before content
+      // starts at the top of screen=1 rather than continuing mid-screen=0.
+      // On the second screen: no-op (already there, or break came after a full
+      // page was committed so this token is at the start of a new buffer).
+      if (on_first_screen)
+        advance_to_next_screen();
+    } else if (c == TEXT_LINE_START_X) {
+      if (i + 1 < length) {
+        const int x = std::max(0, std::min((int)buf[i + 1], ts->display.width));
+        ts->SetPen((u16)x, ts->GetPenY());
+      }
+      ts->linebegan = false;
+      i += (i + 1 < length) ? 2 : 1;
+      continue;
     } else if (c == TEXT_BOLD_ON) {
       i++;
       ts->bold = true;
@@ -474,8 +525,12 @@ void Page::Draw(Text *ts) {
         int current_screen = on_first_screen ? 0 : 1;
         book->PlanInlineImageLayout(ts, image_id, current_screen, ts->GetPenX(),
                                     ts->GetPenY(), ts->linebegan, next_image_context,
-                                    &image_plan);
+                                    &image_plan, next_image_author_width);
+        if (next_image_align != 0)
+          ApplyFloatImageLayoutOverride(&image_plan, ts->linebegan,
+                                        ts->linespacing);
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
+        next_image_author_width = 0;
 
         if (image_plan.advance_before) {
           if (!advance_to_next_screen()) {
@@ -490,7 +545,8 @@ void Page::Draw(Text *ts) {
           ts->linebegan = false;
         }
 
-        book->DrawInlineImage(ts, image_id, &image_plan, current_screen);
+        book->DrawInlineImage(ts, image_id, &image_plan, current_screen,
+                              next_image_align);
 
         bool stop_page_draw = false;
         switch (image_plan.mode) {
@@ -530,9 +586,13 @@ void Page::Draw(Text *ts) {
         }
         if (stop_page_draw)
           break;
+        next_image_align = 0;
+        next_image_author_width = 0;
       } else {
         i++;
         next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
+        next_image_align = 0;
+        next_image_author_width = 0;
       }
       } else {
         i++;
@@ -591,7 +651,7 @@ void Page::Draw(Text *ts) {
       const int glyph_x0 = (int)ts->GetPenX();
       const int base_pen_y = (int)ts->GetPenY();
       if (link_active)
-        ts->SetTextColorOverride(LinkTextColor());
+        ts->SetTextColorOverride(LinkTextColor(ts));
       else
         ts->ClearTextColorOverride();
       if (superscript || subscript) {

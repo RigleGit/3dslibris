@@ -40,6 +40,9 @@ int main() {
   ExpectTrue("svg extension counts as wrapper",
              LooksLikeSvgWrapper("images/cover.SVG",
                                  std::vector<unsigned char>()));
+  ExpectFalse("raster extension without probe data is not svg wrapper",
+              LooksLikeSvgWrapper("images/cover.jpg",
+                                  std::vector<unsigned char>()));
   ExpectTrue("svg content counts as wrapper",
              LooksLikeSvgWrapper("images/cover.bin",
                                  std::vector<unsigned char>(

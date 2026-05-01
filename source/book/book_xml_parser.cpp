@@ -23,6 +23,8 @@
 #include "book/book_xml_table_utils.h"
 #include "book/book_xml_text_emit.h"
 #include "book/book_xml.h"
+#include "book/inline_image_layout.h"
+#include "formats/common/epub_image_utils.h"
 #include "formats/common/html_entity_utils.h"
 #include "reader/inline_link_utils.h"
 #include "book/heading_layout.h"
@@ -48,6 +50,8 @@
 namespace {
 
 static const size_t kFb2BinaryMaxChars = 6 * 1024 * 1024;
+
+using book_xml_css_style_utils::ResolveHorizontalMarginPx;
 
 static bool EqualsAsciiNoCase(const char *a, const char *b) {
   if (!a || !b)
@@ -251,6 +255,110 @@ ParseMarginTopPx(const char *style) {
   return book_xml_css_style_utils::ParseMarginTop(style);
 }
 
+// Parse a CSS/HTML width value and return pixels (>0), or 0 if unconstrained.
+// Handles: %, px, bare integer (HTML width attr), em/rem, pt, cm, mm, in, vw.
+// text_width = available text area in pixels; font_px = current font height in px.
+// screen_width is fixed at 240 on 3DS.
+static int ParseCssLengthPx(const char *v, int text_width, int font_px) {
+  if (!v || !*v)
+    return 0;
+  while (*v == ' ')
+    v++;
+  if (!*v)
+    return 0;
+
+  // Numeric part: integer * 1000 + fractional (3 decimal places of precision)
+  int num1000 = 0; // value * 1000
+  bool has_digit = false;
+  while (*v >= '0' && *v <= '9') {
+    num1000 = num1000 * 10 + (*v - '0') * 1000;
+    has_digit = true;
+    v++;
+    if (num1000 > 100000 * 1000) // overflow guard (>100000 px is nonsense)
+      return 0;
+  }
+  if (*v == '.') {
+    v++;
+    int place = 100;
+    while (*v >= '0' && *v <= '9' && place > 0) {
+      num1000 += (*v - '0') * place;
+      place /= 10;
+      v++;
+      has_digit = true;
+    }
+    while (*v >= '0' && *v <= '9')
+      v++; // consume remaining decimal digits
+  }
+  if (!has_digit)
+    return 0;
+  while (*v == ' ')
+    v++;
+
+  int result_px = 0;
+  if (*v == '%') {
+    // Percentage of text width. Cap at 100% (10000 hundredths).
+    if (num1000 <= 0 || num1000 > 100 * 1000)
+      return 0;
+    result_px = (text_width * num1000 + 50000) / 100000;
+  } else if (*v == '\0') {
+    // Bare integer HTML attribute (e.g. width="50") — treated as px.
+    result_px = (num1000 + 500) / 1000;
+  } else if (v[0] == 'p' && v[1] == 'x') {
+    result_px = (num1000 + 500) / 1000;
+  } else if ((v[0] == 'e' && v[1] == 'm') ||
+             (v[0] == 'r' && v[1] == 'e' && v[2] == 'm')) {
+    // em/rem relative to current font size.
+    result_px = (num1000 * font_px + 500) / 1000;
+  } else if (v[0] == 'p' && v[1] == 't') {
+    // 1pt = 4/3 px at 96 DPI.
+    result_px = (num1000 * 4 + 1500) / 3000;
+  } else if (v[0] == 'c' && v[1] == 'm') {
+    // 1cm = 37.795px at 96 DPI; use 378/10.
+    result_px = (num1000 * 378 + 5000) / 10000;
+  } else if (v[0] == 'm' && v[1] == 'm') {
+    // 1mm = 3.7795px; use 378/100.
+    result_px = (num1000 * 378 + 50000) / 100000;
+  } else if (v[0] == 'i' && v[1] == 'n') {
+    // 1in = 96px.
+    result_px = (num1000 * 96 + 500) / 1000;
+  } else if (v[0] == 'v' && v[1] == 'w') {
+    // vw: percentage of 240px viewport width.
+    if (num1000 <= 0 || num1000 > 100 * 1000)
+      return 0;
+    result_px = (240 * num1000 + 50000) / 100000;
+  } else {
+    // Unknown unit (ch, ex, svw, dvw, max-content, etc.) — don't constrain.
+    return 0;
+  }
+
+  return std::max(0, std::min(result_px, text_width));
+}
+
+// Return the author-specified max width in pixels for an img element.
+// Checks the HTML width attribute first, then the CSS width property in style.
+// Returns 0 if no usable constraint found.
+static int ParseImgWidthPx(const char *width_attr, const char *style,
+                            int text_width, int font_px) {
+  if (width_attr && *width_attr) {
+    int px = ParseCssLengthPx(width_attr, text_width, font_px);
+    if (px > 0)
+      return px;
+  }
+  if (style && *style) {
+    std::string lc = ToLowerAscii(std::string(style));
+    size_t pos = lc.find("width:");
+    if (pos != std::string::npos) {
+      pos += 6;
+      while (pos < lc.size() && lc[pos] == ' ')
+        pos++;
+      int px = ParseCssLengthPx(lc.c_str() + pos, text_width, font_px);
+      if (px > 0)
+        return px;
+    }
+  }
+  return 0;
+}
+
 static void ParseClassStyleFlags(const char *class_name, bool *bold_out,
                                  bool *italic_out, bool *underline_out,
                                  u8 *underline_style_out,
@@ -385,6 +493,222 @@ LookupClassMarginBottom(const std::string &class_attr,
 }
 
 static book_xml_css_style_utils::MarginTopResult
+LookupClassMarginLeft(const std::string &class_attr,
+                      const epub_css_class_map::CssClassMap &class_map) {
+  return epub_css_class_map::LookupMarginLeftForClassAttr(class_attr, class_map);
+}
+
+static book_xml_css_style_utils::MarginTopResult
+LookupClassMarginRight(const std::string &class_attr,
+                       const epub_css_class_map::CssClassMap &class_map) {
+  return epub_css_class_map::LookupMarginRightForClassAttr(class_attr,
+                                                           class_map);
+}
+
+static book_xml_css_style_utils::MarginTopResult
+LookupClassTextIndent(const std::string &class_attr,
+                      const epub_css_class_map::CssClassMap &class_map) {
+  return epub_css_class_map::LookupTextIndentForClassAttr(class_attr, class_map);
+}
+
+static book_xml_css_style_utils::MarginTopResult
+ParseElementMarginLeftWithClass(const char **attr, const parsedata_t *p) {
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        const auto r = book_xml_css_style_utils::ParseMarginLeft(attr[i + 1]);
+        if (r.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
+          return r;
+      }
+    }
+  }
+  const std::string cls = ExtractClassAttr(attr);
+  return LookupClassMarginLeft(cls, p ? p->css_class_map
+                                      : epub_css_class_map::CssClassMap{});
+}
+
+static book_xml_css_style_utils::MarginTopResult
+ParseElementMarginRightWithClass(const char **attr, const parsedata_t *p) {
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        const auto r = book_xml_css_style_utils::ParseMarginRight(attr[i + 1]);
+        if (r.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
+          return r;
+      }
+    }
+  }
+  const std::string cls = ExtractClassAttr(attr);
+  return LookupClassMarginRight(cls, p ? p->css_class_map
+                                       : epub_css_class_map::CssClassMap{});
+}
+
+static void ApplyElementBlockMargins(parsedata_t *p, Text *ts,
+                                     const char **attr) {
+  if (!p || !ts)
+    return;
+
+  const int inherited_left = parse_current_block_margin_left(p);
+  const int inherited_right = parse_current_block_margin_right(p);
+  int effective_left = inherited_left;
+  int effective_right = inherited_right;
+
+  const auto ml = ParseElementMarginLeftWithClass(attr, p);
+  const auto mr = ParseElementMarginRightWithClass(attr, p);
+  if (ml.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
+    effective_left += ResolveHorizontalMarginPx(ml, ts->display.width);
+  if (mr.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
+    effective_right += ResolveHorizontalMarginPx(mr, ts->display.width);
+
+  parse_set_current_block_margins(p, effective_left, effective_right);
+}
+
+static void AlignFreshLineToBlockMargin(parsedata_t *p, Text *ts) {
+  if (!p || !ts)
+    return;
+  const int x = std::max(0, ts->margin.left + p->block_margin_left);
+  if (p->pen.x == x)
+    return;
+  p->pen.x = x;
+  if (!p->linebegan) {
+    AppendParsedByte(p, TEXT_LINE_START_X);
+    AppendParsedByte(p, (u32)x);
+  }
+}
+
+static book_xml_css_style_utils::MarginTopResult
+ParseElementTextIndentWithClass(const char **attr, const parsedata_t *p) {
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        const auto r = book_xml_css_style_utils::ParseTextIndent(attr[i + 1]);
+        if (r.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
+          return r;
+      }
+    }
+  }
+  const std::string cls = ExtractClassAttr(attr);
+  return LookupClassTextIndent(cls, p ? p->css_class_map
+                                      : epub_css_class_map::CssClassMap{});
+}
+
+static u8
+ParseElementTextTransform(const char **attr,
+                           const epub_css_class_map::CssClassMap &class_map) {
+  using book_xml_css_style_utils::TextTransform;
+  u8 result = 0;
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        const TextTransform tt =
+            book_xml_css_style_utils::ParseTextTransform(attr[i + 1]);
+        if (tt != TextTransform::None)
+          result = (u8)tt;
+      } else if (AttrNameEquals(attr[i], "class")) {
+        TextTransform tt;
+        if (epub_css_class_map::LookupTextTransformForClassAttr(
+                std::string(attr[i + 1]), class_map, &tt))
+          result = (u8)tt;
+      }
+    }
+  }
+  return result;
+}
+
+static u8 ParseElementWhiteSpace(
+    const char **attr, const epub_css_class_map::CssClassMap &class_map) {
+  using book_xml_css_style_utils::WhiteSpaceMode;
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        WhiteSpaceMode mode = WhiteSpaceMode::Normal;
+        if (book_xml_css_style_utils::TryParseWhiteSpace(attr[i + 1], &mode))
+          return (u8)mode + 1;
+      } else if (AttrNameEquals(attr[i], "class")) {
+        WhiteSpaceMode mode = WhiteSpaceMode::Normal;
+        if (epub_css_class_map::LookupWhiteSpaceForClassAttr(
+                std::string(attr[i + 1]), class_map, &mode)) {
+          return (u8)mode + 1;
+        }
+      }
+    }
+  }
+  return 0;
+}
+
+static book_xml_css_style_utils::WhiteSpaceMode
+ResolveActiveWhiteSpace(const parsedata_t *p) {
+  using book_xml_css_style_utils::WhiteSpaceMode;
+  if (!p)
+    return WhiteSpaceMode::Normal;
+  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+    if (p->style_white_space_stack[i] != 0)
+      return (WhiteSpaceMode)(p->style_white_space_stack[i] - 1);
+  }
+  if (parse_in((parsedata_t *)p, TAG_PRE))
+    return WhiteSpaceMode::PreWrap;
+  return WhiteSpaceMode::Normal;
+}
+
+static book_xml_css_style_utils::FloatMode
+ParseElementFloat(const char **attr,
+                  const epub_css_class_map::CssClassMap &class_map) {
+  using book_xml_css_style_utils::FloatMode;
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        FloatMode mode = FloatMode::None;
+        if (book_xml_css_style_utils::TryParseFloat(attr[i + 1], &mode))
+          return mode;
+      } else if (AttrNameEquals(attr[i], "class")) {
+        FloatMode mode = FloatMode::None;
+        if (epub_css_class_map::LookupFloatForClassAttr(
+                std::string(attr[i + 1]), class_map, &mode)) {
+          return mode;
+        }
+      }
+    }
+  }
+  return FloatMode::None;
+}
+
+static book_xml_css_style_utils::ClearMode
+ParseElementClear(const char **attr,
+                  const epub_css_class_map::CssClassMap &class_map) {
+  using book_xml_css_style_utils::ClearMode;
+  if (attr) {
+    for (int i = 0; attr[i]; i += 2) {
+      if (!attr[i + 1] || !attr[i + 1][0])
+        continue;
+      if (AttrNameEquals(attr[i], "style")) {
+        ClearMode mode = ClearMode::None;
+        if (book_xml_css_style_utils::TryParseClear(attr[i + 1], &mode))
+          return mode;
+      } else if (AttrNameEquals(attr[i], "class")) {
+        ClearMode mode = ClearMode::None;
+        if (epub_css_class_map::LookupClearForClassAttr(
+                std::string(attr[i + 1]), class_map, &mode)) {
+          return mode;
+        }
+      }
+    }
+  }
+  return ClearMode::None;
+}
+
+static book_xml_css_style_utils::MarginTopResult
 ParseElementMarginTopWithClass(const char **attr, const parsedata_t *p) {
   const book_xml_css_style_utils::MarginTopResult from_style =
       ParseElementMarginTopPx(attr);
@@ -406,9 +730,24 @@ ParseElementMarginBottomWithClass(const std::string &last_style,
   return LookupClassMarginBottom(last_class, class_map);
 }
 
+static bool FindActiveBlockTextAlign(
+    const parsedata_t *p, book_xml_css_style_utils::TextAlign *out) {
+  if (!p || !out)
+    return false;
+  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+    if (!p->block_text_align_stack[i])
+      continue;
+    *out = (book_xml_css_style_utils::TextAlign)
+               p->block_text_align_value_stack[i];
+    return true;
+  }
+  return false;
+}
+
 static book_xml_css_style_utils::TextAlign
 ResolveElementTextAlignWithClass(const std::string &style_attr,
                                  const std::string &class_attr,
+                                 const parsedata_t *p,
                                  const epub_css_class_map::CssClassMap &class_map) {
   book_xml_css_style_utils::TextAlign align =
       book_xml_css_style_utils::TextAlign::Left;
@@ -418,6 +757,8 @@ ResolveElementTextAlignWithClass(const std::string &style_attr,
                                                       &align)) {
     return align;
   }
+  if (FindActiveBlockTextAlign(p, &align))
+    return align;
   return book_xml_css_style_utils::TextAlign::Left;
 }
 
@@ -432,6 +773,59 @@ static void AppendParagraphAlignMarker(
   } else {
     AppendParsedByte(p, TEXT_PARAGRAPH_LEFT);
   }
+}
+
+static bool StyleLooksDisplayBlock(const std::string &style_attr) {
+  const std::string style_lc = ToLowerAsciiLocal(style_attr);
+  return ContainsAsciiNoCase(style_lc, "display:block") ||
+         ContainsAsciiNoCase(style_lc, "display: block");
+}
+
+static bool ElementCanCarryBlockTextAlign(const char *el,
+                                          const std::string &style_attr) {
+  return !strcmp(el, "body") || !strcmp(el, "div") ||
+         !strcmp(el, "aside") || !strcmp(el, "blockquote") ||
+         !strcmp(el, "caption") || !strcmp(el, "figure") ||
+         AttrNameEquals(el, "section") || StyleLooksDisplayBlock(style_attr);
+}
+
+static void RestoreActiveBlockTextAlignMarker(parsedata_t *p) {
+  if (!p)
+    return;
+  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+    if (!p->block_text_align_stack[i])
+      continue;
+    AppendParagraphAlignMarker(
+        p, (book_xml_css_style_utils::TextAlign)
+               p->block_text_align_value_stack[i]);
+    return;
+  }
+  AppendParagraphAlignMarker(p, book_xml_css_style_utils::TextAlign::Left);
+}
+
+static void ConfigureBlockTextAlign(parsedata_t *p, const char *el,
+                                    const char **attr) {
+  if (!p || !el || p->stacksize == 0)
+    return;
+
+  const std::string style_attr = ExtractStyleAttr(attr);
+  const std::string class_attr = ExtractClassAttr(attr);
+  if (!ElementCanCarryBlockTextAlign(el, style_attr))
+    return;
+
+  book_xml_css_style_utils::TextAlign align =
+      book_xml_css_style_utils::TextAlign::Left;
+  const bool has_align =
+      book_xml_css_style_utils::TryParseTextAlign(style_attr.c_str(), &align) ||
+      epub_css_class_map::LookupTextAlignForClassAttr(class_attr,
+                                                      p->css_class_map, &align);
+  if (!has_align)
+    return;
+
+  const u8 current = (u8)(p->stacksize - 1);
+  p->block_text_align_stack[current] = true;
+  p->block_text_align_value_stack[current] = (u8)align;
+  AppendParagraphAlignMarker(p, align);
 }
 
 static void ApplyHeadingFontSize(parsedata_t *p, Text *ts, int heading_level,
@@ -507,6 +901,11 @@ static bool ShouldRenderHrRule(const std::string &style_attr,
   return true;
 }
 
+static bool ImagePathLooksLikeSvgWrapper(const std::string &path) {
+  static const std::vector<u8> empty;
+  return epub_image_utils::LooksLikeSvgWrapper(path, empty);
+}
+
 static const char *MarginUnitName(
     book_xml_css_style_utils::MarginTopResult::Unit unit) {
   using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
@@ -555,8 +954,10 @@ static void ParseElementStyleFlags(const char **attr, bool *bold_out,
                                    bool *italic_out, bool *underline_out,
                                    u8 *underline_style_out,
                                    bool *overline_out, bool *strikethrough_out,
-                                   bool *superscript_out,
-                                   bool *subscript_out) {
+                                   bool *superscript_out, bool *subscript_out,
+                                   bool *no_underline_out,
+                                   bool *reset_bold_out,
+                                   bool *reset_italic_out) {
   if ((!bold_out && !italic_out && !underline_out && !overline_out &&
        !strikethrough_out &&
        !superscript_out && !subscript_out) ||
@@ -584,6 +985,12 @@ static void ParseElementStyleFlags(const char **attr, bool *bold_out,
         *superscript_out = true;
       if (subscript_out && flags.subscript)
         *subscript_out = true;
+      if (no_underline_out && flags.no_underline)
+        *no_underline_out = true;
+      if (reset_bold_out && flags.reset_bold)
+        *reset_bold_out = true;
+      if (reset_italic_out && flags.reset_italic)
+        *reset_italic_out = true;
     } else if (AttrNameEquals(attr[i], "class")) {
       ParseClassStyleFlags(attr[i + 1], bold_out, italic_out, underline_out,
                            underline_style_out, overline_out,
@@ -764,6 +1171,36 @@ static bool HasActiveStackSubscriptStyle(const parsedata_t *p) {
   return false;
 }
 
+static bool HasActiveStackNoUnderlineStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_no_underline_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackResetBoldStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_reset_bold_stack[i])
+      return true;
+  }
+  return false;
+}
+
+static bool HasActiveStackResetItalicStyle(const parsedata_t *p) {
+  if (!p)
+    return false;
+  for (u8 i = 0; i < p->stacksize; i++) {
+    if (p->style_reset_italic_stack[i])
+      return true;
+  }
+  return false;
+}
+
 static bool HasActiveStackMonoStyle(const parsedata_t *p) {
   if (!p)
     return false;
@@ -839,6 +1276,170 @@ struct ChardataPerfScope {
 };
 #endif
 
+static void EmitFlowedUtf8Segment(
+    parsedata_t *p, const char *txt, size_t txtlen,
+    const ParsedTextMeasureContext &measure_ctx,
+    const book_xml_text_emit::FlowEmitMetrics &emit_metrics) {
+  if (!p || !txt || txtlen == 0)
+    return;
+
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  bool has_rtl = false;
+  if (!text_layout_utils::ShapeTextRunBidi(
+          txt, txtlen, NULL, MeasureParsedTextAdvance, (void *)&measure_ctx,
+          &run, &has_rtl))
+    return;
+
+  std::vector<text_bidi_utils::BidiRun> bidi_runs;
+  if (has_rtl) {
+    std::vector<uint32_t> run_cps;
+    run_cps.reserve(run.size());
+    for (size_t ci = 0; ci < run.size(); ci++)
+      run_cps.push_back(run[ci].text.codepoint);
+    text_bidi_utils::AnalyzeBidiRuns(run_cps.data(), run_cps.size(),
+                                     &bidi_runs);
+  }
+  book_xml_text_emit::EmitFlowedShapedText(
+      p, txt, run, has_rtl, bidi_runs, emit_metrics,
+      AdvanceParsedPageOnOverflowThunk, NULL);
+}
+
+static void EmitPreformattedUtf8Segment(
+    parsedata_t *p, const char *txt, size_t txtlen,
+    const ParsedTextMeasureContext &measure_ctx, int lineheight,
+    int linespacing, bool allow_wrap, bool text_already_transformed) {
+  if (!p || !txt || txtlen == 0)
+    return;
+
+  Text *ts = p->ts;
+  if (!allow_wrap) {
+    size_t offset = 0;
+    while (offset < txtlen) {
+      uint32_t cp = 0;
+      const size_t step = text_unicode_utils::DecodeNextDisplayCodepoint(
+          txt + offset, txtlen - offset, &cp);
+      if (step == 0) {
+        offset++;
+        continue;
+      }
+      if (cp == '\r') {
+        offset += step;
+        continue;
+      }
+      if (cp == '\n') {
+        AppendParsedByte(p, '\n');
+        p->pen.x = ts->margin.left;
+        p->pen.y += (lineheight + linespacing);
+        p->linebegan = false;
+        AdvanceParsedPageOnOverflow(p, lineheight);
+        offset += step;
+        continue;
+      }
+
+      AdvanceParsedPageOnOverflow(p, lineheight);
+      if (text_already_transformed)
+        book_xml_text_emit::AppendParsedCodepointsRaw(p, txt + offset, step);
+      else
+        book_xml_text_emit::AppendParsedCodepoints(p, txt + offset, step);
+      p->pen.x += ts->GetAdvance(cp, measure_ctx.style);
+      p->linebegan = true;
+      offset += step;
+    }
+    return;
+  }
+
+  std::vector<text_layout_utils::ShapedGlyph> pre_run;
+  bool pre_has_rtl = false;
+  if (!text_layout_utils::ShapeTextRunBidi(
+          txt, txtlen, NULL, MeasureParsedTextAdvance, (void *)&measure_ctx,
+          &pre_run, &pre_has_rtl)) {
+    return;
+  }
+
+  std::vector<text_bidi_utils::BidiRun> pre_bidi_runs;
+  if (pre_has_rtl) {
+    std::vector<uint32_t> pre_cps;
+    pre_cps.reserve(pre_run.size());
+    for (size_t ci = 0; ci < pre_run.size(); ci++)
+      pre_cps.push_back(pre_run[ci].text.codepoint);
+    text_bidi_utils::AnalyzeBidiRuns(pre_cps.data(), pre_cps.size(),
+                                     &pre_bidi_runs);
+    if (book_xml_text_emit::DetectParagraphRTL(pre_run))
+      AppendParsedByte(p, TEXT_PARAGRAPH_RTL);
+    else
+      AppendParsedByte(p, TEXT_PARAGRAPH_LTR);
+  }
+
+  const int max_pre_line_width =
+      ts->display.width - ts->margin.right - ts->margin.left;
+  size_t unit_index = 0;
+  while (unit_index < pre_run.size()) {
+    const text_layout_utils::ShapedGlyph &unit = pre_run[unit_index];
+    if (unit.text.codepoint == '\r') {
+      unit_index++;
+      continue;
+    }
+    if (unit.text.codepoint == '\n') {
+      AppendParsedByte(p, '\n');
+      p->pen.x = ts->margin.left;
+      p->pen.y += (lineheight + linespacing);
+      p->linebegan = false;
+      AdvanceParsedPageOnOverflow(p, lineheight);
+      unit_index++;
+      continue;
+    }
+
+    text_layout_utils::LineBreakMeasureResult segment =
+        text_layout_utils::FindPreformattedLineBreakAndMeasure(
+            pre_run, unit_index, max_pre_line_width);
+    size_t segment_end_index = segment.end_index;
+    if (segment_end_index <= unit_index)
+      segment_end_index = unit_index + 1;
+
+    size_t segment_start = pre_run[unit_index].text.byte_offset;
+    size_t segment_end =
+        pre_run[segment_end_index - 1].text.byte_offset +
+        pre_run[segment_end_index - 1].text.byte_length;
+    const int advance = segment.width;
+
+    if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
+      AppendParsedByte(p, '\n');
+      p->pen.x = ts->margin.left;
+      p->pen.y += (lineheight + linespacing);
+      p->linebegan = false;
+      AdvanceParsedPageOnOverflow(p, lineheight);
+    }
+
+    if (pre_has_rtl) {
+      AppendParsedByte(p, TEXT_RTL_LINE_PX);
+      AppendParsedByte(p, (u32)advance);
+      book_xml_text_emit::EmitBidiSegment(p, pre_run, unit_index,
+                                          segment_end_index, pre_bidi_runs,
+                                          !text_already_transformed);
+    } else {
+      if (text_already_transformed) {
+        book_xml_text_emit::AppendParsedCodepointsRaw(
+            p, txt + segment_start, segment_end - segment_start);
+      } else {
+        book_xml_text_emit::AppendParsedCodepoints(
+            p, txt + segment_start, segment_end - segment_start);
+      }
+    }
+    p->pen.x += advance;
+    p->linebegan = true;
+    unit_index = segment_end_index;
+
+    if (unit_index < pre_run.size() &&
+        pre_run[unit_index].text.codepoint != '\n') {
+      AppendParsedByte(p, '\n');
+      p->pen.x = ts->margin.left;
+      p->pen.y += (lineheight + linespacing);
+      p->linebegan = false;
+      AdvanceParsedPageOnOverflow(p, lineheight);
+    }
+  }
+}
+
 static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
                                   int txtlen) {
   if (!p || !txt || txtlen <= 0)
@@ -862,180 +1463,75 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
     p->linebegan = false;
   }
 
-  if (parse_in(p, TAG_PRE)) {
-    if (!p->preformatted_wrap_enabled) {
-      int i = 0;
-      while (i < txtlen) {
-        if (txt[i] == '\r') {
-          i++;
-          continue;
-        }
-
-        if (iswhitespace((u32)(u8)txt[i])) {
-          if (txt[i] == '\n') {
-            AppendParsedByte(p, '\n');
-            p->pen.x = ts->margin.left;
-            p->pen.y += (lineheight + linespacing);
-            p->linebegan = false;
-            AdvanceParsedPageOnOverflow(p, lineheight);
-          } else if (p->linebegan && p->buflen &&
-                     !iswhitespace(p->buf[p->buflen - 1])) {
-            AppendParsedByte(p, ' ');
-            p->pen.x += spaceadvance;
-          }
-          i++;
-          continue;
-        }
-
-        int j = i;
-        int advance = 0;
-        u8 bytes = 1;
-        for (j = i; (j < txtlen) && (!iswhitespace((u32)(u8)txt[j])); j += bytes) {
-          u32 code = (u8)txt[j];
-          bytes = 1;
-          if (code >> 7)
-            bytes =
-                ts->GetCharCode((char *)&(txt[j]), (size_t)(txtlen - j), &code);
-
-          advance += ts->GetAdvance(code, parse_text_style);
-          if (advance >
-              ts->display.width - ts->margin.right - ts->margin.left) {
-            break;
-          }
-        }
-
-        if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
-          AppendParsedByte(p, '\n');
-          p->pen.x = ts->margin.left;
-          p->pen.y += (lineheight + linespacing);
-          p->linebegan = false;
-        }
-
-        AdvanceParsedPageOnOverflow(p, lineheight);
-
-        book_xml_text_emit::AppendParsedCodepoints(p, txt + i,
-                                                   (size_t)(j - i));
-        p->linebegan = true;
-        i = j;
-        p->pen.x += advance;
-      }
-      return;
-    }
-
-    std::vector<text_layout_utils::ShapedGlyph> pre_run;
-    bool pre_has_rtl = false;
-    if (!text_layout_utils::ShapeTextRunBidi(
-            txt, (size_t)txtlen, NULL, MeasureParsedTextAdvance,
-            (void *)&measure_ctx, &pre_run, &pre_has_rtl)) {
-      return;
-    }
-
-    std::vector<text_bidi_utils::BidiRun> pre_bidi_runs;
-    if (pre_has_rtl) {
-      std::vector<uint32_t> pre_cps;
-      pre_cps.reserve(pre_run.size());
-      for (size_t ci = 0; ci < pre_run.size(); ci++)
-        pre_cps.push_back(pre_run[ci].text.codepoint);
-      text_bidi_utils::AnalyzeBidiRuns(pre_cps.data(), pre_cps.size(),
-                                       &pre_bidi_runs);
-      if (book_xml_text_emit::DetectParagraphRTL(pre_run))
-        AppendParsedByte(p, TEXT_PARAGRAPH_RTL);
-      else
-        AppendParsedByte(p, TEXT_PARAGRAPH_LTR);
-    }
-
-    const int maxPreLineWidth =
-        ts->display.width - ts->margin.right - ts->margin.left;
-    size_t unit_index = 0;
-    while (unit_index < pre_run.size()) {
-      const text_layout_utils::ShapedGlyph &unit = pre_run[unit_index];
-      if (unit.text.codepoint == '\r') {
-        unit_index++;
-        continue;
-      }
-
-      if (unit.text.codepoint == '\n') {
-        AppendParsedByte(p, '\n');
-        p->pen.x = ts->margin.left;
-        p->pen.y += (lineheight + linespacing);
-        p->linebegan = false;
-        AdvanceParsedPageOnOverflow(p, lineheight);
-        unit_index++;
-        continue;
-      }
-
-      text_layout_utils::LineBreakMeasureResult segment =
-          text_layout_utils::FindPreformattedLineBreakAndMeasure(
-              pre_run, unit_index, maxPreLineWidth);
-      size_t segment_end_index = segment.end_index;
-      if (segment_end_index <= unit_index)
-        segment_end_index = unit_index + 1;
-
-      size_t segment_start = pre_run[unit_index].text.byte_offset;
-      size_t segment_end =
-          pre_run[segment_end_index - 1].text.byte_offset +
-          pre_run[segment_end_index - 1].text.byte_length;
-      const int advance = segment.width;
-
-      if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
-        AppendParsedByte(p, '\n');
-        p->pen.x = ts->margin.left;
-        p->pen.y += (lineheight + linespacing);
-        p->linebegan = false;
-        AdvanceParsedPageOnOverflow(p, lineheight);
-      }
-
-      if (pre_has_rtl) {
-        AppendParsedByte(p, TEXT_RTL_LINE_PX);
-        AppendParsedByte(p, (u32)advance);
-        book_xml_text_emit::EmitBidiSegment(p, pre_run, unit_index,
-                                            segment_end_index, pre_bidi_runs);
-      } else {
-        book_xml_text_emit::AppendParsedCodepoints(
-            p, txt + segment_start, segment_end - segment_start);
-      }
-      p->pen.x += advance;
-      p->linebegan = true;
-      unit_index = segment_end_index;
-
-      if (unit_index < pre_run.size() &&
-          pre_run[unit_index].text.codepoint != '\n') {
-        AppendParsedByte(p, '\n');
-        p->pen.x = ts->margin.left;
-        p->pen.y += (lineheight + linespacing);
-        p->linebegan = false;
-        AdvanceParsedPageOnOverflow(p, lineheight);
-      }
-    }
-    return;
+  std::string transformed_text;
+  const char *flow_txt = txt;
+  size_t flow_txtlen = (size_t)txtlen;
+  bool text_already_transformed = false;
+  if (parse_resolve_text_transform(p) != 0) {
+    transformed_text =
+        book_xml_text_emit::TransformUtf8ForLayout(p, txt, (size_t)txtlen);
+    flow_txt = transformed_text.c_str();
+    flow_txtlen = transformed_text.size();
+    text_already_transformed = true;
   }
 
-  std::vector<text_layout_utils::ShapedGlyph> run;
-  bool has_rtl = false;
-  if (!text_layout_utils::ShapeTextRunBidi(
-          txt, (size_t)txtlen, NULL, MeasureParsedTextAdvance,
-          (void *)&measure_ctx, &run, &has_rtl))
-    return;
-
-  std::vector<text_bidi_utils::BidiRun> bidi_runs;
-  if (has_rtl) {
-    std::vector<uint32_t> run_cps;
-    run_cps.reserve(run.size());
-    for (size_t ci = 0; ci < run.size(); ci++)
-      run_cps.push_back(run[ci].text.codepoint);
-    text_bidi_utils::AnalyzeBidiRuns(run_cps.data(), run_cps.size(),
-                                     &bidi_runs);
-  }
+  const book_xml_css_style_utils::WhiteSpaceMode white_space =
+      ResolveActiveWhiteSpace(p);
   book_xml_text_emit::FlowEmitMetrics emit_metrics{};
   emit_metrics.display_width = ts->display.width;
-  emit_metrics.margin_left = ts->margin.left;
-  emit_metrics.margin_right = ts->margin.right;
+  emit_metrics.base_margin_left = ts->margin.left;
+  emit_metrics.margin_left = ts->margin.left + p->block_margin_left;
+  emit_metrics.margin_right = ts->margin.right + p->block_margin_right;
   emit_metrics.lineheight = lineheight;
   emit_metrics.linespacing = linespacing;
   emit_metrics.spaceadvance = spaceadvance;
-  book_xml_text_emit::EmitFlowedShapedText(
-      p, txt, run, has_rtl, bidi_runs, emit_metrics,
-      AdvanceParsedPageOnOverflowThunk, NULL);
+  emit_metrics.text_already_transformed = text_already_transformed;
+
+  if (white_space == book_xml_css_style_utils::WhiteSpaceMode::Pre ||
+      white_space == book_xml_css_style_utils::WhiteSpaceMode::PreWrap) {
+    EmitPreformattedUtf8Segment(
+        p, flow_txt, flow_txtlen, measure_ctx, lineheight, linespacing,
+        white_space == book_xml_css_style_utils::WhiteSpaceMode::PreWrap,
+        text_already_transformed);
+    return;
+  }
+
+  if (white_space == book_xml_css_style_utils::WhiteSpaceMode::Nowrap) {
+    const std::string normalized =
+        book_xml_css_style_utils::NormalizeWhiteSpaceText(
+            flow_txt, flow_txtlen, white_space);
+    if (!normalized.empty())
+      EmitFlowedUtf8Segment(p, normalized.c_str(), normalized.size(),
+                            measure_ctx, emit_metrics);
+    return;
+  }
+
+  if (white_space == book_xml_css_style_utils::WhiteSpaceMode::PreLine) {
+    const std::string normalized =
+        book_xml_css_style_utils::NormalizeWhiteSpaceText(
+            flow_txt, flow_txtlen, white_space);
+    size_t start = 0;
+    while (start <= normalized.size()) {
+      const size_t nl = normalized.find('\n', start);
+      const size_t end =
+          (nl == std::string::npos) ? normalized.size() : nl;
+      if (end > start) {
+        EmitFlowedUtf8Segment(p, normalized.c_str() + start, end - start,
+                              measure_ctx, emit_metrics);
+      }
+      if (nl == std::string::npos)
+        break;
+      AppendParsedByte(p, '\n');
+      p->pen.x = ts->margin.left;
+      p->pen.y += (lineheight + linespacing);
+      p->linebegan = false;
+      AdvanceParsedPageOnOverflow(p, lineheight);
+      start = nl + 1;
+    }
+    return;
+  }
+
+  EmitFlowedUtf8Segment(p, flow_txt, flow_txtlen, measure_ctx, emit_metrics);
 }
 
 static void FlushInlineTailAndDeferredStyle(parsedata_t *p, Text *ts) {
@@ -1165,6 +1661,12 @@ static bool blankline(parsedata_t *p) {
   return (p->buf[p->buflen - 1] == '\n') && (p->buf[p->buflen - 2] == '\n');
 }
 
+static void ApplyClearBreak(parsedata_t *p) {
+  if (!p || !p->linebegan || blankline(p))
+    return;
+  linefeed(p);
+}
+
 static int CountTrailingLinefeeds(const parsedata_t *p) {
   if (!p || p->buflen <= 0)
     return 0;
@@ -1230,6 +1732,30 @@ static void AdvanceParsedScreen(parsedata_t *p) {
   p->pen.x = ts->margin.left;
   p->pen.y = ts->margin.top + ts->GetHeight();
   p->linebegan = false;
+}
+
+static void ForcePageBreak(parsedata_t *p) {
+  if (!p || !p->ts || !p->book)
+    return;
+  // If nothing is buffered yet we are already at the top of a fresh screen.
+  if (p->buflen == 0)
+    return;
+  if (p->screen == 0) {
+    // Emit a marker so page.cpp knows to switch to screen=1 at this position.
+    AppendParsedByte(p, TEXT_SCREEN_BREAK);
+  }
+  AdvanceParsedScreen(p);
+}
+
+static bool IsBlockLevelElement(const char *el) {
+  return !strcmp(el, "p") || !strcmp(el, "div") ||
+         !strcmp(el, "h1") || !strcmp(el, "h2") || !strcmp(el, "h3") ||
+         !strcmp(el, "h4") || !strcmp(el, "h5") || !strcmp(el, "h6") ||
+         !strcmp(el, "section") || !strcmp(el, "article") ||
+         !strcmp(el, "aside") || !strcmp(el, "blockquote") ||
+         !strcmp(el, "header") || !strcmp(el, "footer") ||
+         !strcmp(el, "figure") || !strcmp(el, "dl") ||
+         !strcmp(el, "dt") || !strcmp(el, "dd");
 }
 
 static void ResetCapturedTable(parsedata_t *p) {
@@ -1641,22 +2167,54 @@ void start(void *data, const char *el, const char **attr) {
   if (HandleTableStart(p, ts, el, attr))
     return;
 
+  if (IsBlockLevelElement(el)) {
+    const char *el_style = NULL;
+    const char *el_class = NULL;
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (AttrNameEquals(attr[i], "style"))
+        el_style = attr[i + 1];
+      else if (AttrNameEquals(attr[i], "class"))
+        el_class = attr[i + 1];
+    }
+    if (ParseElementClear(attr, p->css_class_map) !=
+        book_xml_css_style_utils::ClearMode::None) {
+      ApplyClearBreak(p);
+    }
+    if ((book_xml_css_style_utils::HasPageBreakInsideAvoid(el_style) ||
+         epub_css_class_map::LookupPageBreakInsideAvoidForClassAttr(
+             el_class ? std::string(el_class) : std::string(),
+             p->css_class_map)) &&
+        p->buflen > 0 && !blankline(p)) {
+      ForcePageBreak(p);
+    }
+    if (book_xml_css_style_utils::HasPageBreakBefore(el_style) ||
+        epub_css_class_map::LookupPageBreakBeforeForClassAttr(
+            el_class ? std::string(el_class) : std::string(),
+            p->css_class_map)) {
+      ForcePageBreak(p);
+    }
+  }
+
   if (!strcmp(el, "html"))
     parse_push(p, TAG_HTML);
   else if (!strcmp(el, "aside")) {
     parse_push(p, TAG_ASIDE);
+    ApplyElementBlockMargins(p, ts, attr);
     if (!blankline(p))
       linefeed(p);
   } else if (!strcmp(el, "blockquote")) {
     parse_push(p, TAG_BLOCKQUOTE);
+    ApplyElementBlockMargins(p, ts, attr);
     if (!blankline(p))
       linefeed(p);
   } else if (!strcmp(el, "caption")) {
     parse_push(p, TAG_CAPTION);
+    ApplyElementBlockMargins(p, ts, attr);
     if (!blankline(p))
       linefeed(p);
   } else if (!strcmp(el, "dd")) {
     parse_push(p, TAG_DD);
+    ApplyElementBlockMargins(p, ts, attr);
     if (!blankline(p))
       linefeed(p);
     const int leading_spaces = book_xml_block_utils::GetLeadingSpaceCount(TAG_DD);
@@ -1667,12 +2225,17 @@ void start(void *data, const char *el, const char **attr) {
   }
   else if (!strcmp(el, "body"))
     parse_push(p, TAG_BODY);
-  else if (!strcmp(el, "div"))
+  else if (!strcmp(el, "div")) {
     parse_push(p, TAG_DIV);
-  else if (!strcmp(el, "dt"))
+    ApplyElementBlockMargins(p, ts, attr);
+  }
+  else if (!strcmp(el, "dt")) {
     parse_push(p, TAG_DT);
+    ApplyElementBlockMargins(p, ts, attr);
+  }
   else if (!strcmp(el, "figure")) {
     parse_push(p, TAG_FIGURE);
+    ApplyElementBlockMargins(p, ts, attr);
     if (!blankline(p))
       linefeed(p);
   }
@@ -1700,12 +2263,13 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 1, p->last_h1_style, p->last_h1_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h1_style,
-                                            p->last_h1_class, p->css_class_map));
+                                            p->last_h1_class, p, p->css_class_map));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     const book_xml_css_style_utils::MarginTopResult mtr =
         ParseElementMarginTopWithClass(attr, p);
+    ApplyElementBlockMargins(p, ts, attr);
     const int line_h = ts->GetHeight() + ts->linespacing;
     const int default_lf = 1;
     const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -1738,12 +2302,13 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 2, p->last_h2_style, p->last_h2_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h2_style,
-                                            p->last_h2_class, p->css_class_map));
+                                            p->last_h2_class, p, p->css_class_map));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     const book_xml_css_style_utils::MarginTopResult mtr =
         ParseElementMarginTopWithClass(attr, p);
+    ApplyElementBlockMargins(p, ts, attr);
     const int line_h = ts->GetHeight() + ts->linespacing;
     const int default_lf = 1;
     const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -1776,13 +2341,14 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 3, p->last_h_style, p->last_h_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p->css_class_map));
+                                            p, p->css_class_map));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
           ParseElementMarginTopWithClass(attr, p);
+      ApplyElementBlockMargins(p, ts, attr);
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = 1;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -1799,13 +2365,14 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 4, p->last_h_style, p->last_h_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p->css_class_map));
+                                            p, p->css_class_map));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
           ParseElementMarginTopWithClass(attr, p);
+      ApplyElementBlockMargins(p, ts, attr);
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !blankline(p) ? 1 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -1822,13 +2389,14 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 5, p->last_h_style, p->last_h_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p->css_class_map));
+                                            p, p->css_class_map));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
           ParseElementMarginTopWithClass(attr, p);
+      ApplyElementBlockMargins(p, ts, attr);
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !blankline(p) ? 1 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -1845,13 +2413,14 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 6, p->last_h_style, p->last_h_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p->css_class_map));
+                                            p, p->css_class_map));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
           ParseElementMarginTopWithClass(attr, p);
+      ApplyElementBlockMargins(p, ts, attr);
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !blankline(p) ? 1 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -1869,11 +2438,12 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_P);
     p->in_paragraph = true;
     p->paragraph_has_content = false;
+    p->text_transform_word_start = true;
     p->last_p_style = ExtractStyleAttr(attr);
     p->last_p_class = ExtractClassAttr(attr);
     const book_xml_css_style_utils::TextAlign align =
         ResolveElementTextAlignWithClass(p->last_p_style, p->last_p_class,
-                                         p->css_class_map);
+                                         p, p->css_class_map);
     AppendParagraphAlignMarker(p, align);
     const bool inside_list_item = book_xml_list_utils::IsInsideListItem(p);
     const bool tight_list_paragraph =
@@ -1883,6 +2453,9 @@ void start(void *data, const char *el, const char **attr) {
         !tight_list_paragraph && !tight_block_paragraph;
     const book_xml_css_style_utils::MarginTopResult mtr =
         ParseElementMarginTopWithClass(attr, p);
+    const book_xml_css_style_utils::MarginTopResult text_indent_mtr =
+        ParseElementTextIndentWithClass(attr, p);
+    ApplyElementBlockMargins(p, ts, attr);
     const int line_h = ts->GetHeight() + ts->linespacing;
     if (can_apply_top_margin) {
       const int default_lf = p->book->GetParagraphSpacing();
@@ -1892,10 +2465,21 @@ void start(void *data, const char *el, const char **attr) {
                              p->last_p_class, mtr, line_h, default_lf,
                              lf_count);
       EmitAdditionalTopLinefeeds(p, lf_count);
-      for (int i = 0; i < p->book->GetParagraphIndent() && !inside_list_item &&
-                      !parse_in(p, TAG_DD); i++) {
-        AppendParsedByte(p, ' ');
-        p->pen.x += ts->GetAdvance(' ');
+      if (!inside_list_item && !parse_in(p, TAG_DD)) {
+        int indent_spaces = 0;
+        using book_xml_css_style_utils::MarginTopResult;
+        if (text_indent_mtr.unit != MarginTopResult::Unit::None &&
+            !text_indent_mtr.negative) {
+          const int sa = ts->GetAdvance(' ');
+          if (sa > 0)
+            indent_spaces = text_indent_mtr.value / sa;
+        } else if (text_indent_mtr.unit == MarginTopResult::Unit::None) {
+          indent_spaces = p->book->GetParagraphIndent();
+        }
+        for (int i = 0; i < indent_spaces; i++) {
+          AppendParsedByte(p, ' ');
+          p->pen.x += ts->GetAdvance(' ');
+        }
       }
     } else {
       const char *phase = "top-skipped";
@@ -1912,6 +2496,7 @@ void start(void *data, const char *el, const char **attr) {
     p->last_hr_class = ExtractClassAttr(attr);
     const book_xml_css_style_utils::MarginTopResult mtr =
         ParseElementMarginTopWithClass(attr, p);
+    ApplyElementBlockMargins(p, ts, attr);
     const int line_h = ts->GetHeight() + ts->linespacing;
     const int default_lf = !blankline(p) ? 1 : 0;
     const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -1941,6 +2526,13 @@ void start(void *data, const char *el, const char **attr) {
     parse_push(p, TAG_LI);
     book_xml_list_utils::MarkCurrentListItemPending(p, true);
     const context_t active_list = book_xml_list_utils::GetActiveListContext(p);
+    const int nested_indent = book_xml_list_utils::ResolveNestedListItemIndentPx(
+        book_xml_list_utils::GetActiveListDepth(p), ts->GetAdvance(' '));
+    if (nested_indent != 0) {
+      parse_set_current_block_margins(
+          p, parse_current_block_margin_left(p) + nested_indent,
+          parse_current_block_margin_right(p));
+    }
     // HasSuppressedListMarkerContext checks ancestor elements (e.g. ol.classname).
     // ParseListMarkerHiddenCssClass checks the <li> element's own class
     // attribute, which ConfigureElementListSemantics hasn't processed yet.
@@ -1950,6 +2542,11 @@ void start(void *data, const char *el, const char **attr) {
     if (active_list == TAG_UL || active_list == TAG_OL) {
       if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
         linefeed(p);
+      // Prevent orphan markers: if the marker's line is the last usable line on
+      // the screen (chardata would immediately advance before the first content
+      // character), push the marker to the next screen now.
+      AdvanceParsedPageOnOverflow(p, ts->GetHeight());
+      AlignFreshLineToBlockMargin(p, ts);
       if (!suppress_marker) {
         if (active_list == TAG_UL) {
           AppendParsedByte(p, 0x2022); // bullet '•'
@@ -2054,11 +2651,21 @@ void start(void *data, const char *el, const char **attr) {
 
     const char *src = NULL;
     const char *img_style = NULL;
+    const char *img_width_attr = NULL;
     for (int i = 0; attr && attr[i]; i += 2) {
       if (XmlNameEquals(attr[i], "src") || XmlNameEquals(attr[i], "href"))
         src = attr[i + 1];
       else if (AttrNameEquals(attr[i], "style"))
         img_style = attr[i + 1];
+      else if (AttrNameEquals(attr[i], "width"))
+        img_width_attr = attr[i + 1];
+    }
+
+    const book_xml_css_style_utils::FloatMode float_mode =
+        ParseElementFloat(attr, p->css_class_map);
+    if (ParseElementClear(attr, p->css_class_map) !=
+        book_xml_css_style_utils::ClearMode::None) {
+      ApplyClearBreak(p);
     }
 
     if (img_style) {
@@ -2086,6 +2693,11 @@ void start(void *data, const char *el, const char **attr) {
 
     if (!resolved.empty() && p->book) {
       u16 image_id = p->book->RegisterInlineImage(resolved);
+      const int text_w = ts->display.width - ts->margin.left - ts->margin.right;
+      const int author_max_w =
+          ParseImgWidthPx(img_width_attr, img_style, text_w, ts->GetHeight());
+      if (author_max_w > 0)
+        p->book->SetInlineImageAuthorMaxWidth(image_id, author_max_w);
       InlineImageLayoutPlan image_plan{};
       const bool leading_paragraph_image =
           p->in_paragraph && !p->paragraph_has_content;
@@ -2096,12 +2708,17 @@ void start(void *data, const char *el, const char **attr) {
                                      p->pen.y, p->linebegan,
                                      image_context, &image_plan);
 
+      if (float_mode != book_xml_css_style_utils::FloatMode::None)
+        ApplyFloatImageLayoutOverride(&image_plan, p->linebegan,
+                                      ts->linespacing);
+
       // If the image can't be decoded (e.g. a pure SVG vector without an
       // embedded raster), PAGE mode would consume a full screen worth of space
       // while drawing nothing. Emit a text placeholder instead.
       InlineImageMetadata img_meta{};
       p->book->GetInlineImageMetadata(image_id, &img_meta);
-      if (!img_meta.ok && image_plan.mode == INLINE_IMAGE_LAYOUT_PAGE) {
+      if (!img_meta.ok && image_plan.mode == INLINE_IMAGE_LAYOUT_PAGE &&
+          ImagePathLooksLikeSvgWrapper(resolved)) {
         const char *fallback = "[illustration]";
         if (!blankline(p))
           linefeed(p);
@@ -2121,6 +2738,17 @@ void start(void *data, const char *el, const char **attr) {
       // concrete inline/band/page behavior from the same layout planner.
       if (leading_paragraph_image)
         AppendParsedByte(p, TEXT_IMAGE_LEADING_PARAGRAPH);
+      if (author_max_w > 0) {
+        AppendParsedByte(p, TEXT_IMAGE_AUTHOR_WIDTH);
+        AppendParsedByte(p, (u32)author_max_w);
+      }
+      if (float_mode == book_xml_css_style_utils::FloatMode::Left) {
+        AppendParsedByte(p, TEXT_IMAGE_ALIGN);
+        AppendParsedByte(p, 1);
+      } else if (float_mode == book_xml_css_style_utils::FloatMode::Right) {
+        AppendParsedByte(p, TEXT_IMAGE_ALIGN);
+        AppendParsedByte(p, 2);
+      }
       AppendParsedByte(p, TEXT_IMAGE);
       AppendParsedByte(p, (u32)image_id);
 
@@ -2199,6 +2827,8 @@ void start(void *data, const char *el, const char **attr) {
   } else
     parse_push(p, TAG_UNKNOWN);
 
+  ConfigureBlockTextAlign(p, el, attr);
+
   // CSS-based emphasis fallback for EPUBs that do not use semantic tags.
   if (parse_in(p, TAG_BODY) && p->stacksize > 0) {
     bool style_bold = false;
@@ -2209,18 +2839,34 @@ void start(void *data, const char *el, const char **attr) {
     bool style_strikethrough = false;
     bool style_superscript = false;
     bool style_subscript = false;
+    bool style_no_underline = false;
+    bool style_reset_bold = false;
+    bool style_reset_italic = false;
     bool style_hidden = false;
     ParseElementStyleFlags(attr, &style_bold, &style_italic, &style_underline,
                            &style_underline_style, &style_overline,
                            &style_strikethrough,
                            &style_superscript,
-                           &style_subscript);
-    // Also check CSS class map for vertical-align: super/sub rules.
-    if (!style_superscript || !style_subscript) {
+                           &style_subscript,
+                           &style_no_underline,
+                           &style_reset_bold,
+                           &style_reset_italic);
+    // Also check CSS class map for vertical-align, underline reset, and bold/italic reset.
+    {
       const std::string cls = ExtractClassAttr(attr);
-      epub_css_class_map::LookupSuperSubForClassAttr(cls, p->css_class_map,
-                                                     &style_superscript,
-                                                     &style_subscript);
+      if (!style_superscript || !style_subscript)
+        epub_css_class_map::LookupSuperSubForClassAttr(cls, p->css_class_map,
+                                                       &style_superscript,
+                                                       &style_subscript);
+      if (!style_no_underline)
+        style_no_underline = epub_css_class_map::LookupNoUnderlineForClassAttr(
+            cls, p->css_class_map);
+      if (!style_reset_bold)
+        style_reset_bold = epub_css_class_map::LookupResetBoldForClassAttr(
+            cls, p->css_class_map);
+      if (!style_reset_italic)
+        style_reset_italic = epub_css_class_map::LookupResetItalicForClassAttr(
+            cls, p->css_class_map);
     }
     ParseElementHiddenFlags(attr, &style_hidden);
 
@@ -2235,20 +2881,82 @@ void start(void *data, const char *el, const char **attr) {
     p->style_superscript_stack[current] = style_superscript;
     p->style_subscript_stack[current] = style_subscript;
     p->style_hidden_stack[current] = style_hidden;
+    p->style_no_underline_stack[current] = style_no_underline;
+    p->style_reset_bold_stack[current] = style_reset_bold;
+    p->style_reset_italic_stack[current] = style_reset_italic;
+    p->style_text_transform_stack[current] =
+        ParseElementTextTransform(attr, p->css_class_map);
+    p->style_white_space_stack[current] =
+        ParseElementWhiteSpace(attr, p->css_class_map);
+
+    // Font-size: <small>/<big> and CSS font-size (headings manage their own)
+    {
+      const bool is_heading_el = (el[0] == 'h' && el[1] >= '1' && el[1] <= '6' && !el[2]);
+      u8 new_font_px = 0;
+      if (!is_heading_el) {
+        book_xml_css_style_utils::FontSizeSpec spec;
+        bool has_spec = book_xml_css_style_utils::TryParseFontSize(
+            ExtractStyleAttr(attr).c_str(), &spec);
+        if (!has_spec)
+          has_spec = epub_css_class_map::LookupFontSizeForClassAttr(
+              ExtractClassAttr(attr), p->css_class_map, &spec);
+        if (!has_spec) {
+          if (!strcmp(el, "small")) {
+            spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Smaller;
+            has_spec = true;
+          } else if (!strcmp(el, "big")) {
+            spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Larger;
+            has_spec = true;
+          }
+        }
+        if (has_spec &&
+            spec.unit != book_xml_css_style_utils::FontSizeSpec::Unit::None) {
+          const int px = book_xml_css_style_utils::ResolveFontSizePx(
+              spec, (int)ts->GetPixelSize());
+          new_font_px = (u8)std::min(std::max(px, 6), 255);
+        }
+      }
+      if (new_font_px) {
+        p->style_font_size_stack[current] = new_font_px;
+        p->style_font_size_restore_stack[current] = ts->GetPixelSize();
+        ts->SetPixelSize(new_font_px);
+        AppendParsedByte(p, TEXT_FONT_SIZE);
+        AppendParsedByte(p, new_font_px);
+      } else {
+        p->style_font_size_stack[current] = 0;
+        p->style_font_size_restore_stack[current] = 0;
+      }
+    }
 
     bool style_changed = false;
-    if (style_bold && !p->bold) {
+    if (style_bold && !style_reset_bold && !p->bold) {
       AppendParsedByte(p, TEXT_BOLD_ON);
       p->pos++;
       p->bold = true;
       style_changed = true;
     }
-    if (style_italic && !p->italic) {
+    if (style_reset_bold && p->bold) {
+      AppendParsedByte(p, TEXT_BOLD_OFF);
+      p->bold = false;
+      style_changed = true;
+    }
+    if (style_italic && !style_reset_italic && !p->italic) {
       AppendParsedByte(p, TEXT_ITALIC_ON);
       p->italic = true;
       style_changed = true;
     }
-    if (style_underline && !p->underline) {
+    if (style_reset_italic && p->italic) {
+      AppendParsedByte(p, TEXT_ITALIC_OFF);
+      p->italic = false;
+      style_changed = true;
+    }
+    if (style_no_underline && p->underline) {
+      AppendParsedByte(p, TEXT_UNDERLINE_OFF);
+      p->underline = false;
+      p->underline_style = UNDERLINE_STYLE_SOLID;
+      style_changed = true;
+    }
+    if (style_underline && !style_no_underline && !p->underline) {
       AppendParsedByte(p, TEXT_UNDERLINE_ON);
       p->underline = true;
       p->underline_style = style_underline_style;
@@ -2283,6 +2991,23 @@ void start(void *data, const char *el, const char **attr) {
     }
     if (style_changed)
       SyncParsedTextStyle(ts, p->bold, p->italic, p->mono);
+  }
+
+  if (IsBlockLevelElement(el) && p->stacksize > 0) {
+    const char *el_style = NULL;
+    const char *el_class = NULL;
+    for (int i = 0; attr && attr[i]; i += 2) {
+      if (AttrNameEquals(attr[i], "style"))
+        el_style = attr[i + 1];
+      else if (AttrNameEquals(attr[i], "class"))
+        el_class = attr[i + 1];
+    }
+    if (book_xml_css_style_utils::HasPageBreakAfter(el_style) ||
+        epub_css_class_map::LookupPageBreakAfterForClassAttr(
+            el_class ? std::string(el_class) : std::string(),
+            p->css_class_map)) {
+      p->page_break_after_stack[p->stacksize - 1] = true;
+    }
   }
 }
 
@@ -2450,10 +3175,14 @@ void end(void *data, const char *el) {
     FlushInlineTailAndDeferredStyle(p, ts);
     linefeed(p);
     linefeed(p);
+    p->block_margin_left = 0;
+    p->block_margin_right = 0;
   } else if (!strcmp(el, "blockquote") || !strcmp(el, "caption") ||
              !strcmp(el, "dd") || !strcmp(el, "figure")) {
     FlushInlineTailAndDeferredStyle(p, ts);
     linefeed(p);
+    p->block_margin_left = 0;
+    p->block_margin_right = 0;
   } else if (!strcmp(el, "p")) {
     FlushInlineTailAndDeferredStyle(p, ts);
     if (p->paragraph_has_content &&
@@ -2476,10 +3205,14 @@ void end(void *data, const char *el) {
         linefeed(p);
       }
     }
-    AppendParagraphAlignMarker(p, book_xml_css_style_utils::TextAlign::Left);
+    RestoreActiveBlockTextAlignMarker(p);
     p->in_paragraph = false;
     p->paragraph_has_content = false;
+    p->block_margin_left = 0;
+    p->block_margin_right = 0;
   } else if (!strcmp(el, "div")) {
+    p->block_margin_left = 0;
+    p->block_margin_right = 0;
   } else if (!strcmp(el, "h1")) {
     FlushInlineTailAndDeferredStyle(p, ts);
     {
@@ -2497,9 +3230,11 @@ void end(void *data, const char *el) {
         linefeed(p);
     }
     RestoreHeadingFontSize(p, ts);
-    AppendParagraphAlignMarker(p, book_xml_css_style_utils::TextAlign::Left);
+    RestoreActiveBlockTextAlignMarker(p);
     if (!Trim(p->doc_heading).empty())
       p->doc_heading_complete = true;
+    p->block_margin_left = 0;
+    p->block_margin_right = 0;
   } else if (!strcmp(el, "h2")) {
     FlushInlineTailAndDeferredStyle(p, ts);
     {
@@ -2517,9 +3252,11 @@ void end(void *data, const char *el) {
         linefeed(p);
     }
     RestoreHeadingFontSize(p, ts);
-    AppendParagraphAlignMarker(p, book_xml_css_style_utils::TextAlign::Left);
+    RestoreActiveBlockTextAlignMarker(p);
     if (!Trim(p->doc_heading).empty())
       p->doc_heading_complete = true;
+    p->block_margin_left = 0;
+    p->block_margin_right = 0;
   } else if (!strcmp(el, "h3") || !strcmp(el, "h4") || !strcmp(el, "h5") ||
              !strcmp(el, "h6") || !strcmp(el, "hr")) {
     FlushInlineTailAndDeferredStyle(p, ts);
@@ -2563,9 +3300,11 @@ void end(void *data, const char *el) {
       RestoreHeadingFontSize(p, ts);
     }
     if (strcmp(el, "hr"))
-      AppendParagraphAlignMarker(p, book_xml_css_style_utils::TextAlign::Left);
+      RestoreActiveBlockTextAlignMarker(p);
     if ((!strcmp(el, "h3")) && !Trim(p->doc_heading).empty())
       p->doc_heading_complete = true;
+    p->block_margin_left = 0;
+    p->block_margin_right = 0;
   } else if (!strcmp(el, "pre")) {
     FlushInlineTailAndDeferredStyle(p, ts);
     AppendParsedByte(p, TEXT_PRE_OFF);
@@ -2578,19 +3317,45 @@ void end(void *data, const char *el) {
     FlushInlineTailAndDeferredStyle(p, ts);
     if (!strcmp(el, "li"))
       p->strip_leading_list_marker = false;
-    linefeed(p);
+    if (p->linebegan)
+      linefeed(p);
+  }
+
+  bool restore_block_text_align = false;
+  bool had_page_break_after = false;
+  u8 restore_font_size_px = 0;
+  if (p->stacksize > 0) {
+    const u8 current = (u8)(p->stacksize - 1);
+    restore_block_text_align = p->block_text_align_stack[current];
+    if (IsBlockLevelElement(el))
+      had_page_break_after = p->page_break_after_stack[current];
+    restore_font_size_px = p->style_font_size_restore_stack[current];
   }
 
   parse_pop(p);
+  if (restore_block_text_align)
+    RestoreActiveBlockTextAlignMarker(p);
+  if (had_page_break_after)
+    ForcePageBreak(p);
+  if (restore_font_size_px) {
+    ts->SetPixelSize(restore_font_size_px);
+    AppendParsedByte(p, TEXT_FONT_SIZE);
+    AppendParsedByte(p, restore_font_size_px);
+  }
 
+  const bool any_reset_bold = HasActiveStackResetBoldStyle(p);
+  const bool any_reset_italic = HasActiveStackResetItalicStyle(p);
+  const bool any_no_underline = HasActiveStackNoUnderlineStyle(p);
   const bool want_bold =
-      parse_in(p, TAG_STRONG) || parse_in(p, TAG_H1) || parse_in(p, TAG_H2) ||
-      parse_in(p, TAG_H3) || parse_in(p, TAG_H4) || parse_in(p, TAG_H5) ||
-      parse_in(p, TAG_H6) || HasActiveStackBoldStyle(p);
+      !any_reset_bold &&
+      (parse_in(p, TAG_STRONG) || parse_in(p, TAG_H1) || parse_in(p, TAG_H2) ||
+       parse_in(p, TAG_H3) || parse_in(p, TAG_H4) || parse_in(p, TAG_H5) ||
+       parse_in(p, TAG_H6) || HasActiveStackBoldStyle(p));
   const bool want_italic =
-      parse_in(p, TAG_EM) || HasActiveStackItalicStyle(p);
+      !any_reset_italic && (parse_in(p, TAG_EM) || HasActiveStackItalicStyle(p));
   const bool want_underline =
-      parse_in(p, TAG_UNDERLINE) || HasActiveStackUnderlineStyle(p);
+      !any_no_underline &&
+      (parse_in(p, TAG_UNDERLINE) || HasActiveStackUnderlineStyle(p));
   const u8 want_underline_style =
       want_underline ? ResolveActiveUnderlineStyle(p) : UNDERLINE_STYLE_SOLID;
   const bool want_overline = HasActiveStackOverlineStyle(p);

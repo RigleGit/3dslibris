@@ -1,0 +1,109 @@
+title: "[Bug triage] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for crashes or unexpected behavior that you cannot yet confirm is reproducible or ready to file as a tracked issue.
+        Confirmed, reproducible bugs can be reported directly as [Issues](../issues/new/choose).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem description
+      description: What goes wrong? Include what you expected to happen.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 3dslibris version
+      placeholder: "e.g. v2.6.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: binary-type
+    attributes:
+      label: Install type
+      options:
+        - .cia (Universal-Updater or manual)
+        - .3dsx (Homebrew Launcher)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: console
+    attributes:
+      label: Console model
+      options:
+        - Old 3DS
+        - Old 3DS XL
+        - 2DS
+        - New 3DS
+        - New 3DS XL
+        - New 2DS XL
+        - Azahar / Citra (emulator)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: luma
+    attributes:
+      label: Luma3DS version
+      placeholder: "e.g. 13.0.1 — leave blank if using an emulator"
+
+  - type: input
+    id: system-version
+    attributes:
+      label: System version and region (if relevant)
+      placeholder: "e.g. 11.17.0-50E"
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Book format involved
+      options:
+        - EPUB
+        - MOBI
+        - FB2
+        - TXT
+        - RTF
+        - ODT
+        - PDF
+        - CBZ
+        - XPS
+        - Not format-specific / unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Navigate to ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Does this happen with one file or multiple files?
+      options:
+        - Only one specific file
+        - Multiple files
+        - All files of this format
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, crash dumps, or screenshots
+      description: Paste log output or attach screenshots. Crash dumps from Luma3DS are especially helpful.

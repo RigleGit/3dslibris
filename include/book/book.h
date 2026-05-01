@@ -68,10 +68,11 @@ public:
     int source_width;
     int source_height;
     u8 follow_text_lines;
+    int author_max_width_px;
 
     InlineImageEntry()
         : metadata_probed(false), metadata_ok(false), source_width(0),
-          source_height(0), follow_text_lines(0) {}
+          source_height(0), follow_text_lines(0), author_max_width_px(0) {}
   };
 
   struct InlineImageCacheEntry
@@ -266,6 +267,7 @@ public:
   bool GetInlineImageMetadata(u16 id, InlineImageMetadata *out);
   void SetInlineImageFollowTextLines(u16 id, u8 lines);
   u8 GetInlineImageFollowTextLines(u16 id) const;
+  void SetInlineImageAuthorMaxWidth(u16 id, int px);
   void ClearInlineImages();
   void SetInlineImageProbeZip(void *uf);
   bool StoreFb2InlineImage(const std::string &id,
@@ -273,10 +275,12 @@ public:
   bool PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
                              int pen_x, int pen_y, bool line_began,
                              InlineImageContext image_context,
-                             InlineImageLayoutPlan *out);
+                             InlineImageLayoutPlan *out,
+                             int author_max_width_override = 0);
   bool DrawInlineImage(Text *ts, u16 image_id,
                        const InlineImageLayoutPlan *plan = NULL,
-                       int current_screen = -1);
+                       int current_screen = -1,
+                       u8 align_mode = 0);
   void AddChapter(u16 page, const std::string &title, u8 level = 0);
   void ClearChapters();
   int GetFocusedInlineLinkIndex() const;

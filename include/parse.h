@@ -101,14 +101,27 @@ struct parsedata_t {
 	bool style_subscript_stack[32];
 	bool style_mono_stack[32];
 	bool style_hidden_stack[32];
+	bool style_no_underline_stack[32];
+	bool style_reset_bold_stack[32];
+	bool style_reset_italic_stack[32];
+	u8 style_text_transform_stack[32];
+	u8 style_white_space_stack[32];
+	u8 style_font_size_stack[32];        // applied px for inline font-size at this depth; 0 = no change
+	u8 style_font_size_restore_stack[32]; // pre-change px to restore on element close; 0 = no change
+	bool text_transform_word_start;
 	bool link_active_stack[32];
 	u16 link_href_id_stack[32];
+	bool block_text_align_stack[32];
+	u8 block_text_align_value_stack[32];
 	bool list_marker_hidden_stack[32];
 	bool list_item_pending_stack[32];
 	unsigned int ordered_list_ordinal_stack[32];
 	u8 ordered_list_style_stack[32];
 	bool heading_font_size_emitted_stack[32];
 	u8 heading_saved_font_size_stack[32];
+	bool page_break_after_stack[32];
+	int block_margin_left_stack[32];
+	int block_margin_right_stack[32];
 	bool deferred_style_sync;
 	bool deferred_target_bold;
 	bool deferred_target_italic;
@@ -147,6 +160,8 @@ struct parsedata_t {
 	std::string last_h_class;
 	std::string last_hr_class;
 	epub_css_class_map::CssClassMap css_class_map;
+	int block_margin_left;
+	int block_margin_right;
 	bool collecting_fb2_binary;
 	bool fb2_binary_too_large;
 	std::string fb2_binary_id;
@@ -170,6 +185,7 @@ bool iswhitespace(u32 c);
 
 void parse_error(XML_ParserStruct *ps);
 void parse_init(parsedata_t *data);
+u8 parse_resolve_text_transform(const parsedata_t *data);
 bool parse_append_page_byte(parsedata_t *data, u32 c);
 bool parse_append_page_byte_soft(parsedata_t *data, u32 c,
                                  parse_page_flush_fn flush_page, void *ctx);
@@ -183,3 +199,6 @@ bool parse_page_buffer_overflowed(const parsedata_t *data);
 void parse_reset_page_buffer(parsedata_t *data);
 void parse_printerror(XML_Parser p);
 void parse_push(parsedata_t *data, context_t context);
+int parse_current_block_margin_left(const parsedata_t *data);
+int parse_current_block_margin_right(const parsedata_t *data);
+void parse_set_current_block_margins(parsedata_t *data, int left, int right);

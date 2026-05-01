@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Capítulo 17 — font-size inline y &lt;small&gt;</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body>
+
+<h1 id="capitulo-17">Capítulo 17: font-size inline y &lt;small&gt;</h1>
+
+<p>Este capítulo valida la aplicación de <code>font-size</code> en elementos no-heading, incluyendo la etiqueta HTML <code>&lt;small&gt;</code>.</p>
+
+<h2>1. Etiqueta &lt;small&gt;</h2>
+
+<p>El texto siguiente contiene <small>texto reducido con la etiqueta small</small> en medio de una oración normal. El tamaño debería volver al normal después de cerrar la etiqueta.</p>
+
+<p><small>Un párrafo entero en pequeño. Todo su contenido debe aparecer con un tamaño de fuente inferior al texto normal del libro.</small></p>
+
+<h2>2. font-size inline: smaller / larger</h2>
+
+<p>Aquí hay texto normal, luego <span style="font-size: smaller;">texto más pequeño vía style=</span> y luego texto normal de nuevo.</p>
+
+<p>Aquí hay texto normal, luego <span style="font-size: larger;">texto más grande vía style=</span> y luego texto normal de nuevo.</p>
+
+<h2>3. font-size: absolute keywords (inline style)</h2>
+
+<p>Texto con <span style="font-size: x-small;">x-small</span>, con <span style="font-size: small;">small</span>, tamaño normal, con <span style="font-size: large;">large</span> y con <span style="font-size: x-large;">x-large</span>.</p>
+
+<h2>4. font-size: porcentaje y em (inline style)</h2>
+
+<p>Normal, luego <span style="font-size: 75%;">75% del tamaño base</span>, luego normal, luego <span style="font-size: 0.8em;">0.8em</span>, luego normal.</p>
+
+<h2>5. font-size vía clase CSS</h2>
+
+<p>Normal, luego <span class="heading-size-smaller">smaller via class</span>, luego normal, luego <span class="heading-size-larger">larger via class</span>, luego normal.</p>
+
+<h2>6. &lt;big&gt; (etiqueta HTML heredada)</h2>
+
+<p>El texto siguiente contiene <big>texto ampliado con la etiqueta big</big> en medio de una oración normal. El tamaño debería volver al normal después de cerrar la etiqueta.</p>
+
+</body>
+</html>

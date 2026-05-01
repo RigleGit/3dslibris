@@ -1,7 +1,9 @@
 #include "reader/inline_link_utils.h"
+#include "shared/text_token_constants.h"
 
 #include <cstdio>
 #include <cstdlib>
+#include <stdint.h>
 #include <string>
 #include <vector>
 
@@ -86,11 +88,29 @@ void TestLinkRectHelpers() {
   ExpectFalse("rect invalid", IsValidRect({5, 5, 5, 10}));
 }
 
+void TestCountInlineLinksInBuffer() {
+  using namespace inline_link_utils;
+
+  const uint32_t one_link[] = {'a', TEXT_LINK_START, 7, 'b', TEXT_LINK_END};
+  ExpectEq("one link marker", (int)CountInlineLinksInBuffer(one_link, 5), 1);
+
+  const uint32_t two_links[] = {TEXT_LINK_START, 1, 'a', TEXT_LINK_END,
+                                TEXT_LINK_START, 2, 'b', TEXT_LINK_END};
+  ExpectEq("two link markers", (int)CountInlineLinksInBuffer(two_links, 8), 2);
+
+  const uint32_t incomplete_link[] = {'a', TEXT_LINK_START};
+  ExpectEq("incomplete link marker ignored",
+           (int)CountInlineLinksInBuffer(incomplete_link, 2), 0);
+
+  ExpectEq("empty buffer", (int)CountInlineLinksInBuffer(NULL, 0), 0);
+}
+
 } // namespace
 
 int main() {
   TestResolveInternalHref();
   TestLinkNavigation();
   TestLinkRectHelpers();
+  TestCountInlineLinksInBuffer();
   return 0;
 }

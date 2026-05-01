@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Capítulo 20 — Listas anidadas</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body>
+
+<h1 id="capitulo-20">Capítulo 20: Listas anidadas</h1>
+
+<p>Este capítulo verifica que los cierres de listas anidadas (<code>&lt;/ol&gt;&lt;/li&gt;&lt;/ol&gt;</code>) no generen líneas en blanco extra al final. El texto de referencia debe aparecer inmediatamente después de cada lista, sin espacio vacío visible.</p>
+
+<!-- ── 1. ol con sub-lista ol ────────────────────────────────────── -->
+
+<h2>1. Lista ordenada con sub-lista romana</h2>
+
+<ol type="a">
+  <li>Elemento alfa</li>
+  <li>
+    Elemento con sub-lista:
+    <ol type="i">
+      <li>Sub-elemento uno</li>
+      <li>Sub-elemento dos</li>
+      <li>Sub-elemento tres</li>
+    </ol>
+  </li>
+  <li>Elemento alfa tras la sub-lista</li>
+</ol>
+
+<p>Este párrafo debe aparecer justo debajo de la lista sin líneas en blanco adicionales.</p>
+
+<!-- ── 2. ul con sub-lista ul ────────────────────────────────────── -->
+
+<h2>2. Lista de viñetas con sub-lista</h2>
+
+<ul>
+  <li>Primer elemento</li>
+  <li>
+    Segundo elemento con sub-lista:
+    <ul>
+      <li>Sub-elemento A</li>
+      <li>Sub-elemento B</li>
+    </ul>
+  </li>
+  <li>Tercer elemento tras la sub-lista</li>
+</ul>
+
+<p>Este párrafo debe aparecer justo debajo de la lista sin líneas en blanco adicionales.</p>
+
+<!-- ── 3. Tres niveles de anidamiento ────────────────────────────── -->
+
+<h2>3. Tres niveles de anidamiento</h2>
+
+<ol>
+  <li>Nivel 1 — elemento A</li>
+  <li>
+    Nivel 1 — elemento B:
+    <ol type="a">
+      <li>Nivel 2 — elemento a</li>
+      <li>
+        Nivel 2 — elemento b:
+        <ol type="i">
+          <li>Nivel 3 — romano i</li>
+          <li>Nivel 3 — romano ii</li>
+        </ol>
+      </li>
+      <li>Nivel 2 — elemento c</li>
+    </ol>
+  </li>
+  <li>Nivel 1 — elemento C</li>
+</ol>
+
+<p>Este párrafo debe aparecer justo debajo de la lista de tres niveles. Si hay espacio en blanco extra antes de esta línea, la corrección de la regresión de cierre de lista no funcionó.</p>
+
+<!-- ── 4. Lista al final del capítulo ───────────────────────────── -->
+
+<h2>4. Lista al final de la sección</h2>
+
+<ol type="a">
+  <li>
+    Elemento con sub-lista al final:
+    <ol type="i">
+      <li>Romano i</li>
+      <li>Romano ii</li>
+    </ol>
+  </li>
+</ol>
+
+<p>Párrafo final de referencia.</p>
+
+</body>
+</html>

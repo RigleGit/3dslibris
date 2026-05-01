@@ -93,5 +93,45 @@
       <navLabel><text>Capítulo 11: Headings con font-size CSS</text></navLabel>
       <content src="text/chapter-11-headings.xhtml#capitulo-11"/>
     </navPoint>
+
+    <navPoint id="nav-17" playOrder="17">
+      <navLabel><text>Capítulo 12: Imágenes ornamento con ancho explícito</text></navLabel>
+      <content src="text/chapter-12-ornament-images.xhtml#capitulo-12"/>
+    </navPoint>
+
+    <navPoint id="nav-18" playOrder="18">
+      <navLabel><text>Capítulo 13: Saltos de página CSS</text></navLabel>
+      <content src="text/chapter-13-pagebreak.xhtml#capitulo-13"/>
+    </navPoint>
+
+    <navPoint id="nav-19" playOrder="19">
+      <navLabel><text>Capítulo 15: white-space y keep-together</text></navLabel>
+      <content src="text/chapter-15-whitespace.xhtml#capitulo-15"/>
+    </navPoint>
+
+    <navPoint id="nav-20" playOrder="20">
+      <navLabel><text>Capítulo 16: float y clear</text></navLabel>
+      <content src="text/chapter-16-float-clear.xhtml#capitulo-16"/>
+    </navPoint>
+
+    <navPoint id="nav-21" playOrder="21">
+      <navLabel><text>Capítulo 17: font-size inline y small</text></navLabel>
+      <content src="text/chapter-17-font-size.xhtml#capitulo-17"/>
+    </navPoint>
+
+    <navPoint id="nav-22" playOrder="22">
+      <navLabel><text>Capítulo 18: text-indent y text-transform</text></navLabel>
+      <content src="text/chapter-18-text-indent-transform.xhtml#capitulo-18"/>
+    </navPoint>
+
+    <navPoint id="nav-23" playOrder="23">
+      <navLabel><text>Capítulo 19: CSS resets y unidades adicionales</text></navLabel>
+      <content src="text/chapter-19-css-resets.xhtml#capitulo-19"/>
+    </navPoint>
+
+    <navPoint id="nav-24" playOrder="24">
+      <navLabel><text>Capítulo 20: Listas anidadas</text></navLabel>
+      <content src="text/chapter-20-nested-lists.xhtml#capitulo-20"/>
+    </navPoint>
   </navMap>
 </ncx>

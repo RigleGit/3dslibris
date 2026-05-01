@@ -361,6 +361,72 @@ namespace
     return true;
   }
 
+  size_t InlineLinkCountForPage(Book *book, int page_index)
+  {
+    if (!book || book->IsFixedLayout() || page_index < 0 ||
+        page_index >= book->GetPageCount())
+      return 0;
+    Page *page = book->GetPage(page_index);
+    return page ? page->GetInlineLinkCount() : 0;
+  }
+
+  bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction)
+  {
+    if (!book || !ts || direction == 0 || book->IsFixedLayout())
+      return false;
+    const std::vector<Page::InlineLinkRenderEntry> *links =
+        CurrentPageInlineLinks(book);
+    if (!links || links->empty())
+      return false;
+
+    int current_index = book->GetFocusedInlineLinkIndex();
+    if (current_index < 0 || current_index >= (int)links->size())
+      current_index = 0;
+
+    if (direction > 0 && current_index + 1 < (int)links->size())
+    {
+      book->SetFocusedInlineLinkIndex(current_index + 1);
+      DrawBookPage(book, ts);
+      return true;
+    }
+    if (direction < 0 && current_index > 0)
+    {
+      book->SetFocusedInlineLinkIndex(current_index - 1);
+      DrawBookPage(book, ts);
+      return true;
+    }
+
+    const int page_count = (int)book->GetPageCount();
+    const int current_page = book->GetPosition();
+    if (direction > 0)
+    {
+      for (int page_index = current_page + 1; page_index < page_count;
+           ++page_index)
+      {
+        const size_t link_count = InlineLinkCountForPage(book, page_index);
+        if (link_count == 0)
+          continue;
+        book->SetPosition(page_index);
+        book->SetFocusedInlineLinkIndex(0);
+        DrawBookPage(book, ts);
+        return true;
+      }
+      return false;
+    }
+
+    for (int page_index = current_page - 1; page_index >= 0; --page_index)
+    {
+      const size_t link_count = InlineLinkCountForPage(book, page_index);
+      if (link_count == 0)
+        continue;
+      book->SetPosition(page_index);
+      book->SetFocusedInlineLinkIndex((int)link_count - 1);
+      DrawBookPage(book, ts);
+      return true;
+    }
+    return false;
+  }
+
   bool FollowFocusedInlineLink(Book *book, Text *ts)
   {
     if (!book || !ts)
@@ -1264,14 +1330,12 @@ void ReaderController::HandleEventInBook()
     }
     else if (keys & key.dleft)
     {
-      if (MoveInlineLinkFocus(bookcurrent_, ts,
-                              inline_link_utils::INLINE_LINK_NAV_LEFT))
+      if (MoveInlineLinkFocusSequential(bookcurrent_, ts, -1))
         status_dirty = true;
     }
     else if (keys & key.dright)
     {
-      if (MoveInlineLinkFocus(bookcurrent_, ts,
-                              inline_link_utils::INLINE_LINK_NAV_RIGHT))
+      if (MoveInlineLinkFocusSequential(bookcurrent_, ts, 1))
         status_dirty = true;
     }
     else if (keys & key.dup)

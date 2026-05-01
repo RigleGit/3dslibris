@@ -79,6 +79,17 @@ std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
         i++;
       continue;
     }
+    if (c == TEXT_IMAGE_ALIGN || c == TEXT_LINE_START_X) {
+      if (i + 1 < len)
+        i += 2;
+      else
+        i++;
+      continue;
+    }
+    if (c == TEXT_SCREEN_BREAK) {
+      i++;
+      continue;
+    }
     if (c < 0x80) {
       line.push_back((char)c);
     } else {

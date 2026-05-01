@@ -226,6 +226,9 @@ App::App()
 App::~App()
 {
   PrepareForShutdown();
+#ifdef DSLIBRIS_DEBUG
+  PrintStatus("APP ~App: aptUnhook begin");
+#endif
   if (apt_hook_installed_)
   { // Clean up APT hook on app exit.
     aptUnhook(&apt_hook_cookie_);
@@ -852,8 +855,12 @@ void App::HandleAppletHook(APT_HookType hook)
     applet_resume_pending_ = true;
     break;
   case APTHOOK_ONEXIT:
+    // Only set the quit flag here. PersistPrefs() writes to the SD card and
+    // must NOT run inside an APT hook callback — doing so blocks the HOME Menu
+    // from receiving the acknowledgment within its expected timing window,
+    // which can cause the HOME Menu process to crash. Prefs are saved in
+    // PrepareForShutdown() after aptMainLoop() returns.
     nav_.mode = AppMode::Quit;
-    PersistPrefs();
     break;
   default:
     break;
@@ -1065,8 +1072,12 @@ void App::ShowLibraryView()
   buttonprefs.Label("settings");
 
   Book *bookcurrent_ = GetCurrentBook();
-  if (bookcurrent_)
+  if (bookcurrent_) {
     bookcurrent_->FlushPendingCacheSaves();
+    // Cancel any in-progress PDF/CBZ strip render so the worker thread is
+    // idle before browser warmup jobs can start touching MuPDF lock state.
+    bookcurrent_->CancelFixedLayoutDeferredWork();
+  }
 
   ResetBrowserMarquee();
   nav_.mode = AppMode::Browser;

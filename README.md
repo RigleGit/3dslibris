@@ -128,6 +128,29 @@ Experimental or best-effort:
 - Large or malformed MOBI files may open slowly or lose some rich formatting in safer fallback paths.
 - After changing layout-related settings such as font size, spacing, orientation, or some format-specific options, reopening the current book may be necessary.
 
+## Reporting crashes
+
+If 3dslibris crashes, include as much of the following as possible when opening a [bug triage discussion](https://github.com/RigleGit/3dslibris/discussions/new?category=bug-triage):
+
+- **3dslibris version**
+- **Install type:** `.3dsx` or `.cia`
+- **Console model:** Old 3DS, New 3DS, 2DS, New 2DS XL, etc.
+- **Luma3DS version** and system version/region if relevant
+- **Book format:** EPUB, PDF, CBZ, MOBI, FB2, TXT, RTF, ODT, XPS
+- **Steps to reproduce**
+- **Crash dump, log file, or screenshots** if available
+
+This makes debugging much easier, especially because some problems only occur on specific hardware or Luma/firmware combinations.
+
+## Community
+
+Questions, ideas, and development discussion happen in [GitHub Discussions](https://github.com/RigleGit/3dslibris/discussions):
+
+- **[Q&A / Support](https://github.com/RigleGit/3dslibris/discussions/new?category=q-a-support)** — installation help, usage questions
+- **[Bug triage](https://github.com/RigleGit/3dslibris/discussions/new?category=bug-triage)** — crashes or unexpected behavior not yet confirmed as a reproducible issue
+- **[Ideas](https://github.com/RigleGit/3dslibris/discussions/new?category=ideas)** — feature suggestions
+- **[Development](https://github.com/RigleGit/3dslibris/discussions/new?category=development)** — implementation questions, architecture discussion
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=RigleGit/3dslibris&type=Date)](https://star-history.com/#RigleGit/3dslibris&Date)

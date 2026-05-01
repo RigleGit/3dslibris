@@ -1,0 +1,56 @@
+title: "[Support] "
+labels: []
+body:
+  - type: textarea
+    id: help-needed
+    attributes:
+      label: What do you need help with?
+      description: Describe what you are trying to do or what is not working as expected.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 3dslibris version
+      placeholder: "e.g. v2.6.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: binary-type
+    attributes:
+      label: Install type
+      options:
+        - .cia (Universal-Updater or manual)
+        - .3dsx (Homebrew Launcher)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: console
+    attributes:
+      label: Console model
+      options:
+        - Old 3DS
+        - Old 3DS XL
+        - 2DS
+        - New 3DS
+        - New 3DS XL
+        - New 2DS XL
+        - Azahar / Citra (emulator)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: luma
+    attributes:
+      label: Luma3DS version (if applicable)
+      placeholder: "e.g. 13.0.1 — leave blank if using an emulator"
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you already tried?
+      description: Steps you have taken, workarounds attempted, etc.

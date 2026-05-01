@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Capítulo 12 — Imágenes ornamento con ancho explícito</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body>
+
+<h1 id="capitulo-12">Capítulo 12: Imágenes ornamento con ancho explícito</h1>
+
+<p>Este capítulo valida que las imágenes ornamento con un ancho explícito pequeño se rendericen a ese tamaño reducido y no se expandan al ancho completo del área de texto.</p>
+
+<!-- ── 1. Control: sin restricción de ancho ──────────────────────── -->
+
+<h2>1. Control — sin restricción de ancho</h2>
+
+<p>La imagen de abajo no lleva atributo <code>width</code> ni <code>style</code>. Es una barra horizontal de 200×20 px con relación de aspecto amplia; sin la corrección se mostraría a todo el ancho. Con la corrección debe ocupar también todo el ancho disponible (comportamiento correcto para imágenes sin restricción).</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento sin restricción"/>
+
+<p>Texto de referencia tras la imagen sin restricción.</p>
+
+<!-- ── 2. Restricción mediante atributo HTML width="%" ───────────── -->
+
+<h2>2. Atributo <code>width="9.38%"</code></h2>
+
+<p>La imagen de abajo usa <code>width="9.38%"</code> directamente en el atributo HTML, igual que el caso reportado en el issue. Debe aparecer muy pequeña (aprox. 9 % del ancho del texto), centrada en la línea.</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento 9.38%" width="9.38%"/>
+
+<p>Texto de referencia tras la imagen con <code>width="9.38%"</code>.</p>
+
+<!-- ── 3. Restricción mediante style="width:X%" ──────────────────── -->
+
+<h2>3. CSS inline <code>style="width: 25%"</code></h2>
+
+<p>La imagen de abajo usa <code>style="width: 25%"</code>. Debe aparecer a aproximadamente un cuarto del ancho del área de texto.</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento 25% style" style="width: 25%"/>
+
+<p>Texto de referencia tras la imagen con <code>style="width: 25%"</code>.</p>
+
+<!-- ── 4. Restricción en píxeles absolutos ───────────────────────── -->
+
+<h2>4. CSS inline <code>style="width: 40px"</code></h2>
+
+<p>La imagen de abajo usa <code>style="width: 40px"</code>. Debe aparecer a 40 px de ancho, independientemente del tamaño intrínseco de la imagen.</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento 40px style" style="width: 40px"/>
+
+<p>Texto de referencia tras la imagen con <code>style="width: 40px"</code>.</p>
+
+<!-- ── 5. Clase CSS con width + ornamento class del issue ─────────── -->
+
+<h2>5. Clase CSS <code>spaceOrnament</code> + atributo <code>width="9.38%"</code></h2>
+
+<p>Este caso reproduce exactamente el issue #74: la imagen usa la clase CSS <code>spaceOrnament</code> (con <code>display:block</code>, márgenes y <code>text-align:center</code>) y además el atributo <code>width="9.38%"</code>. Debe aparecer centrada y pequeña.</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento spaceOrnament" class="spaceOrnament" width="9.38%"/>
+
+<p>Texto de referencia tras la imagen con clase <code>spaceOrnament</code>.</p>
+
+<!-- ── 6. Comparativa: 50 % ──────────────────────────────────────── -->
+
+<h2>6. Comparativa <code>width="50%"</code></h2>
+
+<p>Esta imagen debe aparecer a la mitad del ancho del área de texto, de modo que sirva de referencia visual entre el ornamento pequeño (9 %) y la imagen a ancho completo.</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento 50%" width="50%"/>
+
+<p>Texto de referencia tras la imagen al 50 %.</p>
+
+</body>
+</html>

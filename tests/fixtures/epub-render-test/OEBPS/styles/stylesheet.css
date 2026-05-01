@@ -39,6 +39,10 @@ pre {
   text-decoration: wavy underline;
 }
 
+.underline-double {
+  text-decoration: underline double;
+}
+
 .sup {
   vertical-align: super;
   font-size: smaller;
@@ -111,6 +115,38 @@ li.list-none {
   font-weight: normal;
 }
 
+.ws-pre {
+  white-space: pre;
+}
+
+.ws-nowrap {
+  white-space: nowrap;
+}
+
+.ws-pre-wrap {
+  white-space: pre-wrap;
+}
+
+.ws-pre-line {
+  white-space: pre-line;
+}
+
+.keep-together {
+  page-break-inside: avoid;
+}
+
+.float-left {
+  float: left;
+}
+
+.float-right {
+  float: right;
+}
+
+.clear-both {
+  clear: both;
+}
+
 p.mt-class-qualified {
   margin-top: 48px;
 }
@@ -163,6 +199,14 @@ p.mb-class-grouped-qualified {
   text-align: right;
 }
 
+.align-start {
+  text-align: start;
+}
+
+.align-end {
+  text-align: end;
+}
+
 h2.align-center-heading {
   text-align: center;
 }
@@ -191,4 +235,79 @@ h2.align-center-heading {
 
 .heading-size-larger {
   font-size: larger;
+}
+
+/* page-break-before via CSS class — as reported in issue #72 */
+.chapter-start {
+  page-break-before: always;
+}
+
+.ml-positive-px {
+  margin-left: 48px;
+}
+
+.mr-positive-px {
+  margin-right: 48px;
+}
+
+.ml-percent {
+  margin-left: 15%;
+}
+
+.mr-percent {
+  margin-right: 15%;
+}
+
+.ml-shorthand {
+  margin: 0 0 0 32px;
+}
+
+.mr-shorthand {
+  margin: 0 32px 0 0;
+}
+
+/* text-indent */
+.indent-zero     { text-indent: 0; }
+.indent-negative { text-indent: -1em; }
+.indent-2em      { text-indent: 2em; }
+
+/* text-transform */
+.transform-upper    { text-transform: uppercase; }
+.transform-lower    { text-transform: lowercase; }
+.transform-capitalize { text-transform: capitalize; }
+
+/* text-decoration: none reset */
+.no-underline { text-decoration: none; }
+
+/* font-weight resets */
+.fw-normal  { font-weight: normal; }
+.fw-lighter { font-weight: lighter; }
+.fw-300     { font-weight: 300; }
+
+/* font-style reset */
+.fs-normal { font-style: normal; }
+
+/* font-size: pt units and xx-small/xx-large */
+.size-10pt    { font-size: 10pt; }
+.size-14pt    { font-size: 14pt; }
+.size-xx-small { font-size: xx-small; }
+.size-xx-large { font-size: xx-large; }
+
+/* margin-top: em, rem, pt */
+.mt-1em  { margin-top: 1.5em; }
+.mt-1rem { margin-top: 1.5rem; }
+.mt-12pt { margin-top: 12pt; }
+
+/* margin-bottom: em, rem, pt */
+.mb-1em  { margin-bottom: 1.5em; }
+.mb-1rem { margin-bottom: 1.5rem; }
+.mb-12pt { margin-bottom: 12pt; }
+
+/* Ornament separator — as reported in issue #74 */
+.spaceOrnament {
+  display: block;
+  margin-bottom: 3%;
+  margin-top: 3%;
+  text-align: center;
+  text-indent: 0%;
 }

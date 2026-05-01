@@ -1,6 +1,7 @@
 #include "reader/inline_link_utils.h"
 
 #include "path_utils.h"
+#include "shared/text_token_constants.h"
 
 #include <limits>
 
@@ -113,6 +114,20 @@ int FindNeighborIndex(const std::vector<LinkRect> &rects, int current_index,
   }
 
   return best_index;
+}
+
+size_t CountInlineLinksInBuffer(const uint32_t *buffer, int length) {
+  if (!buffer || length <= 1)
+    return 0;
+
+  size_t count = 0;
+  for (int i = 0; i + 1 < length; ++i) {
+    if (buffer[i] == TEXT_LINK_START && buffer[i + 1] != 0) {
+      count++;
+      i++;
+    }
+  }
+  return count;
 }
 
 } // namespace inline_link_utils

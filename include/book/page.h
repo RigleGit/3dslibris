@@ -35,6 +35,7 @@ A Book contains a vector of Pages.
 #include "book/page_buffer_utils.h"
 #include "reader/inline_link_utils.h"
 #include "ui/text.h"
+#include <cstddef>
 #include <vector>
 
 class Book;
@@ -77,6 +78,7 @@ class Page {
 	const std::vector<InlineLinkRenderEntry> &GetRenderedInlineLinks() const {
 		return rendered_inline_links_;
 	}
+	size_t GetInlineLinkCount() const;
 	//	void Draw();
 	void Draw(Text *ts);
 };

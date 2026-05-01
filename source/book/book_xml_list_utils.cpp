@@ -294,6 +294,13 @@ void ConsumePendingListItemContent(parsedata_t *p) {
   }
 }
 
+int ResolveNestedListItemIndentPx(unsigned int active_list_depth,
+                                  int space_advance) {
+  if (active_list_depth <= 1)
+    return 0;
+  return std::max(12, std::max(0, space_advance) * 3);
+}
+
 unsigned int AdvanceOrderedListOrdinal(parsedata_t *p) {
   if (!p || p->stacksize == 0)
     return 0;

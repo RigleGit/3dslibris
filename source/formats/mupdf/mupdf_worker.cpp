@@ -348,9 +348,20 @@ void ShutdownMuPdfWorker(Book::MuPdfState *mupdf_state) {
   LightEvent_Signal(&w->submit_event);
 
   if (w->thread_handle) {
-    threadJoin(w->thread_handle, 500 * 1000000ULL);
-    threadFree(w->thread_handle);
-    w->thread_handle = NULL;
+    // Loop until the thread exits cooperatively. The strip renderer exits
+    // quickly once shutdown_requested is seen at the top of its loop.
+    // A single timeout could expire mid-render and then free memory the
+    // thread is still using (use-after-free). Re-signal on each retry in
+    // case the initial signal was missed.
+    while (true) {
+      Result join_rc = threadJoin(w->thread_handle, 500 * 1000000ULL);
+      if (R_SUCCEEDED(join_rc)) {
+        threadFree(w->thread_handle);
+        w->thread_handle = NULL;
+        break;
+      }
+      LightEvent_Signal(&w->submit_event);
+    }
   }
 
   if (w->worker_ctx) {

@@ -1,0 +1,47 @@
+title: "[Idea] "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or opportunity
+      description: What limitation or gap does this address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe what you would like to see. Include UX or behavior details if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you thought of, if any.
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Why it would help users
+      description: Who benefits and how often does the problem come up?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Does this affect a specific format or all readers?
+      options:
+        - All formats / general reader
+        - EPUB only
+        - MOBI only
+        - FB2 only
+        - PDF / CBZ / XPS (fixed-layout)
+        - Library / browser UI
+        - Other / unsure
+    validations:
+      required: true

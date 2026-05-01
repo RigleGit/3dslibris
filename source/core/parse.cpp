@@ -142,6 +142,7 @@ void parse_init(parsedata_t *data) {
   data->strip_leading_list_marker = false;
   data->in_paragraph = false;
   data->paragraph_has_content = false;
+  data->text_transform_word_start = true;
   data->bold = false;
   data->italic = false;
   data->underline = false;
@@ -151,6 +152,8 @@ void parse_init(parsedata_t *data) {
   data->superscript = false;
   data->subscript = false;
   data->mono = false;
+  data->block_margin_left = 0;
+  data->block_margin_right = 0;
   for (int i = 0; i < 32; i++) {
     data->style_bold_stack[i] = false;
     data->style_italic_stack[i] = false;
@@ -162,14 +165,26 @@ void parse_init(parsedata_t *data) {
     data->style_subscript_stack[i] = false;
     data->style_mono_stack[i] = false;
     data->style_hidden_stack[i] = false;
+    data->style_no_underline_stack[i] = false;
+    data->style_reset_bold_stack[i] = false;
+    data->style_reset_italic_stack[i] = false;
+    data->style_text_transform_stack[i] = 0;
+    data->style_white_space_stack[i] = 0;
+    data->style_font_size_stack[i] = 0;
+    data->style_font_size_restore_stack[i] = 0;
     data->link_active_stack[i] = false;
     data->link_href_id_stack[i] = 0;
+    data->block_text_align_stack[i] = false;
+    data->block_text_align_value_stack[i] = 0;
     data->list_marker_hidden_stack[i] = false;
     data->list_item_pending_stack[i] = false;
     data->ordered_list_ordinal_stack[i] = 0;
     data->ordered_list_style_stack[i] = 0;
     data->heading_font_size_emitted_stack[i] = false;
     data->heading_saved_font_size_stack[i] = 0;
+    data->page_break_after_stack[i] = false;
+    data->block_margin_left_stack[i] = 0;
+    data->block_margin_right_stack[i] = 0;
   }
   data->deferred_style_sync = false;
   data->deferred_target_bold = false;
@@ -236,25 +251,36 @@ void parse_error(XML_Parser p, char *msg) {
 
 void parse_push(parsedata_t *data, context_t context) {
   if (data->stacksize < 32) {
-    data->stack[data->stacksize] = context;
-    data->style_bold_stack[data->stacksize] = false;
-    data->style_italic_stack[data->stacksize] = false;
-    data->style_underline_stack[data->stacksize] = false;
-    data->style_underline_style_stack[data->stacksize] = UNDERLINE_STYLE_SOLID;
-    data->style_overline_stack[data->stacksize] = false;
-    data->style_strikethrough_stack[data->stacksize] = false;
-    data->style_superscript_stack[data->stacksize] = false;
-    data->style_subscript_stack[data->stacksize] = false;
-    data->style_mono_stack[data->stacksize] = false;
-    data->style_hidden_stack[data->stacksize] = false;
-    data->link_active_stack[data->stacksize] = false;
-    data->link_href_id_stack[data->stacksize] = 0;
-    data->list_marker_hidden_stack[data->stacksize] = false;
-    data->list_item_pending_stack[data->stacksize] = false;
-    data->ordered_list_ordinal_stack[data->stacksize] = 0;
-    data->ordered_list_style_stack[data->stacksize] = 0;
-    data->heading_font_size_emitted_stack[data->stacksize] = false;
-    data->heading_saved_font_size_stack[data->stacksize] = 0;
+    const u8 idx = data->stacksize;
+    data->stack[idx] = context;
+    data->style_bold_stack[idx] = false;
+    data->style_italic_stack[idx] = false;
+    data->style_underline_stack[idx] = false;
+    data->style_underline_style_stack[idx] = UNDERLINE_STYLE_SOLID;
+    data->style_overline_stack[idx] = false;
+    data->style_strikethrough_stack[idx] = false;
+    data->style_superscript_stack[idx] = false;
+    data->style_subscript_stack[idx] = false;
+    data->style_mono_stack[idx] = false;
+    data->style_hidden_stack[idx] = false;
+    data->style_no_underline_stack[idx] = false;
+    data->style_reset_bold_stack[idx] = false;
+    data->style_reset_italic_stack[idx] = false;
+    data->style_text_transform_stack[idx] = 0;
+    data->style_white_space_stack[idx] = 0;
+    data->link_active_stack[idx] = false;
+    data->link_href_id_stack[idx] = 0;
+    data->block_text_align_stack[idx] = false;
+    data->block_text_align_value_stack[idx] = 0;
+    data->list_marker_hidden_stack[idx] = false;
+    data->list_item_pending_stack[idx] = false;
+    data->ordered_list_ordinal_stack[idx] = 0;
+    data->ordered_list_style_stack[idx] = 0;
+    data->heading_font_size_emitted_stack[idx] = false;
+    data->heading_saved_font_size_stack[idx] = 0;
+    data->page_break_after_stack[idx] = false;
+    data->block_margin_left_stack[idx] = data->block_margin_left;
+    data->block_margin_right_stack[idx] = data->block_margin_right;
     data->stacksize++;
   }
 }
@@ -262,25 +288,63 @@ void parse_push(parsedata_t *data, context_t context) {
 context_t parse_pop(parsedata_t *data) {
   if (data->stacksize) {
     data->stacksize--;
-    data->style_bold_stack[data->stacksize] = false;
-    data->style_italic_stack[data->stacksize] = false;
-    data->style_underline_stack[data->stacksize] = false;
-    data->style_underline_style_stack[data->stacksize] = UNDERLINE_STYLE_SOLID;
-    data->style_strikethrough_stack[data->stacksize] = false;
-    data->style_superscript_stack[data->stacksize] = false;
-    data->style_subscript_stack[data->stacksize] = false;
-    data->style_mono_stack[data->stacksize] = false;
-    data->style_hidden_stack[data->stacksize] = false;
-    data->link_active_stack[data->stacksize] = false;
-    data->link_href_id_stack[data->stacksize] = 0;
-    data->list_marker_hidden_stack[data->stacksize] = false;
-    data->list_item_pending_stack[data->stacksize] = false;
-    data->ordered_list_ordinal_stack[data->stacksize] = 0;
-    data->ordered_list_style_stack[data->stacksize] = 0;
-    data->heading_font_size_emitted_stack[data->stacksize] = false;
-    data->heading_saved_font_size_stack[data->stacksize] = 0;
+    const u8 idx = data->stacksize;
+    data->style_bold_stack[idx] = false;
+    data->style_italic_stack[idx] = false;
+    data->style_underline_stack[idx] = false;
+    data->style_underline_style_stack[idx] = UNDERLINE_STYLE_SOLID;
+    data->style_strikethrough_stack[idx] = false;
+    data->style_superscript_stack[idx] = false;
+    data->style_subscript_stack[idx] = false;
+    data->style_mono_stack[idx] = false;
+    data->style_hidden_stack[idx] = false;
+    data->style_no_underline_stack[idx] = false;
+    data->style_reset_bold_stack[idx] = false;
+    data->style_reset_italic_stack[idx] = false;
+    data->style_text_transform_stack[idx] = 0;
+    data->style_white_space_stack[idx] = 0;
+    data->link_active_stack[idx] = false;
+    data->link_href_id_stack[idx] = 0;
+    data->block_text_align_stack[idx] = false;
+    data->block_text_align_value_stack[idx] = 0;
+    data->list_marker_hidden_stack[idx] = false;
+    data->list_item_pending_stack[idx] = false;
+    data->ordered_list_ordinal_stack[idx] = 0;
+    data->ordered_list_style_stack[idx] = 0;
+    data->heading_font_size_emitted_stack[idx] = false;
+    data->heading_saved_font_size_stack[idx] = 0;
+    data->page_break_after_stack[idx] = false;
+    data->block_margin_left_stack[idx] = 0;
+    data->block_margin_right_stack[idx] = 0;
+    if (data->stacksize > 0) {
+      data->block_margin_left = data->block_margin_left_stack[data->stacksize - 1];
+      data->block_margin_right =
+          data->block_margin_right_stack[data->stacksize - 1];
+    } else {
+      data->block_margin_left = 0;
+      data->block_margin_right = 0;
+    }
   }
   return data->stack[data->stacksize];
+}
+
+int parse_current_block_margin_left(const parsedata_t *data) {
+  return data ? data->block_margin_left : 0;
+}
+
+int parse_current_block_margin_right(const parsedata_t *data) {
+  return data ? data->block_margin_right : 0;
+}
+
+void parse_set_current_block_margins(parsedata_t *data, int left, int right) {
+  if (!data)
+    return;
+  data->block_margin_left = left;
+  data->block_margin_right = right;
+  if (data->stacksize == 0)
+    return;
+  data->block_margin_left_stack[data->stacksize - 1] = left;
+  data->block_margin_right_stack[data->stacksize - 1] = right;
 }
 
 bool parse_in(parsedata_t *data, context_t context) {
@@ -290,4 +354,14 @@ bool parse_in(parsedata_t *data, context_t context) {
       return true;
   }
   return false;
+}
+
+u8 parse_resolve_text_transform(const parsedata_t *data) {
+  if (!data)
+    return 0;
+  for (int i = (int)data->stacksize - 1; i >= 0; i--) {
+    if (data->style_text_transform_stack[i] != 0)
+      return data->style_text_transform_stack[i];
+  }
+  return 0;
 }

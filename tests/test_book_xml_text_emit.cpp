@@ -43,12 +43,19 @@ int MeasureMono(uint32_t, void *) { return 1; }
 book_xml_text_emit::FlowEmitMetrics BaseMetrics() {
   book_xml_text_emit::FlowEmitMetrics metrics{};
   metrics.display_width = 6;
+  metrics.base_margin_left = 0;
   metrics.margin_left = 0;
   metrics.margin_right = 0;
   metrics.lineheight = 10;
   metrics.linespacing = 1;
   metrics.spaceadvance = 1;
   return metrics;
+}
+
+int MeasureUppercaseWide(uint32_t cp, void *) {
+  if (cp >= 'A' && cp <= 'Z')
+    return 2;
+  return 1;
 }
 
 void TestEmitFlowedLtrWrapsIntoPageBuffer() {
@@ -136,11 +143,133 @@ void TestEmitKeepsClosingPunctuationOnCurrentLine() {
   ExpectEq("pen advances on same line", p.pen.x, 7);
 }
 
+void TestEmitStartsLtrLineAtLeftMargin() {
+  parsedata_t p{};
+  parse_init(&p);
+  p.pen.x = 0;
+  p.pen.y = 10;
+
+  const char *text = "abc";
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  bool has_rtl = false;
+  ExpectTrue("shape margin text",
+             text_layout_utils::ShapeTextRunBidi(text, 3, NULL, MeasureMono,
+                                                 NULL, &run, &has_rtl));
+
+  book_xml_text_emit::FlowEmitMetrics metrics = BaseMetrics();
+  metrics.display_width = 12;
+  metrics.margin_left = 4;
+  book_xml_text_emit::EmitFlowedShapedText(
+      &p, text, run, has_rtl, std::vector<text_bidi_utils::BidiRun>(), metrics,
+      NULL, NULL);
+
+  ExpectEq("buflen", p.buflen, 5);
+  ExpectEq("line start token", (int)p.buf[0], TEXT_LINE_START_X);
+  ExpectEq("line start x", (int)p.buf[1], 4);
+  ExpectEq("first char", (int)p.buf[2], 'a');
+  ExpectEq("pen starts from left margin", p.pen.x, 7);
+}
+
+void TestEmitMovesFreshLineFromBaseToEffectiveLeftMargin() {
+  parsedata_t p{};
+  parse_init(&p);
+  p.pen.x = 8;
+  p.pen.y = 10;
+
+  const char *text = "abc";
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  bool has_rtl = false;
+  ExpectTrue("shape shifted margin text",
+             text_layout_utils::ShapeTextRunBidi(text, 3, NULL, MeasureMono,
+                                                 NULL, &run, &has_rtl));
+
+  book_xml_text_emit::FlowEmitMetrics metrics = BaseMetrics();
+  metrics.display_width = 20;
+  metrics.base_margin_left = 8;
+  metrics.margin_left = 3;
+  book_xml_text_emit::EmitFlowedShapedText(
+      &p, text, run, has_rtl, std::vector<text_bidi_utils::BidiRun>(), metrics,
+      NULL, NULL);
+
+  ExpectEq("buflen", p.buflen, 5);
+  ExpectEq("line start token", (int)p.buf[0], TEXT_LINE_START_X);
+  ExpectEq("line start x", (int)p.buf[1], 3);
+  ExpectEq("effective negative margin applied", p.pen.x, 6);
+}
+
+void TestEmitRepeatsLeftMarginTokenAfterWrap() {
+  parsedata_t p{};
+  parse_init(&p);
+  p.pen.x = 0;
+  p.pen.y = 10;
+
+  const char *text = "one two";
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  bool has_rtl = false;
+  ExpectTrue("shape wrapped margin text",
+             text_layout_utils::ShapeTextRunBidi(text, 7, NULL, MeasureMono,
+                                                 NULL, &run, &has_rtl));
+
+  book_xml_text_emit::FlowEmitMetrics metrics = BaseMetrics();
+  metrics.display_width = 8;
+  metrics.margin_left = 2;
+  book_xml_text_emit::EmitFlowedShapedText(
+      &p, text, run, has_rtl, std::vector<text_bidi_utils::BidiRun>(), metrics,
+      NULL, NULL);
+
+  ExpectEq("buflen", p.buflen, 12);
+  ExpectEq("first line token", (int)p.buf[0], TEXT_LINE_START_X);
+  ExpectEq("first line x", (int)p.buf[1], 2);
+  ExpectEq("newline inserted", (int)p.buf[6], '\n');
+  ExpectEq("second line token", (int)p.buf[7], TEXT_LINE_START_X);
+  ExpectEq("second line x", (int)p.buf[8], 2);
+  ExpectEq("second line first char", (int)p.buf[9], 't');
+}
+
+void TestTransformedTextIsMeasuredBeforeFlowing() {
+  parsedata_t p{};
+  parse_init(&p);
+  parse_push(&p, TAG_P);
+  p.style_text_transform_stack[p.stacksize - 1] = 1; // uppercase
+  p.pen.x = 0;
+  p.pen.y = 10;
+
+  const char *text = "ab c";
+  const std::string transformed =
+      book_xml_text_emit::TransformUtf8ForLayout(&p, text, std::strlen(text));
+  ExpectTrue("text transformed for layout", transformed == "AB C");
+
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  bool has_rtl = false;
+  ExpectTrue("shape transformed text",
+             text_layout_utils::ShapeTextRunBidi(
+                 transformed.c_str(), transformed.size(), NULL,
+                 MeasureUppercaseWide, NULL, &run, &has_rtl));
+
+  book_xml_text_emit::FlowEmitMetrics metrics = BaseMetrics();
+  metrics.display_width = 6;
+  metrics.text_already_transformed = true;
+  book_xml_text_emit::EmitFlowedShapedText(
+      &p, transformed.c_str(), run, has_rtl,
+      std::vector<text_bidi_utils::BidiRun>(), metrics, NULL, NULL);
+
+  ExpectEq("buflen", p.buflen, 5);
+  ExpectEq("first transformed char", (int)p.buf[0], 'A');
+  ExpectEq("second transformed char", (int)p.buf[1], 'B');
+  ExpectEq("space preserved before wrap", (int)p.buf[2], ' ');
+  ExpectEq("newline inserted after transformed width", (int)p.buf[3], '\n');
+  ExpectEq("wrapped transformed char", (int)p.buf[4], 'C');
+}
+
 } // namespace
 
 int main() {
   TestEmitFlowedLtrWrapsIntoPageBuffer();
   TestEmitFlowedRtlAddsParagraphAndWidthTokens();
   TestEmitKeepsClosingPunctuationOnCurrentLine();
+  TestEmitStartsLtrLineAtLeftMargin();
+  TestEmitMovesFreshLineFromBaseToEffectiveLeftMargin();
+  TestEmitRepeatsLeftMarginTokenAfterWrap();
+  TestTransformedTextIsMeasuredBeforeFlowing();
   return 0;
 }

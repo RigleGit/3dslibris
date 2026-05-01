@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <stdint.h>
 #include <string>
 #include <vector>
 
@@ -26,5 +28,6 @@ int RectCenterX(const LinkRect &rect);
 int RectCenterY(const LinkRect &rect);
 int FindNeighborIndex(const std::vector<LinkRect> &rects, int current_index,
                       InlineLinkNavDirection direction);
+size_t CountInlineLinksInBuffer(const uint32_t *buffer, int length);
 
 } // namespace inline_link_utils

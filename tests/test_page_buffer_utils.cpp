@@ -1,4 +1,5 @@
 #include "book/page_buffer_utils.h"
+#include "shared/text_token_constants.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +18,11 @@ void ExpectEq(const char *label, size_t actual, size_t expected) {
     Fail(std::string(label) + ": expected " + std::to_string(expected) +
          ", got " + std::to_string(actual));
   }
+}
+
+void ExpectTrue(const char *label, bool value) {
+  if (!value)
+    Fail(std::string(label) + ": expected true");
 }
 
 void TestReusesExistingCapacity() {
@@ -61,6 +67,13 @@ void TestAdoptPageBufferMove() {
   ExpectEq("source drained", src.size(), (size_t)0);
 }
 
+void TestScreenBreakTokenCannotCollideWithTextCodepoint() {
+  ExpectTrue("screen break token is outside Unicode",
+             TEXT_SCREEN_BREAK > 0x10FFFF);
+  ExpectTrue("line start x token is outside Unicode",
+             TEXT_LINE_START_X > 0x10FFFF);
+}
+
 } // namespace
 
 int main() {
@@ -69,5 +82,6 @@ int main() {
   TestEmptyPayloadNeedsNoCapacity();
   TestPageVectorReserveCapacity();
   TestAdoptPageBufferMove();
+  TestScreenBreakTokenCannotCollideWithTextCodepoint();
   return 0;
 }

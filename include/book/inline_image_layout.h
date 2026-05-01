@@ -35,6 +35,7 @@ struct InlineImageLayoutRequest {
   InlineImageContext image_context;
   int current_screen;
   int follow_text_lines;
+  int author_max_width_px; // 0 = no constraint; from width="X%" on img tag
 };
 
 struct InlineImageLayoutPlan {
@@ -51,3 +52,5 @@ struct InlineImageLayoutPlan {
 
 InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
                                             const InlineImageMetadata &meta);
+void ApplyFloatImageLayoutOverride(InlineImageLayoutPlan *plan, bool line_began,
+                                   int linespacing);

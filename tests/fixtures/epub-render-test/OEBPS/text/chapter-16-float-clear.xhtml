@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Capítulo 16 — float y clear</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body>
+
+<h1 id="capitulo-16">Capítulo 16: float y clear</h1>
+
+<p>Este capítulo valida la implementación conservadora de <code>float</code> y <code>clear</code>. En esta versión, las imágenes flotadas se muestran como bloques alineados a la izquierda o a la derecha, sin reflujo de texto alrededor.</p>
+
+<h2>1. float: left</h2>
+
+<p>La imagen siguiente debe quedar pegada al margen izquierdo del área de texto.</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento a la izquierda" class="float-left" style="width: 40px"/>
+
+<p>Este párrafo debe empezar debajo de la imagen anterior, no a su lado.</p>
+
+<h2>2. float: right</h2>
+
+<p>La imagen siguiente debe quedar pegada al margen derecho del área de texto.</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento a la derecha" class="float-right" style="width: 40px"/>
+
+<p>Este párrafo debe empezar debajo de la imagen anterior, no a su lado.</p>
+
+<h2>3. clear: both</h2>
+
+<p>La siguiente imagen usa <code>float: right</code> y el bloque posterior declara <code>clear: both</code>. En esta implementación eso fuerza, como mínimo, una ruptura de línea antes del bloque limpiador.</p>
+
+<img src="../images/ornament-bar.png" alt="ornamento previo al clear" class="float-right" style="width: 40px"/>
+
+<div class="clear-both">
+  <p>Este bloque con <code>clear: both</code> debe empezar claramente después de la imagen flotada anterior.</p>
+</div>
+
+</body>
+</html>

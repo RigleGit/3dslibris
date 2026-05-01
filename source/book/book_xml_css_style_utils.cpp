@@ -1,6 +1,7 @@
 #include "book/book_xml_css_style_utils.h"
 
 #include "shared/string_utils.h"
+#include "shared/text_unicode_utils.h"
 
 #include <string>
 
@@ -37,6 +38,8 @@ unsigned char ParseUnderlineStyle(const std::string &style_lc) {
     return UNDERLINE_STYLE_DASHED;
   if (style_lc.find("dotted") != std::string::npos)
     return UNDERLINE_STYLE_DOTTED;
+  if (style_lc.find("double") != std::string::npos)
+    return UNDERLINE_STYLE_DOUBLE;
   return UNDERLINE_STYLE_SOLID;
 }
 
@@ -97,6 +100,12 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
     result.unit = MarginTopResult::Unit::Px;
     result.negative = negative;
     p += unit_len;
+  } else if (p + 1 < lc.size() && lc[p] == 'p' && lc[p + 1] == 't') {
+    // 1pt = 4/3 px (96dpi, 72pt/inch).
+    result.value = (value * 4 + 1) / 3;
+    result.unit = MarginTopResult::Unit::Px;
+    result.negative = negative;
+    p += 2;
   } else if (value == 0 && !has_decimal) {
     // CSS allows bare unitless zero for lengths (e.g. "margin: 0").
     result.value = 0;
@@ -128,11 +137,21 @@ MarginTopResult ParseMarginShorthand(const std::string &lc,
   }
   if (count == 0)
     return MarginTopResult{};
-  if (which == 0)
+  if (which == 0) {
     return tokens[0];
+  }
+  if (which == 1) {
+    if (count >= 2) return tokens[1];
+    return tokens[0];
+  }
   if (which == 2) {
     if (count >= 3) return tokens[2];
-    return tokens[0]; // 1 or 2 values: bottom equals top
+    return tokens[0];
+  }
+  if (which == 3) {
+    if (count >= 4) return tokens[3];
+    if (count >= 2) return tokens[1];
+    return tokens[0];
   }
   return tokens[0];
 }
@@ -241,6 +260,46 @@ void ParseInlineStyleFlags(const char *style, InlineStyleFlags *out) {
       ContainsNoCase(style_lc, "vertical-align: sub")) {
     out->subscript = true;
   }
+
+  // text-decoration: none (find property then check value is "none")
+  {
+    size_t p2 = 0;
+    while (p2 < style_lc.size()) {
+      p2 = style_lc.find("text-decoration", p2);
+      if (p2 == std::string::npos) break;
+      size_t colon = style_lc.find(':', p2);
+      if (colon == std::string::npos) break;
+      size_t v = colon + 1;
+      while (v < style_lc.size() && style_lc[v] == ' ') v++;
+      if (style_lc.compare(v, 4, "none") == 0) {
+        out->no_underline = true;
+        break;
+      }
+      p2++;
+    }
+  }
+
+  if (ContainsNoCase(style_lc, "font-weight:normal") ||
+      ContainsNoCase(style_lc, "font-weight: normal") ||
+      ContainsNoCase(style_lc, "font-weight:lighter") ||
+      ContainsNoCase(style_lc, "font-weight: lighter") ||
+      ContainsNoCase(style_lc, "font-weight:100") ||
+      ContainsNoCase(style_lc, "font-weight: 100") ||
+      ContainsNoCase(style_lc, "font-weight:200") ||
+      ContainsNoCase(style_lc, "font-weight: 200") ||
+      ContainsNoCase(style_lc, "font-weight:300") ||
+      ContainsNoCase(style_lc, "font-weight: 300") ||
+      ContainsNoCase(style_lc, "font-weight:400") ||
+      ContainsNoCase(style_lc, "font-weight: 400") ||
+      ContainsNoCase(style_lc, "font-weight:500") ||
+      ContainsNoCase(style_lc, "font-weight: 500")) {
+    out->reset_bold = true;
+  }
+
+  if (ContainsNoCase(style_lc, "font-style:normal") ||
+      ContainsNoCase(style_lc, "font-style: normal")) {
+    out->reset_italic = true;
+  }
 }
 
 static MarginTopResult ParseMarginValue(const char *style, const char *property,
@@ -254,39 +313,9 @@ static MarginTopResult ParseMarginValue(const char *style, const char *property,
   size_t pos = lc.find(prop_colon);
   if (pos != std::string::npos) {
     pos += prop_colon.size();
-    while (pos < lc.size() && lc[pos] == ' ')
-      pos++;
-    if (pos < lc.size() && lc[pos] == '-') {
-      result.negative = true;
-      pos++;
-    }
-    int value = 0;
-    bool has_digit = false;
-    while (pos < lc.size() && lc[pos] >= '0' && lc[pos] <= '9') {
-      value = value * 10 + (lc[pos] - '0');
-      has_digit = true;
-      pos++;
-    }
-    if (has_digit) {
-      while (pos < lc.size() && lc[pos] == ' ')
-        pos++;
-      if (pos < lc.size() && lc[pos] == '%') {
-        result.value = value;
-        result.unit = MarginTopResult::Unit::Percent;
-        return result;
-      }
-      if (pos + 1 < lc.size() && lc[pos] == 'p' && lc[pos + 1] == 'x') {
-        result.value = value;
-        result.unit = MarginTopResult::Unit::Px;
-        return result;
-      }
-      if (value == 0) {
-        result.value = 0;
-        result.unit = MarginTopResult::Unit::Px;
-        return result;
-      }
-    }
-    result = MarginTopResult{};
+    MarginTopResult r = ParseOneLengthToken(lc, &pos);
+    if (r.unit != MarginTopResult::Unit::None)
+      return r;
   }
 
   const char *shorthand = "margin:";
@@ -307,6 +336,27 @@ MarginTopResult ParseMarginTop(const char *style) {
 
 MarginTopResult ParseMarginBottom(const char *style) {
   return ParseMarginValue(style, "margin-bottom", 2);
+}
+
+MarginTopResult ParseMarginLeft(const char *style) {
+  return ParseMarginValue(style, "margin-left", 3);
+}
+
+MarginTopResult ParseMarginRight(const char *style) {
+  return ParseMarginValue(style, "margin-right", 1);
+}
+
+int ResolveHorizontalMarginPx(const MarginTopResult &mtr, int display_width) {
+  if (mtr.unit == MarginTopResult::Unit::None)
+    return 0;
+
+  int resolved = 0;
+  if (mtr.unit == MarginTopResult::Unit::Percent)
+    resolved = (mtr.value * display_width) / 100;
+  else
+    resolved = mtr.value;
+
+  return mtr.negative ? -resolved : resolved;
 }
 
 bool TryParseFontSize(const char *style, FontSizeSpec *out) {
@@ -333,6 +383,29 @@ bool TryParseFontSize(const char *style, FontSizeSpec *out) {
     out->value_x100 = 0;
     return true;
   }
+  // Absolute keyword sizes — stored as Percent relative to base font.
+  // Order: longer prefixes first to avoid xx-large matching x-large.
+  if (lc.compare(pos, 8, "xx-large") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 20000; return true;
+  }
+  if (lc.compare(pos, 7, "x-large") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 15000; return true;
+  }
+  if (lc.compare(pos, 5, "large") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 12500; return true;
+  }
+  if (lc.compare(pos, 6, "medium") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 10000; return true;
+  }
+  if (lc.compare(pos, 8, "xx-small") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 5000;  return true;
+  }
+  if (lc.compare(pos, 7, "x-small") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 6250;  return true;
+  }
+  if (lc.compare(pos, 5, "small") == 0) {
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 8000;  return true;
+  }
 
   int value_x100 = 0;
   if (!ParseNumberX100(lc, &pos, &value_x100))
@@ -348,6 +421,11 @@ bool TryParseFontSize(const char *style, FontSizeSpec *out) {
     out->unit = FontSizeSpec::Unit::Em;
   } else if (pos + 1 < lc.size() && lc[pos] == 'p' && lc[pos + 1] == 'x') {
     out->unit = FontSizeSpec::Unit::Px;
+  } else if (pos + 1 < lc.size() && lc[pos] == 'p' && lc[pos + 1] == 't') {
+    // 1pt = 4/3 px; value_x100 is in units of hundredths of px.
+    out->unit = FontSizeSpec::Unit::Px;
+    out->value_x100 = (value_x100 * 4 + 1) / 3;
+    return true;
   } else if (pos < lc.size() && lc[pos] == '%') {
     out->unit = FontSizeSpec::Unit::Percent;
   } else {
@@ -401,6 +479,16 @@ bool TryParseTextAlign(const char *style, TextAlign *out) {
     *out = TextAlign::Left;
     return true;
   }
+  if (style_lc.find("text-align: start") != std::string::npos ||
+      style_lc.find("text-align:start") != std::string::npos) {
+    *out = TextAlign::Left;
+    return true;
+  }
+  if (style_lc.find("text-align: end") != std::string::npos ||
+      style_lc.find("text-align:end") != std::string::npos) {
+    *out = TextAlign::Right;
+    return true;
+  }
   return false;
 }
 
@@ -409,6 +497,316 @@ TextAlign ParseTextAlign(const char *style) {
   if (TryParseTextAlign(style, &out))
     return out;
   return TextAlign::Left;
+}
+
+bool TryParseWhiteSpace(const char *style, WhiteSpaceMode *out) {
+  if (!out || !style || !style[0])
+    return false;
+  const std::string style_lc = ToLowerAscii(std::string(style));
+  if (style_lc.find("white-space: pre-wrap") != std::string::npos ||
+      style_lc.find("white-space:pre-wrap") != std::string::npos) {
+    *out = WhiteSpaceMode::PreWrap;
+    return true;
+  }
+  if (style_lc.find("white-space: pre-line") != std::string::npos ||
+      style_lc.find("white-space:pre-line") != std::string::npos) {
+    *out = WhiteSpaceMode::PreLine;
+    return true;
+  }
+  if (style_lc.find("white-space: nowrap") != std::string::npos ||
+      style_lc.find("white-space:nowrap") != std::string::npos) {
+    *out = WhiteSpaceMode::Nowrap;
+    return true;
+  }
+  if (style_lc.find("white-space: pre") != std::string::npos ||
+      style_lc.find("white-space:pre") != std::string::npos) {
+    *out = WhiteSpaceMode::Pre;
+    return true;
+  }
+  if (style_lc.find("white-space: normal") != std::string::npos ||
+      style_lc.find("white-space:normal") != std::string::npos) {
+    *out = WhiteSpaceMode::Normal;
+    return true;
+  }
+  return false;
+}
+
+WhiteSpaceMode ParseWhiteSpace(const char *style) {
+  WhiteSpaceMode out = WhiteSpaceMode::Normal;
+  if (TryParseWhiteSpace(style, &out))
+    return out;
+  return WhiteSpaceMode::Normal;
+}
+
+bool TryParseFloat(const char *style, FloatMode *out) {
+  if (!out || !style || !style[0])
+    return false;
+  const std::string style_lc = ToLowerAscii(std::string(style));
+  if (style_lc.find("float: left") != std::string::npos ||
+      style_lc.find("float:left") != std::string::npos) {
+    *out = FloatMode::Left;
+    return true;
+  }
+  if (style_lc.find("float: right") != std::string::npos ||
+      style_lc.find("float:right") != std::string::npos) {
+    *out = FloatMode::Right;
+    return true;
+  }
+  if (style_lc.find("float: none") != std::string::npos ||
+      style_lc.find("float:none") != std::string::npos) {
+    *out = FloatMode::None;
+    return true;
+  }
+  return false;
+}
+
+FloatMode ParseFloat(const char *style) {
+  FloatMode out = FloatMode::None;
+  if (TryParseFloat(style, &out))
+    return out;
+  return FloatMode::None;
+}
+
+bool TryParseClear(const char *style, ClearMode *out) {
+  if (!out || !style || !style[0])
+    return false;
+  const std::string style_lc = ToLowerAscii(std::string(style));
+  if (style_lc.find("clear: both") != std::string::npos ||
+      style_lc.find("clear:both") != std::string::npos) {
+    *out = ClearMode::Both;
+    return true;
+  }
+  if (style_lc.find("clear: left") != std::string::npos ||
+      style_lc.find("clear:left") != std::string::npos) {
+    *out = ClearMode::Left;
+    return true;
+  }
+  if (style_lc.find("clear: right") != std::string::npos ||
+      style_lc.find("clear:right") != std::string::npos) {
+    *out = ClearMode::Right;
+    return true;
+  }
+  if (style_lc.find("clear: none") != std::string::npos ||
+      style_lc.find("clear:none") != std::string::npos) {
+    *out = ClearMode::None;
+    return true;
+  }
+  return false;
+}
+
+ClearMode ParseClear(const char *style) {
+  ClearMode out = ClearMode::None;
+  if (TryParseClear(style, &out))
+    return out;
+  return ClearMode::None;
+}
+
+namespace {
+
+bool IsWhiteSpaceCodepoint(uint32_t cp) {
+  switch (cp) {
+  case '\t':
+  case '\n':
+  case '\r':
+  case 0x000B:
+  case 0x000C:
+  case 0x0085:
+  case 0x00A0:
+  case 0x2028:
+  case 0x2029:
+  case 0x202F:
+  case ' ':
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool IsLineBreakCodepoint(uint32_t cp) {
+  return cp == '\n' || cp == 0x0085 || cp == 0x2028 || cp == 0x2029;
+}
+
+} // namespace
+
+std::string NormalizeWhiteSpaceText(const char *utf8, size_t len,
+                                    WhiteSpaceMode mode) {
+  if (!utf8 || len == 0)
+    return std::string();
+  if (mode != WhiteSpaceMode::Nowrap && mode != WhiteSpaceMode::PreLine)
+    return std::string(utf8, len);
+
+  std::string out;
+  out.reserve(len);
+  bool pending_space = false;
+  bool at_line_start = false;
+
+  size_t offset = 0;
+  while (offset < len && utf8[offset] != '\0') {
+    uint32_t cp = 0;
+    const size_t step = text_unicode_utils::DecodeNextDisplayCodepoint(
+        utf8 + offset, len - offset, &cp);
+    if (step == 0) {
+      offset++;
+      continue;
+    }
+
+    if (IsLineBreakCodepoint(cp)) {
+      if (mode == WhiteSpaceMode::PreLine) {
+        if (!out.empty() && out[out.size() - 1] == ' ')
+          out.erase(out.size() - 1);
+        out.push_back('\n');
+        pending_space = false;
+        at_line_start = true;
+      } else {
+        pending_space = true;
+      }
+      offset += step;
+      continue;
+    }
+
+    if (cp == '\r') {
+      offset += step;
+      continue;
+    }
+
+    if (IsWhiteSpaceCodepoint(cp)) {
+      pending_space = true;
+      offset += step;
+      continue;
+    }
+
+    if (pending_space && !(mode == WhiteSpaceMode::PreLine && at_line_start))
+      out.push_back(' ');
+    pending_space = false;
+    at_line_start = false;
+    out.append(utf8 + offset, step);
+    offset += step;
+  }
+
+  if (pending_space && mode == WhiteSpaceMode::Nowrap)
+    out.push_back(' ');
+  return out;
+}
+
+namespace {
+
+// Returns true if the CSS property `prop` (e.g. "page-break-before") appears
+// in `lc` with an "always/page/left/right" value. When require_not_dash_preceded
+// is true, the match is skipped if the character before the property name is '-'
+// (so "break-before" does not match inside "page-break-before").
+bool CheckCssBreakProperty(const std::string &lc, const char *prop,
+                           bool require_not_dash_preceded) {
+  const size_t prop_len = strlen(prop);
+  size_t pos = 0;
+  while (true) {
+    pos = lc.find(prop, pos);
+    if (pos == std::string::npos)
+      return false;
+    if (!require_not_dash_preceded || pos == 0 || lc[pos - 1] != '-') {
+      size_t colon = lc.find(':', pos + prop_len);
+      if (colon != std::string::npos) {
+        size_t v = colon + 1;
+        while (v < lc.size() && lc[v] == ' ')
+          v++;
+        if (lc.compare(v, 6, "always") == 0)
+          return true;
+        if (lc.compare(v, 4, "page") == 0)
+          return true;
+        if (lc.compare(v, 5, "right") == 0)
+          return true;
+        if (lc.compare(v, 4, "left") == 0)
+          return true;
+      }
+    }
+    pos++;
+  }
+}
+
+} // anonymous namespace (page-break helpers)
+
+MarginTopResult ParseTextIndent(const char *style) {
+  if (!style || !style[0])
+    return MarginTopResult{};
+  const std::string lc = ToLowerAscii(std::string(style));
+  const std::string key = "text-indent:";
+  size_t pos = lc.find(key);
+  if (pos == std::string::npos)
+    return MarginTopResult{};
+  pos += key.size();
+  return ParseOneLengthToken(lc, &pos);
+}
+
+TextTransform ParseTextTransform(const char *style) {
+  if (!style || !style[0])
+    return TextTransform::None;
+  const std::string lc = ToLowerAscii(std::string(style));
+  const std::string key = "text-transform:";
+  size_t pos = lc.find(key);
+  if (pos == std::string::npos)
+    return TextTransform::None;
+  pos += key.size();
+  while (pos < lc.size() && lc[pos] == ' ')
+    pos++;
+  if (lc.compare(pos, 9, "uppercase") == 0) return TextTransform::Uppercase;
+  if (lc.compare(pos, 9, "lowercase") == 0) return TextTransform::Lowercase;
+  if (lc.compare(pos, 10, "capitalize") == 0) return TextTransform::Capitalize;
+  return TextTransform::None;
+}
+
+bool HasPageBreakBefore(const char *style) {
+  if (!style || !style[0])
+    return false;
+  const std::string lc = ToLowerAscii(std::string(style));
+  return CheckCssBreakProperty(lc, "page-break-before", false) ||
+         CheckCssBreakProperty(lc, "break-before", true);
+}
+
+bool HasPageBreakAfter(const char *style) {
+  if (!style || !style[0])
+    return false;
+  const std::string lc = ToLowerAscii(std::string(style));
+  return CheckCssBreakProperty(lc, "page-break-after", false) ||
+         CheckCssBreakProperty(lc, "break-after", true);
+}
+
+bool HasPageBreakInsideAvoid(const char *style) {
+  if (!style || !style[0])
+    return false;
+  const std::string lc = ToLowerAscii(std::string(style));
+  size_t pos = 0;
+  while (true) {
+    pos = lc.find("page-break-inside", pos);
+    if (pos == std::string::npos)
+      break;
+    if (pos == 0 || lc[pos - 1] != '-') {
+      size_t colon = lc.find(':', pos + 17);
+      if (colon != std::string::npos) {
+        size_t v = colon + 1;
+        while (v < lc.size() && lc[v] == ' ')
+          v++;
+        if (lc.compare(v, 5, "avoid") == 0)
+          return true;
+      }
+    }
+    pos++;
+  }
+  pos = 0;
+  while (true) {
+    pos = lc.find("break-inside", pos);
+    if (pos == std::string::npos)
+      return false;
+    if (pos == 0 || lc[pos - 1] != '-') {
+      size_t colon = lc.find(':', pos + 12);
+      if (colon != std::string::npos) {
+        size_t v = colon + 1;
+        while (v < lc.size() && lc[v] == ' ')
+          v++;
+        if (lc.compare(v, 5, "avoid") == 0)
+          return true;
+      }
+    }
+    pos++;
+  }
 }
 
 } // namespace book_xml_css_style_utils

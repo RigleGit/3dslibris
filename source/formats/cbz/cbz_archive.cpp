@@ -1,11 +1,13 @@
 #include "formats/cbz/cbz_archive.h"
 
+#include "formats/common/xml_parse_utils.h"
 #include "minizip/unzip.h"
 #include "shared/string_utils.h"
 
 #include <algorithm>
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
 
 namespace {
 
@@ -158,4 +160,110 @@ bool ReadCbzArchiveEntryBytes(const std::string &archive_path,
 
 const char *GetLastCbzArchiveError() {
   return g_last_cbz_archive_error;
+}
+
+namespace {
+
+struct ComicInfoParseState {
+  std::vector<CbzComicInfoBookmark> *out;
+  bool in_pages;
+};
+
+static void XMLCALL ComicInfoStartElement(void *user_data, const XML_Char *name,
+                                          const XML_Char **atts) {
+  ComicInfoParseState *state = static_cast<ComicInfoParseState *>(user_data);
+  if (strcmp(name, "Pages") == 0) {
+    state->in_pages = true;
+    return;
+  }
+  if (!state->in_pages || strcmp(name, "Page") != 0)
+    return;
+
+  int image_index = -1;
+  const char *bookmark = NULL;
+  for (int i = 0; atts[i]; i += 2) {
+    if (strcmp(atts[i], "Image") == 0) {
+      image_index = atoi(atts[i + 1]);
+    } else if (strcmp(atts[i], "Bookmark") == 0 && atts[i + 1][0] != '\0') {
+      bookmark = atts[i + 1];
+    }
+  }
+  if (image_index >= 0 && bookmark) {
+    CbzComicInfoBookmark entry;
+    entry.image_index = image_index;
+    entry.title = bookmark;
+    state->out->push_back(entry);
+  }
+}
+
+static void XMLCALL ComicInfoEndElement(void *user_data, const XML_Char *name) {
+  ComicInfoParseState *state = static_cast<ComicInfoParseState *>(user_data);
+  if (strcmp(name, "Pages") == 0)
+    state->in_pages = false;
+}
+
+bool IsComicInfoXmlEntry(const std::string &normalized_path) {
+  const std::string lower = ToLowerAscii(normalized_path);
+  const std::string suffix = "comicinfo.xml";
+  if (lower.size() < suffix.size())
+    return false;
+  const std::string tail = lower.substr(lower.size() - suffix.size());
+  if (tail != suffix)
+    return false;
+  const size_t base_start = lower.size() - suffix.size();
+  return base_start == 0 || lower[base_start - 1] == '/';
+}
+
+} // namespace
+
+bool ReadComicInfoBookmarks(const std::string &archive_path,
+                            std::vector<CbzComicInfoBookmark> *out) {
+  if (!out || archive_path.empty())
+    return false;
+  out->clear();
+
+  unzFile uf = unzOpen(archive_path.c_str());
+  if (!uf)
+    return false;
+
+  bool found = false;
+  int rc = unzGoToFirstFile(uf);
+  while (rc == UNZ_OK) {
+    char fname[1024];
+    unz_file_info fi;
+    if (unzGetCurrentFileInfo(uf, &fi, fname, sizeof(fname), NULL, 0, NULL,
+                              0) == UNZ_OK) {
+      std::string normalized = NormalizeCbzEntryName(fname);
+      if (IsComicInfoXmlEntry(normalized) && fi.uncompressed_size > 0 &&
+          fi.uncompressed_size < 2u * 1024u * 1024u) {
+        if (unzOpenCurrentFile(uf) == UNZ_OK) {
+          ComicInfoParseState state;
+          state.out = out;
+          state.in_pages = false;
+
+          xml_parse_utils::XmlParserOptions opts;
+          opts.start_element = ComicInfoStartElement;
+          opts.end_element = ComicInfoEndElement;
+          opts.user_data = &state;
+
+          xml_parse_utils::ParseXmlZipEntry(uf, opts, 4096);
+          unzCloseCurrentFile(uf);
+          found = true;
+        }
+        break;
+      }
+    }
+    rc = unzGoToNextFile(uf);
+  }
+
+  unzClose(uf);
+  if (!found || out->empty())
+    return false;
+
+  std::stable_sort(out->begin(), out->end(),
+                   [](const CbzComicInfoBookmark &a,
+                      const CbzComicInfoBookmark &b) {
+                     return a.image_index < b.image_index;
+                   });
+  return true;
 }

@@ -103,6 +103,22 @@ uint8_t ParseCbzFile(Book *book, const char *path) {
 
   book->ClearChapters();
   book->ClearTocConfidence();
+
+  std::vector<CbzComicInfoBookmark> bookmarks;
+  if (ReadComicInfoBookmarks(path, &bookmarks)) {
+    for (const CbzComicInfoBookmark &bm : bookmarks) {
+      if (bm.image_index >= 0 &&
+          (size_t)bm.image_index < entries.size()) {
+        book->AddChapter((u16)bm.image_index, bm.title);
+      }
+    }
+    if (!book->GetChapters().empty()) {
+      book->SetTocConfidence(
+          TOC_QUALITY_STRONG,
+          (u16)std::min<size_t>(book->GetChapters().size(), 65535), 0, 0);
+    }
+  }
+
   book->InitCbzView(path, entries, DetectCbzNew3ds());
 #ifdef DSLIBRIS_DEBUG
   if (debug_runtime::ForceSynchronousCbzDecode() && book->GetStatusReporter()) {
