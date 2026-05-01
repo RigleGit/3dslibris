@@ -30,6 +30,24 @@ static size_t Utf8BytesForCharCount(Text *ts, const char *s, u8 count) {
   return text_unicode_utils::Utf8BytesForDisplayChars(s, count);
 }
 
+static int MeasureStringWidth(Text *ts, const char *s) {
+  int w = 0;
+  while (*s) {
+    u32 cp = 0;
+    u8 nb = ts->GetCharCode(s, &cp);
+    if (!nb) break;
+    w += ts->GetAdvance((u16)cp);
+    s += nb;
+  }
+  return w;
+}
+
+static int RtlPenX(Text *ts, const char *line, int text_x, int bx, int bw,
+                   int right_pad) {
+  int rx = bx + bw - right_pad - 2 - MeasureStringWidth(ts, line);
+  return rx < text_x ? text_x : rx;
+}
+
 } // namespace
 
 Button::Button() {}
@@ -75,8 +93,7 @@ static void PrepareButtonLabel(const std::string &raw, std::string *display,
 }
 
 void Button::Label(const char *s) {
-  std::string str = s;
-  SetLabel(str);
+  SetLabel1(std::string(s));
 }
 
 void Button::SetLabel1(std::string s) {
@@ -178,22 +195,8 @@ void Button::Draw(u16 *screen, bool highlight) {
     memcpy(line1, src1, bytes1);
     line1[bytes1] = '\0';
 
-    int pen1_x = text_x;
-    if (text1_rtl) {
-      // Right-align: measure the truncated display string then anchor to right.
-      int w = 0;
-      const char *p = line1;
-      while (*p) {
-        u32 cp = 0;
-        u8 nb = ts->GetCharCode(p, &cp);
-        if (!nb) break;
-        w += ts->GetAdvance((u16)cp);
-        p += nb;
-      }
-      int rx = bx + bw - right_pad - 2 - w;
-      if (rx < text_x) rx = text_x;
-      pen1_x = rx;
-    }
+    int pen1_x = text1_rtl ? RtlPenX(ts, line1, text_x, bx, bw, right_pad)
+                           : text_x;
     ts->SetPen((u16)pen1_x, (u16)(top + line_height));
     ts->PrintString(line1, text.style);
 
@@ -208,21 +211,8 @@ void Button::Draw(u16 *screen, bool highlight) {
       memcpy(line2, src2, bytes2);
       line2[bytes2] = '\0';
 
-      int pen2_x = text_x;
-      if (text2_rtl) {
-        int w = 0;
-        const char *p = line2;
-        while (*p) {
-          u32 cp = 0;
-          u8 nb = ts->GetCharCode(p, &cp);
-          if (!nb) break;
-          w += ts->GetAdvance((u16)cp);
-          p += nb;
-        }
-        int rx = bx + bw - right_pad - 2 - w;
-        if (rx < text_x) rx = text_x;
-        pen2_x = rx;
-      }
+      int pen2_x = text2_rtl ? RtlPenX(ts, line2, text_x, bx, bw, right_pad)
+                             : text_x;
       ts->SetPen((u16)pen2_x, (u16)(top + line_height * 2));
       ts->PrintString(line2, text.style);
     }
@@ -238,21 +228,8 @@ void Button::Draw(u16 *screen, bool highlight) {
       memcpy(line3, src3, bytes3);
       line3[bytes3] = '\0';
 
-      int pen3_x = text_x;
-      if (text3_rtl) {
-        int w = 0;
-        const char *p = line3;
-        while (*p) {
-          u32 cp = 0;
-          u8 nb = ts->GetCharCode(p, &cp);
-          if (!nb) break;
-          w += ts->GetAdvance((u16)cp);
-          p += nb;
-        }
-        int rx = bx + bw - right_pad - 2 - w;
-        if (rx < text_x) rx = text_x;
-        pen3_x = rx;
-      }
+      int pen3_x = text3_rtl ? RtlPenX(ts, line3, text_x, bx, bw, right_pad)
+                             : text_x;
       ts->SetPen((u16)pen3_x, (u16)(top + line_height * 3));
       ts->PrintString(line3, text.style);
     }
