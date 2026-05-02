@@ -67,6 +67,7 @@ https://github.com/rhaleblian/dslibris
 #include "settings/prefs_button_ids.h"
 #include "ui/text.h"
 #include "shared/status_reporter.h"
+#include "app/app_lifecycle_state.h"
 
 class Book;
 class Prefs;
@@ -410,14 +411,7 @@ private:
   LightLock status_log_lock_;
   bool pending_boot_reopen_;
   bool skip_next_browser_present_;
-  bool is_new_3ds_;
-  bool is_homebrew_;
-  bool applet_suspended_;
-  bool applet_resume_pending_;
-  bool applet_suspend_handled_;
-  aptHookCookie apt_hook_cookie_;
-  bool apt_hook_installed_;
-  bool shutdown_prepared_;
+  AppLifecycleState lifecycle_state_;
 
   void InitScreens();
   static void AptHookCallback(APT_HookType hook, void *param);

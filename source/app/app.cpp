@@ -177,17 +177,13 @@ App::App()
   // Initialize 3DS-specific state and hooks.
   pending_boot_reopen_ = false;
   skip_next_browser_present_ = false;
-  is_new_3ds_ = false;
-  is_homebrew_ = false;
-  applet_suspended_ = false;
-  applet_resume_pending_ = false;
-  applet_suspend_handled_ = false;
-  apt_hook_installed_ = false;
-  shutdown_prepared_ = false;
-  APT_CheckNew3DS(&is_new_3ds_);
-  is_homebrew_ = envIsHomebrew();
-  aptHook(&apt_hook_cookie_, App::AptHookCallback, this); // Install APT hook for handling app lifecycle events (suspend, resume, etc.).
-  apt_hook_installed_ = true;
+
+  bool new3ds = false;
+  APT_CheckNew3DS(&new3ds);
+  lifecycle_state_.SetNew3DS(new3ds);
+  lifecycle_state_.SetHomebrew(envIsHomebrew());
+  lifecycle_state_.InstallHook(App::AptHookCallback, this);
+
 
 #ifdef DSLIBRIS_DEBUG
   // Debug builds should emit actionable logs by default.
@@ -206,8 +202,8 @@ App::App()
 #ifdef DSLIBRIS_DEBUG
   // Log environment details for debugging purposes.
   DBG_LOGF(this, "ENV runtime=%s device=%s",
-           is_homebrew_ ? "3dsx/homebrew" : "cia/title",
-           is_new_3ds_ ? "new3ds" : "old3ds");
+           lifecycle_state_.IsHomebrew() ? "3dsx/homebrew" : "cia/title",
+           lifecycle_state_.IsNew3DS() ? "new3ds" : "old3ds");
   if (debug_runtime::BackgroundWorkersDisabled())
   {
     DBG_LOG(this, "SAFE mode: background workers disabled");
@@ -229,11 +225,7 @@ App::~App()
 #ifdef DSLIBRIS_DEBUG
   PrintStatus("APP ~App: aptUnhook begin");
 #endif
-  if (apt_hook_installed_)
-  { // Clean up APT hook on app exit.
-    aptUnhook(&apt_hook_cookie_);
-    apt_hook_installed_ = false;
-  }
+  lifecycle_state_.UninstallHook();
 #ifdef DSLIBRIS_DEBUG
   PrintStatus("APP ~App: start");
 #endif
@@ -500,7 +492,7 @@ void App::RunChaptersMenuFrame(u32 keys)
 
 bool App::PresentIfDirty()
 {
-  if (applet_suspended_)
+  if (lifecycle_state_.IsSuspended())
     return false;
   const bool had_dirty = ts->HasDirtyScreens();
   const bool wrote = ts->BlitToFramebuffer();
@@ -761,35 +753,35 @@ void App::SetInlineLinkHoldStartedAtMs(u64 started_at_ms)
   reader_state_.inline_link_hold_started_at_ms = started_at_ms;
 }
 
-bool App::IsNew3dsDevice() const { return is_new_3ds_; }
+bool App::IsNew3dsDevice() const { return lifecycle_state_.IsNew3DS(); }
 
-bool App::IsHomebrewEnvironment() const { return is_homebrew_; }
+bool App::IsHomebrewEnvironment() const { return lifecycle_state_.IsHomebrew(); }
 
-bool App::IsAppletSuspended() const { return applet_suspended_; }
+bool App::IsAppletSuspended() const { return lifecycle_state_.IsSuspended(); }
 
 bool App::ShouldAbortWork() const
 {
-  return applet_suspended_ || nav_.mode == AppMode::Quit;
+  return lifecycle_state_.ShouldAbortWork(static_cast<u8>(nav_.mode));
 }
 
 void App::PrepareForShutdown()
 {
-  if (shutdown_prepared_)
+  if (lifecycle_state_.IsShutdownPrepared())
     return;
-  shutdown_prepared_ = true;
+  lifecycle_state_.MarkShutdownPrepared();
 
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(this,
            "SHUTDOWN begin env=%s mode=%d current_session=%u opening_session=%u suspended=%u",
-           is_homebrew_ ? "3dsx/homebrew" : "cia/title", (int)nav_.mode,
+           lifecycle_state_.IsHomebrew() ? "3dsx/homebrew" : "cia/title", (int)nav_.mode,
            reader_state_.current_book_session_id, reader_state_.opening.session_id,
-           applet_suspended_ ? 1u : 0u);
+           lifecycle_state_.IsSuspended() ? 1u : 0u);
 #endif
 
   pending_boot_reopen_ = false;
   skip_next_browser_present_ = false;
-  applet_resume_pending_ = false;
-  applet_suspend_handled_ = false;
+  lifecycle_state_.SetResumePending(false);
+  lifecycle_state_.SetSuspendHandled(false);
   nav_.browser.wait_input_release = true;
   nav_.browser.last_interaction_ms = osGetTime();
 
@@ -842,17 +834,17 @@ void App::HandleAppletHook(APT_HookType hook)
   switch (hook)
   {
   case APTHOOK_ONSUSPEND:
-    applet_suspended_ = true;
-    applet_resume_pending_ = false;
-    applet_suspend_handled_ = false;
+    lifecycle_state_.SetSuspended(true);
+    lifecycle_state_.SetResumePending(false);
+    lifecycle_state_.SetSuspendHandled(false);
     nav_.browser.wait_input_release = true;
     nav_.browser.last_interaction_ms = osGetTime();
     OnReaderAppletSuspendRequested();
     break;
   case APTHOOK_ONRESTORE:
   case APTHOOK_ONWAKEUP:
-    applet_suspended_ = false;
-    applet_resume_pending_ = true;
+    lifecycle_state_.SetSuspended(false);
+    lifecycle_state_.SetResumePending(true);
     break;
   case APTHOOK_ONEXIT:
     // Only set the quit flag here. PersistPrefs() writes to the SD card and
@@ -870,9 +862,9 @@ void App::HandleAppletHook(APT_HookType hook)
 // Handle app suspension: pause ongoing work, mark browser state, and notify reader controller.
 void App::HandleAppletSuspend()
 {
-  if (applet_suspend_handled_)
+  if (lifecycle_state_.IsSuspendHandled())
     return;
-  applet_suspend_handled_ = true;
+  lifecycle_state_.SetSuspendHandled(true);
   nav_.browser.wait_input_release = true;
   nav_.browser.last_interaction_ms = osGetTime();
   PauseBrowserJobs();
@@ -889,10 +881,10 @@ void App::HandleAppletSuspend()
 // Handle app resumption: refresh browser state, mark views dirty, and notify reader controller.
 void App::HandleAppletResume()
 {
-  if (!applet_resume_pending_)
+  if (!lifecycle_state_.IsResumePending())
     return;
-  applet_resume_pending_ = false;
-  applet_suspend_handled_ = false;
+  lifecycle_state_.SetResumePending(false);
+  lifecycle_state_.SetSuspendHandled(false);
   nav_.browser.wait_input_release = true;
   nav_.browser.last_interaction_ms = osGetTime();
   nav_.browser.view_dirty = true;
