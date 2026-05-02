@@ -305,87 +305,8 @@ static bool AttrNameEquals(const char *name, const char *needle) {
 }
 
 static book_xml_css_style_utils::MarginTopResult
-ParseMarginTopPx(const char *style) {
-  return book_xml_css_style_utils::ParseMarginTop(style);
-}
-
-// Parse a CSS/HTML width value and return pixels (>0), or 0 if unconstrained.
-// Handles: %, px, bare integer (HTML width attr), em/rem, pt, cm, mm, in, vw.
-// text_width = available text area in pixels; font_px = current font height in px.
-// screen_width is fixed at 240 on 3DS.
-static int ParseCssLengthPx(const char *v, int text_width, int font_px) {
-  if (!v || !*v)
-    return 0;
-  while (*v == ' ')
-    v++;
-  if (!*v)
-    return 0;
-
-  // Numeric part: integer * 1000 + fractional (3 decimal places of precision)
-  int num1000 = 0; // value * 1000
-  bool has_digit = false;
-  while (*v >= '0' && *v <= '9') {
-    num1000 = num1000 * 10 + (*v - '0') * 1000;
-    has_digit = true;
-    v++;
-    if (num1000 > 100000 * 1000) // overflow guard (>100000 px is nonsense)
-      return 0;
-  }
-  if (*v == '.') {
-    v++;
-    int place = 100;
-    while (*v >= '0' && *v <= '9' && place > 0) {
-      num1000 += (*v - '0') * place;
-      place /= 10;
-      v++;
-      has_digit = true;
-    }
-    while (*v >= '0' && *v <= '9')
-      v++; // consume remaining decimal digits
-  }
-  if (!has_digit)
-    return 0;
-  while (*v == ' ')
-    v++;
-
-  int result_px = 0;
-  if (*v == '%') {
-    // Percentage of text width. Cap at 100% (10000 hundredths).
-    if (num1000 <= 0 || num1000 > 100 * 1000)
-      return 0;
-    result_px = (text_width * num1000 + 50000) / 100000;
-  } else if (*v == '\0') {
-    // Bare integer HTML attribute (e.g. width="50") — treated as px.
-    result_px = (num1000 + 500) / 1000;
-  } else if (v[0] == 'p' && v[1] == 'x') {
-    result_px = (num1000 + 500) / 1000;
-  } else if ((v[0] == 'e' && v[1] == 'm') ||
-             (v[0] == 'r' && v[1] == 'e' && v[2] == 'm')) {
-    // em/rem relative to current font size.
-    result_px = (num1000 * font_px + 500) / 1000;
-  } else if (v[0] == 'p' && v[1] == 't') {
-    // 1pt = 4/3 px at 96 DPI.
-    result_px = (num1000 * 4 + 1500) / 3000;
-  } else if (v[0] == 'c' && v[1] == 'm') {
-    // 1cm = 37.795px at 96 DPI; use 378/10.
-    result_px = (num1000 * 378 + 5000) / 10000;
-  } else if (v[0] == 'm' && v[1] == 'm') {
-    // 1mm = 3.7795px; use 378/100.
-    result_px = (num1000 * 378 + 50000) / 100000;
-  } else if (v[0] == 'i' && v[1] == 'n') {
-    // 1in = 96px.
-    result_px = (num1000 * 96 + 500) / 1000;
-  } else if (v[0] == 'v' && v[1] == 'w') {
-    // vw: percentage of 240px viewport width.
-    if (num1000 <= 0 || num1000 > 100 * 1000)
-      return 0;
-    result_px = (240 * num1000 + 50000) / 100000;
-  } else {
-    // Unknown unit (ch, ex, svw, dvw, max-content, etc.) — don't constrain.
-    return 0;
-  }
-
-  return std::max(0, std::min(result_px, text_width));
+ParseElementMarginTopPx(const char **attr) {
+  return book_xml_css_resolver::ParseElementMarginTopPx(attr);
 }
 
 // Return the author-specified max width in pixels for an img element.
@@ -393,147 +314,19 @@ static int ParseCssLengthPx(const char *v, int text_width, int font_px) {
 // Returns 0 if no usable constraint found.
 static int ParseImgWidthPx(const char *width_attr, const char *style,
                             int text_width, int font_px) {
-  if (width_attr && *width_attr) {
-    int px = ParseCssLengthPx(width_attr, text_width, font_px);
-    if (px > 0)
-      return px;
-  }
-  if (style && *style) {
-    std::string lc = ToLowerAscii(std::string(style));
-    size_t pos = lc.find("width:");
-    if (pos != std::string::npos) {
-      pos += 6;
-      while (pos < lc.size() && lc[pos] == ' ')
-        pos++;
-      int px = ParseCssLengthPx(lc.c_str() + pos, text_width, font_px);
-      if (px > 0)
-        return px;
-    }
-  }
-  return 0;
-}
-
-static void ParseClassStyleFlags(const char *class_name, bool *bold_out,
-                                 bool *italic_out, bool *underline_out,
-                                 u8 *underline_style_out,
-                                 bool *overline_out, bool *strikethrough_out,
-                                 bool *superscript_out,
-                                 bool *subscript_out) {
-  if (!class_name ||
-      (!bold_out && !italic_out && !underline_out && !overline_out &&
-       !strikethrough_out &&
-       !superscript_out && !subscript_out))
-    return;
-  const std::string class_lc = ToLowerAsciiLocal(class_name);
-
-  if (italic_out) {
-    if (ContainsAsciiNoCase(class_lc, "italic") ||
-        ContainsAsciiNoCase(class_lc, "oblique") ||
-        ContainsAsciiNoCase(class_lc, "emphasis")) {
-      *italic_out = true;
-    }
-  }
-
-  if (bold_out) {
-    if (ContainsAsciiNoCase(class_lc, "bold") ||
-        ContainsAsciiNoCase(class_lc, "semibold") ||
-        ContainsAsciiNoCase(class_lc, "font-weight")) {
-      *bold_out = true;
-    }
-  }
-
-  if (underline_out) {
-    if (ContainsAsciiNoCase(class_lc, "underline") ||
-        ContainsAsciiNoCase(class_lc, "underlined")) {
-      *underline_out = true;
-      if (underline_style_out) {
-        if (ContainsAsciiNoCase(class_lc, "wavy"))
-          *underline_style_out = UNDERLINE_STYLE_WAVY;
-        else if (ContainsAsciiNoCase(class_lc, "dashed"))
-          *underline_style_out = UNDERLINE_STYLE_DASHED;
-        else if (ContainsAsciiNoCase(class_lc, "dotted"))
-          *underline_style_out = UNDERLINE_STYLE_DOTTED;
-      }
-    }
-  }
-
-  if (overline_out) {
-    if (ContainsAsciiNoCase(class_lc, "overline") ||
-        ContainsAsciiNoCase(class_lc, "overlined")) {
-      *overline_out = true;
-    }
-  }
-
-  if (strikethrough_out) {
-    if (ContainsAsciiNoCase(class_lc, "strikethrough") ||
-        ContainsAsciiNoCase(class_lc, "line-through") ||
-        ContainsAsciiNoCase(class_lc, "strike") ||
-        ContainsAsciiNoCase(class_lc, "deleted")) {
-      *strikethrough_out = true;
-    }
-  }
-
-  if (superscript_out) {
-    if (ContainsAsciiNoCase(class_lc, "superscript")) {
-      *superscript_out = true;
-    }
-  }
-
-  if (subscript_out) {
-    if (ContainsAsciiNoCase(class_lc, "subscript")) {
-      *subscript_out = true;
-    }
-  }
-}
-
-static book_xml_css_style_utils::MarginTopResult
-ParseElementMarginTopPx(const char **attr) {
-  book_xml_css_style_utils::MarginTopResult empty;
-  if (!attr)
-    return empty;
-  for (int i = 0; attr[i]; i += 2) {
-    if (!attr[i + 1] || !attr[i + 1][0])
-      continue;
-    if (AttrNameEquals(attr[i], "style"))
-      return ParseMarginTopPx(attr[i + 1]);
-  }
-  return empty;
+  return book_xml_css_resolver::ParseImgWidthPx(width_attr, style, text_width,
+                                                 font_px);
 }
 
 static std::string ExtractStyleAttr(const char **attr) {
-  if (!attr)
-    return {};
-  for (int i = 0; attr[i]; i += 2) {
-    if (!attr[i + 1] || !attr[i + 1][0])
-      continue;
-    if (AttrNameEquals(attr[i], "style"))
-      return std::string(attr[i + 1]);
-  }
-  return {};
+  return book_xml_css_resolver::ExtractStyleAttr(attr);
 }
 
 static std::string ExtractClassAttr(const char **attr) {
-  if (!attr)
-    return {};
-  for (int i = 0; attr[i]; i += 2) {
-    if (!attr[i + 1] || !attr[i + 1][0])
-      continue;
-    if (AttrNameEquals(attr[i], "class"))
-      return std::string(attr[i + 1]);
-  }
-  return {};
+  return book_xml_css_resolver::ExtractClassAttr(attr);
 }
 
-static book_xml_css_style_utils::MarginTopResult
-LookupClassMarginBottom(const std::string &class_attr,
-                        const epub_css_class_map::CssClassMap &class_map) {
-  epub_css_class_map::CssClassMargins margins;
-  if (epub_css_class_map::LookupMarginsForClassAttr(class_attr, class_map,
-                                                    &margins)) {
-    return margins.margin_bottom;
-  }
-  return {};
-}
+
 
 static void AlignFreshLineToBlockMargin(parsedata_t *p, Text *ts) {
   if (!p || !ts)
@@ -566,26 +359,7 @@ static book_xml_css_style_utils::MarginTopResult
 ParseElementMarginBottomWithClass(const std::string &last_style,
                                   const std::string &last_class,
                                   const epub_css_class_map::CssClassMap &class_map) {
-  using book_xml_css_style_utils::MarginTopResult;
-  const MarginTopResult from_style =
-      book_xml_css_style_utils::ParseMarginBottom(last_style.c_str());
-  if (from_style.unit != MarginTopResult::Unit::None)
-    return from_style;
-  return LookupClassMarginBottom(last_class, class_map);
-}
-
-static bool FindActiveBlockTextAlign(
-    const parsedata_t *p, book_xml_css_style_utils::TextAlign *out) {
-  if (!p || !out)
-    return false;
-  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
-    if (!p->block_text_align_stack[i])
-      continue;
-    *out = (book_xml_css_style_utils::TextAlign)
-               p->block_text_align_value_stack[i];
-    return true;
-  }
-  return false;
+  return book_xml_css_resolver::ParseElementMarginBottomWithClass(last_style, last_class, class_map);
 }
 
 static book_xml_css_style_utils::TextAlign
@@ -593,17 +367,11 @@ ResolveElementTextAlignWithClass(const std::string &style_attr,
                                  const std::string &class_attr,
                                  const parsedata_t *p,
                                  const epub_css_class_map::CssClassMap &class_map) {
-  book_xml_css_style_utils::TextAlign align =
-      book_xml_css_style_utils::TextAlign::Left;
-  if (book_xml_css_style_utils::TryParseTextAlign(style_attr.c_str(), &align))
-    return align;
-  if (epub_css_class_map::LookupTextAlignForClassAttr(class_attr, class_map,
-                                                      &align)) {
-    return align;
-  }
-  if (FindActiveBlockTextAlign(p, &align))
-    return align;
-  return book_xml_css_style_utils::TextAlign::Left;
+  if (!p)
+    return book_xml_css_style_utils::TextAlign::Left;
+  return book_xml_css_resolver::ResolveElementTextAlignWithClass(
+      style_attr, class_attr, p->block_text_align_stack,
+      p->block_text_align_value_stack, p->stacksize, class_map);
 }
 
 static void AppendParagraphAlignMarker(
@@ -619,18 +387,9 @@ static void AppendParagraphAlignMarker(
   }
 }
 
-static bool StyleLooksDisplayBlock(const std::string &style_attr) {
-  const std::string style_lc = ToLowerAsciiLocal(style_attr);
-  return ContainsAsciiNoCase(style_lc, "display:block") ||
-         ContainsAsciiNoCase(style_lc, "display: block");
-}
-
 static bool ElementCanCarryBlockTextAlign(const char *el,
                                           const std::string &style_attr) {
-  return !strcmp(el, "body") || !strcmp(el, "div") ||
-         !strcmp(el, "aside") || !strcmp(el, "blockquote") ||
-         !strcmp(el, "caption") || !strcmp(el, "figure") ||
-         AttrNameEquals(el, "section") || StyleLooksDisplayBlock(style_attr);
+  return book_xml_css_resolver::ElementCanCarryBlockTextAlign(el, style_attr);
 }
 
 static void RestoreActiveBlockTextAlignMarker(parsedata_t *p) {
@@ -777,123 +536,15 @@ static void ParseElementStyleFlags(const char **attr, bool *bold_out,
                                    bool *no_underline_out,
                                    bool *reset_bold_out,
                                    bool *reset_italic_out) {
-  if ((!bold_out && !italic_out && !underline_out && !overline_out &&
-       !strikethrough_out &&
-       !superscript_out && !subscript_out) ||
-      !attr)
-    return;
-  for (int i = 0; attr[i]; i += 2) {
-    if (!attr[i + 1] || !attr[i + 1][0])
-      continue;
-    if (AttrNameEquals(attr[i], "style")) {
-      book_xml_css_style_utils::InlineStyleFlags flags{};
-      book_xml_css_style_utils::ParseInlineStyleFlags(attr[i + 1], &flags);
-      if (bold_out && flags.bold)
-        *bold_out = true;
-      if (italic_out && flags.italic)
-        *italic_out = true;
-      if (underline_out && flags.underline)
-        *underline_out = true;
-      if (underline_style_out && flags.underline)
-        *underline_style_out = flags.underline_style;
-      if (overline_out && flags.overline)
-        *overline_out = true;
-      if (strikethrough_out && flags.strikethrough)
-        *strikethrough_out = true;
-      if (superscript_out && flags.superscript)
-        *superscript_out = true;
-      if (subscript_out && flags.subscript)
-        *subscript_out = true;
-      if (no_underline_out && flags.no_underline)
-        *no_underline_out = true;
-      if (reset_bold_out && flags.reset_bold)
-        *reset_bold_out = true;
-      if (reset_italic_out && flags.reset_italic)
-        *reset_italic_out = true;
-    } else if (AttrNameEquals(attr[i], "class")) {
-      ParseClassStyleFlags(attr[i + 1], bold_out, italic_out, underline_out,
-                           underline_style_out, overline_out,
-                           strikethrough_out, superscript_out, subscript_out);
-    }
-  }
-}
-
-static bool HasClassTokenNoCase(const char *class_name, const char *token) {
-  if (!class_name || !token || !token[0])
-    return false;
-  const std::string class_lc = ToLowerAsciiLocal(class_name);
-  const std::string token_lc = ToLowerAsciiLocal(token);
-  return ContainsToken(class_lc, token_lc);
-}
-
-static void ParseInlineHiddenFlags(const char *style, bool *hidden_out) {
-  if (!style || !hidden_out)
-    return;
-  const std::string style_lc = ToLowerAsciiLocal(style);
-
-  if (ContainsAsciiNoCase(style_lc, "display:none") ||
-      ContainsAsciiNoCase(style_lc, "display: none") ||
-      ContainsAsciiNoCase(style_lc, "visibility:hidden") ||
-      ContainsAsciiNoCase(style_lc, "visibility: hidden") ||
-      ContainsAsciiNoCase(style_lc, "clip:rect(0,0,0,0)") ||
-      ContainsAsciiNoCase(style_lc, "clip: rect(0, 0, 0, 0)") ||
-      ContainsAsciiNoCase(style_lc, "clip-path:inset(50%)") ||
-      ContainsAsciiNoCase(style_lc, "clip-path: inset(50%)")) {
-    *hidden_out = true;
-    return;
-  }
-
-  const bool tiny =
-      (ContainsAsciiNoCase(style_lc, "width:1px") ||
-       ContainsAsciiNoCase(style_lc, "width: 1px")) &&
-      (ContainsAsciiNoCase(style_lc, "height:1px") ||
-       ContainsAsciiNoCase(style_lc, "height: 1px"));
-  const bool offscreen =
-      ContainsAsciiNoCase(style_lc, "position:absolute") ||
-      ContainsAsciiNoCase(style_lc, "position: absolute");
-  const bool hidden_overflow =
-      ContainsAsciiNoCase(style_lc, "overflow:hidden") ||
-      ContainsAsciiNoCase(style_lc, "overflow: hidden");
-  if (tiny && offscreen && hidden_overflow)
-    *hidden_out = true;
-}
-
-static void ParseClassHiddenFlags(const char *class_name, bool *hidden_out) {
-  if (!class_name || !hidden_out)
-    return;
-  if (HasClassTokenNoCase(class_name, "visually-hidden") ||
-      HasClassTokenNoCase(class_name, "visuallyhidden") ||
-      HasClassTokenNoCase(class_name, "sr-only") ||
-      HasClassTokenNoCase(class_name, "screen-reader-text")) {
-    *hidden_out = true;
-  }
-}
-
-static bool AttrTruthyNoCase(const char *value) {
-  if (!value || !value[0])
-    return true;
-  return EqualsAsciiNoCase(value, "1") || EqualsAsciiNoCase(value, "true") ||
-         EqualsAsciiNoCase(value, "yes") ||
-         EqualsAsciiNoCase(value, "hidden");
+  return book_xml_css_resolver::ParseElementStyleFlags(
+      attr, bold_out, italic_out, underline_out,
+      reinterpret_cast<uint8_t *>(underline_style_out),
+      overline_out, strikethrough_out, superscript_out, subscript_out,
+      no_underline_out, reset_bold_out, reset_italic_out);
 }
 
 static void ParseElementHiddenFlags(const char **attr, bool *hidden_out) {
-  if (!hidden_out || !attr)
-    return;
-  for (int i = 0; attr[i]; i += 2) {
-    const char *name = attr[i];
-    const char *value = attr[i + 1];
-    if (AttrNameEquals(name, "hidden")) {
-      *hidden_out = true;
-    } else if (AttrNameEquals(name, "aria-hidden")) {
-      if (AttrTruthyNoCase(value))
-        *hidden_out = true;
-    } else if (value && value[0] && AttrNameEquals(name, "style")) {
-      ParseInlineHiddenFlags(value, hidden_out);
-    } else if (value && value[0] && AttrNameEquals(name, "class")) {
-      ParseClassHiddenFlags(value, hidden_out);
-    }
-  }
+  return book_xml_css_resolver::ParseElementHiddenFlags(attr, hidden_out);
 }
 
 static bool HasActiveStackBoldStyle(const parsedata_t *p) {
