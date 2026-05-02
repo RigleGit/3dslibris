@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Capítulo 21 — text-align desde clase CSS</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+</head>
+<body>
+
+<h1 id="capitulo-21">Capítulo 21: text-align desde clase CSS</h1>
+
+<p>Este capítulo verifica que <code>text-align</code> declarado dentro de una clase CSS (no inline) se aplique correctamente en elementos de bloque como <code>&lt;p&gt;</code>, <code>&lt;div&gt;</code> y headings.</p>
+
+<!-- ── 1. .paraCenter en &lt;p&gt; ──────────────────────────────── -->
+
+<h2>1. .paraCenter en párrafos</h2>
+
+<p class="paraCenter">Este párrafo debe aparecer centrado. Usa la clase .paraCenter que define display: block y text-align: center.</p>
+
+<p class="paraCenter">Segundo párrafo centrado para verificar que todos los hermanos con la misma clase reciben el mismo tratamiento.</p>
+
+<p class="paraCenter">Tercer párrafo centrado con texto más largo para comprobar que el centrado se mantiene correctamente cuando la línea se divide en múltiples filas dentro del ancho disponible de la pantalla de 3DS.</p>
+
+<!-- ── 2. .paraRight en &lt;p&gt; ───────────────────────────────── -->
+
+<h2>2. .paraRight en párrafos</h2>
+
+<p class="paraRight">Este párrafo debe aparecer alineado a la derecha.</p>
+
+<p class="paraRight">Otro párrafo a la derecha para confirmar consistencia entre hermanos.</p>
+
+<!-- ── 3. .paraCenter en &lt;div&gt; ────────────────────────────── -->
+
+<h2>3. .paraCenter en div</h2>
+
+<div class="paraCenter">
+  Este div debe tener su contenido centrado. El texto puede ser largo y ocupar varias líneas.
+</div>
+
+<!-- ── 4. .paraCenter en headings ───────────────────────────────── -->
+
+<h2>4. .paraCenter en headings</h2>
+
+<h3 class="paraCenter">Heading H3 centrado</h3>
+
+<h4 class="paraRight">Heading H4 alineado a la derecha</h4>
+
+<!-- ── 5. Mezcla de alineaciones ────────────────────────────────── -->
+
+<h2>5. Mezcla de alineaciones consecutivas</h2>
+
+<p class="paraCenter">Centrado</p>
+<p class="paraRight">Derecha</p>
+<p>Normal (sin clase, debe ir a la izquierda)</p>
+<p class="paraCenter">Otro centrado</p>
+
+<!-- ── 6. .align-center existente (ya probada en cap. 10) ──────── -->
+
+<h2>6. .align-center existente como referencia</h2>
+
+<p class="align-center">Este usa .align-center (ya existente en el CSS) como referencia de que el sistema de clases de text-align funciona.</p>
+
+<p class="align-right">Este usa .align-right como referencia.</p>
+
+<!-- ── 7. .spaceOrnament (display: block + text-align: center) ─── -->
+
+<h2>7. .spaceOrnament como caso real</h2>
+
+<p>La clase .spaceOrnament combina display: block con text-align: center. Este es un patrón común en EPUBs reales:</p>
+
+<span class="spaceOrnament">***</span>
+
+<p>Si los asteriscos anteriores aparecen centrados, la corrección funciona.</p>
+
+<span class="spaceOrnament">TEST</span>
+
+<p>Si "TEST" aparece centrado, se confirma que display:block en span funciona independientemente del glyph.</p>
+
+</body>
+</html>

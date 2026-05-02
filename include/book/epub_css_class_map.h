@@ -41,6 +41,7 @@ struct CssClassMargins {
   MarginTopResult text_indent;
   bool has_text_transform;
   TextTransform text_transform;
+  bool is_display_block;
 
   CssClassMargins()
       : hide_list_markers(false), has_text_align(false),
@@ -51,7 +52,8 @@ struct CssClassMargins {
         float_mode(FloatMode::None), has_clear(false),
         clear_mode(ClearMode::None),
         no_underline(false), reset_bold(false), reset_italic(false),
-        has_text_transform(false), text_transform(TextTransform::None) {}
+        has_text_transform(false), text_transform(TextTransform::None),
+        is_display_block(false) {}
 };
 
 // Map: bare class name (no '.') → extracted margins.

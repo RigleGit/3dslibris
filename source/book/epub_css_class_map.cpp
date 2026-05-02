@@ -198,6 +198,9 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     const TextTransform text_transform =
         book_xml_css_style_utils::ParseTextTransform(b);
     const bool has_text_transform = (text_transform != TextTransform::None);
+    const bool is_display_block =
+        ContainsNoCase(block, "display:block") ||
+        ContainsNoCase(block, "display: block");
 
     if (mt.unit != MarginTopResult::Unit::None ||
         mb.unit != MarginTopResult::Unit::None ||
@@ -212,7 +215,7 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         has_page_break_inside_avoid ||
         no_underline || reset_bold || reset_italic ||
         text_indent.unit != MarginTopResult::Unit::None ||
-        has_text_transform) {
+        has_text_transform || is_display_block) {
       for (size_t i = 0; i < class_names.size(); i++) {
         CssClassMargins &entry = (*out)[class_names[i]];
         if (mt.unit != MarginTopResult::Unit::None)
@@ -265,6 +268,8 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
           entry.has_text_transform = true;
           entry.text_transform = text_transform;
         }
+        if (is_display_block)
+          entry.is_display_block = true;
       }
     }
   }
@@ -854,6 +859,8 @@ bool LookupAllForClassAttr(const std::string &class_attr,
       out->has_text_transform = true;
       out->text_transform = src.text_transform;
     }
+    if (src.is_display_block)
+      out->is_display_block = true;
     found_any = true;
   }
   return found_any;

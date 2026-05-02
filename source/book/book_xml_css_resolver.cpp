@@ -364,9 +364,15 @@ bool StyleLooksDisplayBlock(const std::string &style_attr) {
 bool ElementCanCarryBlockTextAlign(const char *el,
                                    const std::string &style_attr) {
   return !strcmp(el, "body") || !strcmp(el, "div") ||
+         !strcmp(el, "p") || !strcmp(el, "h1") || !strcmp(el, "h2") ||
+         !strcmp(el, "h3") || !strcmp(el, "h4") || !strcmp(el, "h5") ||
+         !strcmp(el, "h6") || !strcmp(el, "article") ||
          !strcmp(el, "aside") || !strcmp(el, "blockquote") ||
          !strcmp(el, "caption") || !strcmp(el, "figure") ||
-         !strcmp(el, "section") || StyleLooksDisplayBlock(style_attr);
+         !strcmp(el, "section") || !strcmp(el, "header") ||
+         !strcmp(el, "footer") || !strcmp(el, "dl") ||
+         !strcmp(el, "dt") || !strcmp(el, "dd") ||
+         StyleLooksDisplayBlock(style_attr);
 }
 
 book_xml_css_style_utils::TextAlign ResolveElementTextAlignWithClass(

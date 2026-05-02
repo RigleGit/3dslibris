@@ -37,6 +37,7 @@
     <item id="ch18" href="text/chapter-18-text-indent-transform.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch19" href="text/chapter-19-css-resets.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch20" href="text/chapter-20-nested-lists.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch21" href="text/chapter-21-css-text-align.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
 
   <spine toc="ncx">
@@ -63,6 +64,7 @@
     <itemref idref="ch18"/>
     <itemref idref="ch19"/>
     <itemref idref="ch20"/>
+    <itemref idref="ch21"/>
   </spine>
 
   <guide>

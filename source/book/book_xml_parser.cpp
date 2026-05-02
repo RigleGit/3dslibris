@@ -1668,7 +1668,9 @@ static void ConfigureBlockTextAlign(
   if (!p || !el || p->stacksize == 0)
     return;
   const std::string style_attr = ExtractStyleAttr(attr);
-  if (!ElementCanCarryBlockTextAlign(el, style_attr))
+  const bool can_carry = ElementCanCarryBlockTextAlign(el, style_attr) ||
+                         elem_css.is_display_block;
+  if (!can_carry)
     return;
 
   book_xml_css_style_utils::TextAlign align =

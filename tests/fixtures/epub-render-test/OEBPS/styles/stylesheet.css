@@ -303,6 +303,17 @@ h2.align-center-heading {
 .mb-1rem { margin-bottom: 1.5rem; }
 .mb-12pt { margin-bottom: 12pt; }
 
+/* text-align test classes — display: block from class definition */
+.paraCenter {
+  display: block;
+  text-align: center;
+}
+
+.paraRight {
+  display: block;
+  text-align: right;
+}
+
 /* Ornament separator — as reported in issue #74 */
 .spaceOrnament {
   display: block;
