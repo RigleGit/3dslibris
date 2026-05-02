@@ -215,10 +215,10 @@ pdf_view_utils::NormalizedRect ComputeCurrentCbzViewport(
   return pdf_view_utils::ComputeViewportRect(
       cbz_state ? cbz_state->page_width : 1.0f,
       cbz_state ? cbz_state->page_height : 1.0f,
-      cbz_state ? pdf_view_utils::ZoomForIndex(cbz_state->zoom_index) : 1.0f,
+      cbz_state ? pdf_view_utils::ZoomForIndex(cbz_state->viewport.zoom_index) : 1.0f,
       (float)kCbzZoomScreenWidth, (float)kCbzZoomScreenHeight,
-      cbz_state ? cbz_state->viewport_center_x : 0.5f,
-      cbz_state ? cbz_state->viewport_center_y : 0.5f);
+      cbz_state ? cbz_state->viewport.center_x : 0.5f,
+      cbz_state ? cbz_state->viewport.center_y : 0.5f);
 }
 
 bool PromoteCbzAdjacentSlotIfMatching(Book::CbzState *cbz_state,
@@ -323,10 +323,10 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
     return false;
   PromoteCbzAdjacentSlotIfMatching(cbz_state, page_index);
   if (CbzBitmapCacheValid(cbz_state->current_interactive, page_index,
-                          cbz_state->zoom_index)) {
+                          cbz_state->viewport.zoom_index)) {
     return true;
   }
-  if (!EnsureCbzSourceLoaded(cbz_state, page_index, cbz_state->zoom_index))
+  if (!EnsureCbzSourceLoaded(cbz_state, page_index, cbz_state->viewport.zoom_index))
     return false;
 
   const float fit_scale =
@@ -334,7 +334,7 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
                    std::max(1.0f, cbz_state->page_width),
                (float)kCbzZoomScreenHeight /
                    std::max(1.0f, cbz_state->page_height));
-  const float zoom = pdf_view_utils::ZoomForIndex(cbz_state->zoom_index);
+  const float zoom = pdf_view_utils::ZoomForIndex(cbz_state->viewport.zoom_index);
   const int target_width = std::max(
       1, std::min(cbz_state->current_source.bitmap.width,
                   (int)(cbz_state->page_width * fit_scale * zoom + 0.5f)));
@@ -352,7 +352,7 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
   }
 
   cbz_state->current_interactive.page = page_index;
-  cbz_state->current_interactive.zoom_index = cbz_state->zoom_index;
+  cbz_state->current_interactive.zoom_index = cbz_state->viewport.zoom_index;
   cbz_state->current_interactive.bitmap_width = scaled.width;
   cbz_state->current_interactive.bitmap_height = scaled.height;
   cbz_state->current_interactive.pixels.swap(scaled.pixels);
@@ -401,7 +401,7 @@ bool HasCbzNeighborPending(const Book::CbzState *cbz_state, int page_index) {
       !(cbz_state->next_slot.page == next &&
         CbzPreviewCacheValid(cbz_state->next_slot.preview, next) &&
         CbzBitmapCacheValid(cbz_state->next_slot.interactive, next,
-                            cbz_state->zoom_index))) {
+                            cbz_state->viewport.zoom_index))) {
     return true;
   }
   const int prev = page_index - 1;
@@ -409,7 +409,7 @@ bool HasCbzNeighborPending(const Book::CbzState *cbz_state, int page_index) {
       !(cbz_state->prev_slot.page == prev &&
         CbzPreviewCacheValid(cbz_state->prev_slot.preview, prev) &&
         CbzBitmapCacheValid(cbz_state->prev_slot.interactive, prev,
-                            cbz_state->zoom_index))) {
+                            cbz_state->viewport.zoom_index))) {
     return true;
   }
   return false;
@@ -421,10 +421,10 @@ void Book::ResetCbzTransientViewState(bool restart_worker) {
   if (!IsCbz() || !cbz_state)
     return;
 
-  cbz_state->viewport_interaction_active = false;
+  cbz_state->viewport.interaction_active = false;
   cbz_state->preload_pending = false;
-  cbz_state->viewport_center_x = 0.5f;
-  cbz_state->viewport_center_y = 0.5f;
+  cbz_state->viewport.center_x = 0.5f;
+  cbz_state->viewport.center_y = 0.5f;
   ResetCbzFailureState();
   ResetCbzPageBitmap(&cbz_state->current_source);
   ResetCbzBitmapCache(&cbz_state->current_preview);
@@ -477,17 +477,17 @@ void Book::DrawCurrentCbzView(Text *ts) {
   // This gives proper zoom-aware resolution without background threads.
   if (debug_runtime::ForceSynchronousCbzDecode() &&
       !CbzBitmapCacheValid(cbz_state->current_interactive, page_index,
-                           cbz_state->zoom_index)) {
+                           cbz_state->viewport.zoom_index)) {
     EnsureCbzInteractiveCache(cbz_state, page_index);
   }
 
   const pdf_view_utils::NormalizedRect viewport =
       ComputeCurrentCbzViewport(cbz_state);
-  cbz_state->viewport_center_x = viewport.left + viewport.width * 0.5f;
-  cbz_state->viewport_center_y = viewport.top + viewport.height * 0.5f;
+  cbz_state->viewport.center_x = viewport.left + viewport.width * 0.5f;
+  cbz_state->viewport.center_y = viewport.top + viewport.height * 0.5f;
   const bool has_interactive = CbzBitmapCacheValid(
-      cbz_state->current_interactive, page_index, cbz_state->zoom_index);
-  const bool high_quality_viewport = !cbz_state->viewport_interaction_active;
+      cbz_state->current_interactive, page_index, cbz_state->viewport.zoom_index);
+  const bool high_quality_viewport = !cbz_state->viewport.interaction_active;
   const pdf_view_utils::PreviewLayout preview_layout =
       pdf_view_utils::ComputePreviewLayoutInBounds(
           cbz_state->page_width, cbz_state->page_height, kCbzPreviewPadding,
@@ -555,7 +555,7 @@ void Book::DrawCurrentCbzView(Text *ts) {
 void Book::SetCbzViewportInteraction(bool active) {
   if (!IsCbz() || !cbz_state)
     return;
-  cbz_state->viewport_interaction_active = active;
+  cbz_state->viewport.interaction_active = active;
 }
 
 void Book::ResetCbzViewport() {
@@ -567,9 +567,9 @@ void Book::ResetCbzViewport() {
           : fixed_layout_viewport_utils::PAGE_TURN_LEFT_TO_RIGHT;
   const fixed_layout_viewport_utils::ViewportCenter center =
       fixed_layout_viewport_utils::DefaultPageTurnViewportCenter(direction);
-  cbz_state->viewport_center_x = center.x;
-  cbz_state->viewport_center_y = center.y;
-  cbz_state->viewport_interaction_active = false;
+  cbz_state->viewport.center_x = center.x;
+  cbz_state->viewport.center_y = center.y;
+  cbz_state->viewport.interaction_active = false;
 }
 
 bool Book::ChangeCbzZoom(int delta) {
@@ -577,13 +577,13 @@ bool Book::ChangeCbzZoom(int delta) {
     return false;
 
   const int next = std::min(
-      cbz_state->max_zoom_index,
-      pdf_view_utils::ClampZoomIndexForDevice(cbz_state->zoom_index + delta,
+      cbz_state->viewport.max_zoom_index,
+      pdf_view_utils::ClampZoomIndexForDevice(cbz_state->viewport.zoom_index + delta,
                                               cbz_state->is_new_3ds));
-  if (next == cbz_state->zoom_index)
+  if (next == cbz_state->viewport.zoom_index)
     return false;
 
-  cbz_state->zoom_index = next;
+  cbz_state->viewport.zoom_index = next;
   ResetCbzBitmapCache(&cbz_state->current_interactive);
   ResetCbzAdjacentSlot(&cbz_state->prev_slot);
   ResetCbzAdjacentSlot(&cbz_state->next_slot);
@@ -605,13 +605,13 @@ bool Book::MoveCbzViewportToPreview(int touch_x, int touch_y) {
   const pdf_view_utils::NormalizedPoint center =
       pdf_view_utils::RecenterViewportFromPreview(preview, viewport, touch_x,
                                                   touch_y);
-  const float dx = std::abs(center.x - cbz_state->viewport_center_x);
-  const float dy = std::abs(center.y - cbz_state->viewport_center_y);
+  const float dx = std::abs(center.x - cbz_state->viewport.center_x);
+  const float dy = std::abs(center.y - cbz_state->viewport.center_y);
   if (dx < 0.0005f && dy < 0.0005f)
     return false;
 
-  cbz_state->viewport_center_x = center.x;
-  cbz_state->viewport_center_y = center.y;
+  cbz_state->viewport.center_x = center.x;
+  cbz_state->viewport.center_y = center.y;
   return true;
 }
 
@@ -619,14 +619,14 @@ bool Book::TranslateCbzViewport(float dx, float dy) {
   if (!IsCbz() || !cbz_state)
     return false;
   const float new_x =
-      std::max(0.0f, std::min(1.0f, cbz_state->viewport_center_x + dx));
+      std::max(0.0f, std::min(1.0f, cbz_state->viewport.center_x + dx));
   const float new_y =
-      std::max(0.0f, std::min(1.0f, cbz_state->viewport_center_y + dy));
-  if (std::abs(new_x - cbz_state->viewport_center_x) < 0.0005f &&
-      std::abs(new_y - cbz_state->viewport_center_y) < 0.0005f)
+      std::max(0.0f, std::min(1.0f, cbz_state->viewport.center_y + dy));
+  if (std::abs(new_x - cbz_state->viewport.center_x) < 0.0005f &&
+      std::abs(new_y - cbz_state->viewport.center_y) < 0.0005f)
     return false;
-  cbz_state->viewport_center_x = new_x;
-  cbz_state->viewport_center_y = new_y;
+  cbz_state->viewport.center_x = new_x;
+  cbz_state->viewport.center_y = new_y;
   return true;
 }
 
@@ -647,7 +647,7 @@ bool Book::HasPendingCbzDeferredWork() const {
   if (!CbzPreviewCacheValid(cbz_state->current_preview, page_index))
     return true;
   if (!CbzBitmapCacheValid(cbz_state->current_interactive, page_index,
-                           cbz_state->zoom_index)) {
+                           cbz_state->viewport.zoom_index)) {
     return true;
   }
   if (cbz_state->worker) {
@@ -670,7 +670,7 @@ u32 Book::GetCbzDeferredDelayMs() const {
   const int page_index = ClampCbzPageIndex(position, cbz_state->page_count);
   if (!CbzPreviewCacheValid(cbz_state->current_preview, page_index) ||
       !CbzBitmapCacheValid(cbz_state->current_interactive, page_index,
-                           cbz_state->zoom_index)) {
+                           cbz_state->viewport.zoom_index)) {
     return kCbzInteractiveDeferredDelayMs;
   }
   if (cbz_state->worker) {
@@ -705,7 +705,7 @@ bool Book::PumpDeferredCbzWork(u32 budget_ms) {
   }
 
   if (!CbzBitmapCacheValid(cbz_state->current_interactive, page_index,
-                           cbz_state->zoom_index)) {
+                           cbz_state->viewport.zoom_index)) {
     if (EnsureCbzInteractiveCache(cbz_state, page_index))
       worked = true;
     if (budget_ms > 0 && osGetTime() - start_ms >= budget_ms)

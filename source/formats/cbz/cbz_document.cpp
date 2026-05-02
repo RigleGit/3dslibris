@@ -82,10 +82,10 @@ void Book::InitCbzView(const std::string &archive_path,
   cbz_state->entries = entries;
   cbz_state->page_count = (u16)std::min<size_t>(entries.size(), 65535);
   cbz_state->is_new_3ds = is_new_3ds;
-  cbz_state->max_zoom_index = policy.max_zoom_index;
-  cbz_state->zoom_index = policy.default_zoom_index;
-  cbz_state->viewport_center_x = 0.5f;
-  cbz_state->viewport_center_y = 0.5f;
+  cbz_state->viewport.max_zoom_index = policy.max_zoom_index;
+  cbz_state->viewport.zoom_index = policy.default_zoom_index;
+  cbz_state->viewport.center_x = 0.5f;
+  cbz_state->viewport.center_y = 0.5f;
   InitCbzWorker(cbz_state);
 }
 

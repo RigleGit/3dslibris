@@ -1,6 +1,7 @@
 #pragma once
 
 #include "book/book.h"
+#include "formats/common/fixed_layout_viewport_utils.h"
 #include "formats/cbz/cbz_types.h"
 
 #include <3ds.h>
@@ -71,13 +72,9 @@ struct Book::CbzState {
   std::vector<CbzPageEntry> entries;
   u16 page_count;
   bool is_new_3ds;
-  int max_zoom_index;
-  int zoom_index;
+  fixed_layout_viewport_utils::ViewportState viewport;
   float page_width;
   float page_height;
-  float viewport_center_x;
-  float viewport_center_y;
-  bool viewport_interaction_active;
   PageBitmap current_source;
   BitmapCache current_preview;
   BitmapCache current_interactive;
@@ -92,9 +89,8 @@ struct Book::CbzState {
 
   CbzState()
       : archive_path(), entries(), page_count(0), is_new_3ds(false),
-        max_zoom_index(3), zoom_index(2), page_width(1.0f), page_height(1.0f),
-        viewport_center_x(0.5f), viewport_center_y(0.5f),
-        viewport_interaction_active(false), current_source(),
+        viewport(), page_width(1.0f), page_height(1.0f),
+        current_source(),
         current_preview(), current_interactive(), prev_slot(), next_slot(),
         worker(NULL), worker_init_attempted(false), preload_pending(false),
         failed_page(-1), logged_failed_page(-1), last_error() {}

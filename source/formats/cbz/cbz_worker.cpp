@@ -107,7 +107,7 @@ void CbzWorkerThreadFunc(void *arg) {
     ResetCbzAdjacentSlot(&w->result_slot);
     w->job_result = BuildCbzSlotFromPage(
         w->job_archive_path, *w->job_entries, w->job_page_index,
-        w->job_zoom_index, cbz_state->max_zoom_index, &w->result_slot);
+        w->job_zoom_index, cbz_state->viewport.max_zoom_index, &w->result_slot);
 
     __atomic_store_n(&w->job_pending, false, __ATOMIC_RELEASE);
     LightEvent_Signal(&w->done_event);
@@ -123,7 +123,7 @@ int FindCbzPreloadTarget(const Book::CbzState *cbz_state, int current_page) {
       !(cbz_state->next_slot.page == next &&
         CbzPreviewCacheValid(cbz_state->next_slot.preview, next) &&
         CbzBitmapCacheValid(cbz_state->next_slot.interactive, next,
-                            cbz_state->zoom_index))) {
+                            cbz_state->viewport.zoom_index))) {
     return next;
   }
 
@@ -132,7 +132,7 @@ int FindCbzPreloadTarget(const Book::CbzState *cbz_state, int current_page) {
       !(cbz_state->prev_slot.page == prev &&
         CbzPreviewCacheValid(cbz_state->prev_slot.preview, prev) &&
         CbzBitmapCacheValid(cbz_state->prev_slot.interactive, prev,
-                            cbz_state->zoom_index))) {
+                            cbz_state->viewport.zoom_index))) {
     return prev;
   }
 
@@ -239,7 +239,7 @@ CbzPreloadPumpResult PumpCbzPreloadWorker(Book::CbzState *cbz_state,
     return result;
 
   w->job_page_index = target_page;
-  w->job_zoom_index = cbz_state->zoom_index;
+  w->job_zoom_index = cbz_state->viewport.zoom_index;
   w->job_archive_path = cbz_state->archive_path;
   w->job_entries = &cbz_state->entries;
   w->job_result = false;
