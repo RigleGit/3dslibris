@@ -1155,6 +1155,12 @@ static bool IsBlockLevelElement(const char *el) {
          !strcmp(el, "dt") || !strcmp(el, "dd");
 }
 
+// True if element is a native block element OR promoted to block via CSS.
+static bool BehavesAsBlock(const char *el,
+                           const epub_css_class_map::CssClassMargins &elem_css) {
+  return IsBlockLevelElement(el) || elem_css.is_display_block;
+}
+
 static void ResetCapturedTable(parsedata_t *p) {
   if (!p)
     return;
@@ -1751,7 +1757,7 @@ void start(void *data, const char *el, const char **attr) {
       el_class_raw ? std::string(el_class_raw) : std::string(),
       p->css_class_map, &elem_css);
 
-  if (IsBlockLevelElement(el)) {
+  if (BehavesAsBlock(el, elem_css)) {
     if (ParseElementClear(attr, elem_css) !=
         book_xml_css_style_utils::ClearMode::None) {
       ApplyClearBreak(p);
@@ -2403,6 +2409,37 @@ void start(void *data, const char *el, const char **attr) {
 
   ConfigureBlockTextAlign(p, el, attr, elem_css);
 
+  // Promote inline elements with CSS display:block to block layout:
+  // margins, text-indent, and line breaks. Only for non-native-block elements
+  // that are NOT inside a paragraph or other inline context.
+  if (!IsBlockLevelElement(el) && !p->in_paragraph &&
+      elem_css.is_display_block && ts) {
+    if (!blankline(p))
+      linefeed(p);
+    const book_xml_css_style_utils::MarginTopResult mtr =
+        ParseElementMarginTopWithClass(attr, elem_css);
+    ApplyElementBlockMargins(p, ts, attr, elem_css);
+    const int line_h = ts->GetHeight() + ts->linespacing;
+    const int default_lf = 1;
+    const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
+        default_lf, mtr, line_h);
+    EmitAdditionalTopLinefeeds(p, lf_count);
+    const book_xml_css_style_utils::MarginTopResult text_indent_mtr =
+        ParseElementTextIndentWithClass(attr, elem_css);
+    using book_xml_css_style_utils::MarginTopResult;
+    if (text_indent_mtr.unit != MarginTopResult::Unit::None &&
+        !text_indent_mtr.negative) {
+      const int sa = ts->GetAdvance(' ');
+      if (sa > 0) {
+        const int indent_spaces = text_indent_mtr.value / sa;
+        for (int i = 0; i < indent_spaces; i++) {
+          AppendParsedByte(p, ' ');
+          p->pen.x += sa;
+        }
+      }
+    }
+  }
+
   // CSS-based emphasis fallback for EPUBs that do not use semantic tags.
   if (parse_in(p, TAG_BODY) && p->stacksize > 0) {
     bool style_bold = false;
@@ -2562,7 +2599,7 @@ void start(void *data, const char *el, const char **attr) {
       SyncParsedTextStyle(ts, p->bold, p->italic, p->mono);
   }
 
-  if (IsBlockLevelElement(el) && p->stacksize > 0) {
+  if (BehavesAsBlock(el, elem_css) && p->stacksize > 0) {
     if (book_xml_css_style_utils::HasPageBreakAfter(el_style_raw) ||
         elem_css.page_break_after) {
       p->page_break_after_stack[p->stacksize - 1] = true;
@@ -2880,6 +2917,13 @@ void end(void *data, const char *el) {
       p->strip_leading_list_marker = false;
     if (p->linebegan)
       linefeed(p);
+  } else if (!IsBlockLevelElement(el) && p->stacksize > 0 &&
+             p->block_text_align_stack[(u8)(p->stacksize - 1)]) {
+    FlushInlineTailAndDeferredStyle(p, ts);
+    if (p->linebegan)
+      linefeed(p);
+    p->block_margin_left = 0;
+    p->block_margin_right = 0;
   }
 
   bool restore_block_text_align = false;
@@ -2888,7 +2932,7 @@ void end(void *data, const char *el) {
   if (p->stacksize > 0) {
     const u8 current = (u8)(p->stacksize - 1);
     restore_block_text_align = p->block_text_align_stack[current];
-    if (IsBlockLevelElement(el))
+    if (IsBlockLevelElement(el) || p->page_break_after_stack[current])
       had_page_break_after = p->page_break_after_stack[current];
     restore_font_size_px = p->style_font_size_restore_stack[current];
   }

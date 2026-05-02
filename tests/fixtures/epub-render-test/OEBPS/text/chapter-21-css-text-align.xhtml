@@ -75,5 +75,27 @@
 
 <p>Si "TEST" aparece centrado, se confirma que display:block en span funciona independientemente del glyph.</p>
 
+<!-- ── 8. .ornament con margins ─────────────────────────────────── -->
+
+<h2>8. .ornament con margin-top/margin-bottom</h2>
+
+<p>Párrafo antes del ornamento.</p>
+
+<span class="ornament">---***---</span>
+
+<p>Párrafo después del ornamento. Debe haber espacio visible arriba y abajo.</p>
+
+<!-- ── 9. .blockSpan con margin-left/right ─────────────────────── -->
+
+<h2>9. span con margin-left y margin-right</h2>
+
+<span class="blockSpan">Este span tiene margin-left: 32px y margin-right: 32px. El texto debe estar indentado respecto a los márgenes normales.</span>
+
+<!-- ── 10. Span inline normal sin display:block ────────────────── -->
+
+<h2>10. span inline dentro de párrafo (sin break)</h2>
+
+<p>Este párrafo tiene un <span style="font-style: italic">span inline normal</span> que debe fluir en la misma línea. Si el párrafo se rompe o el span salta a otra línea, el fix ha roto el comportamiento inline.</p>
+
 </body>
 </html>

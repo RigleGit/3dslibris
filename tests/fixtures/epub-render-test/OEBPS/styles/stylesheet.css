@@ -314,6 +314,36 @@ h2.align-center-heading {
   text-align: right;
 }
 
+/* display:block on span — margin, text-indent */
+.blockSpan {
+  display: block;
+  margin-top: 16px;
+  margin-bottom: 16px;
+  margin-left: 32px;
+  margin-right: 32px;
+  text-indent: 0;
+}
+
+.ornament {
+  display: block;
+  text-align: center;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+/* float / clear from class — for promoted inline elements */
+.floatLeftBlock {
+  display: block;
+  float: left;
+  margin: 0 12px 0 0;
+}
+
+.clearBothBlock {
+  display: block;
+  clear: both;
+  margin-top: 8px;
+}
+
 /* Ornament separator — as reported in issue #74 */
 .spaceOrnament {
   display: block;
