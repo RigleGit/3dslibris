@@ -1696,6 +1696,79 @@ static void ConfigureBlockTextAlign(
   AppendParagraphAlignMarker(p, align);
 }
 
+static void HandleHeadingStart(parsedata_t *p, Text *ts, const char **attr,
+                               const epub_css_class_map::CssClassMargins &elem_css,
+                               int heading_level) {
+  const std::string heading_style = ExtractStyleAttr(attr);
+  const std::string heading_class = ExtractClassAttr(attr);
+  const int heading_px =
+      ResolveHeadingFontSizePx(p, ts, heading_level, heading_style, heading_class);
+  heading_layout::KeepWithNextRequest req{};
+  req.pen_y = p->pen.y;
+  const text_render_layout_utils::ReadingScreenMetrics metrics =
+      text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
+          p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
+          MIN(ts->margin.bottom, 16));
+  req.screen_height = metrics.max_height;
+  req.bottom_margin = metrics.bottom_margin;
+  req.line_height = MeasureLineHeightForPixelSize(ts, heading_px);
+  req.linespacing = ts->linespacing;
+  req.heading_level = heading_level;
+  if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req))
+    AdvanceParsedScreen(p);
+
+  const char *tag_name = "h1";
+  if (heading_level == 1) {
+    parse_push(p, TAG_H1);
+    p->last_h1_style = heading_style;
+    p->last_h1_class = heading_class;
+    ApplyHeadingFontSize(p, ts, 1, p->last_h1_style, p->last_h1_class);
+    AppendParagraphAlignMarker(
+        p, ResolveElementTextAlignWithClass(p->last_h1_style,
+                                            p->last_h1_class, p, p->css_class_map));
+    tag_name = "h1";
+  } else if (heading_level == 2) {
+    parse_push(p, TAG_H2);
+    p->last_h2_style = heading_style;
+    p->last_h2_class = heading_class;
+    ApplyHeadingFontSize(p, ts, 2, p->last_h2_style, p->last_h2_class);
+    AppendParagraphAlignMarker(
+        p, ResolveElementTextAlignWithClass(p->last_h2_style,
+                                            p->last_h2_class, p, p->css_class_map));
+    tag_name = "h2";
+  } else {
+    parse_push(p, TAG_H3);
+    p->last_h_style = heading_style;
+    p->last_h_class = heading_class;
+    ApplyHeadingFontSize(p, ts, 3, p->last_h_style, p->last_h_class);
+    AppendParagraphAlignMarker(
+        p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
+                                            p, p->css_class_map));
+    tag_name = "h3";
+  }
+
+  AppendParsedByte(p, TEXT_BOLD_ON);
+  p->pos++;
+  p->bold = true;
+  const book_xml_css_style_utils::MarginTopResult mtr =
+      ParseElementMarginTopWithClass(attr, elem_css);
+  ApplyElementBlockMargins(p, ts, attr, elem_css);
+  const int line_h = ts->GetHeight() + ts->linespacing;
+  const int default_lf = 1;
+  const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
+      default_lf, mtr, line_h);
+  if (heading_level == 1)
+    LogResolvedBlockMargin(p, tag_name, "top", p->last_h1_style,
+                           p->last_h1_class, mtr, line_h, default_lf, lf_count);
+  else if (heading_level == 2)
+    LogResolvedBlockMargin(p, tag_name, "top", p->last_h2_style,
+                           p->last_h2_class, mtr, line_h, default_lf, lf_count);
+  else
+    LogResolvedBlockMargin(p, tag_name, "top", p->last_h_style,
+                           p->last_h_class, mtr, line_h, default_lf, lf_count);
+  EmitAdditionalTopLinefeeds(p, lf_count);
+}
+
 void start(void *data, const char *el, const char **attr) {
   //! Expat callback, when starting an element.
 
@@ -1818,124 +1891,11 @@ void start(void *data, const char *el, const char **attr) {
       linefeed(p);
   }
   else if (!strcmp(el, "h1")) {
-    const std::string heading_style = ExtractStyleAttr(attr);
-    const std::string heading_class = ExtractClassAttr(attr);
-    const int heading_px =
-        ResolveHeadingFontSizePx(p, ts, 1, heading_style, heading_class);
-    heading_layout::KeepWithNextRequest req{};
-    req.pen_y = p->pen.y;
-    const text_render_layout_utils::ReadingScreenMetrics metrics =
-        text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
-            p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-            MIN(ts->margin.bottom, 16));
-    req.screen_height = metrics.max_height;
-    req.bottom_margin = metrics.bottom_margin;
-    req.line_height = MeasureLineHeightForPixelSize(ts, heading_px);
-    req.linespacing = ts->linespacing;
-    req.heading_level = 1;
-    if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req))
-      AdvanceParsedScreen(p);
-    parse_push(p, TAG_H1);
-    p->last_h1_style = heading_style;
-    p->last_h1_class = heading_class;
-    ApplyHeadingFontSize(p, ts, 1, p->last_h1_style, p->last_h1_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h1_style,
-                                            p->last_h1_class, p, p->css_class_map));
-    AppendParsedByte(p, TEXT_BOLD_ON);
-    p->pos++;
-    p->bold = true;
-    const book_xml_css_style_utils::MarginTopResult mtr =
-        ParseElementMarginTopWithClass(attr, elem_css);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    const int line_h = ts->GetHeight() + ts->linespacing;
-    const int default_lf = 1;
-    const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-        default_lf, mtr, line_h);
-    LogResolvedBlockMargin(p, "h1", "top", p->last_h1_style,
-                           p->last_h1_class, mtr, line_h, default_lf,
-                           lf_count);
-    EmitAdditionalTopLinefeeds(p, lf_count);
+    HandleHeadingStart(p, ts, attr, elem_css, 1);
   } else if (!strcmp(el, "h2")) {
-    const std::string heading_style = ExtractStyleAttr(attr);
-    const std::string heading_class = ExtractClassAttr(attr);
-    const int heading_px =
-        ResolveHeadingFontSizePx(p, ts, 2, heading_style, heading_class);
-    heading_layout::KeepWithNextRequest req{};
-    req.pen_y = p->pen.y;
-    const text_render_layout_utils::ReadingScreenMetrics metrics =
-        text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
-            p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-            MIN(ts->margin.bottom, 16));
-    req.screen_height = metrics.max_height;
-    req.bottom_margin = metrics.bottom_margin;
-    req.line_height = MeasureLineHeightForPixelSize(ts, heading_px);
-    req.linespacing = ts->linespacing;
-    req.heading_level = 2;
-    if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req))
-      AdvanceParsedScreen(p);
-    parse_push(p, TAG_H2);
-    p->last_h2_style = heading_style;
-    p->last_h2_class = heading_class;
-    ApplyHeadingFontSize(p, ts, 2, p->last_h2_style, p->last_h2_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h2_style,
-                                            p->last_h2_class, p, p->css_class_map));
-    AppendParsedByte(p, TEXT_BOLD_ON);
-    p->pos++;
-    p->bold = true;
-    const book_xml_css_style_utils::MarginTopResult mtr =
-        ParseElementMarginTopWithClass(attr, elem_css);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    const int line_h = ts->GetHeight() + ts->linespacing;
-    const int default_lf = 1;
-    const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-        default_lf, mtr, line_h);
-    LogResolvedBlockMargin(p, "h2", "top", p->last_h2_style,
-                           p->last_h2_class, mtr, line_h, default_lf,
-                           lf_count);
-    EmitAdditionalTopLinefeeds(p, lf_count);
+    HandleHeadingStart(p, ts, attr, elem_css, 2);
   } else if (!strcmp(el, "h3")) {
-    const std::string heading_style = ExtractStyleAttr(attr);
-    const std::string heading_class = ExtractClassAttr(attr);
-    const int heading_px =
-        ResolveHeadingFontSizePx(p, ts, 3, heading_style, heading_class);
-    heading_layout::KeepWithNextRequest req{};
-    req.pen_y = p->pen.y;
-    const text_render_layout_utils::ReadingScreenMetrics metrics =
-        text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
-            p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-            MIN(ts->margin.bottom, 16));
-    req.screen_height = metrics.max_height;
-    req.bottom_margin = metrics.bottom_margin;
-    req.line_height = MeasureLineHeightForPixelSize(ts, heading_px);
-    req.linespacing = ts->linespacing;
-    req.heading_level = 3;
-    if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req))
-      AdvanceParsedScreen(p);
-    parse_push(p, TAG_H3);
-    p->last_h_style = heading_style;
-    p->last_h_class = heading_class;
-    ApplyHeadingFontSize(p, ts, 3, p->last_h_style, p->last_h_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map));
-    AppendParsedByte(p, TEXT_BOLD_ON);
-    p->pos++;
-    p->bold = true;
-    {
-      const book_xml_css_style_utils::MarginTopResult mtr =
-          ParseElementMarginTopWithClass(attr, elem_css);
-      ApplyElementBlockMargins(p, ts, attr, elem_css);
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const int default_lf = 1;
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
-      LogResolvedBlockMargin(p, "h3", "top", p->last_h_style,
-                             p->last_h_class, mtr, line_h, default_lf,
-                             lf_count);
-      EmitAdditionalTopLinefeeds(p, lf_count);
-    }
+    HandleHeadingStart(p, ts, attr, elem_css, 3);
   } else if (!strcmp(el, "h4")) {
     parse_push(p, TAG_H4);
     p->last_h_style = ExtractStyleAttr(attr);
