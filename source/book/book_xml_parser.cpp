@@ -406,13 +406,16 @@ static void ApplyHeadingFontSize(parsedata_t *p, Text *ts, int heading_level,
     return;
 
   const u8 current = (u8)(p->stacksize - 1);
-  const int base_px = (int)ts->GetPixelSize();
-  p->heading_saved_font_size_stack[current] = (u8)base_px;
+  const int inherited_px = (int)ts->GetPixelSize();
+  const int default_heading_base =
+      (p->base_font_size_px != 0) ? (int)p->base_font_size_px : inherited_px;
+  p->heading_saved_font_size_stack[current] = (u8)inherited_px;
   p->heading_font_size_emitted_stack[current] = false;
 
-  const int heading_px = book_xml_parser_style_utils::ComputeHeadingFontSize(
-      base_px, heading_level, style_attr, class_attr, p->css_class_map);
-  if (heading_px == base_px)
+  const int heading_px = book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
+      inherited_px, default_heading_base, heading_level,
+      style_attr, class_attr, p->css_class_map);
+  if (heading_px == inherited_px)
     return;
 
   ts->SetPixelSize((u8)heading_px);
@@ -440,8 +443,11 @@ static int ResolveHeadingFontSizePx(parsedata_t *p, Text *ts, int heading_level,
                                     const std::string &class_attr) {
   if (!p || !ts)
     return 0;
-  return book_xml_parser_style_utils::ComputeHeadingFontSize(
-      (int)ts->GetPixelSize(), heading_level, style_attr, class_attr,
+  const int inherited_px = (int)ts->GetPixelSize();
+  const int default_heading_base =
+      (p->base_font_size_px != 0) ? (int)p->base_font_size_px : inherited_px;
+  return book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
+      inherited_px, default_heading_base, heading_level, style_attr, class_attr,
       p->css_class_map);
 }
 
@@ -2455,12 +2461,24 @@ void start(void *data, const char *el, const char **attr) {
       u8 new_font_px = 0;
       if (!is_heading_el) {
         book_xml_css_style_utils::FontSizeSpec spec;
-        bool has_spec = book_xml_css_style_utils::TryParseFontSize(
-            ExtractStyleAttr(attr).c_str(), &spec);
-        if (!has_spec && elem_css.font_size.unit != book_xml_css_style_utils::FontSizeSpec::Unit::None) {
-          spec = elem_css.font_size;
-          has_spec = true;
+        bool has_spec = false;
+        // Publisher CSS font-size (inline style= and class-based) is gated
+        // behind the respect_publisher_font_size preference. When off (User
+        // size mode), only <small>/<big> semantic tags are allowed to change
+        // inline font size. Element selectors such as body/p/div from
+        // stylesheets are not resolved here and are therefore unaffected.
+        const bool use_publisher_font_size =
+            p->prefs && p->prefs->respect_publisher_font_size;
+        if (use_publisher_font_size) {
+          has_spec = book_xml_css_style_utils::TryParseFontSize(
+              ExtractStyleAttr(attr).c_str(), &spec);
+          if (!has_spec && elem_css.font_size.unit != book_xml_css_style_utils::FontSizeSpec::Unit::None) {
+            spec = elem_css.font_size;
+            has_spec = true;
+          }
         }
+        // <small>/<big> are semantic/local size changes and remain active
+        // regardless of the publisher font-size preference.
         if (!has_spec) {
           if (!strcmp(el, "small")) {
             spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Smaller;
