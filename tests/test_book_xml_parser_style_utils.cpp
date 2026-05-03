@@ -289,6 +289,36 @@ void TestComputeHeadingFontSizeSupportsRelativeCssUnits() {
                  17);
 }
 
+void TestComputeHeadingFontSizeForContextUsesDocBase() {
+  epub_css_class_map::CssClassMap classes;
+
+  // Default h2: inherited == doc base (no nesting) — same as old behavior.
+  test::ExpectEq("h2 default no nesting",
+                 book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
+                     14, 14, 2, "", "", classes),
+                 18);
+
+  // Bug scenario: <small><h2> — inherited_px reduced to 11, doc base stays 14.
+  // Default multiplier must apply to doc base (14), not the reduced context (11).
+  test::ExpectEq("h2 default inside <small> uses doc base",
+                 book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
+                     11, 14, 2, "", "", classes),
+                 18);
+
+  // Explicit CSS on heading: resolves against inherited_px (current context).
+  // <small><h2 style="font-size:1.3em"> → 1.3×11 = 14.
+  test::ExpectEq("h2 explicit CSS inside <small> uses inherited context",
+                 book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
+                     11, 14, 2, "font-size: 1.3em;", "", classes),
+                 14);
+
+  // h1 default inside <small>.
+  test::ExpectEq("h1 default inside <small> uses doc base",
+                 book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
+                     11, 14, 1, "", "", classes),
+                 21);
+}
+
 void TestClampInlineFontSizeKeepsNestedSmallReadable() {
   test::ExpectEq("nested small clamped against reading base",
                  book_xml_parser_style_utils::ClampInlineFontSize(14, 9),
@@ -316,6 +346,7 @@ int main() {
   TestComputeHeadingFontSizeUsesDefaultMultipliers();
   TestComputeHeadingFontSizeUsesCssAndClamps();
   TestComputeHeadingFontSizeSupportsRelativeCssUnits();
+  TestComputeHeadingFontSizeForContextUsesDocBase();
   TestClampInlineFontSizeKeepsNestedSmallReadable();
   return 0;
 }
