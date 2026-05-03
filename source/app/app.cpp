@@ -834,12 +834,13 @@ void App::HandleAppletHook(APT_HookType hook)
   switch (hook)
   {
   case APTHOOK_ONSUSPEND:
+    // Signal suspend state to the main thread. All browser/reader mutations
+    // are deferred to HandleAppletSuspend() on the main thread to avoid
+    // cross-thread writes to nav_ and reader state, and to avoid dereferencing
+    // Book pointers from the APT hook thread.
     lifecycle_state_.SetSuspended(true);
     lifecycle_state_.SetResumePending(false);
     lifecycle_state_.SetSuspendHandled(false);
-    nav_.browser.wait_input_release = true;
-    nav_.browser.last_interaction_ms = osGetTime();
-    OnReaderAppletSuspendRequested();
     break;
   case APTHOOK_ONRESTORE:
   case APTHOOK_ONWAKEUP:
