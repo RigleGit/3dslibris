@@ -95,6 +95,7 @@ int MeasureAlignedLineWidth(const uint32_t *buf, size_t length, size_t start,
       continue;
     case TEXT_IMAGE:
     case TEXT_HR:
+    case TEXT_HR_BOUNDS:
       return line_width;
     case TEXT_UNDERLINE_STYLE:
     case TEXT_FONT_SIZE:

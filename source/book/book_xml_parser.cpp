@@ -2052,9 +2052,61 @@ void start(void *data, const char *el, const char **attr) {
                            lf_count);
     EmitAdditionalTopLinefeeds(p, lf_count);
     if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
-      AppendParsedByte(p, TEXT_HR);
-      // The renderer calls PrintNewLine() for TEXT_HR, advancing pen.y by one
-      // line. Mirror that here so the parser's overflow tracking stays in sync.
+      // Compute rule bounds: block margins (from margin-left/right CSS) narrow
+      // the content area; width CSS + alignment determine the rule width within
+      // that area.  For plain <hr/> all margins are 0 and the bounds match the
+      // old TEXT_HR full-width behavior exactly.
+      const int content_left =
+          ts->margin.left + parse_current_block_margin_left(p);
+      const int content_right =
+          ts->display.width - ts->margin.right - parse_current_block_margin_right(p);
+      const int content_w = std::max(0, content_right - content_left);
+
+      int rule_x0 = content_left;
+      int rule_x1 = content_right;
+
+      const book_xml_css_style_utils::MarginTopResult width_spec =
+          book_xml_css_style_utils::ParseWidth(p->last_hr_style.c_str());
+      if (width_spec.unit != book_xml_css_style_utils::MarginTopResult::Unit::None &&
+          !width_spec.negative && content_w > 0) {
+        const int css_w = book_xml_css_style_utils::ResolveHorizontalMarginPx(
+            width_spec, content_w);
+        const int rule_w = std::max(1, std::min(css_w, content_w));
+        // Alignment: inline style > class > center (hr HTML default)
+        book_xml_css_style_utils::TextAlign align =
+            book_xml_css_style_utils::TextAlign::Center;
+        book_xml_css_style_utils::TextAlign from_style;
+        if (book_xml_css_style_utils::TryParseTextAlign(
+                p->last_hr_style.c_str(), &from_style)) {
+          align = from_style;
+        } else if (elem_css.has_text_align) {
+          align = elem_css.text_align;
+        }
+        if (align == book_xml_css_style_utils::TextAlign::Left ||
+            align == book_xml_css_style_utils::TextAlign::Justify) {
+          rule_x0 = content_left;
+          rule_x1 = content_left + rule_w;
+        } else if (align == book_xml_css_style_utils::TextAlign::Right) {
+          rule_x1 = content_right;
+          rule_x0 = content_right - rule_w;
+        } else {
+          const int mid = (content_left + content_right) / 2;
+          rule_x0 = mid - rule_w / 2;
+          rule_x1 = rule_x0 + rule_w;
+        }
+        rule_x0 = std::max(content_left, std::min(content_right, rule_x0));
+        rule_x1 = std::max(rule_x0, std::min(content_right, rule_x1));
+      }
+
+      // Clamp to u8: display.width <= 240px on 3DS, so all positions fit.
+      const u32 x0_u = (u32)std::max(0, std::min(255, rule_x0));
+      const u32 x1_u = (u32)std::max(x0_u, (u32)std::min(255, rule_x1));
+
+      AppendParsedByte(p, TEXT_HR_BOUNDS);
+      AppendParsedByte(p, x0_u);
+      AppendParsedByte(p, x1_u);
+      // The renderer calls PrintNewLine() for TEXT_HR_BOUNDS, advancing pen.y
+      // by one line. Mirror that here so overflow tracking stays in sync.
       p->pen.y += ts->GetHeight() + ts->linespacing;
       p->pen.x = ts->margin.left;
       p->linebegan = false;
@@ -2850,7 +2902,7 @@ void end(void *data, const char *el) {
                              p->last_hr_class, mbr, line_h, default_lf,
                              lf_count);
       if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
-        // TEXT_HR was emitted, so the renderer has linebegan=false.  It will
+        // TEXT_HR_BOUNDS was emitted, so the renderer has linebegan=false.  It will
         // never call PrintNewLine() for these \n bytes — only the WouldOverflow
         // path fires to advance screens.  Emit the bytes for that check but do
         // NOT advance pen.y: doing so would diverge from the renderer and

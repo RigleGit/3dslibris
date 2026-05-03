@@ -507,6 +507,19 @@ void Page::Draw(Text *ts) {
           break;
       }
       ts->linebegan = false;
+    } else if (c == TEXT_HR_BOUNDS) {
+      i++;
+      const int x0 = (i < length) ? (int)buf[i++] : ts->margin.left;
+      const int x1 = (i < length) ? (int)buf[i++]
+                                   : ts->display.width - ts->margin.right;
+      const int y = std::max(ts->margin.top,
+                             ts->GetPenY() - std::max(1, ts->GetHeight() / 3));
+      ts->FillRect(x0, y, x1, y + 1, ts->GetFgColor());
+      if (!ts->PrintNewLine()) {
+        if (!advance_to_next_screen())
+          break;
+      }
+      ts->linebegan = false;
     } else if (c == TEXT_IMAGE_CONTEXT_DEFAULT) {
       i++;
       next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;

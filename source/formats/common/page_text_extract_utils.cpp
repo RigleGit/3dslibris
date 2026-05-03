@@ -38,6 +38,10 @@ std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
       i++;
       continue;
     }
+    if (c == TEXT_HR_BOUNDS) {
+      i += (i + 2 < len) ? 3 : (i + 1 < len) ? 2 : 1;
+      continue;
+    }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
         c == TEXT_ITALIC_OFF || c == TEXT_UNDERLINE_ON ||
         c == TEXT_UNDERLINE_OFF || c == TEXT_OVERLINE_ON ||

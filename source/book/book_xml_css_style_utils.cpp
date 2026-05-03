@@ -355,6 +355,19 @@ MarginTopResult ParseMarginRight(const char *style) {
   return ParseMarginValue(style, "margin-right", 1);
 }
 
+MarginTopResult ParseWidth(const char *style) {
+  MarginTopResult result;
+  if (!style || !style[0])
+    return result;
+  const std::string lc = ToLowerAscii(std::string(style));
+  const std::string prop_colon = "width:";
+  size_t pos = lc.find(prop_colon);
+  if (pos == std::string::npos)
+    return result;
+  pos += prop_colon.size();
+  return ParseOneLengthToken(lc, &pos);
+}
+
 int ResolveHorizontalMarginPx(const MarginTopResult &mtr, int display_width) {
   if (mtr.unit == MarginTopResult::Unit::None)
     return 0;

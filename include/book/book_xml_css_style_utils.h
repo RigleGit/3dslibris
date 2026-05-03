@@ -60,6 +60,8 @@ enum class TextAlign { Left, Center, Right, Justify };
 TextAlign ParseTextAlign(const char *style);
 bool TryParseTextAlign(const char *style, TextAlign *out);
 
+MarginTopResult ParseWidth(const char *style);
+
 enum class WhiteSpaceMode { Normal, Nowrap, Pre, PreWrap, PreLine };
 
 WhiteSpaceMode ParseWhiteSpace(const char *style);

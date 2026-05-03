@@ -58,6 +58,10 @@ static std::string BuildPageSearchText(Page *page, size_t max_out = 2048) {
       i++;
       continue;
     }
+    if (c == TEXT_HR_BOUNDS) {
+      i += (i + 2 < len) ? 3 : (i + 1 < len) ? 2 : 1;
+      continue;
+    }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
         c == TEXT_ITALIC_OFF || c == TEXT_UNDERLINE_ON ||
         c == TEXT_UNDERLINE_OFF || c == TEXT_OVERLINE_ON ||
@@ -167,6 +171,10 @@ BuildPageHeadingLines(Page *page, size_t max_lines = 12,
     }
     if (c == TEXT_SCREEN_BREAK)
       continue;
+    if (c == TEXT_HR_BOUNDS) {
+      i += (i + 2 < len) ? 2 : (i + 1 < len) ? 1 : 0;
+      continue;
+    }
     if (c == TEXT_BOLD_ON || c == TEXT_BOLD_OFF || c == TEXT_ITALIC_ON ||
         c == TEXT_ITALIC_OFF || c == TEXT_UNDERLINE_ON ||
         c == TEXT_UNDERLINE_OFF || c == TEXT_OVERLINE_ON ||
