@@ -484,49 +484,17 @@ static bool ImagePathLooksLikeSvgWrapper(const std::string &path) {
   return epub_image_utils::LooksLikeSvgWrapper(path, empty);
 }
 
-static const char *MarginUnitName(
-    book_xml_css_style_utils::MarginTopResult::Unit unit) {
-  using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
-  switch (unit) {
-  case Unit::Px:
-    return "px";
-  case Unit::Percent:
-    return "%";
-  case Unit::None:
-  default:
-    return "none";
-  }
-}
-
 static void LogResolvedBlockMargin(parsedata_t *p, const char *tag,
                                    const char *phase,
                                    const std::string &style_attr,
                                    const std::string &class_attr,
                                    const book_xml_css_style_utils::MarginTopResult &m,
                                    int line_h, int default_lf, int final_lf) {
-#ifdef DSLIBRIS_DEBUG
-  if (!p || !p->book || !p->book->GetStatusReporter())
-    return;
-  if (style_attr.empty() && class_attr.empty())
-    return;
-  DBG_LOGF_CAT(
-      p->book->GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_EPUB,
-      "EPUB: margin %s tag=%s path=%s style=\"%s\" class=\"%s\" unit=%s value=%d negative=%d line_h=%d default_lf=%d final_lf=%d screen=%d pen_y=%d",
-      phase ? phase : "?", tag ? tag : "?", p->docpath.c_str(),
-      style_attr.c_str(), class_attr.c_str(), MarginUnitName(m.unit), m.value,
-      m.negative ? 1 : 0, line_h, default_lf, final_lf, p->screen, p->pen.y);
-#else
-  (void)p;
-  (void)tag;
-  (void)phase;
-  (void)style_attr;
-  (void)class_attr;
-  (void)m;
-  (void)line_h;
-  (void)default_lf;
-  (void)final_lf;
-#endif
+  (void)p; (void)tag; (void)phase; (void)style_attr;
+  (void)class_attr; (void)m; (void)line_h; (void)default_lf; (void)final_lf;
 }
+
+
 
 static void ParseElementStyleFlags(const char **attr, bool *bold_out,
                                    bool *italic_out, bool *underline_out,
@@ -587,6 +555,9 @@ static bool HasActiveStackMonoStyle(const parsedata_t *p) {
   return book_xml_inline_state::HasActiveStackMonoStyle(p);
 }
 
+// Forward declaration — defined below after ClearPendingBlockSpacing.
+static void ClearPendingBlockSpacing(parsedata_t *p);
+
 static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
   if (!p || !p->book || !p->ts)
     return;
@@ -623,12 +594,190 @@ static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
 
   p->pen.x = ts->margin.left;
   p->pen.y = ts->margin.top + lineheight;
+  p->current_screen_has_drawable_content = false;
+  // Pending spacing accumulated before the overflow is no longer relevant;
+  // we are at the top of a fresh screen/page.
+  ClearPendingBlockSpacing(p);
 }
 
 static void AdvanceParsedPageOnOverflowThunk(parsedata_t *p, int lineheight,
                                              void *ctx) {
   (void)ctx;
   AdvanceParsedPageOnOverflow(p, lineheight);
+}
+
+// ---------------------------------------------------------------------------
+// Pending block-layout spacing model helpers.
+// See parsedata_t::pending_block_spacing_lf for full doc.
+// ---------------------------------------------------------------------------
+
+// Forward declaration — linefeed_r is defined later in this file.
+static void linefeed_r(parsedata_t *p, const char *tag, const char *reason,
+                       int is_real);
+
+// Returns true only when the current screen has no drawable content since
+// the last screen/page advance.  This is the correct way to determine that
+// we are at the top of a visually empty screen.
+//
+// IMPORTANT: pen.y == top_y is NOT sufficient.  After drawing the first text
+// line, pen.y remains at top_y until the next real linefeed.  Checking only
+// pen.y would incorrectly discard mandatory block separators for elements
+// that follow a heading or paragraph drawn on the first line.
+static bool IsCurrentReadingScreenVisuallyEmpty(const parsedata_t *p) {
+  return p && !p->current_screen_has_drawable_content;
+}
+
+static void ClearPendingBlockSpacing(parsedata_t *p) {
+  if (!p)
+    return;
+  p->pending_block_break = false;
+  p->pending_block_spacing_lf = 0;
+  p->pending_block_spacing_reason = NULL;
+  p->pending_block_spacing_from_css = false;
+}
+
+// Queue layout-only block spacing.
+//
+// lines = total requested lines (1 mandatory break + (lines-1) optional).
+// Mandatory break:  pending_block_break = true (always when lines >= 1).
+// Optional spacing: pending_block_spacing_lf = max(current, lines-1).  Max-collapse.
+// Pass from_css=true when the spacing comes from an explicit CSS property.
+static void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
+                                   const char *reason, bool from_css) {
+  if (!p || lines <= 0)
+    return;
+  p->pending_block_break = true;   // mandatory: must start new line before content
+  const int new_opt = lines - 1;   // optional lines beyond the mandatory break
+  const int prev_opt = p->pending_block_spacing_lf;
+  const int next_opt = (new_opt > prev_opt) ? new_opt : prev_opt; // max-collapse
+  p->pending_block_spacing_lf = next_opt;
+  if (reason)
+    p->pending_block_spacing_reason = reason;
+  if (from_css)
+    p->pending_block_spacing_from_css = true;
+  (void)tag;
+}
+
+// Suppress ONLY the optional spacing.
+// The mandatory block_break is preserved — CSS margin:0 or negative means
+// "no extra space", not "collapse onto same line as previous content".
+static void SuppressPendingBlockSpacingFromCss(parsedata_t *p, const char *tag,
+                                               const char *reason) {
+  if (!p)
+    return;
+  (void)tag; (void)reason;
+  p->pending_block_spacing_lf = 0;          // clear optional spacing
+  p->pending_block_spacing_reason = "css-suppress";
+  p->pending_block_spacing_from_css = true;
+  // pending_block_break is intentionally NOT cleared.
+}
+
+// Queue spacing from a CSS margin result.
+// Positive margin → max-collapse optional spacing (QueueBlockSpacingLines).
+// Zero or negative → mandatory break preserved, optional spacing suppressed.
+// No CSS (Unit::None) → use default_lf.
+static void QueueBlockSpacingFromMarginResult(
+    parsedata_t *p, const char *tag, const char *reason,
+    const book_xml_css_style_utils::MarginTopResult &mtr,
+    int line_h, int default_lf) {
+  using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
+  if (mtr.unit == Unit::None) {
+    // No explicit CSS: use default, max-collapse.
+    QueueBlockSpacingLines(p, default_lf, tag, reason, false);
+    return;
+  }
+  if (mtr.negative || mtr.value == 0) {
+    // Explicit CSS zero or negative: mandatory block break remains, but no
+    // optional spacing.  The block still ends on its own visual line.
+    p->pending_block_break = true;           // mandatory: blocks must separate
+    SuppressPendingBlockSpacingFromCss(p, tag, reason);
+    return;
+  }
+  // Explicit CSS positive: resolve to lines, max-collapse optional spacing.
+  const int css_lf = (line_h > 0) ? ((mtr.value + line_h - 1) / line_h) : 0;
+  const int resolved = (css_lf > default_lf) ? css_lf : default_lf;
+  const int clamped = book_xml_parser_style_utils::ClampResolvedBlockLinefeeds(resolved);
+  QueueBlockSpacingLines(p, clamped, tag, reason, true);
+}
+
+// Flush pending block spacing just before real content is emitted.
+//
+// Content-aware rule (NOT equivalent to min(pending, available)):
+//   available = floor((max_h - bot_margin - pen_y) / line_step)
+//   required  = 1   (1 slot reserved for the next content line)
+//
+//   Case A: pending + required <= available  →  emit all pending
+//   Case B: required <= available            →  emit available - required
+//                                               (discard excess to preserve 1 slot)
+//   Case C: required > available             →  emit 0, content will force
+//                                               AdvanceParsedPageOnOverflow
+//
+// Known limitation (heading orphan edge-case):
+//   When avail == total_heading_lines (e.g. 2 for h2/h3) and pending > 0,
+//   flush emits avail-1 = 1 line, leaving only 1 slot.  If the heading needs
+//   2 slots (itself + content), it overflows as an orphan.  This requires
+//   passing required = total_heading_lines from the heading context to fix.
+//   The keep-with-next logic in HandleHeadingStart uses pending-offset to
+//   approximate this and advances pre-emptively in most such cases.
+//
+// Pending is cleared regardless of how much was emitted.
+static void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
+                                                  const char *next_tag) {
+  if (!p || !p->ts || !p->book)
+    return;
+  if (!p->pending_block_break && p->pending_block_spacing_lf <= 0) {
+    ClearPendingBlockSpacing(p);
+    return;
+  }
+
+  Text *ts = p->ts;
+  const int lh = ts->GetHeight();
+  const int ls = ts->linespacing;
+  const int line_step = lh + (ls > 0 ? ls : 0);
+  if (line_step <= 0) {
+    ClearPendingBlockSpacing(p);
+    return;
+  }
+
+  const text_render_layout_utils::ReadingScreenMetrics metrics =
+      text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
+          p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
+          MIN(ts->margin.bottom, 16));
+  int available = 0;
+  {
+    const int usable = metrics.max_height - metrics.bottom_margin - p->pen.y;
+    available = (usable > 0) ? (usable / line_step) : 0;
+  }
+
+  // ---- Phase 1: mandatory block break -----------------------------------
+  // A mandatory break is needed only when linebegan==true (content drawn on
+  // current line). If the line is fresh (linebegan==false) we are already at
+  // the start of a new line and no extra linefeed is required.
+  if (p->pending_block_break && p->linebegan) {
+    if (available >= 1) {
+      linefeed_r(p, next_tag ? next_tag : "?", "mandatory-break", 0);
+      available--;   // pen.y advanced one line_step
+    }
+    // else available==0: content will trigger AdvanceParsedPageOnOverflow.
+  }
+  p->pending_block_break = false;
+
+  // ---- Phase 2: optional spacing ----------------------------------------
+  const int opt = p->pending_block_spacing_lf;
+  int emit_opt = 0;
+  if (opt > 0 && !IsCurrentReadingScreenVisuallyEmpty(p)) {
+    const int required = 1;
+    if (opt + required <= available) {
+      emit_opt = opt;
+    } else if (required <= available) {
+      emit_opt = available - required;
+      if (emit_opt < 0) emit_opt = 0;
+    }
+    for (int i = 0; i < emit_opt; i++)
+      linefeed_r(p, next_tag ? next_tag : "?", "pending-spacing", 0);
+  }
+
+  ClearPendingBlockSpacing(p);
 }
 
 #ifdef DSLIBRIS_DEBUG
@@ -854,7 +1003,14 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
     p->pen.x = ts->margin.left;
     p->pen.y = ts->margin.top + lineheight;
     p->linebegan = false;
+    ClearPendingBlockSpacing(p); // already at top of screen; discard spacing
+  } else {
+    // Flush any accumulated layout-only block spacing before the first real
+    // text token using the two-phase content-aware rule.
+    FlushPendingBlockSpacingBeforeContent(p, "text");
   }
+  // Text is about to be emitted — mark the screen as having drawable content.
+  p->current_screen_has_drawable_content = true;
 
   std::string transformed_text;
   const char *flow_txt = txt;
@@ -1078,6 +1234,12 @@ static void linefeed(parsedata_t *p) {
   p->linebegan = false;
 }
 
+static void linefeed_r(parsedata_t *p, const char *tag,
+                       const char *reason, int is_real) {
+  (void)tag; (void)reason; (void)is_real;
+  linefeed(p);
+}
+
 static bool blankline(parsedata_t *p) {
   // Was the preceding text a blank line?
   if (p->buflen < 3)
@@ -1103,16 +1265,6 @@ static int CountTrailingLinefeeds(const parsedata_t *p) {
   return count;
 }
 
-static int EmitAdditionalTopLinefeeds(parsedata_t *p, int desired_lf) {
-  if (!p || desired_lf <= 0)
-    return 0;
-  const int existing_lf = CountTrailingLinefeeds(p);
-  const int add_lf = std::max(0, desired_lf - existing_lf);
-  for (int i = 0; i < add_lf; i++)
-    linefeed(p);
-  return add_lf;
-}
-
 static void RestoreParsedInlineLinkMarker(parsedata_t *p) {
   book_xml_inline_state::RestoreParsedInlineLinkMarker(p);
 }
@@ -1120,6 +1272,8 @@ static void RestoreParsedInlineLinkMarker(parsedata_t *p) {
 static void AdvanceParsedScreen(parsedata_t *p) {
   if (!p || !p->ts || !p->book)
     return;
+  ClearPendingBlockSpacing(p);
+  p->current_screen_has_drawable_content = false;
 
   Text *ts = p->ts;
   if (p->screen == 1) {
@@ -1703,15 +1857,50 @@ static void ConfigureBlockTextAlign(
   AppendParagraphAlignMarker(p, align);
 }
 
+// Force a mandatory block boundary before a block-level element that may be
+// nested inside an inline styling wrapper (small, big, span, em, b, etc.).
+//
+// If linebegan==true (inline content exists on the current line), emits a
+// mandatory '\n' immediately — NOT via the pending model — so the break lands
+// in the buffer BEFORE any font-size or style tokens the block handler will
+// emit.  Afterwards, pen.x is reset to the block left margin and linebegan is
+// false, so the subsequent QueueBlockSpacingFromMarginResult call in the
+// block handler will not emit a duplicate break.
+//
+// If linebegan==false the line is already fresh; nothing is emitted.
+static void EnsureBlockBoundaryBeforeBlockStart(parsedata_t *p,
+                                                const char *tag,
+                                                const char *reason) {
+  if (!p || !p->ts)
+    return;
+  if (!p->linebegan)
+    return;
+
+  linefeed_r(p, tag, reason, 0);
+}
+
 static void HandleHeadingStart(parsedata_t *p, Text *ts, const char **attr,
                                const epub_css_class_map::CssClassMargins &elem_css,
                                int heading_level) {
   const std::string heading_style = ExtractStyleAttr(attr);
   const std::string heading_class = ExtractClassAttr(attr);
+
+  // Ensure block boundary: if any inline content exists on the current line
+  // (e.g. this heading is nested inside a <small>/<big> wrapper), emit a
+  // mandatory '\n' now — BEFORE any font-size tokens — so the heading starts
+  // on its own line.  This is an immediate emission, not via pending model.
+  EnsureBlockBoundaryBeforeBlockStart(p, "heading", "heading-block-boundary");
+
   const int heading_px =
       ResolveHeadingFontSizePx(p, ts, heading_level, heading_style, heading_class);
   heading_layout::KeepWithNextRequest req{};
-  req.pen_y = p->pen.y;
+  // Account for any pending block spacing when checking keep-with-next.
+  // Pending spacing will be flushed before the heading text, advancing pen.y.
+  {
+    const int pending_lf = p->pending_block_spacing_lf;
+    const int lh_step = ts->GetHeight() + std::max(0, ts->linespacing);
+    req.pen_y = p->pen.y + (pending_lf > 0 ? pending_lf * lh_step : 0);
+  }
   const text_render_layout_utils::ReadingScreenMetrics metrics =
       text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
           p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
@@ -1773,7 +1962,7 @@ static void HandleHeadingStart(parsedata_t *p, Text *ts, const char **attr,
   else
     LogResolvedBlockMargin(p, tag_name, "top", p->last_h_style,
                            p->last_h_class, mtr, line_h, default_lf, lf_count);
-  EmitAdditionalTopLinefeeds(p, lf_count);
+  QueueBlockSpacingFromMarginResult(p, tag_name, "heading-top", mtr, line_h, default_lf);
 }
 
 void start(void *data, const char *el, const char **attr) {
@@ -1858,23 +2047,19 @@ void start(void *data, const char *el, const char **attr) {
   else if (!strcmp(el, "aside")) {
     parse_push(p, TAG_ASIDE);
     ApplyElementBlockMargins(p, ts, attr, elem_css);
-    if (!blankline(p))
-      linefeed(p);
+    QueueBlockSpacingLines(p, 1, "aside", "aside-top", false);
   } else if (!strcmp(el, "blockquote")) {
     parse_push(p, TAG_BLOCKQUOTE);
     ApplyElementBlockMargins(p, ts, attr, elem_css);
-    if (!blankline(p))
-      linefeed(p);
+    QueueBlockSpacingLines(p, 1, "blockquote", "blockquote-top", false);
   } else if (!strcmp(el, "caption")) {
     parse_push(p, TAG_CAPTION);
     ApplyElementBlockMargins(p, ts, attr, elem_css);
-    if (!blankline(p))
-      linefeed(p);
+    QueueBlockSpacingLines(p, 1, "caption", "caption-top", false);
   } else if (!strcmp(el, "dd")) {
     parse_push(p, TAG_DD);
     ApplyElementBlockMargins(p, ts, attr, elem_css);
-    if (!blankline(p))
-      linefeed(p);
+    QueueBlockSpacingLines(p, 1, "dd", "dd-top", false);
     const int leading_spaces = book_xml_block_utils::GetLeadingSpaceCount(TAG_DD);
     for (int i = 0; i < leading_spaces; i++) {
       AppendParsedByte(p, ' ');
@@ -1894,8 +2079,7 @@ void start(void *data, const char *el, const char **attr) {
   else if (!strcmp(el, "figure")) {
     parse_push(p, TAG_FIGURE);
     ApplyElementBlockMargins(p, ts, attr, elem_css);
-    if (!blankline(p))
-      linefeed(p);
+    QueueBlockSpacingLines(p, 1, "figure", "figure-top", false);
   }
   else if (!strcmp(el, "h1")) {
     HandleHeadingStart(p, ts, attr, elem_css, 1);
@@ -1925,7 +2109,7 @@ void start(void *data, const char *el, const char **attr) {
       LogResolvedBlockMargin(p, "h4", "top", p->last_h_style,
                              p->last_h_class, mtr, line_h, default_lf,
                              lf_count);
-      EmitAdditionalTopLinefeeds(p, lf_count);
+      QueueBlockSpacingFromMarginResult(p, "h4", "heading-top", mtr, line_h, default_lf);
     }
   } else if (!strcmp(el, "h5")) {
     parse_push(p, TAG_H5);
@@ -1949,7 +2133,7 @@ void start(void *data, const char *el, const char **attr) {
       LogResolvedBlockMargin(p, "h5", "top", p->last_h_style,
                              p->last_h_class, mtr, line_h, default_lf,
                              lf_count);
-      EmitAdditionalTopLinefeeds(p, lf_count);
+      QueueBlockSpacingFromMarginResult(p, "h5", "heading-top", mtr, line_h, default_lf);
     }
   } else if (!strcmp(el, "h6")) {
     parse_push(p, TAG_H6);
@@ -1973,7 +2157,7 @@ void start(void *data, const char *el, const char **attr) {
       LogResolvedBlockMargin(p, "h6", "top", p->last_h_style,
                              p->last_h_class, mtr, line_h, default_lf,
                              lf_count);
-      EmitAdditionalTopLinefeeds(p, lf_count);
+      QueueBlockSpacingFromMarginResult(p, "h6", "heading-top", mtr, line_h, default_lf);
     }
   } else if (!strcmp(el, "head"))
     parse_push(p, TAG_HEAD);
@@ -2010,7 +2194,7 @@ void start(void *data, const char *el, const char **attr) {
       LogResolvedBlockMargin(p, "p", "top", p->last_p_style,
                              p->last_p_class, mtr, line_h, default_lf,
                              lf_count);
-      EmitAdditionalTopLinefeeds(p, lf_count);
+      QueueBlockSpacingFromMarginResult(p, "p", "paragraph-top", mtr, line_h, default_lf);
       if (!inside_list_item && !parse_in(p, TAG_DD)) {
         int indent_spaces = 0;
         using book_xml_css_style_utils::MarginTopResult;
@@ -2050,8 +2234,9 @@ void start(void *data, const char *el, const char **attr) {
     LogResolvedBlockMargin(p, "hr", "top", p->last_hr_style,
                            p->last_hr_class, mtr, line_h, default_lf,
                            lf_count);
-    EmitAdditionalTopLinefeeds(p, lf_count);
+    QueueBlockSpacingFromMarginResult(p, "hr", "hr-top", mtr, line_h, default_lf);
     if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
+      FlushPendingBlockSpacingBeforeContent(p, "hr");
       // Compute rule bounds: block margins (from margin-left/right CSS) narrow
       // the content area; width CSS + alignment determine the rule width within
       // that area.  For plain <hr/> all margins are 0 and the bounds match the
@@ -2105,6 +2290,8 @@ void start(void *data, const char *el, const char **attr) {
       AppendParsedByte(p, TEXT_HR_BOUNDS);
       AppendParsedByte(p, x0_u);
       AppendParsedByte(p, x1_u);
+      // HR renders as a visible rule — mark the screen as having drawable content.
+      p->current_screen_has_drawable_content = true;
       // The renderer calls PrintNewLine() for TEXT_HR_BOUNDS, advancing pen.y
       // by one line. Mirror that here so overflow tracking stays in sync.
       p->pen.y += ts->GetHeight() + ts->linespacing;
@@ -2440,9 +2627,7 @@ void start(void *data, const char *el, const char **attr) {
     ApplyElementBlockMargins(p, ts, attr, elem_css);
     const int line_h = ts->GetHeight() + ts->linespacing;
     const int default_lf = 1;
-    const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-        default_lf, mtr, line_h);
-    EmitAdditionalTopLinefeeds(p, lf_count);
+    QueueBlockSpacingFromMarginResult(p, el, "block-top", mtr, line_h, default_lf);
     const book_xml_css_style_utils::MarginTopResult text_indent_mtr =
         ParseElementTextIndentWithClass(attr, elem_css);
     using book_xml_css_style_utils::MarginTopResult;
@@ -2787,6 +2972,8 @@ void end(void *data, const char *el) {
 
   if (!strcmp(el, "br")) {
     FlushInlineTailAndDeferredStyle(p, ts);
+    // <br> is real content; flush any pending layout-only block spacing first.
+    FlushPendingBlockSpacingBeforeContent(p, "br");
     linefeed(p);
   } else if (!strcmp(el, "a")) {
     if (p->stacksize > 0) {
@@ -2802,14 +2989,13 @@ void end(void *data, const char *el) {
     }
   } else if (!strcmp(el, "aside")) {
     FlushInlineTailAndDeferredStyle(p, ts);
-    linefeed(p);
-    linefeed(p);
+    QueueBlockSpacingLines(p, 2, "aside", "aside-bottom", false);
     p->block_margin_left = 0;
     p->block_margin_right = 0;
   } else if (!strcmp(el, "blockquote") || !strcmp(el, "caption") ||
              !strcmp(el, "dd") || !strcmp(el, "figure")) {
     FlushInlineTailAndDeferredStyle(p, ts);
-    linefeed(p);
+    QueueBlockSpacingLines(p, 1, el, "block-bottom", false);
     p->block_margin_left = 0;
     p->block_margin_right = 0;
   } else if (!strcmp(el, "p")) {
@@ -2827,12 +3013,10 @@ void end(void *data, const char *el) {
       LogResolvedBlockMargin(p, "p", "bottom", p->last_p_style,
                              p->last_p_class, mbr, line_h, default_lf,
                              lf_count);
-      if (lf_count > 0) {
-        for (int i = 0; i < lf_count; i++)
-          linefeed(p);
-      } else if (p->linebegan) {
-        linefeed(p);
-      }
+      // Queue spacing (mandatory break + optional). CSS zero/negative keeps the
+      // mandatory break but suppresses optional spacing — the block still ends on
+      // its own visual line.
+      QueueBlockSpacingFromMarginResult(p, "p", "paragraph-bottom", mbr, line_h, default_lf);
     }
     RestoreActiveBlockTextAlignMarker(p);
     p->in_paragraph = false;
@@ -2855,8 +3039,7 @@ void end(void *data, const char *el) {
       LogResolvedBlockMargin(p, "h1", "bottom", p->last_h1_style,
                              p->last_h1_class, mbr, line_h, default_lf,
                              lf_count);
-      for (int i = 0; i < lf_count; i++)
-        linefeed(p);
+      QueueBlockSpacingFromMarginResult(p, "h1", "heading-bottom", mbr, line_h, default_lf);
     }
     RestoreHeadingFontSize(p, ts);
     RestoreActiveBlockTextAlignMarker(p);
@@ -2877,8 +3060,7 @@ void end(void *data, const char *el) {
       LogResolvedBlockMargin(p, "h2", "bottom", p->last_h2_style,
                              p->last_h2_class, mbr, line_h, default_lf,
                              lf_count);
-      for (int i = 0; i < lf_count; i++)
-        linefeed(p);
+      QueueBlockSpacingFromMarginResult(p, "h2", "heading-bottom", mbr, line_h, default_lf);
     }
     RestoreHeadingFontSize(p, ts);
     RestoreActiveBlockTextAlignMarker(p);
@@ -2924,8 +3106,7 @@ void end(void *data, const char *el) {
       LogResolvedBlockMargin(p, el, "bottom", p->last_h_style,
                              p->last_h_class, mbr, line_h, default_lf,
                              lf_count);
-      for (int i = 0; i < lf_count; i++)
-        linefeed(p);
+      QueueBlockSpacingFromMarginResult(p, el, "heading-bottom", mbr, line_h, default_lf);
       RestoreHeadingFontSize(p, ts);
     }
     if (strcmp(el, "hr"))
@@ -2938,21 +3119,22 @@ void end(void *data, const char *el) {
     FlushInlineTailAndDeferredStyle(p, ts);
     AppendParsedByte(p, TEXT_PRE_OFF);
     p->preformatted_wrap_enabled = false;
-    linefeed(p);
-    linefeed(p);
+    QueueBlockSpacingLines(p, 2, "pre", "block-bottom", false);
   } else if (!strcmp(el, "code") || !strcmp(el, "tt") ||
              !strcmp(el, "kbd") || !strcmp(el, "samp")) {
   } else if (!strcmp(el, "li") || !strcmp(el, "ul") || !strcmp(el, "ol")) {
     FlushInlineTailAndDeferredStyle(p, ts);
     if (!strcmp(el, "li"))
       p->strip_leading_list_marker = false;
+    // Only queue spacing when we're mid-line; if we're already at a line start
+    // (linebegan=false), the previous linefeed already separated items.
     if (p->linebegan)
-      linefeed(p);
+      QueueBlockSpacingLines(p, 1, el, "list-item-bottom", false);
   } else if (!IsBlockLevelElement(el) && p->stacksize > 0 &&
              p->block_text_align_stack[(u8)(p->stacksize - 1)]) {
     FlushInlineTailAndDeferredStyle(p, ts);
     if (p->linebegan)
-      linefeed(p);
+      QueueBlockSpacingLines(p, 1, el, "block-align-bottom", false);
     p->block_margin_left = 0;
     p->block_margin_right = 0;
   }

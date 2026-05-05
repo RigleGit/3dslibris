@@ -250,10 +250,13 @@ void Page::Draw(Text *ts) {
     }
     return false;
   };
-  ts->margin.bottom =
-      text_render_layout_utils::ResolveReadingScreenMetrics(
-          true, first_is_left, leftBottomMargin, rightBottomMargin)
-          .bottom_margin;
+  // Keep ts->margin.bottom at the unguarded render margin (leftBottomMargin or
+  // rightBottomMargin). The +8px footer guard from ResolveReadingScreenMetrics
+  // is used only as the overflow threshold in WouldOverflowReadingScreen calls,
+  // NOT as the pixel clip boundary. If we set ts->margin.bottom to the guarded
+  // value the renderer clips descenders too early (at 400-44=356 instead of
+  // the correct 400-36=364).
+  ts->margin.bottom = first_is_left ? leftBottomMargin : rightBottomMargin;
   // Clear both page buffers through Text API so dirty flags stay coherent.
   ts->SetScreen(ts->screenleft);
   if (book) {
@@ -372,8 +375,10 @@ void Page::Draw(Text *ts) {
               on_first_screen, first_is_left, leftBottomMargin,
               rightBottomMargin);
       int maxHeight = metrics.max_height;
+      // currentBottomMargin includes the 8px footer guard: used only for the
+      // overflow threshold check, NOT written back to ts->margin.bottom so the
+      // renderer's pixel clip remains at the unguarded boundary.
       int currentBottomMargin = metrics.bottom_margin;
-      ts->margin.bottom = currentBottomMargin;
       if (text_render_layout_utils::WouldOverflowReadingScreen(
               ts->GetPenY(), ts->GetHeight(), ts->linespacing, maxHeight,
               currentBottomMargin)) {

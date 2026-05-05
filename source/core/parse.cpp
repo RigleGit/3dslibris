@@ -254,6 +254,11 @@ void parse_init(parsedata_t *data) {
   data->perf_flush_calls = 0;
   data->perf_inline_images = 0;
   data->perf_page_overflows = 0;
+  data->pending_block_break = false;
+  data->pending_block_spacing_lf = 0;
+  data->pending_block_spacing_reason = NULL;
+  data->pending_block_spacing_from_css = false;
+  data->current_screen_has_drawable_content = false;
   parse_reset_page_buffer(data);
   data->status = 0;
   data->pagecount = 0;

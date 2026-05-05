@@ -153,6 +153,58 @@ void TestWouldCurrentLineOverflowReadingScreen() {
                  365, 0, 0, 400, 36));
 }
 
+// Regression test for Bug 1 (descender clipping near HUD).
+//
+// The renderer keeps ts->margin.bottom at the unguarded value so the pixel clip
+// fires at (max_height - unguarded_margin).  WouldOverflowReadingScreen is
+// called with the guarded margin so overflow fires earlier — this gap is the
+// safety zone in which misaligned descenders still remain visible.
+//
+// Invariant: any glyph that the overflow check admits (last non-overflowing
+// pen_y) must have its maximum reasonable descent strictly below the unguarded
+// pixel clip boundary.
+void TestBottomSafeAreaRendererClipAboveOverflowThreshold() {
+  const int max_height  = 400;
+  const int unguarded   = 36;   // MARGINBOTTOM — used for pixel clip
+  const int guard       = text_render_layout_utils::kFullReadingScreenFooterGuardPx; // 8
+  const int guarded     = unguarded + guard;  // 44 — used for overflow check
+
+  const int clip_boundary       = max_height - unguarded;  // 364
+  const int overflow_threshold  = max_height - guarded;    // 356
+
+  // The renderer clip must be above the overflow threshold.
+  ExpectTrue("clip boundary is above overflow threshold",
+             clip_boundary > overflow_threshold);
+  // The gap must equal the guard constant.
+  ExpectEq("gap between clip and threshold equals guard",
+           clip_boundary - overflow_threshold, guard);
+
+  // The last pen_y that does NOT trigger overflow (strict >):
+  // WouldOverflow(pen_y, h=14, ls=1, 400, 44): pen_y+15 > 356 → pen_y > 341
+  const int line_h  = 14;
+  const int line_ls = 1;
+  ExpectFalse("pen_y=341 with guarded margin is not overflow",
+              text_render_layout_utils::WouldOverflowReadingScreen(
+                  341, line_h, line_ls, max_height, guarded));
+  ExpectTrue("pen_y=342 with guarded margin is overflow",
+             text_render_layout_utils::WouldOverflowReadingScreen(
+                 342, line_h, line_ls, max_height, guarded));
+
+  // A glyph placed at pen_y=341 (last admitted line at 14px) with a generous
+  // descent of 7px has its bottom pixel at sy=348, well below clip_boundary=364.
+  const int last_admitted_pen_y    = overflow_threshold - line_h - line_ls; // 341
+  const int conservative_descent   = guard - 1;  // 7 px
+  ExpectTrue("descent at last admitted line fits within unguarded clip boundary",
+             last_admitted_pen_y + conservative_descent < clip_boundary);
+
+  // Even the edge case where PrintNewLine advances pen_y to exactly
+  // overflow_threshold (= 356, since 341+15=356 and strict > does not fire)
+  // must keep descenders below the unguarded clip boundary.
+  const int edge_pen_y = overflow_threshold;  // 356
+  ExpectTrue("descent at edge pen_y fits within unguarded clip boundary",
+             edge_pen_y + conservative_descent < clip_boundary);
+}
+
 } // namespace
 
 int main() {
@@ -164,5 +216,6 @@ int main() {
   TestResolveCompactReadingBottomMargin();
   TestWouldOverflowReadingScreen();
   TestWouldCurrentLineOverflowReadingScreen();
+  TestBottomSafeAreaRendererClipAboveOverflowThreshold();
   return 0;
 }

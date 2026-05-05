@@ -202,6 +202,41 @@ struct parsedata_t {
 	std::vector<uint32_t> bidi_cps;
 	//! Reusable BiDi run buffer for ShapeTextRunBidi.
 	std::vector<text_bidi_utils::BidiRun> bidi_runs;
+
+	// ---------------------------------------------------------------------------
+	// Pending block-layout spacing model.
+	//
+	// Two distinct concepts are tracked separately:
+	//
+	// 1. pending_block_break (mandatory):
+	//    The next block must start on a new visual line.  Set whenever any
+	//    block-level element ends or begins.  Flushed just before real content
+	//    by emitting one real linefeed if the current line has drawable content
+	//    (linebegan == true).  Cannot be suppressed by CSS margin rules.
+	//
+	// 2. pending_block_spacing_lf (optional):
+	//    Extra blank lines of vertical spacing beyond the mandatory break.
+	//    Collapses (max-collapse): new value = max(current, new).
+	//    CSS margin > 0 raises it.  CSS margin == 0 or negative suppresses it.
+	//    Discarded at the top of a truly empty screen/page.
+	//    Content-aware rule: never consumes the last available slot.
+	//
+	// Screen state:
+	//    current_screen_has_drawable_content tracks whether any drawable text/
+	//    image/hr has been emitted since the last screen or page advance.
+	//    Used to distinguish "top of fresh screen" (discard optional spacing)
+	//    from "first-line baseline after drawing content" (keep pending).
+	//    Note: pen.y == top_y is NOT sufficient — text drawn at the first baseline
+	//    does not advance pen.y until the next linefeed, so pen.y == top_y even
+	//    with drawable content on the first line.
+	//
+	// Cleared on every screen/page advance.
+	// ---------------------------------------------------------------------------
+	bool        pending_block_break;            // mandatory: emit 1 lf if linebegan
+	int         pending_block_spacing_lf;       // optional spacing lines (>= 0)
+	const char *pending_block_spacing_reason;   // last queue label (static string)
+	bool        pending_block_spacing_from_css; // set by explicit CSS margin
+	bool        current_screen_has_drawable_content; // false until text/img/hr drawn
 };
 
 bool iswhitespace(u32 c);

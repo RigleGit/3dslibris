@@ -317,6 +317,22 @@ void TestComputeHeadingFontSizeForContextUsesDocBase() {
                  book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
                      11, 14, 1, "", "", classes),
                  21);
+
+  // Regression test for Bug 2: h2 inside <small> at the typical 12px body
+  // size.  <small> reduces inherited_px to 10 (12 / 1.2).  The heading font
+  // size must be computed from doc_base=12, giving 16px (12 * 1.3 ≈ 16).  If
+  // heading_px ever equals inherited_px (10), ApplyHeadingFontSize returns
+  // early without emitting a font-size token, which silently drops the heading
+  // visual and lets the mandatory block break logic run at the wrong size.
+  test::ExpectEq("h2 inside small at 12px base gets heading size from doc base",
+                 book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
+                     10, 12, 2, "", "", classes),
+                 16);
+  // Explicitly verify that the result differs from the inherited small size so
+  // ApplyHeadingFontSize cannot take the early-return path.
+  test::ExpectTrue("h2 heading size differs from inherited small size",
+                   book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
+                       10, 12, 2, "", "", classes) != 10);
 }
 
 void TestClampInlineFontSizeKeepsNestedSmallReadable() {
