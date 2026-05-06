@@ -54,14 +54,15 @@ static std::string HexBytesForLog(const char *s, size_t max_bytes = 32) {
 }
 #endif
 
-static void LogFilenameStage(App *app, const char *stage, const char *value) {
+static void LogFilenameStage(IStatusReporter *reporter, const char *stage,
+                             const char *value) {
 #if !UTF8_FILENAME_DIAG
-  (void)app;
+  (void)reporter;
   (void)stage;
   (void)value;
   return;
 #else
-  if (!app || !stage || !value)
+  if (!reporter || !stage || !value)
     return;
   char msg[512];
   std::string bytes = HexBytesForLog(value);
@@ -69,7 +70,7 @@ static void LogFilenameStage(App *app, const char *stage, const char *value) {
            "FindBooks %-20s len=%u valid=%d bytes=[%s] text=\"%s\"", stage,
            (unsigned)strlen(value), LooksLikeValidUtf8(value) ? 1 : 0,
            bytes.c_str(), value);
-  DBG_LOG(app, msg);
+  DBG_LOG(reporter, msg);
 #endif
 }
 
@@ -88,13 +89,14 @@ static bool Utf16NameToUtf8(const u16 *name, std::string *out) {
                                      out);
 }
 
-static bool HasBookWithFileName(const App *app, const char *filename) {
-  if (!app || !filename || !*filename)
+static bool HasBookWithFileName(const std::vector<Book *> &books,
+                                const char *filename) {
+  if (!filename || !*filename)
     return false;
-  for (size_t i = 0; i < app->books.size(); i++) {
-    if (!app->books[i] || !app->books[i]->GetFileName())
+  for (size_t i = 0; i < books.size(); i++) {
+    if (!books[i] || !books[i]->GetFileName())
       continue;
-    if (strcasecmp(app->books[i]->GetFileName(), filename) == 0)
+    if (strcasecmp(books[i]->GetFileName(), filename) == 0)
       return true;
   }
   return false;
@@ -122,7 +124,7 @@ static void AppendBookFromFilename(App *app, const std::string &source_dir,
 
   std::string raw_name(filename);
   std::string io_name = NormalizeFsFilenameForIo(filename);
-  if (HasBookWithFileName(app, io_name.c_str()))
+  if (HasBookWithFileName(app->books, io_name.c_str()))
     return;
   LogFilenameStage(app, "d_name", raw_name.c_str());
   if (io_name != raw_name)
