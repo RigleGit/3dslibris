@@ -194,7 +194,8 @@ App::App()
 
   // Initialize UI components.
   ts = std::unique_ptr<Text>(new Text());
-  ts->app = this;
+  ts->SetReporter(this);
+  ts->SetFontDir(fontdir);
 
   fontmenu = std::unique_ptr<FontMenu>(new FontMenu(this));
   bookmarkmenu = std::unique_ptr<BookmarkMenu>(new BookmarkMenu(this));

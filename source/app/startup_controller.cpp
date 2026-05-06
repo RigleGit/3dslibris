@@ -97,8 +97,11 @@ namespace
   {
     if (!app)
       return;
-    if (!FontDirLooksUsable(app->fontdir))
+    if (!FontDirLooksUsable(app->fontdir)) {
       app->fontdir = ResolveDefaultFontDir();
+      if (app->ts)
+        app->ts->SetFontDir(app->fontdir);
+    }
   }
 
   // Collects any missing runtime files. Checks the book directory and the

@@ -6,9 +6,9 @@
 #include <string>
 #include <string.h>
 
-#include "app/app.h"
-#include "shared/debug_log.h"
 #include "shared/bugfix_utils.h"
+#include "shared/debug_log.h"
+#include "shared/main.h"
 #include "ui/font_constants.h"
 #include "shared/path_utils.h"
 #include "ui/screen_constants.h"
@@ -33,14 +33,15 @@ static bool IsArchiveAbsolutePath(const std::string &path) {
          (!path.empty() && path[0] == '/');
 }
 
-static std::string ResolveFontPath(const App *app, const std::string &filename) {
+static std::string ResolveFontPath(const std::string &fontdir,
+                                    const std::string &filename) {
   if (filename.empty())
     return filename;
   if (IsArchiveAbsolutePath(filename))
     return filename;
 
   const std::string configured_dir =
-      (app && !app->fontdir.empty()) ? app->fontdir : paths::GetFontDir();
+      !fontdir.empty() ? fontdir : paths::GetFontDir();
   const std::string configured = configured_dir + "/" + filename;
   if (FileReadable(configured.c_str()))
     return configured;
@@ -140,7 +141,7 @@ FT_Error FontManager::InitFreeTypeCache(void) {
   if (init_error)
     return init_error;
 
-  sprintf(face_id.file_path, "%s/%s", parent->app->fontdir.c_str(),
+  sprintf(face_id.file_path, "%s/%s", fontdir_.c_str(),
           filenames[TEXT_STYLE_REGULAR].c_str());
   face_id.face_index = 0;
   init_error =
@@ -153,7 +154,7 @@ FT_Error FontManager::InitFreeTypeCache(void) {
 }
 
 FT_Error FontManager::CreateFace(int style) {
-  const std::string path = ResolveFontPath(parent->app, filenames[style]);
+  const std::string path = ResolveFontPath(fontdir_, filenames[style]);
   FT_Face loaded_face = nullptr;
   error = FT_New_Face(library, path.c_str(), 0, &loaded_face);
   if (error) {
@@ -591,7 +592,7 @@ bool FontManager::LoadFallbackFont(const char *path) {
     return false;
   if (fallback_count_ >= kMaxFallbackFaces) {
     printf("[WARN] Fallback font limit reached (%d)\n", kMaxFallbackFaces);
-    DBG_LOGF(parent ? parent->app : nullptr,
+    DBG_LOGF(parent ? parent->reporter_ : nullptr,
              "[WARN] Fallback font limit reached (%d)", kMaxFallbackFaces);
     return false;
   }
@@ -612,7 +613,7 @@ bool FontManager::SetFallbackFile(int index, const char *path) {
   if (index < 0 || index >= kMaxFallbackFaces || !path || !*path)
     return false;
 
-  const std::string resolved = ResolveFontPath(parent ? parent->app : nullptr, path);
+  const std::string resolved = ResolveFontPath(fontdir_, path);
   if (!FileReadable(resolved.c_str())) {
     printf("[WARN] Fallback font not found: %s\n", resolved.c_str());
     return false;
@@ -664,7 +665,7 @@ bool FontManager::SetFallbackFile(int index, const char *path) {
     fallback_count_ = index + 1;
 
   printf("[OK] Fallback font[%d]: %s\n", index, resolved.c_str());
-  DBG_LOGF(parent ? parent->app : nullptr,
+  DBG_LOGF(parent ? parent->reporter_ : nullptr,
            "[OK] Fallback font[%d]: %s", index, resolved.c_str());
   return true;
 }
@@ -758,19 +759,18 @@ static void AutoLoadFallbackFontsFromDir(FontManager *fm, const std::string &fon
 }
 
 void FontManager::AutoLoadCjkFallbackFonts() {
-  const std::string font_dir =
-      (parent && parent->app && !parent->app->fontdir.empty())
-          ? parent->app->fontdir
-          : std::string();
   std::vector<std::string> search_dirs;
-  GetFallbackFontSearchDirs(font_dir, paths::GetFontDir().c_str(), &search_dirs);
+  GetFallbackFontSearchDirs(fontdir_, paths::GetFontDir().c_str(), &search_dirs);
   int loaded = 0;
   for (size_t i = 0; i < search_dirs.size() && loaded < kMaxFallbackFaces; i++)
     AutoLoadFallbackFontsFromDir(this, search_dirs[i], &loaded);
 
   if (loaded > 0) {
     printf("[OK] Auto-loaded %d CJK fallback font(s)\n", loaded);
-    DBG_LOGF(parent ? parent->app : nullptr,
+    DBG_LOGF(parent ? parent->reporter_ : nullptr,
              "[OK] Auto-loaded %d CJK fallback font(s)", loaded);
   }
 }
+
+void FontManager::SetFontDir(const std::string &dir) { fontdir_ = dir; }
+const std::string &FontManager::GetFontDir() const { return fontdir_; }

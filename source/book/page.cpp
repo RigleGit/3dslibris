@@ -27,7 +27,6 @@
 
 #include "book/page.h"
 
-#include "app/app.h"
 #include "book/book.h"
 #include "book/inline_image_layout.h"
 #include "book/page_alignment_utils.h"
@@ -346,7 +345,7 @@ void Page::Draw(Text *ts) {
       // ts->linebegan was left true by the previous page's draw loop.
       ts->linebegan = false;
 #ifdef DSLIBRIS_DEBUG
-      DBG_LOGF_CAT(ts->app, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
+      DBG_LOGF_CAT(ts->GetReporter(), DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
                    "RTL token px=%u i=%u linebegan=%d rtl=%d",
                    (unsigned)rtl_line_px, (unsigned)i,
                    ts->linebegan ? 1 : 0, rtl_paragraph ? 1 : 0);
@@ -645,7 +644,7 @@ void Page::Draw(Text *ts) {
             ts->margin.left, right_edge, line_width);
 #ifdef DSLIBRIS_DEBUG
         DBG_LOGF_CAT(
-            ts->app, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
+            ts->GetReporter(), DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
             "RTL line anchor width=%d right=%d start_x=%d clip=[%d,%d) y=%d side=%s",
             line_width, right_edge, rtl_x, (int)ts->margin.left, right_edge,
             (int)ts->GetPenY(), on_first_screen ? "first" : "second");

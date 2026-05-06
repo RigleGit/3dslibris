@@ -26,7 +26,7 @@ static int MeasureTextAdvance(uint32_t codepoint, void *ctx) {
 
 }
 
-Text::Text() : fm(nullptr), tr(nullptr) {
+Text::Text() : reporter_(nullptr), fm(nullptr), tr(nullptr) {
   display.height = PAGE_HEIGHT;
   display.width = PAGE_WIDTH;
 
@@ -81,6 +81,10 @@ Text::~Text() {
 }
 
 int Text::Init() { return fm->Init(); }
+
+void Text::SetReporter(IStatusReporter *reporter) { reporter_ = reporter; }
+IStatusReporter *Text::GetReporter() const { return reporter_; }
+void Text::SetFontDir(const std::string &dir) { fm->SetFontDir(dir); }
 
 void Text::InitPen() { tr->InitPen(); }
 

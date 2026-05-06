@@ -22,6 +22,7 @@
 #include "ui/font_manager.h"
 #include "ui/text_tokens.h"
 #include "ui/text_renderer.h"
+#include "shared/status_reporter.h"
 
 //! Reference: FreeType2 online documentation
 #define EMTOPIXEL (float)(POINTSIZE * DPI / 72.0)
@@ -30,8 +31,6 @@
 #define DPI 110
 
 #define CACHESIZE 512
-
-class App;
 
 //! Typesetter singleton that provides all text rendering services.
 
@@ -42,7 +41,6 @@ class App;
 class Text {
 
 public:
-  App *app;
   int pixelsize;
   struct {
     u8 r;
@@ -75,8 +73,10 @@ public:
   bool screenleft_dirty, screenright_dirty;
 
   Text();
-  Text(class App *parent) { app = parent; }
   ~Text();
+  void SetReporter(IStatusReporter *reporter);
+  IStatusReporter *GetReporter() const;
+  void SetFontDir(const std::string &dir);
   int Init();
   void InitPen(void);
 
@@ -153,6 +153,7 @@ private:
   friend class FontManager;
   friend class TextRenderer;
   friend class FontMenu;
+  IStatusReporter *reporter_;
   FontManager *fm;
   TextRenderer *tr;
 

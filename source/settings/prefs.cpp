@@ -94,8 +94,11 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       else if (!strcmp(attr[i], "fallback4") && strlen(attr[i + 1]))
         app->ts->SetFallbackFontFile(3, attr[i + 1]);
 	      else if (!strcmp(attr[i], "path")) {
-	        if (strlen(attr[i + 1]))
+	        if (strlen(attr[i + 1])) {
 	          app->fontdir = std::string(attr[i + 1]);
+	          if (app->ts)
+	            app->ts->SetFontDir(app->fontdir);
+	        }
 	      } else {
 	        u8 style = 0;
 	        if (font_config_utils::StyleFromFontPrefAttr(attr[i], &style))

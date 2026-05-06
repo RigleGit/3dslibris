@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "3ds.h"
-#include "app/app.h"
 #include "shared/color_utils.h"
 #include "shared/debug_log.h"
 #include "ui/theme_colors.h"
@@ -500,10 +499,10 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   const bool on_left_screen = (parent->screen == parent->screenleft);
   int clipped_right_pixels = 0;
   int layout_overflow_pixels = 0;
-  if (parent->app && g_text_margin_diag_budget > 0 &&
+  if (parent->reporter_ && g_text_margin_diag_budget > 0 &&
       (contentRight <= 0 || contentRight > screenWidth ||
        contentRight < screenWidth - 32)) {
-    DBG_LOGF_CAT(parent->app, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
+    DBG_LOGF_CAT(parent->reporter_, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
                  "TXT margin side=%s sw=%d mr=%d content_right=%d pen=%d,%d style=%d",
                  on_left_screen ? "left" : "right", screenWidth,
                  (int)parent->margin.right, contentRight, pen_x_before,
@@ -545,10 +544,10 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   }
 
 #ifdef DSLIBRIS_DEBUG
-  if (parent->app &&
+  if (parent->reporter_ &&
       (clipped_right_pixels > 0 || layout_overflow_pixels > 0) &&
       g_text_clip_right_budget > 0) {
-    DBG_LOGF_CAT(parent->app, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
+    DBG_LOGF_CAT(parent->reporter_, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
                  "TXT clipR side=%s ucs=%lu pen=%d bx=%d w=%u overflow=%d clip=%d layout_right=%d clip_right=%d mr=%d style=%d",
                  on_left_screen ? "left" : "right", (unsigned long)ucs,
                  pen_x_before, bx, (unsigned)width, layout_overflow_pixels,
@@ -841,10 +840,10 @@ bool TextRenderer::BlitToFramebuffer() {
       return;
 #ifdef DSLIBRIS_DEBUG
     const int max_sx = std::min(parent->display.width, geometry.stride);
-    if (parent->app && g_blit_geometry_diag_budget > 0 &&
+    if (parent->reporter_ && g_blit_geometry_diag_budget > 0 &&
         (max_sx < parent->display.width ||
          (dirty && dirty_rect.valid && dirty_rect.x1 > max_sx))) {
-      DBG_LOGF(parent->app,
+      DBG_LOGF(parent->reporter_,
                "BLIT geom fb=%ux%u stride=%d phys_w=%d logical=%dx%d dirty=%d rect=%d,%d..%d,%d max_sx=%d",
                (unsigned)fbW, (unsigned)fbH, geometry.stride,
                geometry.phys_width, parent->display.width, (int)logicalHeight,
@@ -886,11 +885,11 @@ bool TextRenderer::BlitToFramebuffer() {
       wrote_anything = true;
     }
 #ifdef DSLIBRIS_DEBUG
-    if (parent->app && g_blit_page_diag_budget > 0 &&
+    if (parent->reporter_ && g_blit_page_diag_budget > 0 &&
         frame_debug_utils::ShouldLogBlitPage(dirty, needs_copy)) {
       const uint16_t px0 = src[0];
       const uint16_t px1 = src[(size_t)std::min(10, geometry.stride - 1)];
-      DBG_LOGF(parent->app,
+      DBG_LOGF(parent->reporter_,
                "BLIT page=%s dirty=%d rect_valid=%d rect=%d,%d..%d,%d gen=%llu slot=%d needs_copy=%d wrote_any=%d fb=%ux%u src0=%04x src1=%04x",
                tag ? tag : "?", dirty ? 1 : 0, dirty_rect.valid ? 1 : 0,
                dirty_rect.x0, dirty_rect.y0, dirty_rect.x1, dirty_rect.y1,

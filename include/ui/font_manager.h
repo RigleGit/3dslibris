@@ -73,6 +73,8 @@ public:
 
   int Init();
   void ReportFace(FT_Face face);
+  void SetFontDir(const std::string &dir);
+  const std::string &GetFontDir() const;
 
 private:
   Text *parent;
@@ -97,6 +99,7 @@ private:
   FT_Face fallback_faces_[kMaxFallbackFaces];
   std::string fallback_filenames_[kMaxFallbackFaces];
   int fallback_count_;
+  std::string fontdir_;
 
   FT_Face FindFallbackFace(u32 ucs);
 
