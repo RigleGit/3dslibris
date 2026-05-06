@@ -17,6 +17,7 @@
 #include "book/book.h"
 #include "book/book_renderer.h"
 #include "ui/button.h"
+#include "ui/gradient_utils.h"
 #include "shared/debug_log.h"
 #include "book/page.h"
 #include "ui/touch_utils.h"
@@ -42,6 +43,7 @@ static u16 ClampPageTarget(u16 target_page, u16 page_count) {
 } // namespace
 
 PagedListMenu::PagedListMenu(App *_app, const char *title) : Menu(_app) {
+  current_book_ = nullptr;
   pagesize = 7;
   header_title = title ? title : "";
   wait_input_release = false;
@@ -56,17 +58,17 @@ PagedListMenu::~PagedListMenu() {
 }
 
 void PagedListMenu::LayoutFooterButtons() {
-  app->buttonprev.Move(6, LIST_FOOTER_Y);
-  app->buttonprev.Resize(68, 22);
-  app->buttonprev.Label("prev");
+  buttonprev->Move(6, LIST_FOOTER_Y);
+  buttonprev->Resize(68, 22);
+  buttonprev->Label("prev");
 
-  app->buttonprefs.Move(86, LIST_FOOTER_Y);
-  app->buttonprefs.Resize(68, 22);
-  app->buttonprefs.Label("back");
+  buttonprefs->Move(86, LIST_FOOTER_Y);
+  buttonprefs->Resize(68, 22);
+  buttonprefs->Label("back");
 
-  app->buttonnext.Move(166, LIST_FOOTER_Y);
-  app->buttonnext.Resize(68, 22);
-  app->buttonnext.Label("next");
+  buttonnext->Move(166, LIST_FOOTER_Y);
+  buttonnext->Resize(68, 22);
+  buttonnext->Label("next");
 }
 
 void PagedListMenu::Init() {
@@ -76,24 +78,22 @@ void PagedListMenu::Init() {
   buttons.clear();
   target_pages.clear();
 
-  if (!app || !app->GetCurrentBook()) {
-    if (app) {
-      DBG_LOGF(app, "LIST init skipped title=%s app=%p book=%p",
-               header_title.c_str(), (void *)app,
-               (void *)(app ? app->GetCurrentBook() : NULL));
-    }
+  current_book_ = app ? app->GetCurrentBook() : nullptr;
+  if (!current_book_) {
+    DBG_LOGF(app, "LIST init skipped title=%s app=%p book=%p",
+             header_title.c_str(), (void *)app, (void *)current_book_);
     dirty = true;
     return;
   }
 
   std::vector<std::string> labels;
   std::vector<u16> pages;
-  BuildEntries(labels, pages);
+  BuildEntries(current_book_, ts, labels, pages);
 
   size_t count = std::min(labels.size(), pages.size());
   target_pages.reserve(count);
   for (size_t i = 0; i < count; i++) {
-    Button *b = new Button(app->ts.get());
+    Button *b = new Button(ts);
     b->Init();
     b->Resize(LIST_ROW_W, LIST_ROW_H);
     std::string line1 = labels[i];
@@ -117,8 +117,8 @@ void PagedListMenu::Init() {
 
     int line_count = line3.empty() ? (line2.empty() ? 1 : 2) : 3;
     int line_height = 14;
-    if (app && app->ts)
-      line_height = app->ts->GetHeight();
+    if (ts)
+      line_height = ts->GetHeight();
     if (line_height < 10)
       line_height = 10;
     int button_height = LIST_ROW_H;
@@ -157,17 +157,18 @@ void PagedListMenu::Init() {
   wait_input_release = true;
   wait_input_release_started_ms = osGetTime();
   dirty = true;
-  DBG_LOGF(app, "LIST init title=%s entries=%u pages=%u", header_title.c_str(),
-           (unsigned)buttons.size(), (unsigned)GetPageCount());
+  DBG_LOGF(app, "LIST init title=%s entries=%u pages=%u book=%p",
+           header_title.c_str(), (unsigned)buttons.size(),
+           (unsigned)GetPageCount(), (void *)current_book_);
 }
 
 void PagedListMenu::Draw() {
 #ifdef DSLIBRIS_DEBUG
   static int s_list_draw_begin_budget = 24;
   if (app && s_list_draw_begin_budget > 0) {
-    const u16 before0 = app->ts->screenright[0];
+    const u16 before0 = ts->screenright[0];
     const u16 before1 =
-        app->ts->screenright[(size_t)10 * (size_t)app->ts->display.height + 10];
+        ts->screenright[(size_t)10 * (size_t)ts->display.height + 10];
     DBG_LOGF(app,
              "LIST draw begin title=%s dirty=%d page=%u sel=%u before0=%04x before1=%04x",
              header_title.c_str(), dirty ? 1 : 0, (unsigned)GetCurrentPage(),
@@ -175,19 +176,20 @@ void PagedListMenu::Draw() {
     s_list_draw_begin_budget--;
   }
 #endif
-  int savedColorMode = app->ts->GetColorMode();
-  app->ts->SetScreen(app->ts->screenright);
-  app->ts->ClearScreen();
-  app->DrawBottomGradientBackground();
+  int savedColorMode = ts->GetColorMode();
+  ts->SetScreen(ts->screenright);
+  ts->ClearScreen();
+  gradient_utils::DrawToScreen(ts, color_mode ? (int)*color_mode : 0,
+                               ts->screenright, 320);
 
-  app->ts->SetPen(LIST_HEADER_X, LIST_HEADER_Y);
-  app->ts->PrintString(header_title.c_str());
+  ts->SetPen(LIST_HEADER_X, LIST_HEADER_Y);
+  ts->PrintString(header_title.c_str());
 
   u16 start = GetPageStart(page);
   u16 end = (u16)std::min(buttons.size(), (size_t)(start + GetPageSize(page)));
 #ifdef DSLIBRIS_DEBUG
   static int s_draw_trace_budget = 48;
-  if (app && s_draw_trace_budget > 0) {
+  if (s_draw_trace_budget > 0) {
     DBG_LOGF(app,
              "LIST draw title=%s entries=%u page=%u/%u sel=%u range=[%u,%u)",
              header_title.c_str(), (unsigned)buttons.size(),
@@ -203,24 +205,24 @@ void PagedListMenu::Draw() {
   char label[32];
   u16 total_pages = page_sizes.empty() ? GetPageCount() : (u16)page_sizes.size();
   snprintf(label, sizeof(label), "Pg %d/%d", GetCurrentPage(), total_pages);
-  app->ts->SetPen(6, 282);
-  app->ts->PrintString(label);
+  ts->SetPen(6, 282);
+  ts->PrintString(label);
 
   LayoutFooterButtons();
   if (page > 0)
-    app->buttonprev.Draw();
-  app->buttonprefs.Draw();
+    buttonprev->Draw();
+  buttonprefs->Draw();
   if (page < GetPageCount() - 1)
-    app->buttonnext.Draw();
+    buttonnext->Draw();
 
-  app->ts->SetColorMode(savedColorMode);
+  ts->SetColorMode(savedColorMode);
   dirty = false;
 #ifdef DSLIBRIS_DEBUG
   static int s_list_draw_end_budget = 24;
-  if (app && s_list_draw_end_budget > 0) {
-    const u16 after0 = app->ts->screenright[0];
+  if (s_list_draw_end_budget > 0) {
+    const u16 after0 = ts->screenright[0];
     const u16 after1 =
-        app->ts->screenright[(size_t)10 * (size_t)app->ts->display.height + 10];
+        ts->screenright[(size_t)10 * (size_t)ts->display.height + 10];
     DBG_LOGF(app,
              "LIST draw end title=%s dirty=%d page=%u sel=%u after0=%04x after1=%04x",
              header_title.c_str(), dirty ? 1 : 0, (unsigned)GetCurrentPage(),
@@ -377,46 +379,38 @@ void PagedListMenu::PreviousPage() {
 }
 
 void PagedListMenu::ActivateSelected() {
-  Book *book = app ? app->GetCurrentBook() : NULL;
+  Book *book = current_book_;
   if (!book || buttons.empty() || selected >= target_pages.size()) {
-    if (app) {
-      DBG_LOGF(app,
-               "LIST activate skipped title=%s book=%p buttons=%u sel=%u targets=%u",
-               header_title.c_str(), (void *)book, (unsigned)buttons.size(),
-               (unsigned)selected, (unsigned)target_pages.size());
-    }
+    DBG_LOGF(app,
+             "LIST activate skipped title=%s book=%p buttons=%u sel=%u targets=%u",
+             header_title.c_str(), (void *)book, (unsigned)buttons.size(),
+             (unsigned)selected, (unsigned)target_pages.size());
     return;
   }
 
   u16 target_page = target_pages[selected];
   const bool resolved = ResolveTargetPage(selected, &target_page);
   if (!resolved) {
-    if (app) {
-      DBG_LOGF(app, "LIST resolve failed title=%s sel=%u targets=%u",
-               header_title.c_str(), (unsigned)selected,
-               (unsigned)target_pages.size());
-    }
+    DBG_LOGF(app, "LIST resolve failed title=%s sel=%u targets=%u",
+             header_title.c_str(), (unsigned)selected,
+             (unsigned)target_pages.size());
     return;
   }
 
-  if (app) {
-    DBG_LOGF(app, "LIST activate title=%s sel=%u target=%u cur=%u",
-             header_title.c_str(), (unsigned)selected, (unsigned)target_page,
-             (unsigned)book->GetPosition());
-  }
+  DBG_LOGF(app, "LIST activate title=%s sel=%u target=%u cur=%u",
+           header_title.c_str(), (unsigned)selected, (unsigned)target_page,
+           (unsigned)book->GetPosition());
   const u16 page_count = book->GetPageCount();
   if (page_count == 0)
     return;
   const u16 unclamped_target = target_page;
   target_page = ClampPageTarget(target_page, page_count);
-  if (app) {
-    DBG_LOGF(app, "LIST target title=%s raw=%u clamped=%u page_count=%u",
-             header_title.c_str(), (unsigned)unclamped_target,
-             (unsigned)target_page, (unsigned)page_count);
-  }
+  DBG_LOGF(app, "LIST target title=%s raw=%u clamped=%u page_count=%u",
+           header_title.c_str(), (unsigned)unclamped_target,
+           (unsigned)target_page, (unsigned)page_count);
   book->SetPosition(target_page);
   app->ShowCurrentBookView();
-  book_renderer::DrawCurrentView(book, app->ts.get());
+  book_renderer::DrawCurrentView(book, ts);
   app->RequestStatusRedraw();
 }
 
@@ -477,21 +471,16 @@ void PagedListMenu::SelectItem(u16 index) {
 }
 
 void PagedListMenu::Back() {
-#ifdef DSLIBRIS_DEBUG
-  if (app) {
-    DBG_LOGF(app, "LIST back title=%s from_book_ctx=%d", header_title.c_str(),
-             app->IsBookSettingsContext() ? 1 : 0);
-  }
-#endif
+  DBG_LOGF(app, "LIST back title=%s from_book_ctx=%d", header_title.c_str(),
+           app->IsBookSettingsContext() ? 1 : 0);
   if (app->IsBookSettingsContext()) {
     app->ShowSettingsView(true);
     return;
   }
 
-  Book *book = app ? app->GetCurrentBook() : NULL;
   app->ShowCurrentBookView();
-  if (book) {
-    book_renderer::DrawCurrentView(book, app->ts.get());
+  if (current_book_) {
+    book_renderer::DrawCurrentView(current_book_, ts);
   }
   app->RequestStatusRedraw();
 }
@@ -502,12 +491,8 @@ void PagedListMenu::HandleTouchInput() {
   LayoutFooterButtons();
   TouchCandidates candidates;
   touch::BuildCandidates(app->TouchRead(), &candidates);
-#ifdef DSLIBRIS_DEBUG
-  if (app) {
-    DBG_LOGF(app, "LIST touch title=%s c0=(%d,%d)", header_title.c_str(),
-             candidates.points[0].x, candidates.points[0].y);
-  }
-#endif
+  DBG_LOGF(app, "LIST touch title=%s c0=(%d,%d)", header_title.c_str(),
+           candidates.points[0].x, candidates.points[0].y);
 
   int footerX = -1;
   touch::FirstXInBottomBand(candidates, 284, &footerX);
@@ -526,30 +511,18 @@ void PagedListMenu::HandleTouchInput() {
     }
   }
 
-  if (touch::HitsButton(candidates, &app->buttonprefs, 4)) {
-#ifdef DSLIBRIS_DEBUG
-    if (app) {
-      DBG_LOGF(app, "LIST touch footer=back title=%s", header_title.c_str());
-    }
-#endif
+  if (touch::HitsButton(candidates, buttonprefs, 4)) {
+    DBG_LOGF(app, "LIST touch footer=back title=%s", header_title.c_str());
     Back();
     return;
   }
-  if (touch::HitsButton(candidates, &app->buttonnext, 4)) {
-#ifdef DSLIBRIS_DEBUG
-    if (app) {
-      DBG_LOGF(app, "LIST touch footer=next title=%s", header_title.c_str());
-    }
-#endif
+  if (touch::HitsButton(candidates, buttonnext, 4)) {
+    DBG_LOGF(app, "LIST touch footer=next title=%s", header_title.c_str());
     NextPage();
     return;
   }
-  if (touch::HitsButton(candidates, &app->buttonprev, 4)) {
-#ifdef DSLIBRIS_DEBUG
-    if (app) {
-      DBG_LOGF(app, "LIST touch footer=prev title=%s", header_title.c_str());
-    }
-#endif
+  if (touch::HitsButton(candidates, buttonprev, 4)) {
+    DBG_LOGF(app, "LIST touch footer=prev title=%s", header_title.c_str());
     PreviousPage();
     return;
   }
@@ -561,12 +534,8 @@ void PagedListMenu::HandleTouchInput() {
     } else {
       NextPage();
     }
-#ifdef DSLIBRIS_DEBUG
-    if (app) {
-      DBG_LOGF(app, "LIST touch footer-band title=%s x=%d", header_title.c_str(),
-               footerX);
-    }
-#endif
+  DBG_LOGF(app, "LIST touch footer-band title=%s x=%d", header_title.c_str(),
+           footerX);
     return;
   }
 
@@ -575,19 +544,11 @@ void PagedListMenu::HandleTouchInput() {
   for (u16 i = start; i < end; i++) {
     if (touch::HitsButton(candidates, buttons[i], 4)) {
       selected = i;
-#ifdef DSLIBRIS_DEBUG
-      if (app) {
-        DBG_LOGF(app, "LIST touch button-hit title=%s sel=%u",
-                 header_title.c_str(), (unsigned)selected);
-      }
-#endif
+      DBG_LOGF(app, "LIST touch button-hit title=%s sel=%u",
+               header_title.c_str(), (unsigned)selected);
       ActivateSelected();
       return;
     }
   }
-#ifdef DSLIBRIS_DEBUG
-  if (app) {
-    DBG_LOGF(app, "LIST touch no-hit title=%s", header_title.c_str());
-  }
-#endif
+  DBG_LOGF(app, "LIST touch no-hit title=%s", header_title.c_str());
 }

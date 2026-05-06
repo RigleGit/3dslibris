@@ -14,8 +14,8 @@
 
 #include <stdio.h>
 
-#include "app/app.h"
 #include "book/book.h"
+#include "ui/text.h"
 #include "book/page.h"
 #include "shared/text_token_constants.h"
 #include "shared/text_unicode_utils.h"
@@ -240,9 +240,9 @@ BookmarkMenu::BookmarkMenu(App *_app) : PagedListMenu(_app, "bookmarks") {}
 
 BookmarkMenu::~BookmarkMenu() {}
 
-void BookmarkMenu::BuildEntries(std::vector<std::string> &labels,
+void BookmarkMenu::BuildEntries(Book *book, Text *text,
+                                std::vector<std::string> &labels,
                                 std::vector<u16> &pages) {
-  Book *book = app ? app->GetCurrentBook() : NULL;
   if (!book)
     return;
 
@@ -264,7 +264,7 @@ void BookmarkMenu::BuildEntries(std::vector<std::string> &labels,
       std::string preview = ExtractPagePreview(page, kPreviewChars);
       if (!preview.empty()) {
         std::vector<std::string> lines = WrapTextToLines(
-            app->ts.get(), preview, kPreviewWidth, kMaxPreviewLines);
+            text, preview, kPreviewWidth, kMaxPreviewLines);
         for (const auto &line : lines) {
           full_label += "\n" + line;
         }

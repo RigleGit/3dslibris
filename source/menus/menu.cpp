@@ -15,6 +15,11 @@
 
 Menu::Menu(App *_app) {
     app = _app ? _app : App::GetInstance();
+    ts = app ? app->ts.get() : nullptr;
+    buttonprev = app ? &app->buttonprev : nullptr;
+    buttonnext = app ? &app->buttonnext : nullptr;
+    buttonprefs = app ? &app->buttonprefs : nullptr;
+    color_mode = app ? &app->colorMode : nullptr;
     buttons.clear();
     pagesize = 7;
     selected = 0;

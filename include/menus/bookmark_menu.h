@@ -22,6 +22,7 @@ public:
   ~BookmarkMenu();
 
 private:
-  void BuildEntries(std::vector<std::string> &labels,
+  void BuildEntries(class Book *book, class Text *text,
+                    std::vector<std::string> &labels,
                     std::vector<u16> &pages) override;
 };

@@ -24,6 +24,7 @@
 #include "shared/debug_log.h"
 #include "ui/button.h"
 #include "ui/font_constants.h"
+#include "ui/gradient_utils.h"
 #include "settings/font_config_utils.h"
 #include "settings/prefs.h"
 #include "shared/bugfix_utils.h"
@@ -111,24 +112,25 @@ static u8 TargetFromMode(AppMode mode) {
   }
 }
 
-static void LayoutFileFooterButtons(App *app) {
-  app->buttonprev.Move(6, 292);
-  app->buttonprev.Resize(68, 22);
-  app->buttonprev.Label("prev");
+static void LayoutFileFooterButtons(Button *buttonprev, Button *buttonnext,
+                                     Button *buttonprefs) {
+  buttonprev->Move(6, 292);
+  buttonprev->Resize(68, 22);
+  buttonprev->Label("prev");
 
-  app->buttonprefs.Move(86, 292);
-  app->buttonprefs.Resize(68, 22);
-  app->buttonprefs.Label("back");
+  buttonprefs->Move(86, 292);
+  buttonprefs->Resize(68, 22);
+  buttonprefs->Label("back");
 
-  app->buttonnext.Move(166, 292);
-  app->buttonnext.Resize(68, 22);
-  app->buttonnext.Label("next");
+  buttonnext->Move(166, 292);
+  buttonnext->Resize(68, 22);
+  buttonnext->Label("next");
 }
 
-static void LayoutTargetFooterButtons(App *app) {
-  app->buttonprefs.Move(86, 292);
-  app->buttonprefs.Resize(68, 22);
-  app->buttonprefs.Label("back");
+static void LayoutTargetFooterButtons(Button *buttonprefs) {
+  buttonprefs->Move(86, 292);
+  buttonprefs->Resize(68, 22);
+  buttonprefs->Label("back");
 }
 
 } // namespace
@@ -146,16 +148,15 @@ FontMenu::FontMenu(App *_app)
             });
 
   for (auto &filename : files) {
-    Button *b = new Button(app->ts.get());
+    Button *b = new Button(ts);
     b->Init();
     b->Move(5, 24);
 
-    std::vector<std::string> lines = WrapTextToLines(
-        app->ts.get(), filename, 220, 2);
+    std::vector<std::string> lines = WrapTextToLines(ts, filename, 220, 2);
     if (lines.size() > 0) b->SetLabel1(lines[0]);
     if (lines.size() > 1) b->SetLabel2(lines[1]);
 
-    int line_height = app->ts->GetHeight();
+    int line_height = ts->GetHeight();
     if (line_height < 10)
       line_height = 10;
     int button_height = 34;
@@ -167,7 +168,7 @@ FontMenu::FontMenu(App *_app)
   }
 
   for (u8 i = 0; i < font_config_utils::FONT_TARGET_COUNT; i++) {
-    Button *b = new Button(app->ts.get());
+    Button *b = new Button(ts);
     b->Init();
     b->SetStyle(BUTTON_STYLE_SETTING);
     b->Move(5, 24 + (i % kTargetsPerPage) * 38);
@@ -241,11 +242,11 @@ void FontMenu::refreshTargetButtons() {
        i++) {
     if (font_config_utils::IsFallbackTarget(i)) {
       int fb_idx = font_config_utils::FallbackIndexFromTarget(i);
-      std::string fb_file = app->ts->fm->GetFallbackFile(fb_idx);
+      std::string fb_file = ts->fm->GetFallbackFile(fb_idx);
       targetButtons[i]->SetLabel2(fb_file.empty() ? "(none)" : BasenameOnly(fb_file));
     } else {
       u8 style = font_config_utils::StyleFromTarget(i);
-      std::string current = app->ts->GetFontFile(style);
+      std::string current = ts->GetFontFile(style);
       if (current.empty())
         current = font_config_utils::DefaultFontForStyle(style);
       targetButtons[i]->SetLabel2(BasenameOnly(current));
@@ -285,7 +286,7 @@ void FontMenu::enterFileView() {
   }
 
   u8 style = font_config_utils::StyleFromTarget(targetSelected);
-  std::string current = app->ts->GetFontFile(style);
+  std::string current = ts->GetFontFile(style);
   if (current.empty())
     current = font_config_utils::DefaultFontForStyle(style);
 
@@ -363,22 +364,22 @@ void FontMenu::handleFileInput(u32 keys) {
 }
 
 void FontMenu::handleTargetTouchInput() {
-  LayoutTargetFooterButtons(app);
+  LayoutTargetFooterButtons(buttonprefs);
   TouchCandidates candidates;
   touch::BuildCandidates(app->TouchRead(), &candidates);
 
   if (targetPage + 1 < getTargetPageCount() &&
-      touch::HitsButton(candidates, &app->buttonnext, 4)) {
+      touch::HitsButton(candidates, buttonnext, 4)) {
     nextTargetPage();
     return;
   }
 
-  if (targetPage > 0 && touch::HitsButton(candidates, &app->buttonprev, 4)) {
+  if (targetPage > 0 && touch::HitsButton(candidates, buttonprev, 4)) {
     previousTargetPage();
     return;
   }
 
-  if (touch::HitsButton(candidates, &app->buttonprefs, 4)) {
+  if (touch::HitsButton(candidates, buttonprefs, 4)) {
     app->ShowSettingsView(app->IsBookSettingsContext());
     return;
   }
@@ -415,7 +416,7 @@ void FontMenu::handleTargetTouchInput() {
 }
 
 void FontMenu::handleFileTouchInput() {
-  LayoutFileFooterButtons(app);
+  LayoutFileFooterButtons(buttonprev, buttonnext, buttonprefs);
   TouchCandidates candidates;
   touch::BuildCandidates(app->TouchRead(), &candidates);
 
@@ -431,18 +432,18 @@ void FontMenu::handleFileTouchInput() {
     }
   }
 
-  if (touch::HitsButton(candidates, &app->buttonprefs, 4)) {
+  if (touch::HitsButton(candidates, buttonprefs, 4)) {
     enterTargetView(targetSelected);
     return;
   }
 
   if (page < GetPageCount() - 1 &&
-      touch::HitsButton(candidates, &app->buttonnext, 4)) {
+      touch::HitsButton(candidates, buttonnext, 4)) {
     nextPage();
     return;
   }
 
-  if (page > 0 && touch::HitsButton(candidates, &app->buttonprev, 4)) {
+  if (page > 0 && touch::HitsButton(candidates, buttonprev, 4)) {
     previousPage();
     return;
   }
@@ -474,9 +475,9 @@ void FontMenu::handleFileTouchInput() {
 void FontMenu::draw() {
 #ifdef DSLIBRIS_DEBUG
   static int s_font_draw_budget = 24;
-  if (app && s_font_draw_budget > 0) {
-    const u16 before0 = app->ts->screenright[0];
-    const u16 before1 = app->ts->screenright[(size_t)10 * (size_t)app->ts->display.height + 10];
+  if (s_font_draw_budget > 0) {
+    const u16 before0 = ts->screenright[0];
+    const u16 before1 = ts->screenright[(size_t)10 * (size_t)ts->display.height + 10];
     DBG_LOGF(app,
              "FONT draw begin view=%d target=%u sel=%u page=%u dirty=%d app=%p before0=%04x before1=%04x",
              (int)viewState, (unsigned)targetSelected, (unsigned)selected,
@@ -485,14 +486,15 @@ void FontMenu::draw() {
     s_font_draw_budget--;
   }
 #endif
-  app->ts->SetScreen(app->ts->screenright);
-  app->ts->ClearScreen();
-  app->DrawBottomGradientBackground();
+  ts->SetScreen(ts->screenright);
+  ts->ClearScreen();
+  gradient_utils::DrawToScreen(ts, color_mode ? (int)*color_mode : 0,
+                               ts->screenright, 320);
 
   if (viewState == VIEW_TARGETS) {
-    LayoutTargetFooterButtons(app);
-    app->ts->SetPen(6, 14);
-    app->ts->PrintString("font configuration");
+    LayoutTargetFooterButtons(buttonprefs);
+    ts->SetPen(6, 14);
+    ts->PrintString("font configuration");
 
     const u8 start = getTargetPageStart();
     const u8 end = getTargetPageEnd();
@@ -504,21 +506,21 @@ void FontMenu::draw() {
     char pageLabel[24];
     snprintf(pageLabel, sizeof(pageLabel), "Pg %d/%d", getTargetCurrentPage(),
              getTargetPageCount());
-    app->ts->SetPen(6, 282);
-    app->ts->PrintString(pageLabel);
+    ts->SetPen(6, 282);
+    ts->PrintString(pageLabel);
 
     if (targetPage > 0)
-      app->buttonprev.Draw();
-    app->buttonprefs.Draw();
+      buttonprev->Draw();
+    buttonprefs->Draw();
     if (targetPage + 1 < getTargetPageCount())
-      app->buttonnext.Draw();
+      buttonnext->Draw();
     dirty = false;
 #ifdef DSLIBRIS_DEBUG
     static int s_font_draw_end_budget = 24;
-    if (app && s_font_draw_end_budget > 0) {
-      const u16 after0 = app->ts->screenright[0];
+    if (s_font_draw_end_budget > 0) {
+      const u16 after0 = ts->screenright[0];
       const u16 after1 =
-          app->ts->screenright[(size_t)10 * (size_t)app->ts->display.height + 10];
+          ts->screenright[(size_t)10 * (size_t)ts->display.height + 10];
       DBG_LOGF(app,
                "FONT draw end view=targets dirty=%d after0=%04x after1=%04x",
                dirty ? 1 : 0, (unsigned)after0, (unsigned)after1);
@@ -528,12 +530,12 @@ void FontMenu::draw() {
     return;
   }
 
-  LayoutFileFooterButtons(app);
-  app->ts->SetPen(6, 14);
+  LayoutFileFooterButtons(buttonprev, buttonnext, buttonprefs);
+  ts->SetPen(6, 14);
   char header[72];
   snprintf(header, sizeof(header), "select %s",
            font_config_utils::GetFontTargetLabel(targetSelected));
-  app->ts->PrintString(header);
+  ts->PrintString(header);
 
   LayoutFileButtons();
   for (u8 i = page * pagesize;
@@ -544,21 +546,21 @@ void FontMenu::draw() {
   char pageLabel[24];
   snprintf(pageLabel, sizeof(pageLabel), "Pg %d/%d", GetCurrentPage(),
            GetPageCount());
-  app->ts->SetPen(6, 282);
-  app->ts->PrintString(pageLabel);
+  ts->SetPen(6, 282);
+  ts->PrintString(pageLabel);
 
   if (page > 0)
-    app->buttonprev.Draw();
-  app->buttonprefs.Draw();
+    buttonprev->Draw();
+  buttonprefs->Draw();
   if (page < GetPageCount() - 1)
-    app->buttonnext.Draw();
+    buttonnext->Draw();
   dirty = false;
 #ifdef DSLIBRIS_DEBUG
   static int s_font_draw_end_budget2 = 24;
-  if (app && s_font_draw_end_budget2 > 0) {
-    const u16 after0 = app->ts->screenright[0];
+  if (s_font_draw_end_budget2 > 0) {
+    const u16 after0 = ts->screenright[0];
     const u16 after1 =
-        app->ts->screenright[(size_t)10 * (size_t)app->ts->display.height + 10];
+        ts->screenright[(size_t)10 * (size_t)ts->display.height + 10];
     DBG_LOGF(app, "FONT draw end view=files dirty=%d after0=%04x after1=%04x",
              dirty ? 1 : 0, (unsigned)after0, (unsigned)after1);
     s_font_draw_end_budget2--;
@@ -678,7 +680,7 @@ void FontMenu::handleButtonPress() {
 
   if (font_config_utils::IsFallbackTarget(targetSelected)) {
     int fb_idx = font_config_utils::FallbackIndexFromTarget(targetSelected);
-    if (app->ts->fm->SetFallbackFile(fb_idx, filename)) {
+    if (ts->fm->SetFallbackFile(fb_idx, filename)) {
       char msg[64];
       snprintf(msg, sizeof(msg), "fallback %d: %s", fb_idx + 1, BasenameOnly(filename).c_str());
       app->PrintStatus(msg);
@@ -686,16 +688,16 @@ void FontMenu::handleButtonPress() {
       const int write_rc = app->prefs->Write();
 #ifdef DSLIBRIS_DEBUG
       DBG_LOGF(app, "FONT prefs write rc=%d fallback=%d file=%s", write_rc,
-               fb_idx + 1, app->ts->fm->GetFallbackFile(fb_idx).c_str());
+               fb_idx + 1, ts->fm->GetFallbackFile(fb_idx).c_str());
 #endif
     } else {
       app->PrintStatus("error loading fallback font");
     }
   } else {
     const u8 style = font_config_utils::StyleFromTarget(targetSelected);
-    const std::string previous = app->ts->GetFontFile(style);
-    app->ts->SetFontFile(filename, style);
-    const std::string current = app->ts->GetFontFile(style);
+    const std::string previous = ts->GetFontFile(style);
+    ts->SetFontFile(filename, style);
+    const std::string current = ts->GetFontFile(style);
     if (current != std::string(filename)) {
       app->PrintStatus("error loading font");
 #ifdef DSLIBRIS_DEBUG

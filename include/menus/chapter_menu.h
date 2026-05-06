@@ -20,7 +20,8 @@ public:
   ~ChapterMenu();
 
 private:
-  void BuildEntries(std::vector<std::string> &labels,
+  void BuildEntries(class Book *book, class Text *text,
+                    std::vector<std::string> &labels,
                     std::vector<u16> &pages) override;
   bool ResolveTargetPage(u16 index, u16 *page_out) override;
 

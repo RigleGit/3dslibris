@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+class Book;
+
 class PagedListMenu : public Menu {
 public:
   PagedListMenu(class App *app, const char *header_title);
@@ -35,9 +37,12 @@ public:
 
 protected:
   inline void SetHeaderTitle(const std::string &title) { header_title = title; }
-  virtual void BuildEntries(std::vector<std::string> &labels,
+  virtual void BuildEntries(Book *book, class Text *text,
+                            std::vector<std::string> &labels,
                             std::vector<u16> &pages) = 0;
   virtual bool ResolveTargetPage(u16 index, u16 *page_out);
+
+  Book *current_book_;
 
   u16 GetPageStart(u16 page_index) const;
   u16 GetPageSize(u16 page_index) const;

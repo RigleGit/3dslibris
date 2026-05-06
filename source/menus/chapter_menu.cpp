@@ -510,9 +510,9 @@ ChapterMenu::ChapterMenu(App *_app) : PagedListMenu(_app, "index") {}
 
 ChapterMenu::~ChapterMenu() {}
 
-void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
+void ChapterMenu::BuildEntries(Book *book, Text *text,
+                               std::vector<std::string> &labels,
                                std::vector<u16> &pages) {
-  Book *book = app ? app->GetCurrentBook() : NULL;
   if (!book)
     return;
 
@@ -523,11 +523,9 @@ void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
   SetHeaderTitle(TocQualityLabel(book->GetTocQuality()));
 
   const std::vector<ChapterEntry> &chapters = book->GetChapters();
-  if (app) {
-    DBG_LOGF(app, "INDEX build fmt=%d tocq=%d entries=%u pages=%u",
-             (int)book->format, (int)book->GetTocQuality(),
-             (unsigned)chapters.size(), (unsigned)book->GetPageCount());
-  }
+  DBG_LOGF(app, "INDEX build fmt=%d tocq=%d entries=%u pages=%u",
+           (int)book->format, (int)book->GetTocQuality(),
+           (unsigned)chapters.size(), (unsigned)book->GetPageCount());
   labels.reserve(chapters.size());
   pages.reserve(chapters.size());
   entry_titles.reserve(chapters.size());
@@ -540,7 +538,7 @@ void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
     if (text_width < 60)
       text_width = 60;
     std::vector<std::string> lines =
-        WrapTextToLines(app->ts.get(), ch.title, text_width, 3);
+        WrapTextToLines(text, ch.title, text_width, 3);
     std::string label;
     for (size_t i = 0; i < lines.size(); i++) {
       if (i > 0)
@@ -557,31 +555,24 @@ void ChapterMenu::BuildEntries(std::vector<std::string> &labels,
 
 bool ChapterMenu::ResolveTargetPage(u16 index, u16 *page_out) {
   if (!PagedListMenu::ResolveTargetPage(index, page_out)) {
-    if (app) {
-      DBG_LOGF(app, "INDEX resolve base failed idx=%u", (unsigned)index);
-    }
+    DBG_LOGF(app, "INDEX resolve base failed idx=%u", (unsigned)index);
     return false;
   }
-  Book *book = app ? app->GetCurrentBook() : NULL;
+  Book *book = current_book_;
   if (!book)
     return true;
   if (index >= entry_titles.size() || index >= entry_pages.size() ||
       index >= approx_page_cache.size()) {
-    if (app) {
-      DBG_LOGF(app,
-               "INDEX resolve bounds idx=%u titles=%u pages=%u approx=%u",
-               (unsigned)index, (unsigned)entry_titles.size(),
-               (unsigned)entry_pages.size(), (unsigned)approx_page_cache.size());
-    }
+    DBG_LOGF(app, "INDEX resolve bounds idx=%u titles=%u pages=%u approx=%u",
+             (unsigned)index, (unsigned)entry_titles.size(),
+             (unsigned)entry_pages.size(), (unsigned)approx_page_cache.size());
     return true;
   }
 
   TocQuality q = book->GetTocQuality();
   if (q == TOC_QUALITY_UNKNOWN) {
-    if (app) {
-      DBG_LOGF(app, "INDEX resolve toc unknown idx=%u page=%u", (unsigned)index,
-               (unsigned)*page_out);
-    }
+    DBG_LOGF(app, "INDEX resolve toc unknown idx=%u page=%u", (unsigned)index,
+             (unsigned)*page_out);
     return true;
   }
 

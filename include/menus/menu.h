@@ -26,6 +26,11 @@ public:
   virtual void SelectItem(u16 index);
 
   class App *app; //! Pointer to the application instance.
+  class Text *ts;              //! Shorthand for app->ts.get(); valid after construction.
+  class Button *buttonprev;    //! Pointer into app->buttonprev.
+  class Button *buttonnext;    //! Pointer into app->buttonnext.
+  class Button *buttonprefs;   //! Pointer into app->buttonprefs.
+  const u8 *color_mode;        //! Pointer into app->colorMode.
   std::vector<class Button *> buttons;
   bool dirty;
   u16 page;
