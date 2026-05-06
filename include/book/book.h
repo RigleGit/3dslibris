@@ -313,27 +313,15 @@ public:
   void SetTitle(const char *title);
   Page *AppendPage();
   void ReservePageCapacity(size_t incoming_pages);
-  void DrawCurrentView(Text *ts);
   void DrawCurrentMuPdfView(Text *ts);
   void DrawCurrentCbzView(Text *ts);
   void PrepareForOpen();
-  u8 OpenPrepared();
   void InitMuPdfView(u16 page_count, fz_context *ctx, fz_document *doc,
                      fz_outline *outline, bool is_new_3ds,
                      app_flow_utils::MuPdfDocumentKind document_kind);
   void InitCbzView(const std::string &archive_path,
                    const std::vector<CbzPageEntry> &entries,
                    bool is_new_3ds);
-  void SetFixedLayoutViewportInteraction(bool active);
-  void ResetFixedLayoutViewportForNavigation();
-  bool ChangeFixedLayoutZoom(int delta);
-  bool MoveFixedLayoutViewportToPreview(int touch_x, int touch_y);
-  bool TranslateFixedLayoutViewport(float dx, float dy);
-  bool JumpFixedLayoutChapter(int delta);
-  bool HasPendingFixedLayoutDeferredWork() const;
-  u32 GetFixedLayoutDeferredDelayMs() const;
-  bool PumpDeferredFixedLayoutWork(u32 budget_ms);
-  void CancelFixedLayoutDeferredWork();
   void SuspendFixedLayoutWorkers();
   void ResumeFixedLayoutWorkers();
   void SetCbzViewportInteraction(bool active);
@@ -362,7 +350,6 @@ public:
   u8 Index();
   void IndexHTML();
   u8 Open();
-  u8 Parse(bool fulltext = true);
   int ParseHTML();
   bool SupportsAsyncReflowOpen() const;
   bool StartAsyncReflowOpen(unsigned int session_id = 0);

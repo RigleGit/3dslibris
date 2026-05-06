@@ -26,6 +26,7 @@
 #include <3ds.h>
 
 #include "book/book.h"
+#include "book/book_renderer.h"
 #include "menus/bookmark_menu.h"
 #include "ui/button.h"
 #include "menus/chapter_menu.h"
@@ -799,7 +800,7 @@ void App::PrepareForShutdown()
   if (opening_book)
   {
     opening_book->RequestAbortOpen();
-    opening_book->CancelFixedLayoutDeferredWork();
+    book_renderer::CancelFixedLayoutDeferredWork(opening_book);
     opening_book->CancelAsyncReflowOpen();
   }
 
@@ -1069,7 +1070,7 @@ void App::ShowLibraryView()
     bookcurrent_->FlushPendingCacheSaves();
     // Cancel any in-progress PDF/CBZ strip render so the worker thread is
     // idle before browser warmup jobs can start touching MuPDF lock state.
-    bookcurrent_->CancelFixedLayoutDeferredWork();
+    book_renderer::CancelFixedLayoutDeferredWork(bookcurrent_);
   }
 
   ResetBrowserMarquee();

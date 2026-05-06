@@ -26,6 +26,7 @@
 #include <3ds.h>
 
 #include "book/book.h"
+#include "book/book_renderer.h"
 #include "formats/common/book_error.h"
 #include "shared/app_flow_utils.h"
 #include "shared/debug_runtime_mode.h"
@@ -252,7 +253,7 @@ namespace
   {
     if (!book || !ts || book->GetPageCount() == 0)
       return;
-    book->DrawCurrentView(ts);
+    book_renderer::DrawCurrentView(book, ts);
   }
 
   void ResetBookRenderState(App *app, bool clear_glyph_cache,
@@ -275,11 +276,11 @@ namespace
     if (book->IsCbz())
       book->ResetCbzFailureState();
     if (book->IsFixedLayout())
-      book->CancelFixedLayoutDeferredWork();
+      book_renderer::CancelFixedLayoutDeferredWork(book);
     book->SetPosition(page);
     book->ClearFocusedInlineLink();
     if (book->IsFixedLayout())
-      book->ResetFixedLayoutViewportForNavigation();
+      book_renderer::ResetFixedLayoutViewportForNavigation(book);
     DrawBookPage(book, ts);
     return true;
   }
@@ -732,7 +733,7 @@ void ReaderController::OnAppletSuspendRequested()
   app_.SetPdfTouchLastY(-1);
   app_.SetPdfDeferredReadyAtMs(0);
   if (bookcurrent_)
-    bookcurrent_->SetFixedLayoutViewportInteraction(false);
+    book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, false);
   if (opening_book)
   {
     opening_book->RequestAbortOpen();
@@ -756,13 +757,13 @@ void ReaderController::OnAppletSuspended()
   app_.SetPdfDeferredReadyAtMs(0);
   if (bookcurrent_)
   {
-    bookcurrent_->SetFixedLayoutViewportInteraction(false);
-    bookcurrent_->CancelFixedLayoutDeferredWork();
+    book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, false);
+    book_renderer::CancelFixedLayoutDeferredWork(bookcurrent_);
     bookcurrent_->SuspendFixedLayoutWorkers();
   }
   if (!opening_book)
     return;
-  opening_book->CancelFixedLayoutDeferredWork();
+  book_renderer::CancelFixedLayoutDeferredWork(opening_book);
   if (reader_suspend_policy_utils::ShouldKeepOpeningDuringSuspend(
           true, opening_book->IsAsyncReflowOpenPending()))
   {
@@ -815,7 +816,7 @@ void ReaderController::OnAppletResumed()
   if (bookcurrent_->IsFixedLayout())
   {
     bookcurrent_->ResumeFixedLayoutWorkers();
-    const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
+    const u32 delay_ms = book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_);
     app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
   }
 }
@@ -1025,8 +1026,8 @@ void ReaderController::HandleEventInOpening()
   DrawBookPage(bookcurrent_, ts);
   if (bookcurrent_ && bookcurrent_->IsFixedLayout())
     app_.SetPdfDeferredReadyAtMs(
-        bookcurrent_->HasPendingFixedLayoutDeferredWork()
-            ? (osGetTime() + bookcurrent_->GetFixedLayoutDeferredDelayMs())
+        book_renderer::HasPendingFixedLayoutDeferredWork(bookcurrent_)
+            ? (osGetTime() + book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_))
             : 0);
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);
@@ -1086,12 +1087,12 @@ void ReaderController::HandleEventInBook()
   {
     const auto delay_fixed_layout_deferred = [&]()
     {
-      const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
+      const u32 delay_ms = book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_);
       app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
     };
     if (keys & zoom_in_keys)
     {
-      if (bookcurrent_->ChangeFixedLayoutZoom(1))
+      if (book_renderer::ChangeFixedLayoutZoom(bookcurrent_, 1))
       {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
@@ -1100,7 +1101,7 @@ void ReaderController::HandleEventInBook()
     }
     else if (keys & zoom_out_keys)
     {
-      if (bookcurrent_->ChangeFixedLayoutZoom(-1))
+      if (book_renderer::ChangeFixedLayoutZoom(bookcurrent_, -1))
       {
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
@@ -1147,9 +1148,9 @@ void ReaderController::HandleEventInBook()
     {
       if (!bookcurrent_->GetChapters().empty())
       {
-        if (bookcurrent_->JumpFixedLayoutChapter(1))
+        if (book_renderer::JumpFixedLayoutChapter(bookcurrent_, 1))
         {
-          bookcurrent_->ResetFixedLayoutViewportForNavigation();
+          book_renderer::ResetFixedLayoutViewportForNavigation(bookcurrent_);
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
           delay_fixed_layout_deferred();
@@ -1165,9 +1166,9 @@ void ReaderController::HandleEventInBook()
     {
       if (!bookcurrent_->GetChapters().empty())
       {
-        if (bookcurrent_->JumpFixedLayoutChapter(-1))
+        if (book_renderer::JumpFixedLayoutChapter(bookcurrent_, -1))
         {
-          bookcurrent_->ResetFixedLayoutViewportForNavigation();
+          book_renderer::ResetFixedLayoutViewportForNavigation(bookcurrent_);
           DrawBookPage(bookcurrent_, ts);
           status_dirty = true;
           delay_fixed_layout_deferred();
@@ -1183,10 +1184,10 @@ void ReaderController::HandleEventInBook()
     {
       touchPosition mapped = touch_read();
       app_.SetPdfTouchDragActive(true);
-      bookcurrent_->SetFixedLayoutViewportInteraction(true);
+      book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, true);
       app_.SetPdfTouchLastX((int)mapped.px);
       app_.SetPdfTouchLastY((int)mapped.py);
-      if (bookcurrent_->MoveFixedLayoutViewportToPreview((int)mapped.px,
+      if (book_renderer::MoveFixedLayoutViewportToPreview(bookcurrent_, (int)mapped.px,
                                                          (int)mapped.py))
       {
         DrawBookPage(bookcurrent_, ts);
@@ -1203,10 +1204,10 @@ void ReaderController::HandleEventInBook()
               (int)mapped.py, kPdfTouchRerenderDelta))
       {
         app_.SetPdfTouchDragActive(true);
-        bookcurrent_->SetFixedLayoutViewportInteraction(true);
+        book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, true);
         app_.SetPdfTouchLastX((int)mapped.px);
         app_.SetPdfTouchLastY((int)mapped.py);
-        if (bookcurrent_->MoveFixedLayoutViewportToPreview((int)mapped.px,
+        if (book_renderer::MoveFixedLayoutViewportToPreview(bookcurrent_, (int)mapped.px,
                                                            (int)mapped.py))
         {
           // DrawCurrentView now uses the full-page zoom cache for viewport
@@ -1232,12 +1233,12 @@ void ReaderController::HandleEventInBook()
     {
       if (app_.IsPdfTouchDragActive())
       {
-        bookcurrent_->SetFixedLayoutViewportInteraction(false);
+        book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, false);
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_fixed_layout_deferred();
       }
-      bookcurrent_->SetFixedLayoutViewportInteraction(false);
+      book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, false);
       app_.SetPdfTouchDragActive(false);
       app_.SetPdfTouchLastX(-1);
       app_.SetPdfTouchLastY(-1);
@@ -1278,9 +1279,9 @@ void ReaderController::HandleEventInBook()
                                         &viewport_dy);
 
       if (stick_active &&
-          bookcurrent_->TranslateFixedLayoutViewport(viewport_dx, viewport_dy))
+          book_renderer::TranslateFixedLayoutViewport(bookcurrent_, viewport_dx, viewport_dy))
       {
-        bookcurrent_->SetFixedLayoutViewportInteraction(true);
+        book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, true);
         DrawBookPage(bookcurrent_, ts);
         status_dirty = true;
         delay_fixed_layout_deferred();
@@ -1292,12 +1293,12 @@ void ReaderController::HandleEventInBook()
       request_status_redraw();
     }
     else if (!(held & KEY_TOUCH) && keys == 0 &&
-             bookcurrent_->HasPendingFixedLayoutDeferredWork() &&
+             book_renderer::HasPendingFixedLayoutDeferredWork(bookcurrent_) &&
              osGetTime() >= app_.GetPdfDeferredReadyAtMs())
     {
       const u32 budget_ms = 4;
-      const bool worked = bookcurrent_->PumpDeferredFixedLayoutWork(budget_ms);
-      const u32 delay_ms = bookcurrent_->GetFixedLayoutDeferredDelayMs();
+      const bool worked = book_renderer::PumpDeferredFixedLayoutWork(bookcurrent_, budget_ms);
+      const u32 delay_ms = book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_);
       app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
       if (worked)
       {
@@ -1500,7 +1501,7 @@ void ReaderController::ToggleBookmark()
 
   DrawBookPage(bookcurrent_, ts);
   const u32 delay_ms =
-      bookcurrent_ ? bookcurrent_->GetFixedLayoutDeferredDelayMs() : 0;
+      bookcurrent_ ? book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_) : 0;
   app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
   app_.RequestStatusRedraw();
 }
@@ -1735,8 +1736,8 @@ u8 ReaderController::OpenBook()
   DrawBookPage(bookcurrent_, ts);
   if (bookcurrent_ && bookcurrent_->IsFixedLayout())
     app_.SetPdfDeferredReadyAtMs(
-        bookcurrent_->HasPendingFixedLayoutDeferredWork()
-            ? (osGetTime() + bookcurrent_->GetFixedLayoutDeferredDelayMs())
+        book_renderer::HasPendingFixedLayoutDeferredWork(bookcurrent_)
+            ? (osGetTime() + book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_))
             : 0);
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);

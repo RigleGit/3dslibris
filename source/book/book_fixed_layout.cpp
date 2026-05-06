@@ -1,66 +1,9 @@
 #include "book/book.h"
 
-#include "book/book_renderer.h"
 #include "book/page.h"
 #include "formats/mupdf/mupdf_worker.h"
 #include "formats/cbz/cbz_worker.h"
 #include "shared/debug_log.h"
-
-void Book::DrawCurrentView(Text *ts) {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  book_renderer::DrawCurrentView(this, ts);
-}
-
-void Book::SetFixedLayoutViewportInteraction(bool active) {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  book_renderer::SetFixedLayoutViewportInteraction(this, active);
-}
-
-void Book::ResetFixedLayoutViewportForNavigation() {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  book_renderer::ResetFixedLayoutViewportForNavigation(this);
-}
-
-bool Book::ChangeFixedLayoutZoom(int delta) {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  return book_renderer::ChangeFixedLayoutZoom(this, delta);
-}
-
-bool Book::MoveFixedLayoutViewportToPreview(int touch_x, int touch_y) {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  return book_renderer::MoveFixedLayoutViewportToPreview(this, touch_x,
-                                                        touch_y);
-}
-
-bool Book::TranslateFixedLayoutViewport(float dx, float dy) {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  return book_renderer::TranslateFixedLayoutViewport(this, dx, dy);
-}
-
-bool Book::JumpFixedLayoutChapter(int delta) {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  return book_renderer::JumpFixedLayoutChapter(this, delta);
-}
-
-bool Book::HasPendingFixedLayoutDeferredWork() const {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  return book_renderer::HasPendingFixedLayoutDeferredWork(this);
-}
-
-u32 Book::GetFixedLayoutDeferredDelayMs() const {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  return book_renderer::GetFixedLayoutDeferredDelayMs(this);
-}
-
-bool Book::PumpDeferredFixedLayoutWork(u32 budget_ms) {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  return book_renderer::PumpDeferredFixedLayoutWork(this, budget_ms);
-}
-
-void Book::CancelFixedLayoutDeferredWork() {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  book_renderer::CancelFixedLayoutDeferredWork(this);
-}
 
 void Book::SuspendFixedLayoutWorkers() {
   // Stop background worker threads before the HOME menu takes over.

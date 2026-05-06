@@ -84,7 +84,7 @@ void ReflowWorkerThreadFunc(void *arg) {
                (unsigned long long)queue_ms,
                book->GetFileName() ? book->GetFileName() : "");
     }
-    w->job_result = book->OpenPrepared();
+    w->job_result = book_parser::OpenPrepared(book);
     w->finished_at_ms = osGetTime();
     if (book->GetStatusReporter()) {
       const u64 worker_ms =
@@ -114,11 +114,6 @@ void Book::PrepareForOpen() {
   tocResolved = false;
   ClearTocConfidence();
   ClearChapterAnchors();
-}
-
-u8 Book::OpenPrepared() {
-  // Transitional wrapper: kept during Book parser/renderer split.
-  return book_parser::OpenPrepared(this);
 }
 
 bool Book::SupportsAsyncReflowOpen() const {

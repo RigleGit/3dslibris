@@ -12,7 +12,7 @@
 
 u8 Book::Open() {
   PrepareForOpen();
-  return OpenPrepared();
+  return book_parser::OpenPrepared(this);
 }
 
 // Tries to populate title/author/coverImagePath from the disk cache without

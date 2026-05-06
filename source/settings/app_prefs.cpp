@@ -26,6 +26,7 @@
 
 #include "app/settings_controller.h"
 #include "book/book.h"
+#include "book/book_renderer.h"
 #include "library/browser_view_utils.h"
 #include "utf8proc.h"
 #include "ui/button.h"
@@ -330,16 +331,16 @@ bool SettingsController::ConfirmGoToPageSelection() {
       go_to_page_target_page_, book->GetPageCount());
 
   if (book->IsFixedLayout())
-    book->CancelFixedLayoutDeferredWork();
+    book_renderer::CancelFixedLayoutDeferredWork(book);
   book->SetPosition(target_page);
   if (book->IsFixedLayout())
-    book->ResetFixedLayoutViewportForNavigation();
+    book_renderer::ResetFixedLayoutViewportForNavigation(book);
 
   app_.ShowCurrentBookView();
-  book->DrawCurrentView(app_.ts.get());
+  book_renderer::DrawCurrentView(book, app_.ts.get());
   app_.SetPdfDeferredReadyAtMs(
-      (book->IsFixedLayout() && book->HasPendingFixedLayoutDeferredWork())
-          ? (osGetTime() + book->GetFixedLayoutDeferredDelayMs())
+      (book->IsFixedLayout() && book_renderer::HasPendingFixedLayoutDeferredWork(book))
+          ? (osGetTime() + book_renderer::GetFixedLayoutDeferredDelayMs(book))
           : 0);
   app_.RequestStatusRedraw();
   go_to_page_popup_open_ = false;
@@ -1063,7 +1064,7 @@ void SettingsController::PrefsHandlePress() {
     } else if (CurrentBookUsesReadingDirectionSlot(app)) {
       ToggleFixedLayoutReadingDirection(app->prefs.get());
       if (app->GetCurrentBook()) {
-        app->GetCurrentBook()->ResetFixedLayoutViewportForNavigation();
+        book_renderer::ResetFixedLayoutViewportForNavigation(app->GetCurrentBook());
         app->RequestStatusRedraw();
       }
       PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);

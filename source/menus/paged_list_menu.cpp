@@ -15,6 +15,7 @@
 
 #include "app/app.h"
 #include "book/book.h"
+#include "book/book_renderer.h"
 #include "ui/button.h"
 #include "shared/debug_log.h"
 #include "book/page.h"
@@ -415,7 +416,7 @@ void PagedListMenu::ActivateSelected() {
   }
   book->SetPosition(target_page);
   app->ShowCurrentBookView();
-  book->DrawCurrentView(app->ts.get());
+  book_renderer::DrawCurrentView(book, app->ts.get());
   app->RequestStatusRedraw();
 }
 
@@ -490,7 +491,7 @@ void PagedListMenu::Back() {
   Book *book = app ? app->GetCurrentBook() : NULL;
   app->ShowCurrentBookView();
   if (book) {
-    book->DrawCurrentView(app->ts.get());
+    book_renderer::DrawCurrentView(book, app->ts.get());
   }
   app->RequestStatusRedraw();
 }
