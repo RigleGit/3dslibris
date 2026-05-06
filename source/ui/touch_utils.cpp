@@ -12,8 +12,6 @@
 
 #include <3ds.h>
 
-#include "app/app.h"
-
 namespace {
 
 bool EnclosesWithSlack(Button *button, int x, int y, int slack) {
@@ -38,20 +36,13 @@ bool EnclosesWithSlack(Button *button, int x, int y, int slack) {
 
 namespace touch {
 
-void BuildCandidates(App *app, TouchCandidates *out) {
+void BuildCandidates(touchPosition mapped, TouchCandidates *out) {
   if (!out)
     return;
   for (int i = 0; i < TouchCandidates::kCount; i++) {
     out->points[i].x = -1;
     out->points[i].y = -1;
   }
-  if (!app)
-    return;
-
-  touchPosition mapped = app->TouchRead();
-
-  // Single source of truth: use the app-level mapped coordinate only.
-  // Multi-transform candidates can hit mirrored controls in turned modes.
   out->points[0] = {(int)mapped.px, (int)mapped.py};
 }
 

@@ -365,7 +365,7 @@ void FontMenu::handleFileInput(u32 keys) {
 void FontMenu::handleTargetTouchInput() {
   LayoutTargetFooterButtons(app);
   TouchCandidates candidates;
-  touch::BuildCandidates(app, &candidates);
+  touch::BuildCandidates(app->TouchRead(), &candidates);
 
   if (targetPage + 1 < getTargetPageCount() &&
       touch::HitsButton(candidates, &app->buttonnext, 4)) {
@@ -417,7 +417,7 @@ void FontMenu::handleTargetTouchInput() {
 void FontMenu::handleFileTouchInput() {
   LayoutFileFooterButtons(app);
   TouchCandidates candidates;
-  touch::BuildCandidates(app, &candidates);
+  touch::BuildCandidates(app->TouchRead(), &candidates);
 
   int footerX = -1;
   touch::FirstXInBottomBand(candidates, 284, &footerX);

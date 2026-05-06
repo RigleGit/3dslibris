@@ -501,7 +501,7 @@ void PagedListMenu::HandleTouchInput() {
     return;
   LayoutFooterButtons();
   TouchCandidates candidates;
-  touch::BuildCandidates(app, &candidates);
+  touch::BuildCandidates(app->TouchRead(), &candidates);
 #ifdef DSLIBRIS_DEBUG
   if (app) {
     DBG_LOGF(app, "LIST touch title=%s c0=(%d,%d)", header_title.c_str(),

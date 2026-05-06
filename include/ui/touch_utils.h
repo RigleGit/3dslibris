@@ -9,9 +9,9 @@
 
 #pragma once
 
-#include "ui/button.h"
+#include <3ds.h>
 
-class App;
+#include "ui/button.h"
 
 struct TouchPoint {
   int x;
@@ -25,7 +25,7 @@ struct TouchCandidates {
 
 namespace touch {
 
-void BuildCandidates(App *app, TouchCandidates *out);
+void BuildCandidates(touchPosition mapped, TouchCandidates *out);
 bool InScreenBounds(int x, int y);
 bool HitsButton(const TouchCandidates &candidates, Button *button, int slack);
 bool FirstXInBottomBand(const TouchCandidates &candidates, int y_min, int *x_out);
