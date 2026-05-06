@@ -3,14 +3,12 @@
 */
 
 #include "book/book.h"
+#include "book/book_parser.h"
 
 #include <sys/stat.h>
 
-#include "formats/cbz/cbz.h"
 #include "formats/common/book_error.h"
 #include "formats/common/book_meta_cache.h"
-#include "formats/epub/epub.h"
-#include "formats/pdf/pdf.h"
 
 u8 Book::Open() {
   PrepareForOpen();
@@ -73,16 +71,7 @@ u8 Book::Index() {
   }
 
   metadataIndexTried = true;
-  int err = 1;
-  if (format == FORMAT_EPUB) {
-    err = epub(this, path, true);
-  } else if (format == FORMAT_PDF) {
-    err = IndexPdfMetadata(this, path.c_str());
-  } else if (format == FORMAT_CBZ) {
-    err = IndexCbzMetadata(this, path.c_str());
-  } else {
-    err = 0;
-  }
+  int err = book_parser::IndexMetadata(this, path.c_str());
 
   if (err == BOOK_ERR_CANCELLED) {
     metadataIndexTried = false;
