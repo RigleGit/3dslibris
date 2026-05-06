@@ -10,11 +10,6 @@
 #include "formats/common/book_error.h"
 #include "formats/common/book_meta_cache.h"
 
-u8 Book::Open() {
-  PrepareForOpen();
-  return book_parser::OpenPrepared(this);
-}
-
 // Tries to populate title/author/coverImagePath from the disk cache without
 // opening the source file. Returns true on cache hit.
 bool Book::TryLoadMetadataFromCache() {

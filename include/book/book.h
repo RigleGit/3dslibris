@@ -349,7 +349,6 @@ public:
   void Close();
   u8 Index();
   void IndexHTML();
-  u8 Open();
   int ParseHTML();
   bool SupportsAsyncReflowOpen() const;
   bool StartAsyncReflowOpen(unsigned int session_id = 0);

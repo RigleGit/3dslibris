@@ -117,6 +117,13 @@ std::string BuildPath(Book *book) {
 
 namespace book_parser {
 
+uint8_t Open(Book *book) {
+  if (!book)
+    return 1;
+  book->PrepareForOpen();
+  return OpenPrepared(book);
+}
+
 uint8_t OpenPrepared(Book *book) {
   if (!book)
     return 1;

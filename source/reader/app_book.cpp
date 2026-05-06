@@ -26,6 +26,7 @@
 #include <3ds.h>
 
 #include "book/book.h"
+#include "book/book_parser.h"
 #include "book/book_renderer.h"
 #include "formats/common/book_error.h"
 #include "shared/app_flow_utils.h"
@@ -653,7 +654,7 @@ namespace
     DBG_LOG(app, "BOOK open path: synchronous");
     DBG_LOGF(app, "BOOK open begin session=%u book=%s", session_id,
              SafeBookName(selected));
-    if (int err = selected->Open())
+    if (int err = book_parser::Open(selected))
     {
       DBG_LOGF(app, "BOOK open fail session=%u rc=%d book=%s", session_id, err,
                SafeBookName(selected));
