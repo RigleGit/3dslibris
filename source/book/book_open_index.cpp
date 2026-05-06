@@ -3,11 +3,9 @@
 */
 
 #include "book/book.h"
-#include "book/book_parser.h"
 
 #include <sys/stat.h>
 
-#include "formats/common/book_error.h"
 #include "formats/common/book_meta_cache.h"
 
 // Tries to populate title/author/coverImagePath from the disk cache without
@@ -44,45 +42,3 @@ bool Book::TryLoadMetadataFromCache() {
   return true;
 }
 
-u8 Book::Index() {
-  if (metadataIndexTried)
-    return metadataIndexed ? 0 : 1;
-
-  // Fast path: disk cache hit.
-  if (TryLoadMetadataFromCache())
-    return 0;
-
-  // Cache miss: parse the source file.
-  std::string path;
-  path.append(GetFolderName());
-  path.append("/");
-  path.append(GetFileName());
-
-  struct stat st;
-  long long fsize = 0, fmtime = 0;
-  if (stat(path.c_str(), &st) == 0) {
-    fsize  = (long long)st.st_size;
-    fmtime = (long long)st.st_mtime;
-  }
-
-  metadataIndexTried = true;
-  int err = book_parser::IndexMetadata(this, path.c_str());
-
-  if (err == BOOK_ERR_CANCELLED) {
-    metadataIndexTried = false;
-    metadataIndexed    = false;
-    return err;
-  }
-
-  if (!err) {
-    metadataIndexed = true;
-    book_meta_cache::MetaEntry entry;
-    entry.title            = title;
-    entry.author           = author;
-    entry.cover_image_path = coverImagePath;
-    book_meta_cache::Save(
-        book_meta_cache::BuildPath(path, fsize, fmtime), entry);
-  }
-
-  return err;
-}

@@ -29,6 +29,7 @@
 #include <3ds.h>
 
 #include "book/book.h"
+#include "book/book_parser.h"
 #include "ui/browser_nav.h"
 #include "formats/common/book_error.h"
 #include "ui/button.h"
@@ -345,7 +346,7 @@ static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
         // Metadata indexing jobs may not have run yet; index synchronously
         // here so coverImagePath gets populated before extraction.
         if (!book->metadataIndexTried) {
-          if (book->Index() == 0)
+          if (book_parser::Index(book) == 0)
             book->ClearBrowserDisplayNameCache();
         }
         if (book->metadataIndexTried && !book->coverImagePath.empty())
@@ -834,7 +835,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
       if (!book->metadataIndexTried &&
           app_flow_utils::SupportsMetadataIndexing(
               app_flow_utils::DetectBookFormat(book->GetFileName()))) {
-        rc = book->Index();
+        rc = book_parser::Index(book);
         if (rc == 0) {
           book->ClearBrowserDisplayNameCache();
           if (book == app_.GetSelectedBook())

@@ -315,6 +315,8 @@ public:
   void ReservePageCapacity(size_t incoming_pages);
   void DrawCurrentMuPdfView(Text *ts);
   void DrawCurrentCbzView(Text *ts);
+  // Resets Book state before a sync or async open. Public because both
+  // book_parser::Open() and the async reflow path call it directly.
   void PrepareForOpen();
   void InitMuPdfView(u16 page_count, fz_context *ctx, fz_document *doc,
                      fz_outline *outline, bool is_new_3ds,
@@ -322,6 +324,8 @@ public:
   void InitCbzView(const std::string &archive_path,
                    const std::vector<CbzPageEntry> &entries,
                    bool is_new_3ds);
+  // HOME/APT-sensitive worker lifecycle. Kept on Book until fixed-layout
+  // worker ownership is split safely.
   void SuspendFixedLayoutWorkers();
   void ResumeFixedLayoutWorkers();
   void SetCbzViewportInteraction(bool active);
@@ -347,7 +351,6 @@ public:
   bool PumpDeferredMuPdfWork(u32 budget_ms);
   void CancelMuPdfIncrementalRender();
   void Close();
-  u8 Index();
   void IndexHTML();
   int ParseHTML();
   bool SupportsAsyncReflowOpen() const;

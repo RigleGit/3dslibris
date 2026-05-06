@@ -4,6 +4,7 @@
 #include "book/book_parse_deps.h"
 #include "formats/cbz/cbz_parser.h"
 #include "formats/common/book_error.h"
+#include "formats/common/book_meta_cache.h"
 #include "formats/common/xml_book_parser.h"
 #include "formats/epub/epub_parser.h"
 #include "formats/fb2/fb2_parser.h"
@@ -17,6 +18,7 @@
 
 #include <stdio.h>
 #include <sys/param.h>
+#include <sys/stat.h>
 
 namespace {
 
@@ -172,6 +174,51 @@ uint8_t IndexMetadata(Book *book, const char *path) {
   if (book->format == FORMAT_CBZ)
     return cbz_parser::Index(book, path);
   return 0;
+}
+
+uint8_t Index(Book *book) {
+  if (!book)
+    return 1;
+
+  if (book->metadataIndexTried)
+    return book->metadataIndexed ? 0 : 1;
+
+  if (book->TryLoadMetadataFromCache())
+    return 0;
+
+  std::string path;
+  path.append(book->GetFolderName());
+  path.append("/");
+  path.append(book->GetFileName());
+
+  struct stat st;
+  long long fsize = 0, fmtime = 0;
+  if (stat(path.c_str(), &st) == 0) {
+    fsize  = (long long)st.st_size;
+    fmtime = (long long)st.st_mtime;
+  }
+
+  book->metadataIndexTried = true;
+  int err = IndexMetadata(book, path.c_str());
+
+  if (err == BOOK_ERR_CANCELLED) {
+    book->metadataIndexTried = false;
+    book->metadataIndexed    = false;
+    return (uint8_t)err;
+  }
+
+  if (!err) {
+    book->metadataIndexed = true;
+    book_meta_cache::MetaEntry entry;
+    const char *t = book->GetTitle();
+    entry.title            = t ? t : "";
+    entry.author           = book->GetAuthor();
+    entry.cover_image_path = book->coverImagePath;
+    book_meta_cache::Save(
+        book_meta_cache::BuildPath(path, fsize, fmtime), entry);
+  }
+
+  return (uint8_t)err;
 }
 
 } // namespace book_parser
