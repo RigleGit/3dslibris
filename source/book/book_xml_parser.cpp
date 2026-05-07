@@ -53,6 +53,7 @@
 namespace {
 
 static const size_t kFb2BinaryMaxChars = 6 * 1024 * 1024;
+constexpr int kCompactBottomMargin = 20;
 
 using book_xml_css_style_utils::ResolveHorizontalMarginPx;
 
@@ -581,7 +582,7 @@ static void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
 
   Text *ts = p->ts;
   const int leftBottomMargin = ts->margin.bottom;
-  const int rightBottomMargin = MIN(ts->margin.bottom, 16);
+  const int rightBottomMargin = text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom);
   const text_render_layout_utils::ReadingScreenMetrics metrics =
       text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
           p->book->GetOrientation() != 0, p->screen, leftBottomMargin,
@@ -766,7 +767,7 @@ static void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
   const text_render_layout_utils::ReadingScreenMetrics metrics =
       text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
           p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-          MIN(ts->margin.bottom, 16));
+          text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom));
   int available = 0;
   {
     const int usable = metrics.max_height - metrics.bottom_margin - p->pen.y;
@@ -792,7 +793,7 @@ if (p->pending_block_break && p->linebegan) {
             p->book->GetOrientation() != 0,
             p->screen,
             ts->margin.bottom,
-            MIN(ts->margin.bottom, 16));
+            text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom));
 
     const int usable_after =
         after_metrics.max_height - after_metrics.bottom_margin - p->pen.y;
@@ -1168,7 +1169,7 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
           const text_render_layout_utils::ReadingScreenMetrics sm =
               text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
                   p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-                  MIN(ts->margin.bottom, 16));
+                  text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom));
 #ifdef DSLIBRIS_DEBUG
           const int threshold = sm.max_height - sm.bottom_margin;
 #endif
@@ -1215,7 +1216,7 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
     const text_render_layout_utils::ReadingScreenMetrics sm =
         text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
             p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-            MIN(ts->margin.bottom, 16));
+            text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom));
     emit_metrics.overflow_threshold = sm.max_height - sm.bottom_margin;
     emit_metrics.screen_max_height = sm.max_height;
     emit_metrics.screen_bottom_margin = sm.bottom_margin;
@@ -2160,7 +2161,7 @@ static void HandleHeadingStart(parsedata_t *p, Text *ts, const char **attr,
   const text_render_layout_utils::ReadingScreenMetrics metrics =
       text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
           p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-          MIN(ts->margin.bottom, 16));
+          text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom));
   req.screen_height = metrics.max_height;
   req.bottom_margin = metrics.bottom_margin;
   req.line_height = MeasureLineHeightForPixelSize(ts, heading_px);
@@ -3448,7 +3449,7 @@ void end(void *data, const char *el) {
   const text_render_layout_utils::ReadingScreenMetrics metrics =
       text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
           p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-          MIN(ts->margin.bottom, 16));
+          text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom));
   int maxHeight = metrics.max_height;
   int bottomMargin = metrics.bottom_margin;
   if (!text_render_layout_utils::CurrentLineFitsScreen(

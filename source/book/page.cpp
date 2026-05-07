@@ -185,8 +185,9 @@ void Page::Draw(Text *ts) {
   int savedBottomMargin = ts->margin.bottom;
   int leftBottomMargin = savedBottomMargin;
   // On the 320px screen we only need a small footer for page number.
-  int rightBottomMargin =
-      (savedBottomMargin > 16) ? 16 : savedBottomMargin;
+  const int rightBottomMargin =
+    text_render_layout_utils::ResolveCompactReadingBottomMargin(
+        ts->margin.bottom);
   const bool turned_right = (book && book->GetOrientation() != 0);
   u16 *first_screen = turned_right ? ts->screenright : ts->screenleft;
   u16 *second_screen = turned_right ? ts->screenleft : ts->screenright;

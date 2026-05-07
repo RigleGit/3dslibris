@@ -50,7 +50,7 @@ inline ReadingScreenMetrics ResolveReadingScreenMetrics(
 }
 
 inline int ResolveCompactReadingBottomMargin(int full_bottom_margin) {
-  return (full_bottom_margin > 16) ? 16 : full_bottom_margin;
+  return (full_bottom_margin > 20) ? 20 : full_bottom_margin;
 }
 
 inline ReadingScreenMetrics ResolveReadingScreenMetricsForReadingScreen(

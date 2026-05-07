@@ -17,7 +17,9 @@ void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
 
   Text *ts = p->ts;
   const int leftBottomMargin = ts->margin.bottom;
-  const int rightBottomMargin = MIN(ts->margin.bottom, 16);
+  const int rightBottomMargin =
+    text_render_layout_utils::ResolveCompactReadingBottomMargin(
+        ts->margin.bottom);
   const text_render_layout_utils::ReadingScreenMetrics metrics =
       text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
           p->book->GetOrientation() != 0, p->screen, leftBottomMargin,
