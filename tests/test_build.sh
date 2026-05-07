@@ -53,6 +53,28 @@ done <<EOF
 $(_build_third_party_objs)
 EOF
 
+# Compile expat once — only included when tests pass --expat
+_build_expat_objs() {
+  local -a objs
+  objs=()
+  if [ -f "$TEST_ROOT/third_party/expat/xmlparse.c" ]; then
+    local expat_flags="-DXML_CONTEXT_BYTES=1024 -DHAVE_ARC4RANDOM_BUF"
+    local expat_inc="-I$TEST_ROOT/third_party/expat"
+    for f in xmlparse xmlrole xmltok; do
+      local src="$TEST_ROOT/third_party/expat/${f}.c"
+      if [ -f "$src" ] && [ ! -f "$TEST_OUTDIR/expat_${f}.o" ]; then
+        cc -std=c99 $expat_flags $expat_inc -c "$src" -o "$TEST_OUTDIR/expat_${f}.o"
+      fi
+      if [ -f "$TEST_OUTDIR/expat_${f}.o" ]; then
+        objs+=("$TEST_OUTDIR/expat_${f}.o")
+      fi
+    done
+  fi
+  for obj in "${objs[@]}"; do
+    printf '%s\n' "$obj"
+  done
+}
+
 build_test() {
   local name="$1"
   shift
@@ -61,6 +83,7 @@ build_test() {
   local -a libs
   local -a includes
   local -a stubs
+  local use_expat=0
   sources=()
   libs=()
   stubs=()
@@ -68,6 +91,7 @@ build_test() {
     "-I$TEST_ROOT/include"
     "-I$TEST_ROOT/third_party/utf8proc"
     "-I$TEST_ROOT/third_party/libunibreak/src"
+    "-I$TEST_ROOT/third_party/mupdf/thirdparty/zlib/contrib"
   )
 
   while [ $# -gt 0 ]; do
@@ -82,12 +106,26 @@ build_test() {
         shift
         stubs+=("$TEST_ROOT/tests/stubs/$1")
         ;;
+      --expat)
+        use_expat=1
+        ;;
       *)
         sources+=("$1")
         ;;
     esac
     shift
   done
+
+  local -a expat_objs
+  expat_objs=()
+  if [ "$use_expat" = "1" ]; then
+    while IFS= read -r obj; do
+      [ -n "$obj" ] || continue
+      expat_objs+=("$obj")
+    done <<EOFEXPAT
+$(_build_expat_objs)
+EOFEXPAT
+  fi
 
   local -a cmd
   cmd=(c++ -std=c++11)
@@ -99,6 +137,9 @@ build_test() {
   fi
   if [ ${#THIRD_PARTY_OBJS[@]} -gt 0 ]; then
     cmd+=("${THIRD_PARTY_OBJS[@]}")
+  fi
+  if [ ${#expat_objs[@]} -gt 0 ]; then
+    cmd+=("${expat_objs[@]}")
   fi
   if [ ${#includes[@]} -gt 0 ]; then
     cmd+=("${includes[@]}")
