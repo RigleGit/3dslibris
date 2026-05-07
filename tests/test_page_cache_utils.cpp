@@ -182,6 +182,97 @@ void TestChaptersRoundTrip() {
   std::remove(tmp_name);
 }
 
+void TestRawStringRoundTrip() {
+  char tmp_name[] = "/tmp/3dslibris-page-cache-rawstr-XXXXXX";
+  FILE *fp = OpenTempFile(tmp_name);
+
+  std::string utf8 = "Caf\xc3\xa9 \xe2\x80\x94 \xd8\xa7\xd9\x84\xd8\xb9\xd8\xb1\xd8\xa8\xd9\x8a\xd8\xa9";
+  ExpectTrue("write raw UTF-8 string", page_cache_utils::WriteRawString(fp, utf8));
+  ExpectTrue("seek to start", fseek(fp, 0, SEEK_SET) == 0);
+
+  std::string got;
+  ExpectTrue("read raw UTF-8 string",
+             page_cache_utils::ReadRawString(fp, utf8.size(), &got));
+  ExpectEq("raw string roundtrip matches", got, utf8);
+
+  fclose(fp);
+  std::remove(tmp_name);
+}
+
+void TestClampString() {
+  ExpectEq("clamp: below limit unchanged",
+           page_cache_utils::ClampString("hello", 10), std::string("hello"));
+  ExpectEq("clamp: exactly at limit",
+           page_cache_utils::ClampString("abcde", 5), std::string("abcde"));
+  ExpectEq("clamp: over limit truncated",
+           page_cache_utils::ClampString("abcdefgh", 4), std::string("abcd"));
+  ExpectEq("clamp: empty string",
+           page_cache_utils::ClampString("", 10), std::string(""));
+}
+
+void TestTruncatedPagesRead() {
+  char tmp_name[] = "/tmp/3dslibris-page-cache-trunc-pages-XXXXXX";
+  FILE *fp = OpenTempFile(tmp_name);
+
+  std::vector<page_cache_utils::CachedPage> pages;
+  pages.push_back(page_cache_utils::CachedPage(2, 0));
+  pages[0][0] = 10; pages[0][1] = 20;
+  ExpectTrue("write 1 page", page_cache_utils::WritePages(fp, pages, 4096));
+  ExpectTrue("seek to start", fseek(fp, 0, SEEK_SET) == 0);
+
+  std::vector<page_cache_utils::CachedPage> loaded;
+  ExpectFalse("read more pages than written fails",
+              page_cache_utils::ReadPages(fp, 5, 4096, &loaded));
+
+  fclose(fp);
+  std::remove(tmp_name);
+}
+
+void TestTruncatedChaptersRead() {
+  char tmp_name[] = "/tmp/3dslibris-page-cache-trunc-chap-XXXXXX";
+  FILE *fp = OpenTempFile(tmp_name);
+
+  // Write only 2 bytes (incomplete chapter header: page field is u16 but level+title missing)
+  uint16_t partial = 7;
+  ExpectTrue("write partial data",
+             fwrite(&partial, 1, sizeof(partial), fp) == sizeof(partial));
+  ExpectTrue("seek to start", fseek(fp, 0, SEEK_SET) == 0);
+
+  std::vector<page_cache_utils::CachedChapter> loaded;
+  ExpectFalse("read truncated chapter fails",
+              page_cache_utils::ReadChapters(fp, 1, 2048, &loaded));
+
+  fclose(fp);
+  std::remove(tmp_name);
+}
+
+void TestEmptyPagesRoundTrip() {
+  std::vector<page_cache_utils::CachedPage> empty;
+  // WritePages with empty vector writes nothing — ReadPages(count=0) should succeed
+  char tmp_name[] = "/tmp/3dslibris-page-cache-empty-XXXXXX";
+  FILE *fp = OpenTempFile(tmp_name);
+
+  ExpectTrue("write 0 pages", page_cache_utils::WritePages(fp, empty, 4096));
+  ExpectTrue("seek to start", fseek(fp, 0, SEEK_SET) == 0);
+
+  std::vector<page_cache_utils::CachedPage> loaded;
+  ExpectTrue("read 0 pages ok",
+             page_cache_utils::ReadPages(fp, 0, 4096, &loaded));
+  ExpectSize("0 pages loaded", loaded.size(), 0);
+
+  fclose(fp);
+  std::remove(tmp_name);
+}
+
+void TestBuildPathDifferentBookPaths() {
+  page_cache_utils::PageCacheLayoutParams params = SampleParams();
+  const std::string p1 = page_cache_utils::BuildPageCachePath(
+      "/cache/epub", ".epc", "/books/a.epub", params);
+  const std::string p2 = page_cache_utils::BuildPageCachePath(
+      "/cache/epub", ".epc", "/books/b.epub", params);
+  ExpectFalse("different book paths produce different cache paths", p1 == p2);
+}
+
 } // namespace
 
 int main() {
@@ -190,5 +281,11 @@ int main() {
   TestBoundedStringRoundTrip();
   TestPagesRoundTrip();
   TestChaptersRoundTrip();
+  TestRawStringRoundTrip();
+  TestClampString();
+  TestTruncatedPagesRead();
+  TestTruncatedChaptersRead();
+  TestEmptyPagesRoundTrip();
+  TestBuildPathDifferentBookPaths();
   return 0;
 }

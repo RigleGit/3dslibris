@@ -1,6 +1,7 @@
 #include "book/book.h"
 #include "book/book_context.h"
 #include "formats/epub/epub_parser.h"
+#include "formats/epub/epub_page_cache.h"
 #include "shared/app_flow_utils.h"
 #include "ui/text.h"
 
@@ -208,6 +209,97 @@ void TestEpubIndexThenOpen() {
   delete book;
 }
 
+// ---------------------------------------------------------------------------
+// epub_page_cache guard tests
+// ---------------------------------------------------------------------------
+
+// Common layout params used by all cache tests — matches the Text stub metrics.
+static void CallTryLoad(Book *book, const char *path, bool *result) {
+  *result = epub_page_cache::TryLoad(book, path,
+                                     14, 2, 0, 0, 0,
+                                     12, 12, 10, 36,
+                                     nullptr, false);
+}
+
+void TestEpubPageCacheTryLoadNullBook() {
+  bool result = true;
+  CallTryLoad(nullptr, "/tmp/3dslibris_cache_test.epub", &result);
+  ExpectFalse("page cache TryLoad null book returns false", result);
+}
+
+void TestEpubPageCacheTryLoadNullPath() {
+  Book *book = MakeEpubBook("/tmp", "x.epub");
+  bool result = true;
+  CallTryLoad(book, nullptr, &result);
+  ExpectFalse("page cache TryLoad null path returns false", result);
+  book->Close();
+  delete book;
+}
+
+void TestEpubPageCacheTryLoadMissingFile() {
+  // Cache file lives at sdmc:/...; it won't exist on host → returns false safely.
+  Book *book = MakeEpubBook("/tmp", "nonexistent_3dslibris_cache_test.epub");
+  bool result = true;
+  CallTryLoad(book, "/tmp/nonexistent_3dslibris_cache_test.epub", &result);
+  ExpectFalse("page cache TryLoad missing file returns false", result);
+  book->Close();
+  delete book;
+}
+
+void TestEpubPageCacheSaveNullBook() {
+  // Save with null book must not crash (bails immediately).
+  epub_page_cache::Save(nullptr, "/tmp/x.epub",
+                        14, 2, 0, 0, 0, 12, 12, 10, 36,
+                        nullptr, false, false);
+  g_pass++;  // no crash
+}
+
+void TestEpubPageCacheSaveZeroPages() {
+  // Save with a real book that has 0 pages must not crash (bails early).
+  Book *book = MakeEpubBook("/tmp", "x.epub");
+  epub_page_cache::Save(book, "/tmp/x.epub",
+                        14, 2, 0, 0, 0, 12, 12, 10, 36,
+                        nullptr, false, false);
+  g_pass++;  // no crash
+  book->Close();
+  delete book;
+}
+
+void TestEpubStreamWriterNullBook() {
+  epub_page_cache::StreamWriter sw;
+  bool ok = sw.Begin(nullptr, "/tmp/x.epub",
+                     14, 2, 0, 0, 0, 12, 12, 10, 36, nullptr, false);
+  ExpectFalse("StreamWriter::Begin null book returns false", ok);
+  ExpectFalse("StreamWriter not open after failed Begin", sw.IsOpen());
+}
+
+void TestEpubStreamWriterNullPath() {
+  Book *book = MakeEpubBook("/tmp", "x.epub");
+  epub_page_cache::StreamWriter sw;
+  bool ok = sw.Begin(book, nullptr,
+                     14, 2, 0, 0, 0, 12, 12, 10, 36, nullptr, false);
+  ExpectFalse("StreamWriter::Begin null path returns false", ok);
+  ExpectFalse("StreamWriter not open after null path", sw.IsOpen());
+  book->Close();
+  delete book;
+}
+
+void TestEpubStreamWriterFinalizeWithoutBegin() {
+  Book *book = MakeEpubBook("/tmp", "x.epub");
+  epub_page_cache::StreamWriter sw;
+  bool ok = sw.Finalize(book);
+  ExpectFalse("StreamWriter::Finalize without Begin returns false", ok);
+  book->Close();
+  delete book;
+}
+
+void TestEpubStreamWriterAbortIdempotent() {
+  epub_page_cache::StreamWriter sw;
+  sw.Abort();
+  sw.Abort();  // second abort must not crash
+  g_pass++;    // no crash
+}
+
 } // namespace
 
 int main() {
@@ -217,6 +309,15 @@ int main() {
   TestEpubIndexMetadata();
   TestEpubIndexMissingFile();
   TestEpubIndexThenOpen();
+  TestEpubPageCacheTryLoadNullBook();
+  TestEpubPageCacheTryLoadNullPath();
+  TestEpubPageCacheTryLoadMissingFile();
+  TestEpubPageCacheSaveNullBook();
+  TestEpubPageCacheSaveZeroPages();
+  TestEpubStreamWriterNullBook();
+  TestEpubStreamWriterNullPath();
+  TestEpubStreamWriterFinalizeWithoutBegin();
+  TestEpubStreamWriterAbortIdempotent();
 
   fprintf(stderr, "Results: %d/%d passed, %d failed\n", g_pass, g_pass + g_fail,
           g_fail);
