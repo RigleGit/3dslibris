@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description>
+    <title-info>
+      <genre>other</genre>
+      <author>
+        <first-name>Test</first-name>
+        <last-name>Author</last-name>
+      </author>
+      <book-title>Basic FB2 Fixture</book-title>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <section>
+      <title><p>Chapter 1</p></title>
+      <p>This is a tiny FB2 fixture for 3dslibris host tests.</p>
+      <p>It has two paragraphs in one section.</p>
+    </section>
+  </body>
+</FictionBook>
