@@ -38,9 +38,12 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
   // Central XML dispatcher for preference tags.
   // Each branch maps one persisted element into runtime App/Text state.
   parsedata_t *p = (parsedata_t *)data;
-  App *app = App::GetInstance();
-  if (!app || !p->prefs || !p->ts)
+  if (!p->prefs || !p->ts)
     return;
+  App *app = p->prefs->GetApp();
+  if (!app)
+    return;
+  Text *ts = p->ts;
   int position = 0; //! Page position in book.
   char filename[MAXPATHLEN];
   bool current = false;
@@ -49,7 +52,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
   if (!strcmp(name, "library")) {
     for (i = 0; attr[i]; i += 2)
       if (!strcmp(attr[i], "modtime"))
-        app->prefs->modtime = atoi(attr[i + 1]);
+        p->prefs->modtime = atoi(attr[i + 1]);
   } else if (!strcmp(name, "screen")) {
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "brightness")) {
@@ -57,7 +60,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       } else if (!strcmp(attr[i], "colorMode")) {
         int mode = atoi(attr[i + 1]);
         app->colorMode = mode;
-        app->ts->SetColorMode(mode);
+        ts->SetColorMode(mode);
         UiButtonSkin_SetColorMode(mode);
       } else if (!strcmp(attr[i], "flip")) {
         app->orientation = atoi(attr[i + 1]);
@@ -80,33 +83,32 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       }
     }
     if (has_fallback_attrs)
-      app->ts->ClearFallbackFonts();
+      ts->ClearFallbackFonts();
 
-	    for (i = 0; attr[i]; i += 2) {
-	      if (!strcmp(attr[i], "size"))
-	        app->ts->SetPixelSize((u8)ClampTextPixelSize(atoi(attr[i + 1])));
-	      else if (!strcmp(attr[i], "fallback1") && strlen(attr[i + 1]))
-	        app->ts->SetFallbackFontFile(0, attr[i + 1]);
+    for (i = 0; attr[i]; i += 2) {
+      if (!strcmp(attr[i], "size"))
+        ts->SetPixelSize((u8)ClampTextPixelSize(atoi(attr[i + 1])));
+      else if (!strcmp(attr[i], "fallback1") && strlen(attr[i + 1]))
+        ts->SetFallbackFontFile(0, attr[i + 1]);
       else if (!strcmp(attr[i], "fallback2") && strlen(attr[i + 1]))
-        app->ts->SetFallbackFontFile(1, attr[i + 1]);
+        ts->SetFallbackFontFile(1, attr[i + 1]);
       else if (!strcmp(attr[i], "fallback3") && strlen(attr[i + 1]))
-        app->ts->SetFallbackFontFile(2, attr[i + 1]);
+        ts->SetFallbackFontFile(2, attr[i + 1]);
       else if (!strcmp(attr[i], "fallback4") && strlen(attr[i + 1]))
-        app->ts->SetFallbackFontFile(3, attr[i + 1]);
-	      else if (!strcmp(attr[i], "path")) {
-	        if (strlen(attr[i + 1])) {
-	          app->fontdir = std::string(attr[i + 1]);
-	          if (app->ts)
-	            app->ts->SetFontDir(app->fontdir);
-	        }
-	      } else {
-	        u8 style = 0;
-	        if (font_config_utils::StyleFromFontPrefAttr(attr[i], &style))
-	          app->ts->SetFontFile((char *)attr[i + 1], style);
-	      }
-	    }
+        ts->SetFallbackFontFile(3, attr[i + 1]);
+      else if (!strcmp(attr[i], "path")) {
+        if (strlen(attr[i + 1])) {
+          app->fontdir = std::string(attr[i + 1]);
+          ts->SetFontDir(app->fontdir);
+        }
+      } else {
+        u8 style = 0;
+        if (font_config_utils::StyleFromFontPrefAttr(attr[i], &style))
+          ts->SetFontFile((char *)attr[i + 1], style);
+      }
+    }
     if (has_fallback_attrs)
-      app->ts->AutoLoadFallbackFonts();
+      ts->AutoLoadFallbackFonts();
   } else if (!strcmp(name, "books")) {
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "reopen"))
@@ -173,16 +175,16 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
   } else if (!strcmp(name, "margin")) {
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "left"))
-        app->ts->margin.left = atoi(attr[i + 1]);
+        ts->margin.left = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "right"))
-        app->ts->margin.right = atoi(attr[i + 1]);
+        ts->margin.right = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "top"))
-        app->ts->margin.top = atoi(attr[i + 1]);
+        ts->margin.top = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "bottom")) {
         int parsedBottom = atoi(attr[i + 1]);
         // 3DS screens are 400/320px tall; legacy DS values like 65 leave too
         // much blank area, especially on the 320px screen.
-        app->ts->margin.bottom = MIN(MAX(parsedBottom, 16), 36);
+        ts->margin.bottom = MIN(MAX(parsedBottom, 16), 36);
       }
     }
   } else if (!strcmp(name, "option")) {
@@ -303,10 +305,7 @@ void Prefs::Apply() {
 //! \return Error code.
 int Prefs::Write() {
   int err = 0;
-  int colorMode = 0;
-
-  if (app)
-    colorMode = app->ts->GetColorMode();
+  Text *ts = app ? app->ts.get() : nullptr;
 
   FILE *fp = fopen(paths::GetPrefsFile().c_str(), "w");
   if (!fp)
@@ -319,45 +318,46 @@ int Prefs::Write() {
           browser_view_utils::ToPrefValue(browser_view_mode),
           fixed_layout_rtl ? 1 : 0,
           respect_publisher_font_size ? 1 : 0);
-  fprintf(fp, "\t<screen colorMode=\"%d\" flip=\"%d\" />\n", colorMode,
-          app->orientation);
+  fprintf(fp, "\t<screen colorMode=\"%d\" flip=\"%d\" />\n",
+          ts ? ts->GetColorMode() : 0,
+          app ? app->orientation : 0);
   fprintf(fp,
           "\t<margin top=\"%d\" left=\"%d\" bottom=\"%d\" right=\"%d\" />\n",
-          app->ts->margin.top, app->ts->margin.left, app->ts->margin.bottom,
-          app->ts->margin.right);
+          ts ? ts->margin.top : 0, ts ? ts->margin.left : 0,
+          ts ? ts->margin.bottom : 0, ts ? ts->margin.right : 0);
   const std::string font_regular =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_REGULAR).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : "");
   const std::string font_bold =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BOLD).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_BOLD).c_str() : "");
   const std::string font_italic =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_ITALIC).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_ITALIC).c_str() : "");
   const std::string font_bolditalic =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BOLDITALIC).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_BOLDITALIC).c_str() : "");
   const std::string font_browser =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_BROWSER).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_BROWSER).c_str() : "");
   const std::string font_mono =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_MONO).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_MONO).c_str() : "");
   const std::string font_mono_bold =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_MONO_BOLD).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_MONO_BOLD).c_str() : "");
   const std::string font_mono_italic =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_MONO_ITALIC).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_MONO_ITALIC).c_str() : "");
   const std::string font_mono_bolditalic =
-      XmlEscapeAttr(app->ts->GetFontFile(TEXT_STYLE_MONO_BOLDITALIC).c_str());
+      XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_MONO_BOLDITALIC).c_str() : "");
   const std::string fallback1 =
-      XmlEscapeAttr(app->ts->GetFallbackFontFile(0).c_str());
+      XmlEscapeAttr(ts ? ts->GetFallbackFontFile(0).c_str() : "");
   const std::string fallback2 =
-      XmlEscapeAttr(app->ts->GetFallbackFontFile(1).c_str());
+      XmlEscapeAttr(ts ? ts->GetFallbackFontFile(1).c_str() : "");
   const std::string fallback3 =
-      XmlEscapeAttr(app->ts->GetFallbackFontFile(2).c_str());
+      XmlEscapeAttr(ts ? ts->GetFallbackFontFile(2).c_str() : "");
   const std::string fallback4 =
-      XmlEscapeAttr(app->ts->GetFallbackFontFile(3).c_str());
+      XmlEscapeAttr(ts ? ts->GetFallbackFontFile(3).c_str() : "");
 
   fprintf(fp,
           "\t<font size=\"%d\" %s=\"%s\" %s=\"%s\" %s=\"%s\" "
           "%s=\"%s\" %s=\"%s\" %s=\"%s\" %s=\"%s\" %s=\"%s\" "
           "%s=\"%s\" fallback1=\"%s\" "
           "fallback2=\"%s\" fallback3=\"%s\" fallback4=\"%s\" />\n",
-          app->ts->GetPixelSize(),
+          ts ? ts->GetPixelSize() : 12,
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_REGULAR),
           font_regular.c_str(),
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_BOLD),

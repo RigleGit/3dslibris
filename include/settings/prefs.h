@@ -23,6 +23,7 @@ public:
   void Apply();
   int Read();
   int Write();
+  App *GetApp() const { return app; }
   long modtime;
   bool swapshoulder;
   bool time24h;
