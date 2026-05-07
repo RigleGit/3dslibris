@@ -378,13 +378,17 @@ bool ElementCanCarryBlockTextAlign(const char *el,
 book_xml_css_style_utils::TextAlign ResolveElementTextAlignWithClass(
     const std::string &style_attr, const std::string &class_attr,
     const bool *block_text_align_stack, const uint8_t *block_text_align_value_stack,
-    uint8_t stacksize, const epub_css_class_map::CssClassMap &class_map) {
+    uint8_t stacksize, const epub_css_class_map::CssClassMap &class_map,
+    const char *element_tag) {
   book_xml_css_style_utils::TextAlign align =
       book_xml_css_style_utils::TextAlign::Left;
   if (book_xml_css_style_utils::TryParseTextAlign(style_attr.c_str(), &align))
     return align;
   if (epub_css_class_map::LookupTextAlignForClassAttr(class_attr, class_map,
                                                       &align))
+    return align;
+  if (element_tag &&
+      epub_css_class_map::LookupTextAlignForTag(element_tag, class_map, &align))
     return align;
   if (FindActiveBlockTextAlignInternal(block_text_align_stack,
                                        block_text_align_value_stack, stacksize,
@@ -409,13 +413,23 @@ ParseElementMarginTopPx(const char **attr) {
 
 book_xml_css_style_utils::MarginTopResult ParseElementMarginBottomWithClass(
     const std::string &last_style, const std::string &last_class,
-    const epub_css_class_map::CssClassMap &class_map) {
+    const epub_css_class_map::CssClassMap &class_map,
+    const char *element_tag) {
   using book_xml_css_style_utils::MarginTopResult;
   const MarginTopResult from_style =
       book_xml_css_style_utils::ParseMarginBottom(last_style.c_str());
   if (from_style.unit != MarginTopResult::Unit::None)
     return from_style;
-  return LookupClassMarginBottomInternal(last_class, class_map);
+  const MarginTopResult from_class =
+      LookupClassMarginBottomInternal(last_class, class_map);
+  if (from_class.unit != MarginTopResult::Unit::None)
+    return from_class;
+  if (element_tag && element_tag[0]) {
+    epub_css_class_map::CssClassMargins tag_css;
+    if (epub_css_class_map::LookupAllForTag(element_tag, class_map, &tag_css))
+      return tag_css.margin_bottom;
+  }
+  return {};
 }
 
 } // namespace book_xml_css_resolver

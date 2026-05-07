@@ -88,10 +88,31 @@ bool ExtractSingleClassSelectorName(const std::string &selector,
   return true;
 }
 
+// Recognises bare element selectors like "p", "body", "li", "h1".
+// Rejects anything with dots, hashes, colons, spaces, brackets, or @.
+static bool ExtractBareElementSelectorName(const std::string &selector,
+                                           std::string *el_out) {
+  if (!el_out)
+    return false;
+  const std::string trimmed = TrimAscii(selector);
+  if (trimmed.empty())
+    return false;
+  // Must start with a letter (tag names never start with a digit).
+  if (!(trimmed[0] >= 'a' && trimmed[0] <= 'z') &&
+      !(trimmed[0] >= 'A' && trimmed[0] <= 'Z'))
+    return false;
+  // Must be purely ident chars — no dot, hash, colon, bracket, space, @.
+  for (size_t i = 0; i < trimmed.size(); i++) {
+    if (!IsIdentChar(trimmed[i]))
+      return false;
+  }
+  *el_out = trimmed;
+  return true;
+}
+
 void ParseSelectorList(const std::string &selector_list,
-                       std::vector<std::string> *class_names_out) {
-  if (!class_names_out)
-    return;
+                       std::vector<std::string> *class_names_out,
+                       std::vector<std::string> *element_names_out) {
   size_t start = 0;
   while (start <= selector_list.size()) {
     size_t comma = selector_list.find(',', start);
@@ -99,9 +120,11 @@ void ParseSelectorList(const std::string &selector_list,
         selector_list.substr(start, comma == std::string::npos
                                         ? std::string::npos
                                         : comma - start);
-    std::string class_name;
-    if (ExtractSingleClassSelectorName(selector, &class_name))
-      class_names_out->push_back(class_name);
+    std::string name;
+    if (class_names_out && ExtractSingleClassSelectorName(selector, &name))
+      class_names_out->push_back(name);
+    else if (element_names_out && ExtractBareElementSelectorName(selector, &name))
+      element_names_out->push_back(name);
     if (comma == std::string::npos)
       break;
     start = comma + 1;
@@ -131,7 +154,8 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
       break;
     std::string selector_list(css_text + selector_start, pos - selector_start);
     std::vector<std::string> class_names;
-    ParseSelectorList(selector_list, &class_names);
+    std::vector<std::string> element_names;
+    ParseSelectorList(selector_list, &class_names, &element_names);
     ++pos;
 
     size_t block_start = pos;
@@ -140,7 +164,7 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     if (pos < len)
       ++pos;
 
-    if (class_names.empty())
+    if (class_names.empty() && element_names.empty())
       continue;
 
     std::string block(css_text + block_start, block_end - block_start);
@@ -202,22 +226,23 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         ContainsNoCase(block, "display:block") ||
         ContainsNoCase(block, "display: block");
 
-    if (mt.unit != MarginTopResult::Unit::None ||
+    const bool any_prop =
+        mt.unit != MarginTopResult::Unit::None ||
         mb.unit != MarginTopResult::Unit::None ||
         ml.unit != MarginTopResult::Unit::None ||
         mr.unit != MarginTopResult::Unit::None ||
-        has_font_size ||
-        hide_list_markers ||
-        has_text_align || has_white_space ||
-        has_float || has_clear ||
+        has_font_size || hide_list_markers || has_text_align ||
+        has_white_space || has_float || has_clear ||
         is_superscript || is_subscript ||
         has_page_break_before || has_page_break_after ||
         has_page_break_inside_avoid ||
         no_underline || reset_bold || reset_italic ||
         text_indent.unit != MarginTopResult::Unit::None ||
-        has_text_transform || is_display_block) {
-      for (size_t i = 0; i < class_names.size(); i++) {
-        CssClassMargins &entry = (*out)[class_names[i]];
+        has_text_transform || is_display_block;
+
+    if (any_prop) {
+      // Merge parsed properties into a map entry.
+      auto apply = [&](CssClassMargins &entry) {
         if (mt.unit != MarginTopResult::Unit::None)
           entry.margin_top = mt;
         if (mb.unit != MarginTopResult::Unit::None)
@@ -270,6 +295,16 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         }
         if (is_display_block)
           entry.is_display_block = true;
+      };
+
+      for (size_t i = 0; i < class_names.size(); i++)
+        apply((*out)[class_names[i]]);
+
+      // Element selectors: stored under sentinel key "*" + tag_name.
+      for (size_t i = 0; i < element_names.size(); i++) {
+        std::string key("*");
+        key += element_names[i];
+        apply((*out)[key]);
       }
     }
   }
@@ -782,10 +817,12 @@ MarginTopResult LookupMarginRightForClassAttr(const std::string &class_attr,
 
 bool LookupAllForClassAttr(const std::string &class_attr,
                            const CssClassMap &class_map,
-                           CssClassMargins *out) {
+                           CssClassMargins *out,
+                           bool reset_output) {
   if (!out)
     return false;
-  *out = CssClassMargins{};
+  if (reset_output)
+    *out = CssClassMargins{};
   if (class_attr.empty() || class_map.empty())
     return false;
 
@@ -864,6 +901,50 @@ bool LookupAllForClassAttr(const std::string &class_attr,
     found_any = true;
   }
   return found_any;
+}
+
+bool LookupAllForTag(const char *tag, const CssClassMap &class_map,
+                     CssClassMargins *out) {
+  if (!out)
+    return false;
+  *out = CssClassMargins{};
+  if (!tag || !tag[0] || class_map.empty())
+    return false;
+  const size_t tag_len = strlen(tag);
+  if (tag_len >= 63)
+    return false;
+  char key_buf[64];
+  key_buf[0] = '*';
+  memcpy(key_buf + 1, tag, tag_len + 1);
+  CssClassMap::const_iterator it =
+      class_map.find(std::string(key_buf, tag_len + 1));
+  if (it == class_map.end())
+    return false;
+  *out = it->second;
+  return true;
+}
+
+bool MergeClassRulesToStyle(const std::string &class_attr,
+                             const CssClassMap &class_map, CssClassMargins *out) {
+  return LookupAllForClassAttr(class_attr, class_map, out, false);
+}
+
+bool LookupTextAlignForTag(const char *tag, const CssClassMap &class_map,
+                            TextAlign *out) {
+  if (!tag || !tag[0] || !out || class_map.empty())
+    return false;
+  const size_t tag_len = strlen(tag);
+  if (tag_len >= 63)
+    return false;
+  char key_buf[64];
+  key_buf[0] = '*';
+  memcpy(key_buf + 1, tag, tag_len + 1);
+  CssClassMap::const_iterator it =
+      class_map.find(std::string(key_buf, tag_len + 1));
+  if (it == class_map.end() || !it->second.has_text_align)
+    return false;
+  *out = it->second.text_align;
+  return true;
 }
 
 } // namespace epub_css_class_map

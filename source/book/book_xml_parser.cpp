@@ -352,20 +352,23 @@ ResolveActiveWhiteSpace(const parsedata_t *p) {
 static book_xml_css_style_utils::MarginTopResult
 ParseElementMarginBottomWithClass(const std::string &last_style,
                                   const std::string &last_class,
-                                  const epub_css_class_map::CssClassMap &class_map) {
-  return book_xml_css_resolver::ParseElementMarginBottomWithClass(last_style, last_class, class_map);
+                                  const epub_css_class_map::CssClassMap &class_map,
+                                  const char *element_tag = nullptr) {
+  return book_xml_css_resolver::ParseElementMarginBottomWithClass(
+      last_style, last_class, class_map, element_tag);
 }
 
 static book_xml_css_style_utils::TextAlign
 ResolveElementTextAlignWithClass(const std::string &style_attr,
                                  const std::string &class_attr,
                                  const parsedata_t *p,
-                                 const epub_css_class_map::CssClassMap &class_map) {
+                                 const epub_css_class_map::CssClassMap &class_map,
+                                 const char *element_tag = nullptr) {
   if (!p)
     return book_xml_css_style_utils::TextAlign::Left;
   return book_xml_css_resolver::ResolveElementTextAlignWithClass(
       style_attr, class_attr, p->block_text_align_stack,
-      p->block_text_align_value_stack, p->stacksize, class_map);
+      p->block_text_align_value_stack, p->stacksize, class_map, element_tag);
 }
 
 static void AppendParagraphAlignMarker(
@@ -2073,7 +2076,7 @@ static void HandleHeadingStart(parsedata_t *p, Text *ts, const char **attr,
     ApplyHeadingFontSize(p, ts, 1, p->last_h1_style, p->last_h1_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h1_style,
-                                            p->last_h1_class, p, p->css_class_map));
+                                            p->last_h1_class, p, p->css_class_map, "h1"));
     tag_name = "h1";
   } else if (heading_level == 2) {
     parse_push(p, TAG_H2);
@@ -2082,7 +2085,7 @@ static void HandleHeadingStart(parsedata_t *p, Text *ts, const char **attr,
     ApplyHeadingFontSize(p, ts, 2, p->last_h2_style, p->last_h2_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h2_style,
-                                            p->last_h2_class, p, p->css_class_map));
+                                            p->last_h2_class, p, p->css_class_map, "h2"));
     tag_name = "h2";
   } else {
     parse_push(p, TAG_H3);
@@ -2091,7 +2094,7 @@ static void HandleHeadingStart(parsedata_t *p, Text *ts, const char **attr,
     ApplyHeadingFontSize(p, ts, 3, p->last_h_style, p->last_h_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map));
+                                            p, p->css_class_map, "h3"));
     tag_name = "h3";
   }
 
@@ -2174,7 +2177,8 @@ void start(void *data, const char *el, const char **attr) {
       el_style_raw = attr[i + 1];
   }
   epub_css_class_map::CssClassMargins elem_css;
-  epub_css_class_map::LookupAllForClassAttr(
+  epub_css_class_map::LookupAllForTag(el, p->css_class_map, &elem_css);
+  epub_css_class_map::MergeClassRulesToStyle(
       el_class_raw ? std::string(el_class_raw) : std::string(),
       p->css_class_map, &elem_css);
 
@@ -2246,7 +2250,7 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 4, p->last_h_style, p->last_h_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map));
+                                            p, p->css_class_map, "h4"));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
@@ -2270,7 +2274,7 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 5, p->last_h_style, p->last_h_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map));
+                                            p, p->css_class_map, "h5"));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
@@ -2294,7 +2298,7 @@ void start(void *data, const char *el, const char **attr) {
     ApplyHeadingFontSize(p, ts, 6, p->last_h_style, p->last_h_class);
     AppendParagraphAlignMarker(
         p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map));
+                                            p, p->css_class_map, "h6"));
     AppendParsedByte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
@@ -2325,7 +2329,7 @@ void start(void *data, const char *el, const char **attr) {
     p->last_p_class = ExtractClassAttr(attr);
     const book_xml_css_style_utils::TextAlign align =
         ResolveElementTextAlignWithClass(p->last_p_style, p->last_p_class,
-                                         p, p->css_class_map);
+                                         p, p->css_class_map, "p");
     AppendParagraphAlignMarker(p, align);
     const bool inside_list_item = book_xml_list_utils::IsInsideListItem(p);
     const bool tight_list_paragraph =
@@ -3158,7 +3162,7 @@ void end(void *data, const char *el) {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
           ParseElementMarginBottomWithClass(p->last_p_style, p->last_p_class,
-                                            p->css_class_map);
+                                            p->css_class_map, "p");
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);
@@ -3184,7 +3188,7 @@ void end(void *data, const char *el) {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
           ParseElementMarginBottomWithClass(p->last_h1_style, p->last_h1_class,
-                                            p->css_class_map);
+                                            p->css_class_map, "h1");
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);
@@ -3205,7 +3209,7 @@ void end(void *data, const char *el) {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
           ParseElementMarginBottomWithClass(p->last_h2_style, p->last_h2_class,
-                                            p->css_class_map);
+                                            p->css_class_map, "h2");
       const int default_lf = 1;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);
@@ -3227,7 +3231,7 @@ void end(void *data, const char *el) {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
           ParseElementMarginBottomWithClass(p->last_hr_style, p->last_hr_class,
-                                            p->css_class_map);
+                                            p->css_class_map, "hr");
       const int default_lf = 2;
       const int lf_count =
           book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
@@ -3251,7 +3255,7 @@ void end(void *data, const char *el) {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
           ParseElementMarginBottomWithClass(p->last_h_style, p->last_h_class,
-                                            p->css_class_map);
+                                            p->css_class_map, el);
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);

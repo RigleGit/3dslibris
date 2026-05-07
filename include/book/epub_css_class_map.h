@@ -133,8 +133,24 @@ bool LookupWhiteSpaceForClassAttr(const std::string &class_attr,
 // Single-pass lookup of ALL CSS properties for a class="" attribute.
 // Fills *out with merged values from all matching classes. Returns true if any
 // class matched. Use this instead of calling individual Lookup* functions.
+// When reset_output is false, merges into *out without clearing first.
 bool LookupAllForClassAttr(const std::string &class_attr,
                            const CssClassMap &class_map,
-                           CssClassMargins *out);
+                           CssClassMargins *out,
+                           bool reset_output = true);
+
+// Fills *out with CSS rules from element-type selectors (e.g. "p { ... }").
+// Resets *out before filling. Returns true if any rule exists for that tag.
+bool LookupAllForTag(const char *tag, const CssClassMap &class_map,
+                     CssClassMargins *out);
+
+// Merges class rules from class_attr into *out WITHOUT resetting first.
+// Call after LookupAllForTag to overlay class rules (higher specificity).
+bool MergeClassRulesToStyle(const std::string &class_attr,
+                             const CssClassMap &class_map, CssClassMargins *out);
+
+// Returns true if an element-type selector for tag specifies text-align.
+bool LookupTextAlignForTag(const char *tag, const CssClassMap &class_map,
+                            TextAlign *out);
 
 } // namespace epub_css_class_map

@@ -511,6 +511,134 @@ void TestLookupTextIndentAndTransformFunctions() {
   test::ExpectFalse("LookupTextTransform misses no-transform class", found2);
 }
 
+void TestParseCssIntoClassMapHandlesElementSelectors() {
+  const char *css =
+      "p { margin-top: 8px; margin-bottom: 12px; text-align: justify; }\n"
+      "body { margin-left: 4px; }\n"
+      "li { list-style-type: none; }\n"
+      "h1 { font-size: 24px; }\n"
+      "blockquote { margin-left: 16px; margin-right: 16px; }\n"
+      ".override { text-align: center; }\n"
+      "span { color: red; }\n";  // color unsupported → no entry
+
+  CssClassMap out;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &out);
+
+  using U = book_xml_css_style_utils::MarginTopResult::Unit;
+
+  test::ExpectTrue("p element parsed",
+                   out.find(std::string("*p")) != out.end());
+  test::ExpectTrue("body element parsed",
+                   out.find(std::string("*body")) != out.end());
+  test::ExpectTrue("li element parsed",
+                   out.find(std::string("*li")) != out.end());
+  test::ExpectTrue("h1 element parsed",
+                   out.find(std::string("*h1")) != out.end());
+  test::ExpectTrue("blockquote element parsed",
+                   out.find(std::string("*blockquote")) != out.end());
+  test::ExpectTrue("class .override still parsed",
+                   out.find("override") != out.end());
+  test::ExpectTrue("span not parsed (no relevant props)",
+                   out.find(std::string("*span")) == out.end());
+
+  // p margin-top
+  const CssClassMargins &p_css = out[std::string("*p")];
+  test::ExpectEq("p margin-top unit", (int)p_css.margin_top.unit, (int)U::Px);
+  test::ExpectEq("p margin-top value", p_css.margin_top.value, 8);
+  // p margin-bottom
+  test::ExpectEq("p margin-bottom unit", (int)p_css.margin_bottom.unit, (int)U::Px);
+  test::ExpectEq("p margin-bottom value", p_css.margin_bottom.value, 12);
+  // p text-align
+  test::ExpectTrue("p has_text_align", p_css.has_text_align);
+  test::ExpectEq("p text-align justify",
+                 (int)p_css.text_align,
+                 (int)book_xml_css_style_utils::TextAlign::Justify);
+  // li list-style-type: none
+  test::ExpectTrue("li hides list markers", out[std::string("*li")].hide_list_markers);
+  // h1 font-size
+  test::ExpectEq("h1 font-size unit",
+                 (int)out[std::string("*h1")].font_size.unit,
+                 (int)book_xml_css_style_utils::FontSizeSpec::Unit::Px);
+  test::ExpectEq("h1 font-size value", out[std::string("*h1")].font_size.value_x100, 2400);
+}
+
+void TestLookupAllForTagAndMergeClassRulesToStyle() {
+  using U = book_xml_css_style_utils::MarginTopResult::Unit;
+
+  CssClassMap map;
+  // p element rule: margin-top 8px, text-align justify
+  map[std::string("*p")].margin_top.unit = U::Px;
+  map[std::string("*p")].margin_top.value = 8;
+  map[std::string("*p")].has_text_align = true;
+  map[std::string("*p")].text_align = book_xml_css_style_utils::TextAlign::Left;
+  // .center class rule: text-align center
+  map["center"].has_text_align = true;
+  map["center"].text_align = book_xml_css_style_utils::TextAlign::Center;
+
+  // LookupAllForTag: fills from element rule
+  CssClassMargins out;
+  bool found = epub_css_class_map::LookupAllForTag("p", map, &out);
+  test::ExpectTrue("LookupAllForTag finds p rule", found);
+  test::ExpectEq("tag margin-top unit", (int)out.margin_top.unit, (int)U::Px);
+  test::ExpectEq("tag margin-top value", out.margin_top.value, 8);
+  test::ExpectTrue("tag has_text_align", out.has_text_align);
+
+  // MergeClassRulesToStyle: overlay class rule on top → class wins text-align
+  epub_css_class_map::MergeClassRulesToStyle("center", map, &out);
+  test::ExpectTrue("merged has_text_align", out.has_text_align);
+  test::ExpectEq("class overrides element text-align",
+                 (int)out.text_align,
+                 (int)book_xml_css_style_utils::TextAlign::Center);
+  // Element margin-top survives merge
+  test::ExpectEq("element margin-top survives", out.margin_top.value, 8);
+
+  // LookupAllForTag for unknown tag returns false and resets
+  CssClassMargins empty_out;
+  bool not_found = epub_css_class_map::LookupAllForTag("div", map, &empty_out);
+  test::ExpectFalse("LookupAllForTag unknown tag returns false", not_found);
+
+  // LookupTextAlignForTag
+  book_xml_css_style_utils::TextAlign align = book_xml_css_style_utils::TextAlign::Right;
+  bool ta_found = epub_css_class_map::LookupTextAlignForTag("p", map, &align);
+  test::ExpectTrue("LookupTextAlignForTag finds p", ta_found);
+  test::ExpectEq("LookupTextAlignForTag value",
+                 (int)align, (int)book_xml_css_style_utils::TextAlign::Left);
+  // (map["*p"].text_align was set to Left directly)
+
+  bool ta_miss = epub_css_class_map::LookupTextAlignForTag("div", map, &align);
+  test::ExpectFalse("LookupTextAlignForTag misses unknown", ta_miss);
+}
+
+void TestElementSelectorCascadesOverTag() {
+  // Verify: global p {} margin is applied, class .note overrides text-align
+  const char *css =
+      "p { margin-bottom: 10px; text-align: justify; }\n"
+      ".note { text-align: center; margin-bottom: 20px; }\n";
+
+  CssClassMap map;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &map);
+
+  using U = book_xml_css_style_utils::MarginTopResult::Unit;
+
+  // No class: tag rule applies
+  CssClassMargins result;
+  epub_css_class_map::LookupAllForTag("p", map, &result);
+  epub_css_class_map::MergeClassRulesToStyle("", map, &result);
+  test::ExpectEq("no-class margin-bottom from tag", result.margin_bottom.value, 10);
+  test::ExpectEq("no-class text-align from tag",
+                 (int)result.text_align,
+                 (int)book_xml_css_style_utils::TextAlign::Justify);
+
+  // With .note class: class overrides both margin-bottom and text-align
+  CssClassMargins result2;
+  epub_css_class_map::LookupAllForTag("p", map, &result2);
+  epub_css_class_map::MergeClassRulesToStyle("note", map, &result2);
+  test::ExpectEq("class margin-bottom wins", result2.margin_bottom.value, 20);
+  test::ExpectEq("class text-align wins",
+                 (int)result2.text_align,
+                 (int)book_xml_css_style_utils::TextAlign::Center);
+}
+
 } // namespace
 
 int main() {
@@ -533,5 +661,8 @@ int main() {
   TestLookupTextIndentAndTransformFunctions();
   TestParseCssIntoClassMapDetectsMarginLeftRight();
   TestLookupMarginLeftRightForClassAttr();
+  TestParseCssIntoClassMapHandlesElementSelectors();
+  TestLookupAllForTagAndMergeClassRulesToStyle();
+  TestElementSelectorCascadesOverTag();
   return 0;
 }

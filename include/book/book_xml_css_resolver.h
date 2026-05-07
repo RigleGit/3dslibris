@@ -75,12 +75,13 @@ bool ElementCanCarryBlockTextAlign(const char *el,
                                    const std::string &style_attr);
 
 // Resolve the effective text-align for an element.
-// Priority: inline style > class > active inherited stack value > Left.
-// parsedata stack access is read-only; call with const parsedata_t* cast.
+// Priority: inline style > class > element-type rule > inherited stack > Left.
+// element_tag (e.g. "p") enables lookup of "p { text-align: ... }" rules.
 book_xml_css_style_utils::TextAlign ResolveElementTextAlignWithClass(
     const std::string &style_attr, const std::string &class_attr,
     const bool *block_text_align_stack, const uint8_t *block_text_align_value_stack,
-    uint8_t stacksize, const epub_css_class_map::CssClassMap &class_map);
+    uint8_t stacksize, const epub_css_class_map::CssClassMap &class_map,
+    const char *element_tag = nullptr);
 
 // ---------------------------------------------------------------------------
 // Margin resolution
@@ -91,9 +92,11 @@ book_xml_css_style_utils::MarginTopResult
 ParseElementMarginTopPx(const char **attr);
 
 // Resolve margin-bottom from a previously captured style/class pair.
-// Checks inline style first, falls back to CssClassMap lookup.
+// Priority: inline style > class rule > element-type rule.
+// element_tag (e.g. "p") enables lookup of "p { margin-bottom: ... }" rules.
 book_xml_css_style_utils::MarginTopResult ParseElementMarginBottomWithClass(
     const std::string &last_style, const std::string &last_class,
-    const epub_css_class_map::CssClassMap &class_map);
+    const epub_css_class_map::CssClassMap &class_map,
+    const char *element_tag = nullptr);
 
 } // namespace book_xml_css_resolver

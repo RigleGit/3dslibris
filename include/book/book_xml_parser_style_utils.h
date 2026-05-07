@@ -63,6 +63,10 @@ inline void RestoreParsedParagraphAlignmentMarker(parsedata_t *p) {
       have_align = epub_css_class_map::LookupTextAlignForClassAttr(
           p->last_p_class, p->css_class_map, &align);
     }
+    if (!have_align) {
+      have_align = epub_css_class_map::LookupTextAlignForTag(
+          "p", p->css_class_map, &align);
+    }
   } else if (parse_in(p, TAG_H1)) {
     in_alignable_block = true;
     have_align = book_xml_css_style_utils::TryParseTextAlign(
@@ -70,6 +74,10 @@ inline void RestoreParsedParagraphAlignmentMarker(parsedata_t *p) {
     if (!have_align) {
       have_align = epub_css_class_map::LookupTextAlignForClassAttr(
           p->last_h1_class, p->css_class_map, &align);
+    }
+    if (!have_align) {
+      have_align = epub_css_class_map::LookupTextAlignForTag(
+          "h1", p->css_class_map, &align);
     }
   } else if (parse_in(p, TAG_H2)) {
     in_alignable_block = true;
@@ -79,6 +87,10 @@ inline void RestoreParsedParagraphAlignmentMarker(parsedata_t *p) {
       have_align = epub_css_class_map::LookupTextAlignForClassAttr(
           p->last_h2_class, p->css_class_map, &align);
     }
+    if (!have_align) {
+      have_align = epub_css_class_map::LookupTextAlignForTag(
+          "h2", p->css_class_map, &align);
+    }
   } else if (parse_in(p, TAG_H3) || parse_in(p, TAG_H4) || parse_in(p, TAG_H5) ||
              parse_in(p, TAG_H6)) {
     in_alignable_block = true;
@@ -87,6 +99,13 @@ inline void RestoreParsedParagraphAlignmentMarker(parsedata_t *p) {
     if (!have_align) {
       have_align = epub_css_class_map::LookupTextAlignForClassAttr(
           p->last_h_class, p->css_class_map, &align);
+    }
+    if (!have_align) {
+      const char *htag = parse_in(p, TAG_H3) ? "h3"
+                       : parse_in(p, TAG_H4) ? "h4"
+                       : parse_in(p, TAG_H5) ? "h5" : "h6";
+      have_align = epub_css_class_map::LookupTextAlignForTag(
+          htag, p->css_class_map, &align);
     }
   } else {
     for (int i = (int)p->stacksize - 1; i >= 0; --i) {
