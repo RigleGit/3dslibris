@@ -759,12 +759,28 @@ static void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
   // A mandatory break is needed only when linebegan==true (content drawn on
   // current line). If the line is fresh (linebegan==false) we are already at
   // the start of a new line and no extra linefeed is required.
-  if (p->pending_block_break && p->linebegan) {
-    if (available >= 1) {
-      linefeed_r(p, next_tag ? next_tag : "?", "mandatory-break", 0);
-      available--;   // pen.y advanced one line_step
+if (p->pending_block_break && p->linebegan) {
+  if (available >= 1) {
+    linefeed_r(p, next_tag ? next_tag : "?", "mandatory-break", 0);
+    available--;   // pen.y advanced one line_step
+  } else {
+    // We still owe a mandatory block break, but there is no vertical room
+    // left on this screen. Do not let the next block continue on the same
+    // visual line; move to the next screen/page before emitting content.
+    AdvanceParsedScreen(p);
+
+    const text_render_layout_utils::ReadingScreenMetrics after_metrics =
+        text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
+            p->book->GetOrientation() != 0,
+            p->screen,
+            ts->margin.bottom,
+            MIN(ts->margin.bottom, 16));
+
+    const int usable_after =
+        after_metrics.max_height - after_metrics.bottom_margin - p->pen.y;
+
+    available = (usable_after > 0) ? (usable_after / line_step) : 0;
     }
-    // else available==0: content will trigger AdvanceParsedPageOnOverflow.
   }
   p->pending_block_break = false;
 
@@ -909,10 +925,6 @@ static bool FlowedTextFitsCurrentVisualLine(
   const int content_right =
       emit_metrics.display_width - emit_metrics.margin_right;
   int start_x = p->linebegan ? p->pen.x : emit_metrics.margin_left;
-  if (!p->linebegan) {
-    const int existing_offset = p->pen.x - emit_metrics.base_margin_left;
-    start_x = std::max(0, emit_metrics.margin_left + existing_offset);
-  }
   const int available = content_right - start_x;
   if (available <= 0)
     return false;
@@ -1383,8 +1395,11 @@ static std::string NormalizeFb2ChapterTitle(const std::string &in) {
 }
 
 static void linefeed(parsedata_t *p) {
+  if (!p || !p->ts)
+    return;
+
   AppendParsedByte(p, '\n');
-  p->pen.x = MARGINLEFT;
+  p->pen.x = p->ts->margin.left;
   p->pen.y += p->ts->GetHeight() + p->ts->linespacing;
   p->linebegan = false;
 }
@@ -1475,6 +1490,25 @@ static bool IsBlockLevelElement(const char *el) {
 static bool BehavesAsBlock(const char *el,
                            const epub_css_class_map::CssClassMargins &elem_css) {
   return IsBlockLevelElement(el) || elem_css.is_display_block;
+}
+
+static void FlushInlineTailBeforeElementStart(parsedata_t *p, Text *ts,
+                                              const char *el) {
+  if (!p)
+    return;
+
+  // Whitespace-only indentation/newlines between block elements must not be
+  // emitted as real flowed text. If emitted, it can consume pending block
+  // breaks before the next real block content arrives.
+  if (el && IsBlockLevelElement(el) && !p->inline_text_tail.empty() &&
+      !HasVisibleTextContentUtf8(p->inline_text_tail.c_str(),
+                                 (int)p->inline_text_tail.size())) {
+    p->inline_text_tail.clear();
+    ApplyDeferredStyleSync(p, ts);
+    return;
+  }
+
+  FlushInlineTailAndDeferredStyle(p, ts);
 }
 
 static void ResetCapturedTable(parsedata_t *p) {
@@ -1967,23 +2001,6 @@ ParseElementMarginTopWithClass(const char **attr,
   return elem_css.margin_top;
 }
 
-static book_xml_css_style_utils::MarginTopResult
-ParseElementTextIndentWithClass(const char **attr,
-                                const epub_css_class_map::CssClassMargins &elem_css) {
-  if (attr) {
-    for (int i = 0; attr[i]; i += 2) {
-      if (!attr[i + 1] || !attr[i + 1][0])
-        continue;
-      if (AttrNameEquals(attr[i], "style")) {
-        const auto r = book_xml_css_style_utils::ParseTextIndent(attr[i + 1]);
-        if (r.unit != book_xml_css_style_utils::MarginTopResult::Unit::None)
-          return r;
-      }
-    }
-  }
-  return elem_css.text_indent;
-}
-
 static void ConfigureBlockTextAlign(
     parsedata_t *p, const char *el, const char **attr,
     const epub_css_class_map::CssClassMargins &elem_css) {
@@ -2128,7 +2145,7 @@ void start(void *data, const char *el, const char **attr) {
   parsedata_t *p = (parsedata_t *)data;
   ElementPerfScope elem_perf(p);
   Text *ts = p->ts;
-  FlushInlineTailAndDeferredStyle(p, ts);
+  FlushInlineTailBeforeElementStart(p, ts, el);
 
   if (book_xml_hidden_utils::IsCosmeticPageBreakElement(attr)) {
     parse_push(p, TAG_UNKNOWN);
@@ -2217,12 +2234,19 @@ void start(void *data, const char *el, const char **attr) {
   } else if (!strcmp(el, "dd")) {
     parse_push(p, TAG_DD);
     ApplyElementBlockMargins(p, ts, attr, elem_css);
-    QueueBlockSpacingLines(p, 1, "dd", "dd-top", false);
-    const int leading_spaces = book_xml_block_utils::GetLeadingSpaceCount(TAG_DD);
-    for (int i = 0; i < leading_spaces; i++) {
-      AppendParsedByte(p, ' ');
-      p->pen.x += ts->GetAdvance(' ');
+    if (elem_css.margin_left.unit ==
+        book_xml_css_style_utils::MarginTopResult::Unit::None) {
+      const int space_advance = ts->GetAdvance(' ');
+      const int legacy_dd_indent_px =
+          space_advance > 0 ? 2 * space_advance : 12;
+
+      parse_set_current_block_margins(
+          p,
+          parse_current_block_margin_left(p) + legacy_dd_indent_px,
+          parse_current_block_margin_right(p));
     }
+
+    QueueBlockSpacingLines(p, 1, "dd", "dd-top", false);
   }
   else if (!strcmp(el, "body"))
     parse_push(p, TAG_BODY);
@@ -2339,7 +2363,6 @@ void start(void *data, const char *el, const char **attr) {
         ResolveElementTextAlignWithClass(p->last_p_style, p->last_p_class,
                                          p, p->css_class_map, "p");
     AppendParagraphAlignMarker(p, align);
-    const bool inside_list_item = book_xml_list_utils::IsInsideListItem(p);
     const bool tight_list_paragraph =
         book_xml_list_utils::HasPendingListItemContent(p);
     const bool tight_block_paragraph = ParseInAnyEasyParagraphTightBlock(p);
@@ -2347,8 +2370,6 @@ void start(void *data, const char *el, const char **attr) {
         !tight_list_paragraph && !tight_block_paragraph;
     const book_xml_css_style_utils::MarginTopResult mtr =
         ParseElementMarginTopWithClass(attr, elem_css);
-    const book_xml_css_style_utils::MarginTopResult text_indent_mtr =
-        ParseElementTextIndentWithClass(attr, elem_css);
     ApplyElementBlockMargins(p, ts, attr, elem_css);
     const int line_h = ts->GetHeight() + ts->linespacing;
     if (can_apply_top_margin) {
@@ -2359,22 +2380,6 @@ void start(void *data, const char *el, const char **attr) {
                              p->last_p_class, mtr, line_h, default_lf,
                              lf_count);
       QueueBlockSpacingFromMarginResult(p, "p", "paragraph-top", mtr, line_h, default_lf);
-      if (!inside_list_item && !parse_in(p, TAG_DD)) {
-        int indent_spaces = 0;
-        using book_xml_css_style_utils::MarginTopResult;
-        if (text_indent_mtr.unit != MarginTopResult::Unit::None &&
-            !text_indent_mtr.negative) {
-          const int sa = ts->GetAdvance(' ');
-          if (sa > 0)
-            indent_spaces = text_indent_mtr.value / sa;
-        } else if (text_indent_mtr.unit == MarginTopResult::Unit::None) {
-          indent_spaces = p->book->GetParagraphIndent();
-        }
-        for (int i = 0; i < indent_spaces; i++) {
-          AppendParsedByte(p, ' ');
-          p->pen.x += ts->GetAdvance(' ');
-        }
-      }
     } else {
       const char *phase = "top-skipped";
       if (tight_list_paragraph)
@@ -2792,20 +2797,6 @@ void start(void *data, const char *el, const char **attr) {
     const int line_h = ts->GetHeight() + ts->linespacing;
     const int default_lf = 1;
     QueueBlockSpacingFromMarginResult(p, el, "block-top", mtr, line_h, default_lf);
-    const book_xml_css_style_utils::MarginTopResult text_indent_mtr =
-        ParseElementTextIndentWithClass(attr, elem_css);
-    using book_xml_css_style_utils::MarginTopResult;
-    if (text_indent_mtr.unit != MarginTopResult::Unit::None &&
-        !text_indent_mtr.negative) {
-      const int sa = ts->GetAdvance(' ');
-      if (sa > 0) {
-        const int indent_spaces = text_indent_mtr.value / sa;
-        for (int i = 0; i < indent_spaces; i++) {
-          AppendParsedByte(p, ' ');
-          p->pen.x += sa;
-        }
-      }
-    }
   }
 
   // CSS-based emphasis fallback for EPUBs that do not use semantic tags.

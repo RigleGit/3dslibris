@@ -289,10 +289,10 @@ int main() {
         PlanInlineImageLayout(req, Metadata(800, 1200));
     ExpectMode("page image on right screen mid-page", plan,
                INLINE_IMAGE_LAYOUT_PAGE);
-    ExpectTrue("page mid-right advances before", plan.advance_before);
-    ExpectEq("advance from right goes to left on next page",
-             plan.next_text_screen, 1);
-    ExpectEq("advance from right crosses one page boundary",
+    ExpectFalse("page mid-right does not advance before", plan.advance_before);
+    ExpectEq("page image on right sends text to next page left",
+             plan.next_text_screen, 0);
+    ExpectEq("page image on right crosses one page boundary",
              plan.page_breaks, 1);
   }
 

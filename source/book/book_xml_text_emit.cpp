@@ -70,8 +70,8 @@ void AlignFreshLineToEffectiveLeftMargin(parsedata_t *p,
                                          const FlowEmitMetrics &metrics) {
   if (!p || p->linebegan)
     return;
-  const int existing_offset = p->pen.x - metrics.base_margin_left;
-  p->pen.x = std::max(metrics.base_margin_left, metrics.margin_left + existing_offset);
+
+  p->pen.x = metrics.margin_left;
 }
 
 void EmitFreshLineStartX(parsedata_t *p, const FlowEmitMetrics &metrics) {
