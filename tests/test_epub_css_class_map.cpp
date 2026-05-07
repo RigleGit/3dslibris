@@ -639,6 +639,59 @@ void TestElementSelectorCascadesOverTag() {
                  (int)book_xml_css_style_utils::TextAlign::Center);
 }
 
+void TestParaCenterCssParseAndLookup() {
+  // Exact CSS from the bug report.
+  const char *css =
+      ".paraCenter {\n"
+      "    display: block;\n"
+      "    text-align: center;\n"
+      "    margin-top: 0%;\n"
+      "    margin-bottom: 0%;\n"
+      "}\n";
+
+  CssClassMap map;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &map);
+
+  // Entry must exist.
+  test::ExpectTrue("paraCenter in map", map.count("paraCenter") > 0);
+
+  const CssClassMargins &entry = map.at("paraCenter");
+
+  // text-align: center must be captured.
+  test::ExpectTrue("paraCenter has_text_align", entry.has_text_align);
+  test::ExpectEq("paraCenter text_align is center",
+                 (int)entry.text_align,
+                 (int)book_xml_css_style_utils::TextAlign::Center);
+
+  // display: block must be captured.
+  test::ExpectTrue("paraCenter is_display_block", entry.is_display_block);
+
+  // margin-top: 0% must be captured (unit=Percent, value=0).
+  using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
+  test::ExpectEq("paraCenter margin-top unit is percent",
+                 (int)entry.margin_top.unit, (int)Unit::Percent);
+  test::ExpectEq("paraCenter margin-top value is 0", entry.margin_top.value, 0);
+
+  // LookupTextAlignForClassAttr must return center.
+  book_xml_css_style_utils::TextAlign align =
+      book_xml_css_style_utils::TextAlign::Left;
+  bool found =
+      epub_css_class_map::LookupTextAlignForClassAttr("paraCenter", map, &align);
+  test::ExpectTrue("LookupTextAlignForClassAttr finds paraCenter", found);
+  test::ExpectEq("paraCenter align is center",
+                 (int)align, (int)book_xml_css_style_utils::TextAlign::Center);
+
+  // Multiple classes: "foo paraCenter" must also find center.
+  book_xml_css_style_utils::TextAlign align2 =
+      book_xml_css_style_utils::TextAlign::Left;
+  bool found2 =
+      epub_css_class_map::LookupTextAlignForClassAttr("foo paraCenter", map, &align2);
+  test::ExpectTrue("LookupTextAlignForClassAttr finds paraCenter in multi-class",
+                   found2);
+  test::ExpectEq("multi-class paraCenter align is center",
+                 (int)align2, (int)book_xml_css_style_utils::TextAlign::Center);
+}
+
 void TestLookupHideListMarkersForTag() {
   const char *css =
       "ol { list-style-type: none; }\n"
@@ -683,6 +736,7 @@ int main() {
   TestParseCssIntoClassMapHandlesElementSelectors();
   TestLookupAllForTagAndMergeClassRulesToStyle();
   TestElementSelectorCascadesOverTag();
+  TestParaCenterCssParseAndLookup();
   TestLookupHideListMarkersForTag();
   return 0;
 }
