@@ -2,12 +2,15 @@
 #include "book/book_context.h"
 #include "formats/epub/epub_parser.h"
 #include "formats/epub/epub_page_cache.h"
+#include "formats/common/page_cache_utils.h"
 #include "shared/app_flow_utils.h"
 #include "ui/text.h"
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
+#include <unistd.h>
 
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
@@ -300,6 +303,227 @@ void TestEpubStreamWriterAbortIdempotent() {
   g_pass++;    // no crash
 }
 
+// ---------------------------------------------------------------------------
+// Cache layout params matching the Text stub fixed metrics.
+// ---------------------------------------------------------------------------
+
+static const char *kCacheBookPath = "/tmp/3dslibris_cache_roundtrip_book.epub";
+static const int   kCachePx       = 14;
+static const int   kCacheLS       = 2;
+static const int   kCachePS       = 0;
+static const int   kCachePI       = 0;
+static const int   kCacheOri      = 0;
+static const int   kCacheMl       = 12;
+static const int   kCacheMr       = 12;
+static const int   kCacheMt       = 10;
+static const int   kCacheMb       = 36;
+
+// Compute the cache file path that Save/TryLoad will use for kCacheBookPath
+// with the metrics above (file_size=0, file_mtime=0 since file doesn't exist).
+static std::string CacheFilePath(const char *cache_dir) {
+  page_cache_utils::PageCacheLayoutParams lp;
+  lp.file_size = 0;
+  lp.file_mtime = 0;
+  lp.pixel_size = kCachePx;
+  lp.line_spacing = kCacheLS;
+  lp.paragraph_spacing = kCachePS;
+  lp.paragraph_indent = kCachePI;
+  lp.orientation = kCacheOri;
+  lp.margin_left = kCacheMl;
+  lp.margin_right = kCacheMr;
+  lp.margin_top = kCacheMt;
+  lp.margin_bottom = kCacheMb;
+  lp.regular_font = "";
+  return page_cache_utils::BuildPageCachePath(cache_dir, ".epc", kCacheBookPath, lp);
+}
+
+static void InvokeSave(Book *book, const char *path) {
+  epub_page_cache::Save(book, path,
+                        kCachePx, kCacheLS, kCachePS, kCachePI, kCacheOri,
+                        kCacheMl, kCacheMr, kCacheMt, kCacheMb,
+                        nullptr, false, false);
+}
+
+static bool InvokeTryLoad(Book *book, const char *path) {
+  return epub_page_cache::TryLoad(book, path,
+                                  kCachePx, kCacheLS, kCachePS, kCachePI, kCacheOri,
+                                  kCacheMl, kCacheMr, kCacheMt, kCacheMb,
+                                  nullptr, false);
+}
+
+// ---------------------------------------------------------------------------
+// Roundtrip test
+// ---------------------------------------------------------------------------
+
+void TestEpubPageCacheRoundtrip() {
+  char cache_dir[] = "/tmp/3dslibris-cache-rt-XXXXXX";
+  if (!mkdtemp(cache_dir)) {
+    fprintf(stderr, "SKIP TestEpubPageCacheRoundtrip: mkdtemp failed\n");
+    return;
+  }
+  epub_page_cache::SetCacheDirForTest(cache_dir);
+
+  // Build a Book with 2 pages, 1 chapter, and a title.
+  Book *book = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
+  book->SetTitle("Cache Roundtrip Title");
+  book->AppendPage();   // page 0 (empty buffer)
+  book->AppendPage();   // page 1 (empty buffer)
+  book->AddChapter(0, "Cache Chapter One", 0);
+
+  InvokeSave(book, kCacheBookPath);
+
+  // Load into a fresh Book.
+  Book *book2 = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
+  bool loaded = InvokeTryLoad(book2, kCacheBookPath);
+
+  ExpectTrue("cache roundtrip: TryLoad returns true", loaded);
+  ExpectTrue("cache roundtrip: page count matches",
+             (int)book2->GetPageCount() == (int)book->GetPageCount());
+  const char *t = book2->GetTitle();
+  ExpectTrue("cache roundtrip: title survives",
+             t && std::string(t) == "Cache Roundtrip Title");
+  ExpectTrue("cache roundtrip: chapter count matches",
+             book2->GetChapters().size() == 1);
+  if (!book2->GetChapters().empty())
+    ExpectTrue("cache roundtrip: chapter title survives",
+               book2->GetChapters()[0].title == "Cache Chapter One");
+
+  book->Close();
+  book2->Close();
+  delete book;
+  delete book2;
+
+  // Cleanup
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  std::string cache_file = CacheFilePath(cache_dir);
+  if (!cache_file.empty())
+    remove(cache_file.c_str());
+  rmdir(cache_dir);
+  g_pass++;  // cleanup survived
+}
+
+// ---------------------------------------------------------------------------
+// Header validation tests (using the same temp dir trick)
+// ---------------------------------------------------------------------------
+
+static void WriteU32LE(FILE *fp, uint32_t v) {
+  fwrite(&v, 1, sizeof(v), fp);
+}
+static void WriteU16LE(FILE *fp, uint16_t v) {
+  fwrite(&v, 1, sizeof(v), fp);
+}
+
+static FILE *OpenCacheFileForWrite(const char *cache_dir, std::string *path_out) {
+  *path_out = CacheFilePath(cache_dir);
+  if (path_out->empty())
+    return nullptr;
+  return fopen(path_out->c_str(), "wb");
+}
+
+static bool TryLoadCorrupt(const char *cache_dir) {
+  Book *book = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
+  bool ok = InvokeTryLoad(book, kCacheBookPath);
+  book->Close();
+  delete book;
+  return ok;
+}
+
+void TestEpubPageCacheHeaderValidation() {
+  char cache_dir[] = "/tmp/3dslibris-cache-hv-XXXXXX";
+  if (!mkdtemp(cache_dir)) {
+    fprintf(stderr, "SKIP TestEpubPageCacheHeaderValidation: mkdtemp failed\n");
+    return;
+  }
+  epub_page_cache::SetCacheDirForTest(cache_dir);
+
+  std::string path;
+
+  // Wrong magic
+  {
+    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
+    if (fp) {
+      WriteU32LE(fp, 0xDEADBEEFU); // bad magic
+      WriteU16LE(fp, 6);           // version
+      WriteU16LE(fp, 0);           // title_len
+      WriteU32LE(fp, 1);           // page_count
+      WriteU32LE(fp, 0);           // chapter_count
+      WriteU32LE(fp, 0);           // doc_start_count
+      WriteU32LE(fp, 0);           // image_count
+      fclose(fp);
+      ExpectFalse("cache hdr: wrong magic → TryLoad returns false",
+                  TryLoadCorrupt(cache_dir));
+    }
+  }
+
+  // Wrong version
+  {
+    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
+    if (fp) {
+      WriteU32LE(fp, 0x45504347U); // correct magic
+      WriteU16LE(fp, 0xFFFFU);     // bad version
+      WriteU16LE(fp, 0);
+      WriteU32LE(fp, 1);
+      WriteU32LE(fp, 0);
+      WriteU32LE(fp, 0);
+      WriteU32LE(fp, 0);
+      fclose(fp);
+      ExpectFalse("cache hdr: wrong version → TryLoad returns false",
+                  TryLoadCorrupt(cache_dir));
+    }
+  }
+
+  // Zero page_count (invalid)
+  {
+    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
+    if (fp) {
+      WriteU32LE(fp, 0x45504347U);
+      WriteU16LE(fp, 6);
+      WriteU16LE(fp, 0);
+      WriteU32LE(fp, 0);           // page_count == 0 → invalid
+      WriteU32LE(fp, 0);
+      WriteU32LE(fp, 0);
+      WriteU32LE(fp, 0);
+      fclose(fp);
+      ExpectFalse("cache hdr: page_count=0 → TryLoad returns false",
+                  TryLoadCorrupt(cache_dir));
+    }
+  }
+
+  // Excessive page_count
+  {
+    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
+    if (fp) {
+      WriteU32LE(fp, 0x45504347U);
+      WriteU16LE(fp, 6);
+      WriteU16LE(fp, 0);
+      WriteU32LE(fp, 99999U);      // > 50000 limit
+      WriteU32LE(fp, 0);
+      WriteU32LE(fp, 0);
+      WriteU32LE(fp, 0);
+      fclose(fp);
+      ExpectFalse("cache hdr: page_count>50000 → TryLoad returns false",
+                  TryLoadCorrupt(cache_dir));
+    }
+  }
+
+  // Truncated header (only 4 bytes written)
+  {
+    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
+    if (fp) {
+      WriteU32LE(fp, 0x45504347U); // just the magic, header incomplete
+      fclose(fp);
+      ExpectFalse("cache hdr: truncated header → TryLoad returns false",
+                  TryLoadCorrupt(cache_dir));
+    }
+  }
+
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  if (!path.empty())
+    remove(path.c_str());
+  rmdir(cache_dir);
+  g_pass++;  // cleanup survived
+}
+
 } // namespace
 
 int main() {
@@ -318,6 +542,8 @@ int main() {
   TestEpubStreamWriterNullPath();
   TestEpubStreamWriterFinalizeWithoutBegin();
   TestEpubStreamWriterAbortIdempotent();
+  TestEpubPageCacheRoundtrip();
+  TestEpubPageCacheHeaderValidation();
 
   fprintf(stderr, "Results: %d/%d passed, %d failed\n", g_pass, g_pass + g_fail,
           g_fail);

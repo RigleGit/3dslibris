@@ -58,6 +58,7 @@ fi
 # No book_parser.cpp: EPUB test calls epub_parser::Open directly,
 # avoiding the full format dispatch table and other format parsers.
 c++ -std=c++11 \
+  -DDSLIBRIS_HOST_TEST \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \
   "-I$TEST_ROOT/third_party/utf8proc" \

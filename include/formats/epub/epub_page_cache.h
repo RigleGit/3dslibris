@@ -54,4 +54,8 @@ private:
   u32 pages_written_;
 };
 
+#ifdef DSLIBRIS_HOST_TEST
+void SetCacheDirForTest(const char *dir);
+#endif
+
 } // namespace epub_page_cache

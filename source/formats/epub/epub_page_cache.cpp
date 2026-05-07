@@ -23,6 +23,18 @@ namespace {
 
 static const std::string &kEpubCacheBaseDir = paths::GetCacheBaseDir();
 static const std::string &kEpubCacheDir = paths::GetEpubCacheDir();
+
+#ifdef DSLIBRIS_HOST_TEST
+static std::string g_host_test_cache_dir;
+#endif
+
+static const std::string &GetEffectiveCacheDir() {
+#ifdef DSLIBRIS_HOST_TEST
+  if (!g_host_test_cache_dir.empty())
+    return g_host_test_cache_dir;
+#endif
+  return kEpubCacheDir;
+}
 static const u32 kEpubPageCacheMagic = 0x45504347U;
 static const u16 kEpubPageCacheVersion = 6;
 static const u16 kPageCacheTitleMaxBytes = 1000;
@@ -62,7 +74,7 @@ BuildLayoutParams(const char *book_path, int pixel_size, int line_spacing,
                   int margin_left, int margin_right, int margin_top,
                   int margin_bottom, const char *regular_font,
                   bool respect_publisher_font_size) {
-  EpubCacheLayoutParams params;
+  EpubCacheLayoutParams params = {};
   if (!book_path)
     return params;
 
@@ -106,7 +118,7 @@ static std::string BuildCachePath(const char *book_path,
   if (params.respect_publisher_font_size)
     layout_params.variant_token = "pub1";
   return page_cache_utils::BuildPageCachePath(
-      kEpubCacheDir, ".epc", book_path, layout_params);
+      GetEffectiveCacheDir(), ".epc", book_path, layout_params);
 }
 
 static void EnsureCacheDirs() {
@@ -605,5 +617,11 @@ void StreamWriter::Abort() {
   }
   pages_written_ = 0;
 }
+
+#ifdef DSLIBRIS_HOST_TEST
+void SetCacheDirForTest(const char *dir) {
+  g_host_test_cache_dir = dir ? dir : "";
+}
+#endif
 
 } // namespace epub_page_cache
