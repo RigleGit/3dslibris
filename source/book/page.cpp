@@ -569,8 +569,32 @@ void Page::Draw(Text *ts) {
           ts->linebegan = false;
         }
 
-        book->DrawInlineImage(ts, image_id, &image_plan, current_screen,
-                              next_image_align);
+        const int image_pen_x = (int)ts->GetPenX();
+        const int image_line_top = (int)ts->GetPenY() - ts->GetHeight();
+        const bool image_drawn =
+            book->DrawInlineImage(ts, image_id, &image_plan, current_screen,
+                                  next_image_align);
+        if (image_drawn && link_active && active_link_render_index >= 0 &&
+            active_link_render_index < (int)rendered_inline_links_.size()) {
+          InlineLinkRenderEntry &entry =
+              rendered_inline_links_[(size_t)active_link_render_index];
+          entry.screen_index = on_first_screen ? 0 : 1;
+          int image_x0 = image_pen_x;
+          int image_y0 = image_line_top;
+          int image_x1 = image_x0 + image_plan.draw_width;
+          int image_y1 = image_y0 + image_plan.draw_height;
+          if (image_plan.mode == INLINE_IMAGE_LAYOUT_PAGE) {
+            image_x0 = 0;
+            image_y0 = 0;
+            image_x1 = ts->display.width;
+            image_y1 = on_first_screen ? 400 : 320;
+          } else if (image_plan.mode == INLINE_IMAGE_LAYOUT_BAND) {
+            image_x0 = ts->margin.left;
+            image_x1 = ts->display.width - ts->margin.right;
+          }
+          ExpandLinkBounds(&entry.bounds, image_x0, image_y0, image_x1,
+                           image_y1);
+        }
 
         bool stop_page_draw = false;
         switch (image_plan.mode) {

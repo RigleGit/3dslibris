@@ -25,22 +25,22 @@ void ExpectTrue(const char *label, bool value) {
 
 void TestPlacementUsesContentArea() {
   const InlineImagePagePlacement p = ResolveInlineImagePagePlacement(
-      240, 400, 12, 12, 10, 36, 600, 1200, 2, 2, 0);
-  ExpectEq("avail width excludes margins", p.avail_width, 212);
-  ExpectEq("avail height excludes ui", p.avail_height, 352);
+      240, 400, 0, 0, 0, 36, 600, 1200, 0, 0, 0);
+  ExpectEq("avail width uses full screen", p.avail_width, 240);
+  ExpectEq("avail height excludes ui", p.avail_height, 364);
   ExpectTrue("draw height fits content box", p.draw_height <= p.avail_height);
-  ExpectTrue("top respects top margin", p.start_y >= 12);
+  ExpectTrue("top may use full image area", p.start_y >= 0);
   ExpectTrue("bottom stays above footer",
              p.start_y + p.draw_height <= 364);
 }
 
 void TestSmallImageCentersWithinContentBox() {
   const InlineImagePagePlacement p = ResolveInlineImagePagePlacement(
-      240, 320, 12, 12, 10, 16, 80, 60, 2, 2, 0);
-  ExpectEq("no upscale width", p.draw_width, 80);
-  ExpectEq("no upscale height", p.draw_height, 60);
-  ExpectTrue("x centered", p.start_x > 14);
-  ExpectTrue("y centered", p.start_y > 12);
+      240, 320, 0, 0, 0, 16, 80, 60, 0, 0, 0);
+  ExpectEq("page image upscales width", p.draw_width, 240);
+  ExpectEq("page image upscales height", p.draw_height, 180);
+  ExpectEq("x fills screen", p.start_x, 0);
+  ExpectTrue("y centered", p.start_y > 0);
 }
 
 } // namespace

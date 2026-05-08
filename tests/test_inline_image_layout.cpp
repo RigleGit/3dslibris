@@ -136,6 +136,19 @@ int main() {
 
   {
     InlineImageLayoutRequest req = BaseRequest();
+    req.line_began = false;
+    req.pen_x = req.margin_left;
+    req.pen_y = req.margin_top + req.line_height;
+    InlineImageLayoutPlan plan =
+        PlanInlineImageLayout(req, Metadata(1196, 1800));
+    ExpectMode("cover-like image at screen start stays page", plan,
+               INLINE_IMAGE_LAYOUT_PAGE);
+    ExpectFalse("fresh cover-like page image does not pre-advance",
+                plan.advance_before);
+  }
+
+  {
+    InlineImageLayoutRequest req = BaseRequest();
     req.pen_x = 200;
     InlineImageLayoutPlan plan =
         PlanInlineImageLayout(req, Metadata(48, 16));

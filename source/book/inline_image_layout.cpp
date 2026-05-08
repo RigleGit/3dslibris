@@ -133,6 +133,14 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
     }
   }
 
+  const bool page_like_image_at_screen_start =
+      IsAtScreenStart(req) && eff_meta.height >= (eff_meta.width * 4) / 3 &&
+      eff_meta.height >= (8 * line_height);
+  if (page_like_image_at_screen_start) {
+    FillPageMode(req, &plan);
+    return plan;
+  }
+
   const int inline_height = line_height;
   const int inline_width =
       std::max(1, DivRoundNearest(eff_meta.width * inline_height, eff_meta.height));

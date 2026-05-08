@@ -717,9 +717,9 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     } else {
       const InlineImagePagePlacement placement =
           ResolveInlineImagePagePlacement(
-              screen_w, screen_h, ts->margin.left, ts->margin.right,
-              ts->margin.top, draw_screen_layout.current_margin_bottom,
-              page_imgW, page_imgH, 2, 2, 0);
+              screen_w, screen_h, 0, 0, 0,
+              draw_screen_layout.current_margin_bottom,
+              page_imgW, page_imgH, 0, 0, 0);
       draw_w = placement.draw_width;
       draw_h = placement.draw_height;
       start_x = placement.start_x;
@@ -815,9 +815,9 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   if (need_page_recompute && page_imgW == 0 && page_imgH == 0) {
     const InlineImagePagePlacement placement =
         ResolveInlineImagePagePlacement(
-            screen_w, screen_h, ts->margin.left, ts->margin.right,
-            ts->margin.top, draw_screen_layout.current_margin_bottom, imgW,
-            imgH, 2, 2, 0);
+            screen_w, screen_h, 0, 0, 0,
+            draw_screen_layout.current_margin_bottom, imgW,
+            imgH, 0, 0, 0);
     draw_w = placement.draw_width;
     draw_h = placement.draw_height;
     start_x = placement.start_x;
