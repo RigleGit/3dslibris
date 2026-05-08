@@ -24,14 +24,14 @@ void TestLeftScreenGeometry() {
   ExpectEq("left current height", layout.current_screen_height, 400);
   ExpectEq("left current bottom margin", layout.current_margin_bottom, 36);
   ExpectEq("left next height", layout.next_screen_height, 320);
-  ExpectEq("left next bottom margin", layout.next_margin_bottom, 16);
+  ExpectEq("left next bottom margin", layout.next_margin_bottom, 20);
 }
 
 void TestRightScreenGeometry() {
   const InlineImageScreenLayout layout =
       ResolveInlineImageScreenLayout(false, 36, 10);
   ExpectEq("right current height", layout.current_screen_height, 320);
-  ExpectEq("right current bottom margin", layout.current_margin_bottom, 16);
+  ExpectEq("right current bottom margin", layout.current_margin_bottom, 20);
   ExpectEq("right next height", layout.next_screen_height, 400);
   ExpectEq("right next bottom margin", layout.next_margin_bottom, 36);
 }

@@ -812,6 +812,7 @@ void App::PrepareForShutdown()
            "SHUTDOWN cancel workers done removed_jobs=%u current_session=%u opening_session=%u",
            (unsigned)removed_jobs, reader_state_.current_book_session_id,
            reader_state_.opening.session_id);
+  DBG_LOGF(this, "SHUTDOWN end mode=%d", (int)nav_.mode);
 #endif
 }
 
@@ -866,14 +867,27 @@ void App::HandleAppletSuspend()
 {
   if (lifecycle_state_.IsSuspendHandled())
     return;
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(this,
+           "APPLET suspend begin mode=%d current_session=%u opening_session=%u",
+           (int)nav_.mode, reader_state_.current_book_session_id,
+           reader_state_.opening.session_id);
+#endif
   lifecycle_state_.SetSuspendHandled(true);
   nav_.browser.wait_input_release = true;
   nav_.browser.last_interaction_ms = osGetTime();
-  PauseBrowserJobs();
+  const size_t removed_jobs = PauseBrowserJobs();
+#ifndef DSLIBRIS_DEBUG
+  (void)removed_jobs;
+#endif
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(this, "APPLET suspend workers paused removed_jobs=%u",
+           (unsigned)removed_jobs);
+#endif
   OnReaderAppletSuspended();
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(this,
-           "APPLET suspended mode=%d current_session=%u opening_session=%u",
+           "APPLET suspend end mode=%d current_session=%u opening_session=%u",
            (int)nav_.mode,
            reader_state_.current_book_session_id,
            reader_state_.opening.session_id);

@@ -104,7 +104,8 @@ test -f 3dslibris.elf
 test -f dist/3dslibris-sdmc.zip
 test -f dist/3dslibris-source.tar.gz
 test -f dist/romfs/3ds/3dslibris/font/LiberationSerif-Regular.ttf
-test -f dist/romfs/3ds/3dslibris/resources/splash.jpg
+test -f dist/romfs/3ds/3dslibris/resources/3DSLibris_dark_small.jpg
+test -f dist/romfs/3ds/3dslibris/resources/3DSLibris_light_small.jpg
 
 cat <<EOF
 Build complete.

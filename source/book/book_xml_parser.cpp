@@ -1876,7 +1876,9 @@ static bool HandleTableEnd(parsedata_t *p, Text *ts, const char *el) {
 
 } // namespace
 
-namespace xml::book::metadata {
+namespace xml {
+namespace book {
+namespace metadata {
 
 std::string title;
 
@@ -1910,9 +1912,12 @@ void end(void *userdata, const char *el) {
   parse_pop(data);
 }
 
-} // namespace xml::book::metadata
+} // namespace metadata
+} // namespace book
+} // namespace xml
 
-namespace xml::book {
+namespace xml {
+namespace book {
 
 void chardata(void *data, const XML_Char *txt, int txtlen);
 
@@ -3503,4 +3508,5 @@ void fallback(void *data, const XML_Char *s, int len) {
   p->pen.x += p->ts->GetAdvance(cp);
 }
 
-} // namespace xml::book
+} // namespace book
+} // namespace xml

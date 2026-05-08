@@ -123,12 +123,14 @@ fi
   "$TEST_ROOT/source/formats/common/xml_book_parser.cpp" \
   "$TEST_ROOT/source/formats/common/xml_parse_utils.cpp" \
   "$TEST_ROOT/source/formats/common/file_read_utils.cpp" \
+  "$TEST_ROOT/source/formats/common/binary_io_utils.cpp" \
   "$TEST_ROOT/source/formats/common/book_meta_cache.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_utils.cpp" \
   "$TEST_ROOT/source/formats/common/html_entity_utils.cpp" \
   "$TEST_ROOT/source/formats/common/href_normalization.cpp" \
   "$TEST_ROOT/source/formats/common/page_text_extract_utils.cpp" \
   "$TEST_ROOT/source/formats/common/epub_image_utils.cpp" \
+  "$TEST_ROOT/source/formats/common/zip_read_utils.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_page_cache.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_heading_markers.cpp" \
   "$TEST_ROOT/source/reader/inline_link_utils.cpp" \

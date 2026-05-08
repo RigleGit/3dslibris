@@ -128,8 +128,8 @@ void TestResolveReadingScreenMetricsForReadingScreen() {
 void TestResolveCompactReadingBottomMargin() {
   ExpectEq("keeps compact footer when already small",
            text_render_layout_utils::ResolveCompactReadingBottomMargin(12), 12);
-  ExpectEq("caps compact footer to 16",
-           text_render_layout_utils::ResolveCompactReadingBottomMargin(36), 16);
+  ExpectEq("caps compact footer to 20",
+           text_render_layout_utils::ResolveCompactReadingBottomMargin(36), 20);
 }
 
 void TestWouldOverflowReadingScreen() {

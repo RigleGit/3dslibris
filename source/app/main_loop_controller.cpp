@@ -30,18 +30,79 @@ int MainLoopController::RunMainLoop()
   AppMode last_mode = app_.GetMode();
   int mode_log_budget = 64;
   int heap_log_countdown = 0;
+  int lifecycle_log_budget = 32;
 #endif
-  while (aptMainLoop())
-  {                     // Main loop runs until aptMainLoop returns false (app exit).
-    gspWaitForVBlank(); // Sync with display refresh to avoid tearing and control frame timing.
-    hidScanInput();     // Update input state for this frame, must be called before reading keys.
-
+  auto handle_lifecycle_pause = [&]() -> bool {
+    if (app_.GetMode() == AppMode::Quit)
+      return false;
     if (app_.IsAppletSuspended())
     {
+#ifdef DSLIBRIS_DEBUG
+      if (lifecycle_log_budget > 0)
+      {
+        DBG_LOGF(&app_, "MAIN lifecycle pause before frame mode=%d",
+                 (int)app_.GetMode());
+        lifecycle_log_budget--;
+      }
+#endif
       app_.HandleAppletSuspend();
-      continue;
+      return true;
     }
     app_.HandleAppletResume();
+    return false;
+  };
+
+  while (aptMainLoop())
+  {
+    if (app_.GetMode() == AppMode::Quit)
+    {
+      app_.PersistPrefs();
+      return 0;
+    }
+
+    // Main loop runs until aptMainLoop returns false (app exit). Handle APT
+    // suspend before touching GSP/HID so HOME transitions do not run another
+    // frame of graphics/input work after the hook requests suspension.
+    if (handle_lifecycle_pause())
+      continue;
+
+#ifdef DSLIBRIS_DEBUG
+    if (lifecycle_log_budget > 0)
+    {
+      DBG_LOGF(&app_, "MAIN before vblank mode=%d", (int)app_.GetMode());
+      lifecycle_log_budget--;
+    }
+#endif
+    gspWaitForVBlank(); // Sync with display refresh to avoid tearing and control frame timing.
+#ifdef DSLIBRIS_DEBUG
+    if (lifecycle_log_budget > 0)
+    {
+      DBG_LOGF(&app_, "MAIN after vblank mode=%d suspended=%u",
+               (int)app_.GetMode(), app_.IsAppletSuspended() ? 1u : 0u);
+      lifecycle_log_budget--;
+    }
+#endif
+    if (handle_lifecycle_pause())
+      continue;
+
+#ifdef DSLIBRIS_DEBUG
+    if (lifecycle_log_budget > 0)
+    {
+      DBG_LOGF(&app_, "MAIN before hid mode=%d", (int)app_.GetMode());
+      lifecycle_log_budget--;
+    }
+#endif
+    hidScanInput(); // Update input state for this frame, must be called before reading keys.
+#ifdef DSLIBRIS_DEBUG
+    if (lifecycle_log_budget > 0)
+    {
+      DBG_LOGF(&app_, "MAIN after hid mode=%d suspended=%u",
+               (int)app_.GetMode(), app_.IsAppletSuspended() ? 1u : 0u);
+      lifecycle_log_budget--;
+    }
+#endif
+    if (handle_lifecycle_pause())
+      continue;
 
     if (app_.HasPendingBootReopen())
     {
@@ -141,6 +202,12 @@ int MainLoopController::RunMainLoop()
     case AppMode::Chapters:
       app_.RunChaptersMenuFrame(hidKeysDown());
       break;
+    }
+
+    if (app_.GetMode() == AppMode::Quit)
+    {
+      app_.PersistPrefs();
+      return 0;
     }
 
     if (app_.GetMode() == AppMode::Browser && app_.IsBrowserDirty())

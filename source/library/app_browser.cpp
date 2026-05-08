@@ -1213,6 +1213,8 @@ void LibraryController::browser_handleevent() {
 
   if (keys & app_.key.a) {
     app_.OpenBook();
+  } else if (keys & app_.key.start) {
+    app_.SetMode(AppMode::Quit);
   } else if (has_grid_nav) {
     navigateSelection(nav_move);
   } else if (keys & app_.key.l) {

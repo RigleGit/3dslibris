@@ -11,7 +11,8 @@
 
 #include "expat.h"
 
-namespace xml::book {
+namespace xml {
+namespace book {
 void start(void *data, const char *el, const char **attr);
 void chardata(void *data, const char *txt, int txtlen);
 void end(void *data, const char *el);
@@ -19,10 +20,15 @@ void instruction(void *data, const char *target, const char *pidata);
 int unknown(void *encodingHandlerData, const XML_Char *name,
             XML_Encoding *info);
 void fallback(void *data, const XML_Char *s, int len);
-} // namespace xml::book
+} // namespace book
+} // namespace xml
 
-namespace xml::book::metadata {
+namespace xml {
+namespace book {
+namespace metadata {
 void start(void *userdata, const char *el, const char **attr);
 void chardata(void *userdata, const char *txt, int txtlen);
 void end(void *userdata, const char *el);
-} // namespace xml::book::metadata
+} // namespace metadata
+} // namespace book
+} // namespace xml
