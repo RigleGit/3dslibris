@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "book/cover_layout_constants.h"
 #include "library/browser_draw_context.h"
 
 class Book;
@@ -32,8 +33,8 @@ namespace browser_grid_view {
 static const int kGridCols = 2;
 static const int kGridRows = 2;
 static const int kPageCapacity = kGridCols * kGridRows;
-static const int kCoverW = 85;
-static const int kCoverH = 115;
+static const int kCoverW = cover_layout::kBrowserCoverThumbWidth;
+static const int kCoverH = cover_layout::kBrowserCoverThumbHeight;
 static const int kCellW = 115;
 static const int kCellH = 144;
 static const int kTitleOffsetY = kCoverH + 10;

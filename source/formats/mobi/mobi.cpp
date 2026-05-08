@@ -9,6 +9,7 @@
 
 #include "formats/mobi/mobi.h"
 
+#include "book/cover_layout_constants.h"
 #include "formats/common/book_error.h"
 #include "formats/mobi/mobi_cover_meta_cache.h"
 #include "formats/mobi/mobi_record_scan.h"
@@ -389,20 +390,18 @@ static bool DecodeAndScaleToCover(Book *book, const u8 *data, size_t size) {
     return false;
   }
 
-  const int thumb_w = 85;
-  const int thumb_h = 115;
-  float scale_x = (float)img_w / thumb_w;
-  float scale_y = (float)img_h / thumb_h;
+  float scale_x = (float)img_w / cover_layout::kBrowserCoverThumbWidth;
+  float scale_y = (float)img_h / cover_layout::kBrowserCoverThumbHeight;
   float scale = (scale_x > scale_y) ? scale_x : scale_y;
   if (scale < 1.0f)
     scale = 1.0f;
 
   int final_w = (int)(img_w / scale);
   int final_h = (int)(img_h / scale);
-  if (final_w > thumb_w)
-    final_w = thumb_w;
-  if (final_h > thumb_h)
-    final_h = thumb_h;
+  if (final_w > cover_layout::kBrowserCoverThumbWidth)
+    final_w = cover_layout::kBrowserCoverThumbWidth;
+  if (final_h > cover_layout::kBrowserCoverThumbHeight)
+    final_h = cover_layout::kBrowserCoverThumbHeight;
   if (final_w < 1)
     final_w = 1;
   if (final_h < 1)

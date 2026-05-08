@@ -3,6 +3,7 @@
 #include "formats/pdf/pdf.h"
 
 #include "book/book.h"
+#include "book/cover_layout_constants.h"
 #include "formats/mupdf/mupdf_document.h"
 #include "formats/mupdf/mupdf_render.h"
 #include "formats/mupdf/mupdf_render_policy_utils.h"
@@ -13,22 +14,25 @@
 
 namespace {
 
-static const int kCoverThumbW = 85;
-static const int kCoverThumbH = 115;
-
 static bool AssignCoverFromRgb565(Book *book, const uint16_t *src, int src_w,
                                   int src_h) {
   if (!book || !src || src_w <= 0 || src_h <= 0)
     return false;
 
-  float scale_x = (float)src_w / (float)kCoverThumbW;
-  float scale_y = (float)src_h / (float)kCoverThumbH;
+  float scale_x =
+      (float)src_w / (float)cover_layout::kBrowserCoverThumbWidth;
+  float scale_y =
+      (float)src_h / (float)cover_layout::kBrowserCoverThumbHeight;
   float scale = std::max(scale_x, scale_y);
   if (scale < 1.0f)
     scale = 1.0f;
 
-  const int dst_w = std::max(1, std::min(kCoverThumbW, (int)(src_w / scale)));
-  const int dst_h = std::max(1, std::min(kCoverThumbH, (int)(src_h / scale)));
+  const int dst_w =
+      std::max(1, std::min(cover_layout::kBrowserCoverThumbWidth,
+                           (int)(src_w / scale)));
+  const int dst_h =
+      std::max(1, std::min(cover_layout::kBrowserCoverThumbHeight,
+                           (int)(src_h / scale)));
 
   if (book->coverPixels) {
     delete[] book->coverPixels;
@@ -118,8 +122,8 @@ int pdf_extract_cover(Book *book, const std::string &pdfpath) {
   }
 
   const float fit_scale =
-      std::min((float)kCoverThumbW / page_width,
-               (float)kCoverThumbH / page_height);
+      std::min((float)cover_layout::kBrowserCoverThumbWidth / page_width,
+               (float)cover_layout::kBrowserCoverThumbHeight / page_height);
   const float render_scale = std::max(0.25f, fit_scale * 2.0f);
   RenderedMuPdfBitmap rendered;
   if (!RenderMuPdfBitmap(ctx, doc, 0, render_scale, &rendered, NULL, NULL,

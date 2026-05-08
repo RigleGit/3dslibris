@@ -6,6 +6,7 @@
 #include "formats/cbz/cbz_decode.h"
 #include "formats/cbz/cbz_worker.h"
 #include "formats/common/book_error.h"
+#include "formats/common/format_limits.h"
 #include "formats/common/pdf_view_utils.h"
 #include "shared/debug_log.h"
 #include "shared/debug_runtime_mode.h"
@@ -16,8 +17,6 @@
 #include <new>
 
 namespace {
-
-static const size_t kMaxCoverEntryBytes = 64u * 1024u * 1024u;
 
 bool DetectCbzNew3ds() {
   bool is_new_3ds = false;
@@ -195,7 +194,7 @@ int cbz_extract_cover(Book *book, const std::string &cbzpath) {
 
   std::vector<unsigned char> bytes;
   if (!ReadCbzArchiveEntryBytes(cbzpath, entries[0], &bytes,
-                                kMaxCoverEntryBytes)) {
+                                format_limits::kMaxCbzCoverEntryBytes)) {
     return 3;
   }
 

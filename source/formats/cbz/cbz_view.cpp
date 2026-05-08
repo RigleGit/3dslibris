@@ -3,6 +3,7 @@
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
 #include "formats/cbz/cbz_worker.h"
+#include "formats/common/format_limits.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "formats/common/pdf_view_utils.h"
 #include "settings/prefs.h"
@@ -26,7 +27,6 @@ static const u16 kCbzFrame = 0x2104;
 static const u16 kCbzAccent = 0x0000;
 static const u32 kCbzInteractiveDeferredDelayMs = 180;
 static const u32 kCbzPreloadDeferredDelayMs = 600;
-static const size_t kCbzMaxEntryBytes = 64u * 1024u * 1024u;
 
 inline bool CbzSourceValid(const Book::CbzState::PageBitmap &page_bitmap,
                            int page_index, int zoom_index) {
@@ -258,7 +258,7 @@ bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
   std::vector<unsigned char> bytes;
   if (!ReadCbzArchiveEntryBytes(cbz_state->archive_path,
                                 cbz_state->entries[(size_t)page_index], &bytes,
-                                kCbzMaxEntryBytes)) {
+                                format_limits::kMaxCbzPageEntryBytes)) {
     cbz_state->last_error = GetLastCbzArchiveError();
     cbz_state->failed_page = page_index;
     return false;

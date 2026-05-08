@@ -3,6 +3,7 @@
 #include "book/book.h"
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
+#include "formats/common/format_limits.h"
 #include "formats/common/pdf_view_utils.h"
 #include "shared/debug_runtime_mode.h"
 
@@ -10,7 +11,6 @@
 
 namespace {
 
-static const size_t kCbzMaxEntryBytes = 64u * 1024u * 1024u;
 static const size_t kCbzWorkerStackBytes = 256u * 1024u;
 static const int kCbzPreviewBoundsWidth = 240 - 8;
 static const int kCbzPreviewBoundsHeight = 320 - 8;
@@ -26,7 +26,7 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
 
   std::vector<unsigned char> bytes;
   if (!ReadCbzArchiveEntryBytes(archive_path, entries[(size_t)page_index], &bytes,
-                                kCbzMaxEntryBytes)) {
+                                format_limits::kMaxCbzPageEntryBytes)) {
     return false;
   }
 

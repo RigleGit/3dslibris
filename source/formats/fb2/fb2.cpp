@@ -10,6 +10,7 @@
 
 #include "formats/fb2/fb2.h"
 
+#include "book/cover_layout_constants.h"
 #include "shared/base64_utils.h"
 #include "formats/common/xml_parse_utils.h"
 #include "stb_image.h"
@@ -191,19 +192,17 @@ static int DecodeAndScaleToCover(Book *book, const u8 *data, int size) {
     return 12;
   }
 
-  const int thumbW = 85;
-  const int thumbH = 115;
-  float scaleX = (float)imgW / thumbW;
-  float scaleY = (float)imgH / thumbH;
+  float scaleX = (float)imgW / cover_layout::kBrowserCoverThumbWidth;
+  float scaleY = (float)imgH / cover_layout::kBrowserCoverThumbHeight;
   float scale = (scaleX > scaleY) ? scaleX : scaleY;
   if (scale < 1.0f)
     scale = 1.0f;
   int finalW = (int)(imgW / scale);
   int finalH = (int)(imgH / scale);
-  if (finalW > thumbW)
-    finalW = thumbW;
-  if (finalH > thumbH)
-    finalH = thumbH;
+  if (finalW > cover_layout::kBrowserCoverThumbWidth)
+    finalW = cover_layout::kBrowserCoverThumbWidth;
+  if (finalH > cover_layout::kBrowserCoverThumbHeight)
+    finalH = cover_layout::kBrowserCoverThumbHeight;
   if (finalW < 1)
     finalW = 1;
   if (finalH < 1)
