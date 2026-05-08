@@ -14,6 +14,7 @@
 #include "formats/mobi/mobi_cover_meta_cache.h"
 #include "formats/mobi/mobi_record_scan.h"
 #include "formats/mobi/mobi_cover_utils.h"
+#include "shared/aspect_fit_utils.h"
 #include "shared/path_utils.h"
 #include "shared/status_reporter.h"
 #include "stb_image.h"
@@ -390,22 +391,15 @@ static bool DecodeAndScaleToCover(Book *book, const u8 *data, size_t size) {
     return false;
   }
 
-  float scale_x = (float)img_w / cover_layout::kBrowserCoverThumbWidth;
-  float scale_y = (float)img_h / cover_layout::kBrowserCoverThumbHeight;
-  float scale = (scale_x > scale_y) ? scale_x : scale_y;
-  if (scale < 1.0f)
-    scale = 1.0f;
-
-  int final_w = (int)(img_w / scale);
-  int final_h = (int)(img_h / scale);
-  if (final_w > cover_layout::kBrowserCoverThumbWidth)
-    final_w = cover_layout::kBrowserCoverThumbWidth;
-  if (final_h > cover_layout::kBrowserCoverThumbHeight)
-    final_h = cover_layout::kBrowserCoverThumbHeight;
-  if (final_w < 1)
-    final_w = 1;
-  if (final_h < 1)
-    final_h = 1;
+  const aspect_fit_utils::Placement placement =
+      aspect_fit_utils::FitInsideBox(
+          0, 0, cover_layout::kBrowserCoverThumbWidth,
+          cover_layout::kBrowserCoverThumbHeight, img_w, img_h, false);
+  int final_w = placement.width;
+  int final_h = placement.height;
+  const float scale =
+      std::max((float)img_w / (float)final_w,
+               (float)img_h / (float)final_h);
 
   if (book->coverPixels) {
     delete[] book->coverPixels;

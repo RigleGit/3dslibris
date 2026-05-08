@@ -43,10 +43,32 @@ void TestSmallImageCentersWithinContentBox() {
   ExpectTrue("y centered", p.start_y > 0);
 }
 
+void TestMarginsAndPaddingReduceAvailableArea() {
+  const InlineImagePagePlacement p = ResolveInlineImagePagePlacement(
+      240, 320, 10, 20, 30, 40, 100, 100, 5, 7, 9);
+  ExpectEq("avail width excludes margins and horizontal padding",
+           p.avail_width, 200);
+  ExpectEq("avail height excludes margins and vertical padding",
+           p.avail_height, 234);
+  ExpectEq("start x begins after left margin and padding", p.start_x, 15);
+  ExpectTrue("start y respects top margin and padding", p.start_y >= 37);
+}
+
+void TestInvalidSourceDimensionsClampSafely() {
+  const InlineImagePagePlacement p = ResolveInlineImagePagePlacement(
+      240, 320, 0, 0, 0, 0, 0, -1, 0, 0, 0);
+  ExpectEq("invalid source available width", p.avail_width, 240);
+  ExpectEq("invalid source available height", p.avail_height, 320);
+  ExpectEq("invalid source draw width", p.draw_width, 240);
+  ExpectEq("invalid source draw height", p.draw_height, 240);
+}
+
 } // namespace
 
 int main() {
   TestPlacementUsesContentArea();
   TestSmallImageCentersWithinContentBox();
+  TestMarginsAndPaddingReduceAvailableArea();
+  TestInvalidSourceDimensionsClampSafely();
   return 0;
 }

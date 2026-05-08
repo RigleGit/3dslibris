@@ -10,6 +10,7 @@
 #include "formats/common/pdf_view_utils.h"
 #include "shared/debug_log.h"
 #include "shared/debug_runtime_mode.h"
+#include "shared/aspect_fit_utils.h"
 
 #include <3ds.h>
 #include <algorithm>
@@ -29,19 +30,13 @@ bool IsValidCbzBitmap(const CbzBitmap &bitmap) {
 }
 
 void ComputeCoverThumbSize(const CbzBitmap &bitmap, int *dst_w, int *dst_h) {
-  float scale_x =
-      (float)bitmap.width / (float)cover_layout::kBrowserCoverThumbWidth;
-  float scale_y =
-      (float)bitmap.height / (float)cover_layout::kBrowserCoverThumbHeight;
-  float scale = std::max(scale_x, scale_y);
-
-  if (scale < 1.0f)
-    scale = 1.0f;
-
-  *dst_w = std::max(1, std::min(cover_layout::kBrowserCoverThumbWidth,
-                                (int)(bitmap.width / scale)));
-  *dst_h = std::max(1, std::min(cover_layout::kBrowserCoverThumbHeight,
-                                (int)(bitmap.height / scale)));
+  const aspect_fit_utils::Placement placement =
+      aspect_fit_utils::FitInsideBox(
+          0, 0, cover_layout::kBrowserCoverThumbWidth,
+          cover_layout::kBrowserCoverThumbHeight, bitmap.width, bitmap.height,
+          false);
+  *dst_w = placement.width;
+  *dst_h = placement.height;
 }
 
 bool ReplaceBookCoverPixels(Book *book, const CbzBitmap &bitmap) {

@@ -8,6 +8,7 @@
 #include "formats/mupdf/mupdf_render.h"
 #include "formats/mupdf/mupdf_render_policy_utils.h"
 #include "shared/app_flow_utils.h"
+#include "shared/aspect_fit_utils.h"
 
 #include <algorithm>
 #include <vector>
@@ -19,20 +20,14 @@ static bool AssignCoverFromRgb565(Book *book, const uint16_t *src, int src_w,
   if (!book || !src || src_w <= 0 || src_h <= 0)
     return false;
 
-  float scale_x =
-      (float)src_w / (float)cover_layout::kBrowserCoverThumbWidth;
-  float scale_y =
-      (float)src_h / (float)cover_layout::kBrowserCoverThumbHeight;
-  float scale = std::max(scale_x, scale_y);
-  if (scale < 1.0f)
-    scale = 1.0f;
-
-  const int dst_w =
-      std::max(1, std::min(cover_layout::kBrowserCoverThumbWidth,
-                           (int)(src_w / scale)));
-  const int dst_h =
-      std::max(1, std::min(cover_layout::kBrowserCoverThumbHeight,
-                           (int)(src_h / scale)));
+  const aspect_fit_utils::Placement placement =
+      aspect_fit_utils::FitInsideBox(
+          0, 0, cover_layout::kBrowserCoverThumbWidth,
+          cover_layout::kBrowserCoverThumbHeight, src_w, src_h, false);
+  const int dst_w = placement.width;
+  const int dst_h = placement.height;
+  const float scale =
+      std::max((float)src_w / (float)dst_w, (float)src_h / (float)dst_h);
 
   if (book->coverPixels) {
     delete[] book->coverPixels;

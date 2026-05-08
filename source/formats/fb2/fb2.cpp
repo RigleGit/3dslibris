@@ -11,6 +11,7 @@
 #include "formats/fb2/fb2.h"
 
 #include "book/cover_layout_constants.h"
+#include "shared/aspect_fit_utils.h"
 #include "shared/base64_utils.h"
 #include "formats/common/xml_parse_utils.h"
 #include "stb_image.h"
@@ -192,21 +193,14 @@ static int DecodeAndScaleToCover(Book *book, const u8 *data, int size) {
     return 12;
   }
 
-  float scaleX = (float)imgW / cover_layout::kBrowserCoverThumbWidth;
-  float scaleY = (float)imgH / cover_layout::kBrowserCoverThumbHeight;
-  float scale = (scaleX > scaleY) ? scaleX : scaleY;
-  if (scale < 1.0f)
-    scale = 1.0f;
-  int finalW = (int)(imgW / scale);
-  int finalH = (int)(imgH / scale);
-  if (finalW > cover_layout::kBrowserCoverThumbWidth)
-    finalW = cover_layout::kBrowserCoverThumbWidth;
-  if (finalH > cover_layout::kBrowserCoverThumbHeight)
-    finalH = cover_layout::kBrowserCoverThumbHeight;
-  if (finalW < 1)
-    finalW = 1;
-  if (finalH < 1)
-    finalH = 1;
+  const aspect_fit_utils::Placement placement =
+      aspect_fit_utils::FitInsideBox(
+          0, 0, cover_layout::kBrowserCoverThumbWidth,
+          cover_layout::kBrowserCoverThumbHeight, imgW, imgH, false);
+  int finalW = placement.width;
+  int finalH = placement.height;
+  const float scale =
+      std::max((float)imgW / (float)finalW, (float)imgH / (float)finalH);
 
   if (book->coverPixels) {
     delete[] book->coverPixels;

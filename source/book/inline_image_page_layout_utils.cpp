@@ -1,5 +1,7 @@
 #include "book/inline_image_page_layout_utils.h"
 
+#include "shared/aspect_fit_utils.h"
+
 #include <algorithm>
 
 namespace {
@@ -34,17 +36,15 @@ InlineImagePagePlacement ResolveInlineImagePagePlacement(
   out.avail_width = std::max(1, right - left);
   out.avail_height = std::max(1, bottom - top);
 
-  int scale_x = (out.avail_width * 1024) / src_width;
-  int scale_y = (out.avail_height * 1024) / src_height;
-  int scale = std::min(scale_x, scale_y);
-
   // PAGE images/covers should fill the available page box.
   // Unlike inline/band images, page placement is allowed to upscale.
-  scale = std::max(1, scale);
-
-  out.draw_width = std::max(1, (src_width * scale + 512) / 1024);
-  out.draw_height = std::max(1, (src_height * scale + 512) / 1024);
-  out.start_x = left + std::max(0, (out.avail_width - out.draw_width) / 2);
-  out.start_y = top + std::max(0, (out.avail_height - out.draw_height) / 2);
+  const aspect_fit_utils::Placement placement =
+      aspect_fit_utils::FitInsideBox(left, top, out.avail_width,
+                                     out.avail_height, src_width, src_height,
+                                     true);
+  out.draw_width = placement.width;
+  out.draw_height = placement.height;
+  out.start_x = placement.x;
+  out.start_y = placement.y;
   return out;
 }
