@@ -1169,14 +1169,6 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
     //   - The screen is not already visually empty (no point advancing a blank).
     //   - White-space mode is not Pre/PreWrap (those must not be reflowed).
     //   - The available slot count (after the flush) is exactly 1.
-#ifdef DSLIBRIS_DEBUG
-    DBG_LOGF_CAT(p->reporter, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
-        "[PARA_GUARD_EVAL] in_para=%d para_content=%d visual_empty=%d"
-        " y=%d screen=%d linebegan=%d\n",
-        (int)p->in_paragraph, (int)p->paragraph_has_content,
-        (int)IsCurrentReadingScreenVisuallyEmpty(p),
-        p->pen.y, p->screen, (int)p->linebegan);
-#endif
     if (p->in_paragraph && !p->paragraph_has_content &&
         !IsCurrentReadingScreenVisuallyEmpty(p)) {
       const book_xml_css_style_utils::WhiteSpaceMode ws_mode =
@@ -1193,9 +1185,6 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
               text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
                   p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
                   text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom));
-#ifdef DSLIBRIS_DEBUG
-          const int threshold = sm.max_height - sm.bottom_margin;
-#endif
           // pen.y after flush points to the line where text would start.
           // A "line slot" is usable if the current line visually fits.
           // The paragraph needs at least 2 slots: the current line AND one
@@ -1215,15 +1204,6 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
           const bool should_advance =
               text_render_layout_utils::ShouldAdvanceParagraphStartGuard(
                   slot1, slot2, one_line_paragraph);
-#ifdef DSLIBRIS_DEBUG
-          DBG_LOGF_CAT(p->reporter, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
-              "[PARA_START_GUARD] y=%d threshold=%d step=%d"
-              " slot1=%d slot2=%d one_line=%d action=%s\n",
-              p->pen.y, threshold, step,
-              (int)slot1, (int)slot2,
-              (int)one_line_paragraph,
-              should_advance ? "advance-screen" : "no-action");
-#endif
           if (should_advance) {
             AdvanceParsedScreen(p);
           }
@@ -1234,7 +1214,6 @@ static void EmitFlowedFragmentRaw(parsedata_t *p, const XML_Char *txt,
   // Text is about to be emitted — mark the screen as having drawable content.
   p->current_screen_has_drawable_content = true;
 
-  // overflow_threshold: read-only for WRAP_TRACE logging.
   {
     const text_render_layout_utils::ReadingScreenMetrics sm =
         text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
@@ -2597,6 +2576,8 @@ void start(void *data, const char *el, const char **attr) {
   } else if (!strcmp(el, "li")) {
     parse_push(p, TAG_LI);
     book_xml_list_utils::MarkCurrentListItemPending(p, true);
+    if (HasActiveStackHiddenStyle(p))
+      return;
     const context_t active_list = book_xml_list_utils::GetActiveListContext(p);
     const int nested_indent = book_xml_list_utils::ResolveNestedListItemIndentPx(
         book_xml_list_utils::GetActiveListDepth(p), ts->GetAdvance(' '));
@@ -2699,6 +2680,8 @@ void start(void *data, const char *el, const char **attr) {
     const u8 current = (u8)(p->stacksize - 1);
     p->link_active_stack[current] = false;
     p->link_href_id_stack[current] = 0;
+    if (HasActiveStackHiddenStyle(p))
+      return;
     const char *href = NULL;
     for (int i = 0; attr && attr[i]; i += 2) {
       if (XmlNameEquals(attr[i], "href")) {
@@ -2954,6 +2937,8 @@ void start(void *data, const char *el, const char **attr) {
     if (!style_reset_bold) style_reset_bold = elem_css.reset_bold;
     if (!style_reset_italic) style_reset_italic = elem_css.reset_italic;
     ParseElementHiddenFlags(attr, &style_hidden);
+    if (elem_css.is_display_none)
+      style_hidden = true;
 
     const u8 current = (u8)(p->stacksize - 1);
     book_xml_list_utils::ConfigureElementListSemantics(p, attr);

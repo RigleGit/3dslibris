@@ -711,6 +711,25 @@ void TestLookupHideListMarkersForTag() {
                     epub_css_class_map::LookupHideListMarkersForTag("p", map));
 }
 
+void TestParseCssIntoClassMapDetectsDisplayNone() {
+  const char *css =
+      ".hide1 { display:none; }\n"
+      ".shown { display: block; }\n";
+
+  CssClassMap map;
+  epub_css_class_map::ParseCssIntoClassMap(css, std::strlen(css), &map);
+
+  test::ExpectTrue("hide1 class captured", map.find("hide1") != map.end());
+  test::ExpectTrue("hide1 display none", map["hide1"].is_display_none);
+  test::ExpectFalse("shown is not display none", map["shown"].is_display_none);
+
+  CssClassMargins merged;
+  test::ExpectTrue("display none merged from class attr",
+                   epub_css_class_map::LookupAllForClassAttr(
+                       "nav hide1", map, &merged, true));
+  test::ExpectTrue("merged display none", merged.is_display_none);
+}
+
 } // namespace
 
 int main() {
@@ -738,5 +757,6 @@ int main() {
   TestElementSelectorCascadesOverTag();
   TestParaCenterCssParseAndLookup();
   TestLookupHideListMarkersForTag();
+  TestParseCssIntoClassMapDetectsDisplayNone();
   return 0;
 }

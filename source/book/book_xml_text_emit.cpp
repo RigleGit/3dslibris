@@ -1,6 +1,5 @@
 #include "book/book_xml_text_emit.h"
 
-#include "shared/debug_log.h"
 #include "shared/text_token_constants.h"
 #include "shared/text_render_layout_utils.h"
 #include "utf8proc.h"
@@ -11,26 +10,6 @@
 namespace book_xml_text_emit {
 
 namespace {
-
-#ifdef DSLIBRIS_DEBUG
-// Build a short ASCII-printable excerpt from a shaped run segment [s, e).
-// Non-ASCII codepoints are rendered as '?'.
-static std::string SegmentExcerpt(
-    const std::vector<text_layout_utils::ShapedGlyph> &run,
-    size_t s, size_t e, size_t max_chars = 20) {
-  std::string out;
-  for (size_t i = s; i < e && out.size() < max_chars; i++) {
-    uint32_t cp = run[i].text.codepoint;
-    if (cp >= 0x20 && cp < 0x7F)
-      out += (char)cp;
-    else if (cp == 0x00A0)
-      out += '_'; // NBSP
-    else
-      out += '?';
-  }
-  return out;
-}
-#endif // DSLIBRIS_DEBUG
 
 bool IsClosingAttachedPunctuation(uint32_t cp) {
   switch (cp) {
@@ -90,20 +69,6 @@ bool CurrentLineFitsEmitMetrics(int pen_y, const FlowEmitMetrics &metrics) {
   return (metrics.overflow_threshold <= 0) ||
          (pen_y <= metrics.overflow_threshold);
 }
-
-#ifdef DSLIBRIS_DEBUG
-bool HasFollowingLineRoomEmitMetrics(int pen_y,
-                                     const FlowEmitMetrics &metrics) {
-  if (metrics.screen_max_height > 0 && metrics.screen_bottom_margin >= 0) {
-    return text_render_layout_utils::HasRoomForFollowingLine(
-        pen_y, metrics.lineheight, metrics.linespacing,
-        metrics.screen_max_height, metrics.screen_bottom_margin);
-  }
-  const int step = metrics.lineheight + metrics.linespacing;
-  return (metrics.overflow_threshold <= 0) ||
-         (pen_y + step <= metrics.overflow_threshold);
-}
-#endif
 
 } // namespace
 
@@ -442,19 +407,10 @@ void EmitFlowedShapedText(
       p->pen.x = (p->pen.x > (int)metrics.spaceadvance)
                      ? (p->pen.x - metrics.spaceadvance)
                      : metrics.margin_left;
-#ifdef DSLIBRIS_DEBUG
-      DBG_LOGF_CAT(p->reporter, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
-                   "[PUNCT_WRAP] punct=U+%04X removed_trailing_space=1 "
-                   "action=glue-to-prev\n",
-                   run[unit_index].text.codepoint);
-#endif
     }
     const bool need_wrap =
         ((p->pen.x + advance) >= (metrics.display_width - metrics.margin_right) &&
          !(p->linebegan && attached_closing_punctuation));
-#ifdef DSLIBRIS_DEBUG
-    const int y_before_wrap = p->pen.y;
-#endif
     if (need_wrap) {
       parse_append_page_byte(p, '\n');
       p->pen.x = metrics.margin_left;
@@ -470,50 +426,6 @@ void EmitFlowedShapedText(
                             advance_ctx);
       }
     }
-#ifdef DSLIBRIS_DEBUG
-    {
-      const int step = metrics.lineheight + metrics.linespacing;
-      const int y_after_wrap =
-          y_before_wrap + (need_wrap ? step : 0);
-      const int threshold = metrics.overflow_threshold;
-      const bool candidate_line_vis = (threshold <= 0) ||
-                                      (y_after_wrap <= threshold);
-      const bool following_line_vis = (threshold <= 0) ||
-                                      (y_after_wrap + step <= threshold);
-      const bool line_fits =
-          CurrentLineFitsEmitMetrics(y_after_wrap, metrics);
-      const bool room_for_next =
-          HasFollowingLineRoomEmitMetrics(y_after_wrap, metrics);
-      const bool advance_fired = (p->pen.y != y_after_wrap);
-      const std::string seg_txt =
-          SegmentExcerpt(run, unit_index, segment_end_index);
-      DBG_LOGF_CAT(p->reporter, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
-                   "[WRAP_TRACE] text=\"%s\" seg=[%zu,%zu)"
-                   " x_before=%d y_before=%d"
-                   " width=%d max_width=%d"
-                   " need_wrap=%d"
-                   " y_after_wrap=%d"
-                   " step=%d threshold=%d"
-                   " cand_vis=%d foll_vis=%d"
-                   " line_fits=%d room_for_next=%d"
-                   " in_para=%d para_content=%d"
-                   " adv_fired=%d screen=%d"
-                   " y_after=%d\n",
-                   seg_txt.c_str(),
-                   unit_index, segment_end_index,
-                   p->pen.x - advance, y_before_wrap,
-                   (int)advance,
-                   metrics.display_width - metrics.margin_right - metrics.margin_left,
-                   (int)need_wrap,
-                   y_after_wrap,
-                   step, threshold,
-                   (int)candidate_line_vis, (int)following_line_vis,
-                   (int)line_fits, (int)room_for_next,
-                   (int)p->in_paragraph, (int)p->paragraph_has_content,
-                   (int)advance_fired, p->screen,
-                   p->pen.y);
-    }
-#endif
     EmitFreshLineStartX(p, metrics);
     if (has_rtl)
       EmitBidiSegment(p, run, unit_index, segment_end_index, bidi_runs,

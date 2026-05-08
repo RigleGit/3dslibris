@@ -225,6 +225,9 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     const bool is_display_block =
         ContainsNoCase(block, "display:block") ||
         ContainsNoCase(block, "display: block");
+    const bool is_display_none =
+        ContainsNoCase(block, "display:none") ||
+        ContainsNoCase(block, "display: none");
 
     const bool any_prop =
         mt.unit != MarginTopResult::Unit::None ||
@@ -238,7 +241,7 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         has_page_break_inside_avoid ||
         no_underline || reset_bold || reset_italic ||
         text_indent.unit != MarginTopResult::Unit::None ||
-        has_text_transform || is_display_block;
+        has_text_transform || is_display_block || is_display_none;
 
     if (any_prop) {
       // Merge parsed properties into a map entry.
@@ -295,6 +298,8 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         }
         if (is_display_block)
           entry.is_display_block = true;
+        if (is_display_none)
+          entry.is_display_none = true;
       };
 
       for (size_t i = 0; i < class_names.size(); i++)
@@ -898,6 +903,8 @@ bool LookupAllForClassAttr(const std::string &class_attr,
     }
     if (src.is_display_block)
       out->is_display_block = true;
+    if (src.is_display_none)
+      out->is_display_none = true;
     found_any = true;
   }
   return found_any;
