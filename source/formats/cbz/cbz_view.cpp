@@ -1,9 +1,11 @@
 #include "book/book.h"
-#include "shared/color_utils.h"
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
 #include "formats/cbz/cbz_worker.h"
 #include "formats/common/format_limits.h"
+#include "formats/common/fixed_layout_blit_utils.h"
+#include "formats/common/fixed_layout_preview_constants.h"
+#include "formats/common/fixed_layout_screen_constants.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "formats/common/pdf_view_utils.h"
 #include "settings/prefs.h"
@@ -17,14 +19,6 @@
 
 namespace {
 
-static const int kCbzPreviewScreenWidth = 240;
-static const int kCbzPreviewScreenHeight = 320;
-static const int kCbzPreviewPadding = 4;
-static const int kCbzZoomScreenWidth = 240;
-static const int kCbzZoomScreenHeight = 400;
-static const u16 kCbzPaper = 0xFFFF;
-static const u16 kCbzFrame = 0x2104;
-static const u16 kCbzAccent = 0x0000;
 static const u32 kCbzInteractiveDeferredDelayMs = 180;
 static const u32 kCbzPreloadDeferredDelayMs = 600;
 
@@ -47,13 +41,55 @@ inline int ClampCbzPageIndex(int page_index, u16 page_count) {
   return page_index;
 }
 
-inline void UnpackRgb565(u16 pixel, int *r, int *g, int *b) {
-  const int r5 = (pixel >> 11) & 0x1F;
-  const int g6 = (pixel >> 5) & 0x3F;
-  const int b5 = pixel & 0x1F;
-  *r = (r5 << 3) | (r5 >> 2);
-  *g = (g6 << 2) | (g6 >> 4);
-  *b = (b5 << 3) | (b5 >> 2);
+enum CbzWorkerQueueState {
+  CBZ_WORKER_IDLE,
+  CBZ_WORKER_PENDING,
+  CBZ_WORKER_READY_TO_INTEGRATE
+};
+
+struct ScopedTextRenderState {
+  explicit ScopedTextRenderState(Text *text)
+      : ts(text),
+        style(text ? text->GetStyle() : 0),
+        color_mode(text ? text->GetColorMode() : 0),
+        screen(text ? text->GetScreen() : NULL),
+        bottom_margin(text ? text->margin.bottom : 0) {}
+
+  ~ScopedTextRenderState() {
+    if (!ts)
+      return;
+    ts->SetStyle(style);
+    ts->SetColorMode(color_mode);
+    ts->SetScreen(screen);
+    ts->margin.bottom = bottom_margin;
+  }
+
+  Text *ts;
+  int style;
+  int color_mode;
+  u16 *screen;
+  int bottom_margin;
+
+private:
+  ScopedTextRenderState(const ScopedTextRenderState &);
+  ScopedTextRenderState &operator=(const ScopedTextRenderState &);
+};
+
+CbzWorkerQueueState GetCbzWorkerQueueState(
+    const Book::CbzState *cbz_state) {
+  if (!cbz_state || !cbz_state->worker)
+    return CBZ_WORKER_IDLE;
+
+  const bool job_pending =
+      __atomic_load_n(&cbz_state->worker->job_pending, __ATOMIC_ACQUIRE);
+
+  if (job_pending)
+    return CBZ_WORKER_PENDING;
+
+  if (cbz_state->worker->job_submitted)
+    return CBZ_WORKER_READY_TO_INTEGRATE;
+
+  return CBZ_WORKER_IDLE;
 }
 
 void ResetCbzPageBitmap(Book::CbzState::PageBitmap *page_bitmap) {
@@ -91,11 +127,7 @@ void DrawCbzLoadFailure(Book *book, Text *ts, int page_index,
   if (!book || !ts)
     return;
 
-  const int saved_style = ts->GetStyle();
-  const int saved_color = ts->GetColorMode();
-  u16 *saved_screen = ts->GetScreen();
-  const int saved_bottom_margin = ts->margin.bottom;
-
+  ScopedTextRenderState saved_state(ts);
   ts->SetStyle(TEXT_STYLE_BROWSER);
   ts->margin.bottom = 0;
 
@@ -119,95 +151,6 @@ void DrawCbzLoadFailure(Book *book, Text *ts, int page_index,
     ts->SetPen(12, 72);
     ts->PrintString(reason.c_str());
   }
-
-  ts->SetStyle(saved_style);
-  ts->SetColorMode(saved_color);
-  ts->SetScreen(saved_screen);
-  ts->margin.bottom = saved_bottom_margin;
-}
-
-void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
-                                int x, int y, int draw_width, int draw_height,
-                                const std::vector<u16> &pixels, int src_width,
-                                int src_height, int crop_x, int crop_y,
-                                int crop_width, int crop_height,
-                                bool high_quality_filter) {
-  if (!ts || !screen || pixels.empty() || draw_width <= 0 || draw_height <= 0 ||
-      src_width <= 0 || src_height <= 0 || crop_width <= 0 ||
-      crop_height <= 0) {
-    return;
-  }
-
-  crop_x = std::max(0, std::min(src_width - 1, crop_x));
-  crop_y = std::max(0, std::min(src_height - 1, crop_y));
-  crop_width = std::max(1, std::min(src_width - crop_x, crop_width));
-  crop_height = std::max(1, std::min(src_height - crop_y, crop_height));
-
-  const int stride = ts->display.height;
-  const int logical_width = ts->display.width;
-  ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
-
-  for (int row = 0; row < draw_height; row++) {
-    const int dy = y + row;
-    if (dy < 0 || dy >= logical_height)
-      continue;
-    for (int col = 0; col < draw_width; col++) {
-      const int dx = x + col;
-      if (dx < 0 || dx >= logical_width)
-        continue;
-
-      if (!high_quality_filter) {
-        const int src_x = crop_x +
-                          ((col * crop_width) / std::max(1, draw_width));
-        const int src_y = crop_y +
-                          ((row * crop_height) / std::max(1, draw_height));
-        screen[(size_t)dy * (size_t)stride + (size_t)dx] =
-            pixels[(size_t)src_y * (size_t)src_width + (size_t)src_x];
-        continue;
-      }
-
-      const float src_xf =
-          (float)crop_x +
-          (((float)col + 0.5f) * (float)crop_width / (float)draw_width) - 0.5f;
-      const float src_yf =
-          (float)crop_y +
-          (((float)row + 0.5f) * (float)crop_height / (float)draw_height) - 0.5f;
-      const float clamped_x =
-          std::max((float)crop_x,
-                   std::min((float)(crop_x + crop_width - 1), src_xf));
-      const float clamped_y =
-          std::max((float)crop_y,
-                   std::min((float)(crop_y + crop_height - 1), src_yf));
-      const int x0 = (int)clamped_x;
-      const int y0 = (int)clamped_y;
-      const int x1 = std::min(crop_x + crop_width - 1, x0 + 1);
-      const int y1 = std::min(crop_y + crop_height - 1, y0 + 1);
-      const float tx = clamped_x - (float)x0;
-      const float ty = clamped_y - (float)y0;
-
-      int r00 = 0, g00 = 0, b00 = 0;
-      int r10 = 0, g10 = 0, b10 = 0;
-      int r01 = 0, g01 = 0, b01 = 0;
-      int r11 = 0, g11 = 0, b11 = 0;
-      UnpackRgb565(pixels[(size_t)y0 * (size_t)src_width + (size_t)x0], &r00,
-                   &g00, &b00);
-      UnpackRgb565(pixels[(size_t)y0 * (size_t)src_width + (size_t)x1], &r10,
-                   &g10, &b10);
-      UnpackRgb565(pixels[(size_t)y1 * (size_t)src_width + (size_t)x0], &r01,
-                   &g01, &b01);
-      UnpackRgb565(pixels[(size_t)y1 * (size_t)src_width + (size_t)x1], &r11,
-                   &g11, &b11);
-
-      const float w00 = (1.0f - tx) * (1.0f - ty);
-      const float w10 = tx * (1.0f - ty);
-      const float w01 = (1.0f - tx) * ty;
-      const float w11 = tx * ty;
-      screen[(size_t)dy * (size_t)stride + (size_t)dx] = RGB565FromU8(
-          r00 * w00 + r10 * w10 + r01 * w01 + r11 * w11 + 0.5f,
-          g00 * w00 + g10 * w10 + g01 * w01 + g11 * w11 + 0.5f,
-          b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11 + 0.5f);
-    }
-  }
 }
 
 pdf_view_utils::NormalizedRect ComputeCurrentCbzViewport(
@@ -216,7 +159,8 @@ pdf_view_utils::NormalizedRect ComputeCurrentCbzViewport(
       cbz_state ? cbz_state->page_width : 1.0f,
       cbz_state ? cbz_state->page_height : 1.0f,
       cbz_state ? pdf_view_utils::ZoomForIndex(cbz_state->viewport.zoom_index) : 1.0f,
-      (float)kCbzZoomScreenWidth, (float)kCbzZoomScreenHeight,
+      (float)fixed_layout_screen::kTopScreenWidth,
+      (float)fixed_layout_screen::kTopScreenHeight,
       cbz_state ? cbz_state->viewport.center_x : 0.5f,
       cbz_state ? cbz_state->viewport.center_y : 0.5f);
 }
@@ -301,8 +245,10 @@ bool EnsureCbzPreviewCache(Book::CbzState *cbz_state, int page_index) {
   const pdf_view_utils::PreviewLayout preview_layout =
       pdf_view_utils::ComputePreviewLayout(
           cbz_state->page_width, cbz_state->page_height,
-          kCbzPreviewScreenWidth - 2 * kCbzPreviewPadding,
-          kCbzPreviewScreenHeight - 2 * kCbzPreviewPadding);
+          fixed_layout_screen::kBottomScreenWidth -
+              2 * fixed_layout_preview::kPadding,
+          fixed_layout_screen::kBottomScreenHeight -
+              2 * fixed_layout_preview::kPadding);
   CbzBitmap scaled;
   if (!ScaleCbzBitmap(cbz_state->current_source.bitmap,
                       std::max(1, preview_layout.width),
@@ -330,9 +276,9 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
     return false;
 
   const float fit_scale =
-      std::min((float)kCbzZoomScreenWidth /
+      std::min((float)fixed_layout_screen::kTopScreenWidth /
                    std::max(1.0f, cbz_state->page_width),
-               (float)kCbzZoomScreenHeight /
+               (float)fixed_layout_screen::kTopScreenHeight /
                    std::max(1.0f, cbz_state->page_height));
   const float zoom = pdf_view_utils::ZoomForIndex(cbz_state->viewport.zoom_index);
   const int target_width = std::max(
@@ -385,12 +331,56 @@ bool BlitCbzCacheViewport(Text *ts, u16 *screen, int logical_height,
       pdf_view_utils::ComputePreviewLayout((float)crop_w, (float)crop_h,
                                            draw_width, draw_height);
 
-  BlitRgb565BitmapScaledCrop(
+  fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
       ts, screen, logical_height, layout.x, layout.y, layout.width,
       layout.height, cache.pixels,
       cache.bitmap_width, cache.bitmap_height, crop_x, crop_y, crop_w, crop_h,
       high_quality_filter);
   return true;
+}
+
+void DrawCbzPreviewPanel(Book *book, Text *ts,
+                         const Book::CbzState *cbz_state,
+                         int page_index,
+                         const pdf_view_utils::PreviewLayout &preview_layout,
+                         const pdf_view_utils::NormalizedRect &viewport) {
+  if (!book || !ts || !cbz_state)
+    return;
+
+  ts->SetScreen(ts->screenright);
+  ts->ClearScreen();
+  book->DrawBottomGradientBackground();
+  ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
+               (u16)(preview_layout.x + preview_layout.width),
+               (u16)(preview_layout.y + preview_layout.height),
+               fixed_layout_preview::kPaper);
+  if (CbzPreviewCacheValid(cbz_state->current_preview, page_index)) {
+    fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
+        ts, ts->screenright, fixed_layout_screen::kBottomScreenHeight,
+        preview_layout.x, preview_layout.y, preview_layout.width,
+        preview_layout.height, cbz_state->current_preview.pixels,
+        cbz_state->current_preview.bitmap_width,
+        cbz_state->current_preview.bitmap_height, 0, 0,
+        cbz_state->current_preview.bitmap_width,
+        cbz_state->current_preview.bitmap_height, true);
+  }
+  ts->DrawRect((u16)preview_layout.x, (u16)preview_layout.y,
+               (u16)(preview_layout.x + preview_layout.width),
+               (u16)(preview_layout.y + preview_layout.height),
+               fixed_layout_preview::kFrame);
+
+  const int viewport_x =
+      preview_layout.x + (int)(viewport.left * preview_layout.width + 0.5f);
+  const int viewport_y =
+      preview_layout.y + (int)(viewport.top * preview_layout.height + 0.5f);
+  const int viewport_w =
+      std::max(1, (int)(viewport.width * preview_layout.width + 0.5f));
+  const int viewport_h =
+      std::max(1, (int)(viewport.height * preview_layout.height + 0.5f));
+  ts->DrawRect((u16)viewport_x, (u16)viewport_y,
+               (u16)(viewport_x + viewport_w),
+               (u16)(viewport_y + viewport_h),
+               fixed_layout_preview::kViewportAccent);
 }
 
 bool HasCbzNeighborPending(const Book::CbzState *cbz_state, int page_index) {
@@ -490,66 +480,36 @@ void Book::DrawCurrentCbzView(Text *ts) {
   const bool high_quality_viewport = !cbz_state->viewport.interaction_active;
   const pdf_view_utils::PreviewLayout preview_layout =
       pdf_view_utils::ComputePreviewLayoutInBounds(
-          cbz_state->page_width, cbz_state->page_height, kCbzPreviewPadding,
-          kCbzPreviewPadding, kCbzPreviewScreenWidth - 2 * kCbzPreviewPadding,
-          kCbzPreviewScreenHeight - 2 * kCbzPreviewPadding);
+          cbz_state->page_width, cbz_state->page_height,
+          fixed_layout_preview::kPadding, fixed_layout_preview::kPadding,
+          fixed_layout_screen::kBottomScreenWidth -
+              2 * fixed_layout_preview::kPadding,
+          fixed_layout_screen::kBottomScreenHeight -
+              2 * fixed_layout_preview::kPadding);
 
-  const int saved_style = ts->GetStyle();
-  const int saved_color = ts->GetColorMode();
-  u16 *saved_screen = ts->GetScreen();
-  const int saved_bottom_margin = ts->margin.bottom;
-
+  ScopedTextRenderState saved_state(ts);
   ts->SetStyle(TEXT_STYLE_BROWSER);
   ts->margin.bottom = 0;
 
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
   if (has_interactive) {
-    BlitCbzCacheViewport(ts, ts->screenleft, kCbzZoomScreenHeight,
-                         kCbzZoomScreenWidth, kCbzZoomScreenHeight,
+    BlitCbzCacheViewport(ts, ts->screenleft,
+                         fixed_layout_screen::kTopScreenHeight,
+                         fixed_layout_screen::kTopScreenWidth,
+                         fixed_layout_screen::kTopScreenHeight,
                          cbz_state->current_interactive, viewport,
                          high_quality_viewport);
   } else {
-    BlitCbzCacheViewport(ts, ts->screenleft, kCbzZoomScreenHeight,
-                         kCbzZoomScreenWidth, kCbzZoomScreenHeight,
+    BlitCbzCacheViewport(ts, ts->screenleft,
+                         fixed_layout_screen::kTopScreenHeight,
+                         fixed_layout_screen::kTopScreenWidth,
+                         fixed_layout_screen::kTopScreenHeight,
                          cbz_state->current_preview, viewport,
                          high_quality_viewport);
   }
-  ts->SetScreen(ts->screenright);
-  ts->ClearScreen();
-  DrawBottomGradientBackground();
-  ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
-               (u16)(preview_layout.x + preview_layout.width),
-               (u16)(preview_layout.y + preview_layout.height), kCbzPaper);
-  if (CbzPreviewCacheValid(cbz_state->current_preview, page_index)) {
-    BlitRgb565BitmapScaledCrop(
-        ts, ts->screenright, kCbzPreviewScreenHeight, preview_layout.x,
-        preview_layout.y, preview_layout.width, preview_layout.height,
-        cbz_state->current_preview.pixels, cbz_state->current_preview.bitmap_width,
-        cbz_state->current_preview.bitmap_height, 0, 0,
-        cbz_state->current_preview.bitmap_width,
-        cbz_state->current_preview.bitmap_height, true);
-  }
-  ts->DrawRect((u16)preview_layout.x, (u16)preview_layout.y,
-               (u16)(preview_layout.x + preview_layout.width),
-               (u16)(preview_layout.y + preview_layout.height), kCbzFrame);
-
-  const int viewport_x =
-      preview_layout.x + (int)(viewport.left * preview_layout.width + 0.5f);
-  const int viewport_y =
-      preview_layout.y + (int)(viewport.top * preview_layout.height + 0.5f);
-  const int viewport_w =
-      std::max(1, (int)(viewport.width * preview_layout.width + 0.5f));
-  const int viewport_h =
-      std::max(1, (int)(viewport.height * preview_layout.height + 0.5f));
-  ts->DrawRect((u16)viewport_x, (u16)viewport_y,
-               (u16)(viewport_x + viewport_w),
-               (u16)(viewport_y + viewport_h), kCbzAccent);
-
-  ts->SetStyle(saved_style);
-  ts->SetColorMode(saved_color);
-  ts->SetScreen(saved_screen);
-  ts->margin.bottom = saved_bottom_margin;
+  DrawCbzPreviewPanel(this, ts, cbz_state, page_index, preview_layout,
+                      viewport);
 }
 
 void Book::SetCbzViewportInteraction(bool active) {
@@ -597,9 +557,12 @@ bool Book::MoveCbzViewportToPreview(int touch_x, int touch_y) {
 
   const pdf_view_utils::PreviewLayout preview =
       pdf_view_utils::ComputePreviewLayoutInBounds(
-          cbz_state->page_width, cbz_state->page_height, kCbzPreviewPadding,
-          kCbzPreviewPadding, kCbzPreviewScreenWidth - 2 * kCbzPreviewPadding,
-          kCbzPreviewScreenHeight - 2 * kCbzPreviewPadding);
+          cbz_state->page_width, cbz_state->page_height,
+          fixed_layout_preview::kPadding, fixed_layout_preview::kPadding,
+          fixed_layout_screen::kBottomScreenWidth -
+              2 * fixed_layout_preview::kPadding,
+          fixed_layout_screen::kBottomScreenHeight -
+              2 * fixed_layout_preview::kPadding);
   const pdf_view_utils::NormalizedRect viewport =
       ComputeCurrentCbzViewport(cbz_state);
   const pdf_view_utils::NormalizedPoint center =
@@ -650,13 +613,13 @@ bool Book::HasPendingCbzDeferredWork() const {
                            cbz_state->viewport.zoom_index)) {
     return true;
   }
-  if (cbz_state->worker) {
-    const bool job_pending =
-        __atomic_load_n(&cbz_state->worker->job_pending, __ATOMIC_ACQUIRE);
-    if (cbz_state->worker->job_submitted && !job_pending)
+  switch (GetCbzWorkerQueueState(cbz_state)) {
+    case CBZ_WORKER_READY_TO_INTEGRATE:
       return true;
-    if (job_pending)
+    case CBZ_WORKER_PENDING:
       return false;
+    case CBZ_WORKER_IDLE:
+      break;
   }
   return HasCbzNeighborPending(cbz_state, page_index);
 }
@@ -673,13 +636,12 @@ u32 Book::GetCbzDeferredDelayMs() const {
                            cbz_state->viewport.zoom_index)) {
     return kCbzInteractiveDeferredDelayMs;
   }
-  if (cbz_state->worker) {
-    const bool job_pending =
-        __atomic_load_n(&cbz_state->worker->job_pending, __ATOMIC_ACQUIRE);
-    if (cbz_state->worker->job_submitted && !job_pending)
+  switch (GetCbzWorkerQueueState(cbz_state)) {
+    case CBZ_WORKER_READY_TO_INTEGRATE:
+    case CBZ_WORKER_PENDING:
       return 0;
-    if (job_pending)
-      return 0;
+    case CBZ_WORKER_IDLE:
+      break;
   }
   return HasCbzNeighborPending(cbz_state, page_index)
              ? kCbzPreloadDeferredDelayMs

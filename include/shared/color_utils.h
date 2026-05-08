@@ -32,4 +32,13 @@ static inline u16 RGB565FromU8(float r, float g, float b) {
   return ((u16)(r / 8) << 11) | ((u16)(g / 4) << 5) | (u16)(b / 8);
 }
 
+static inline void UnpackRgb565(u16 pixel, int *r, int *g, int *b) {
+  const int r5 = (pixel >> 11) & 0x1F;
+  const int g6 = (pixel >> 5) & 0x3F;
+  const int b5 = pixel & 0x1F;
+  *r = (r5 << 3) | (r5 >> 2);
+  *g = (g6 << 2) | (g6 >> 4);
+  *b = (b5 << 3) | (b5 >> 2);
+}
+
 #endif // COLOR_UTILS_H

@@ -1,6 +1,8 @@
 #include "formats/cbz/cbz_decode.h"
 
+#include "formats/common/fixed_layout_screen_constants.h"
 #include "formats/common/pdf_view_utils.h"
+#include "shared/color_utils.h"
 
 #include "stb_image.h"
 
@@ -20,8 +22,6 @@ extern "C" {
 
 namespace {
 
-static const int kCbzTopScreenWidth = 240;
-static const int kCbzTopScreenHeight = 400;
 static char g_last_cbz_decode_error[192] = "";
 
 struct CbzDecodeTargetSize {
@@ -69,8 +69,9 @@ CbzDecodeTargetSize ComputeDecodeTargetSize(int src_width, int src_height,
     return target;
 
   const float fit_scale =
-      std::min((float)kCbzTopScreenWidth / (float)src_width,
-               (float)kCbzTopScreenHeight / (float)src_height);
+      std::min((float)fixed_layout_screen::kTopScreenWidth / (float)src_width,
+               (float)fixed_layout_screen::kTopScreenHeight /
+                   (float)src_height);
   const float zoom = pdf_view_utils::ZoomForIndex(max_zoom_index);
   const float source_scale =
       std::min(1.0f, std::max(0.0001f, fit_scale * zoom));
@@ -80,36 +81,6 @@ CbzDecodeTargetSize ComputeDecodeTargetSize(int src_width, int src_height,
   target.height = ClampInt((int)std::floor(src_height * source_scale + 0.5f), 1,
                            src_height);
   return target;
-}
-
-inline uint16_t RGB565FromU8(float r, float g, float b) {
-  if (r < 0.0f)
-    r = 0.0f;
-  else if (r > 255.0f)
-    r = 255.0f;
-
-  if (g < 0.0f)
-    g = 0.0f;
-  else if (g > 255.0f)
-    g = 255.0f;
-
-  if (b < 0.0f)
-    b = 0.0f;
-  else if (b > 255.0f)
-    b = 255.0f;
-
-  return ((uint16_t)(r / 8.0f) << 11) | ((uint16_t)(g / 4.0f) << 5) |
-         (uint16_t)(b / 8.0f);
-}
-
-inline void UnpackRgb565(uint16_t pixel, int *r, int *g, int *b) {
-  const int r5 = (pixel >> 11) & 0x1F;
-  const int g6 = (pixel >> 5) & 0x3F;
-  const int b5 = pixel & 0x1F;
-
-  *r = (r5 << 3) | (r5 >> 2);
-  *g = (g6 << 2) | (g6 >> 4);
-  *b = (b5 << 3) | (b5 >> 2);
 }
 
 #ifndef __3DS__

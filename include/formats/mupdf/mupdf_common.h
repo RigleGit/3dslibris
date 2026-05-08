@@ -6,6 +6,8 @@
 #include <cmath>
 #include <vector>
 
+#include "formats/common/fixed_layout_preview_constants.h"
+#include "formats/common/fixed_layout_screen_constants.h"
 #include "formats/common/pdf_view_utils.h"
 
 extern "C" {
@@ -24,11 +26,13 @@ struct App;
 extern fz_locks_context g_mupdf_locks_ctx;
 extern u16 g_gray_to_rgb565[256];
 
-static const int kPdfPreviewScreenWidth = 240;
-static const int kPdfPreviewScreenHeight = 320;
-static const int kPdfPreviewPadding = 4;
-static const int kPdfZoomScreenWidth = 240;
-static const int kPdfZoomScreenHeight = 400;
+static const int kPdfPreviewScreenWidth =
+    fixed_layout_screen::kBottomScreenWidth;
+static const int kPdfPreviewScreenHeight =
+    fixed_layout_screen::kBottomScreenHeight;
+static const int kPdfPreviewPadding = fixed_layout_preview::kPadding;
+static const int kPdfZoomScreenWidth = fixed_layout_screen::kTopScreenWidth;
+static const int kPdfZoomScreenHeight = fixed_layout_screen::kTopScreenHeight;
 static const int kMuPdfAaLevel = 8;
 static const float kPdfInteractiveScale = 1.0f;
 static const u32 kPdfInteractiveDeferredDelayMs = 180;
@@ -36,9 +40,9 @@ static const u32 kPdfFinalDeferredDelayMs = 2200;
 static const u32 kPdfPrefetchDeferredDelayMs = 3500;
 static const int kPdfStripsOld3DS = 8;
 static const int kPdfStripsNew3DS = 8;
-static const u16 kPdfPaper = 0xFFFF;
-static const u16 kPdfFrame = 0x2104;
-static const u16 kPdfAccent = 0x0000;
+static const u16 kPdfPaper = fixed_layout_preview::kPaper;
+static const u16 kPdfFrame = fixed_layout_preview::kFrame;
+static const u16 kPdfAccent = fixed_layout_preview::kViewportAccent;
 
 struct RenderedMuPdfBitmap {
   int width;

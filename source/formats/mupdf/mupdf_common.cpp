@@ -2,6 +2,8 @@
 
 #include "formats/mupdf/mupdf_common.h"
 
+#include "shared/color_utils.h"
+
 #include <3ds.h>
 
 namespace {
@@ -49,12 +51,7 @@ u16 RGB565FromRgb8(unsigned char r, unsigned char g, unsigned char b) {
 void RGB565ToRgb8(u16 pixel, int *r, int *g, int *b) {
   if (!r || !g || !b)
     return;
-  const int r5 = (pixel >> 11) & 0x1F;
-  const int g6 = (pixel >> 5) & 0x3F;
-  const int b5 = pixel & 0x1F;
-  *r = (r5 << 3) | (r5 >> 2);
-  *g = (g6 << 2) | (g6 >> 4);
-  *b = (b5 << 3) | (b5 >> 2);
+  UnpackRgb565(pixel, r, g, b);
 }
 
 bool IsMostlyWhite(u16 pixel) {

@@ -3,9 +3,10 @@
 #include "formats/mupdf/mupdf_view.h"
 
 #include "book/page.h"
-#include "shared/debug_log.h"
+#include "formats/common/fixed_layout_blit_utils.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "settings/prefs.h"
+#include "shared/debug_log.h"
 #include "shared/debug_runtime_mode.h"
 #include "ui/text.h"
 
@@ -176,94 +177,6 @@ int ClampMuPdfPageIndex(int page_index, u16 page_count) {
   return page_index;
 }
 
-static void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
-                                       int x, int y, int draw_width,
-                                       int draw_height,
-                                       const std::vector<u16> &pixels,
-                                       int src_width, int src_height,
-                                       int crop_x, int crop_y, int crop_width,
-                                       int crop_height,
-                                       bool high_quality_filter) {
-  if (!ts || !screen || pixels.empty() || draw_width <= 0 || draw_height <= 0 ||
-      src_width <= 0 || src_height <= 0 || crop_width <= 0 || crop_height <= 0) {
-    return;
-  }
-  crop_x = std::max(0, std::min(src_width - 1, crop_x));
-  crop_y = std::max(0, std::min(src_height - 1, crop_y));
-  crop_width = std::max(1, std::min(src_width - crop_x, crop_width));
-  crop_height = std::max(1, std::min(src_height - crop_y, crop_height));
-
-  const int stride = ts->display.height;
-  const int logical_width = ts->display.width;
-  ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
-  for (int row = 0; row < draw_height; row++) {
-    const int dy = y + row;
-    if (dy < 0 || dy >= logical_height)
-      continue;
-    for (int col = 0; col < draw_width; col++) {
-      const int dx = x + col;
-      if (dx < 0 || dx >= logical_width)
-        continue;
-
-      if (!high_quality_filter) {
-        const int src_x = crop_x +
-                          ((col * crop_width) / std::max(1, draw_width));
-        const int src_y = crop_y +
-                          ((row * crop_height) / std::max(1, draw_height));
-        screen[(size_t)dy * (size_t)stride + (size_t)dx] =
-            pixels[(size_t)src_y * (size_t)src_width + (size_t)src_x];
-        continue;
-      }
-
-      const float src_xf =
-          (float)crop_x +
-          (((float)col + 0.5f) * (float)crop_width / (float)draw_width) - 0.5f;
-      const float src_yf =
-          (float)crop_y +
-          (((float)row + 0.5f) * (float)crop_height / (float)draw_height) - 0.5f;
-
-      const float clamped_x =
-          std::max((float)crop_x,
-                   std::min((float)(crop_x + crop_width - 1), src_xf));
-      const float clamped_y =
-          std::max((float)crop_y,
-                   std::min((float)(crop_y + crop_height - 1), src_yf));
-
-      const int x0 = (int)clamped_x;
-      const int y0 = (int)clamped_y;
-      const int x1 = std::min(crop_x + crop_width - 1, x0 + 1);
-      const int y1 = std::min(crop_y + crop_height - 1, y0 + 1);
-
-      const float tx = clamped_x - (float)x0;
-      const float ty = clamped_y - (float)y0;
-
-      int r00, g00, b00;
-      int r10, g10, b10;
-      int r01, g01, b01;
-      int r11, g11, b11;
-      RGB565ToRgb8(pixels[(size_t)y0 * (size_t)src_width + (size_t)x0], &r00, &g00, &b00);
-      RGB565ToRgb8(pixels[(size_t)y0 * (size_t)src_width + (size_t)x1], &r10, &g10, &b10);
-      RGB565ToRgb8(pixels[(size_t)y1 * (size_t)src_width + (size_t)x0], &r01, &g01, &b01);
-      RGB565ToRgb8(pixels[(size_t)y1 * (size_t)src_width + (size_t)x1], &r11, &g11, &b11);
-
-      const float w00 = (1.0f - tx) * (1.0f - ty);
-      const float w10 = tx * (1.0f - ty);
-      const float w01 = (1.0f - tx) * ty;
-      const float w11 = tx * ty;
-
-      const unsigned char r = (unsigned char)(
-          r00 * w00 + r10 * w10 + r01 * w01 + r11 * w11 + 0.5f);
-      const unsigned char g = (unsigned char)(
-          g00 * w00 + g10 * w10 + g01 * w01 + g11 * w11 + 0.5f);
-      const unsigned char b = (unsigned char)(
-          b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11 + 0.5f);
-
-      screen[(size_t)dy * (size_t)stride + (size_t)dx] =
-          RGB565FromRgb8(r, g, b);
-    }
-  }
-}
-
 static pdf_view_utils::NormalizedPoint RecenterMuPdfViewportFromPreview(
     const pdf_view_utils::PreviewLayout &preview,
     const pdf_view_utils::NormalizedRect &viewport,
@@ -404,10 +317,10 @@ static bool BlitBitmapCacheViewport(Text *ts, u16 *screen, int logical_height,
       1, std::min(cache.bitmap_height - crop_y,
                   (int)((rel_bottom - rel_top) * cache.bitmap_height + 0.5f)));
 
-  BlitRgb565BitmapScaledCrop(ts, screen, logical_height, 0, 0, draw_width,
-                             draw_height, cache.pixels, cache.bitmap_width,
-                             cache.bitmap_height, crop_x, crop_y, crop_w,
-                             crop_h, high_quality_filter);
+  fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
+      ts, screen, logical_height, 0, 0, draw_width, draw_height, cache.pixels,
+      cache.bitmap_width, cache.bitmap_height, crop_x, crop_y, crop_w, crop_h,
+      high_quality_filter);
   return true;
 }
 
@@ -453,11 +366,10 @@ static bool BlitBitmapCacheViewportRegion(
       1, std::min(cache.bitmap_height - crop_y,
                   (int)((rel_bottom - rel_top) * cache.bitmap_height + 0.5f)));
 
-  BlitRgb565BitmapScaledCrop(ts, screen, logical_height, 0, dst_y0, draw_width,
-                             dst_y1 - dst_y0, cache.pixels,
-                             cache.bitmap_width, cache.bitmap_height,
-                             crop_x, crop_y, crop_w, crop_h,
-                             high_quality_filter);
+  fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
+      ts, screen, logical_height, 0, dst_y0, draw_width, dst_y1 - dst_y0,
+      cache.pixels, cache.bitmap_width, cache.bitmap_height, crop_x, crop_y,
+      crop_w, crop_h, high_quality_filter);
   return true;
 }
 
@@ -507,10 +419,10 @@ static bool BlitRawBitmapViewportRegion(
       1, std::min(bitmap_height - crop_y,
                   (int)((rel_bottom - rel_top) * bitmap_height + 0.5f)));
 
-  BlitRgb565BitmapScaledCrop(ts, screen, logical_height, 0, dst_y0, draw_width,
-                             dst_y1 - dst_y0, pixels, bitmap_width,
-                             bitmap_height, crop_x, crop_y, crop_w, crop_h,
-                             false);
+  fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
+      ts, screen, logical_height, 0, dst_y0, draw_width, dst_y1 - dst_y0,
+      pixels, bitmap_width, bitmap_height, crop_x, crop_y, crop_w, crop_h,
+      false);
   return true;
 }
 
@@ -865,7 +777,7 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   if (!mupdf_state->current_preview.pixels.empty() &&
       mupdf_state->current_preview.bitmap_width > 0 &&
       mupdf_state->current_preview.bitmap_height > 0) {
-    BlitRgb565BitmapScaledCrop(
+    fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
         ts, ts->screenright, kPdfPreviewScreenHeight, preview_layout.x,
         preview_layout.y, preview_layout.width, preview_layout.height,
         mupdf_state->current_preview.pixels,

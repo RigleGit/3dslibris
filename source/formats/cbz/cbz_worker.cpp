@@ -4,6 +4,8 @@
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
 #include "formats/common/format_limits.h"
+#include "formats/common/fixed_layout_preview_constants.h"
+#include "formats/common/fixed_layout_screen_constants.h"
 #include "formats/common/pdf_view_utils.h"
 #include "shared/debug_runtime_mode.h"
 
@@ -12,10 +14,6 @@
 namespace {
 
 static const size_t kCbzWorkerStackBytes = 256u * 1024u;
-static const int kCbzPreviewBoundsWidth = 240 - 8;
-static const int kCbzPreviewBoundsHeight = 320 - 8;
-static const int kCbzTopScreenWidth = 240;
-static const int kCbzTopScreenHeight = 400;
 
 bool BuildCbzSlotFromPage(const std::string &archive_path,
                           const std::vector<CbzPageEntry> &entries,
@@ -46,7 +44,10 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
   const pdf_view_utils::PreviewLayout preview_layout =
       pdf_view_utils::ComputePreviewLayout(
           (float)decoded.original_width, (float)decoded.original_height,
-          kCbzPreviewBoundsWidth, kCbzPreviewBoundsHeight);
+          fixed_layout_screen::kBottomScreenWidth -
+              2 * fixed_layout_preview::kPadding,
+          fixed_layout_screen::kBottomScreenHeight -
+              2 * fixed_layout_preview::kPadding);
   CbzBitmap preview_bitmap;
   if (!ScaleCbzBitmap(decoded.source_bitmap, std::max(1, preview_layout.width),
                       std::max(1, preview_layout.height), true,
@@ -55,9 +56,9 @@ bool BuildCbzSlotFromPage(const std::string &archive_path,
   }
 
   const float fit_scale =
-      std::min((float)kCbzTopScreenWidth /
+      std::min((float)fixed_layout_screen::kTopScreenWidth /
                    std::max(1, decoded.original_width),
-               (float)kCbzTopScreenHeight /
+               (float)fixed_layout_screen::kTopScreenHeight /
                    std::max(1, decoded.original_height));
   const float zoom = pdf_view_utils::ZoomForIndex(zoom_index);
   const int interactive_width = std::max(
