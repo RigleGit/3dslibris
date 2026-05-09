@@ -253,8 +253,11 @@ void SettingsController::ShowSettingsView(bool from_book) {
   app_.SetPrefsLayoutNoticePending(
       from_book && app_.GetCurrentBook() &&
       app_.BookNeedsRelayout(app_.GetCurrentBook()));
+
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
+  PrefsRefreshButton(PREFS_BUTTON_CLEAR_CACHE);
+  
   u8 visible_count = PrefsVisibleButtonCount();
   if (visible_count == 0)
     visible_count = 1;
@@ -951,6 +954,7 @@ void SettingsController::ClearAllCaches() {
   DeleteDirContents(paths::GetMobiCoverMetaCacheDir().c_str());
   DeleteDirContents(paths::GetMetaCacheDir().c_str());
   DeleteDirContents(paths::GetCoverCacheDir().c_str());
+
   for (int i = 0; i < app_.BookCount(); i++) {
     Book *b = app_.books[i];
     if (!b)
@@ -964,7 +968,8 @@ void SettingsController::ClearAllCaches() {
     b->coverAttempts = 0;
     b->metadataIndexTried = false;
   }
-  PrefsRefreshButton(PREFS_BUTTON_CLEAR_CACHE);
+
+  app_.prefsButtons[PREFS_BUTTON_CLEAR_CACHE].SetLabel2(std::string("cleared!"));
   app_.PrintStatus("Caches cleared");
   app_.MarkPrefsDirty();
 
