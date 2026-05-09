@@ -964,8 +964,10 @@ void SettingsController::ClearAllCaches() {
     b->coverAttempts = 0;
     b->metadataIndexTried = false;
   }
-  app_.prefsButtons[PREFS_BUTTON_CLEAR_CACHE].SetLabel2("cleared!");
+  PrefsRefreshButton(PREFS_BUTTON_CLEAR_CACHE);
+  app_.PrintStatus("Caches cleared");
   app_.MarkPrefsDirty();
+
   if (app_.GetMode() == AppMode::Browser)
     app_.ts->MarkAllScreensDirty();
 }
