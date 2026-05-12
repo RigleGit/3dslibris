@@ -60,6 +60,10 @@ namespace
   static const int kViewportStickAccelFrames = 24;
   static const u64 kInlineLinkHoldThresholdMs = 350;
   static const int kInlineLinkSecondScreenYOffset = 420;
+  // Minimum hit rect dimensions for touch link activation. Tiny inline links
+  // (e.g. footnote asterisks) get inflated to this size around their center.
+  static const int kTouchLinkMinHitPx = 12;
+  static const int kTouchLinkPadPx = 4;
 
   // Returns a human-readable name for the book, for debug logging.
   [[gnu::unused]] static const char *SafeBookName(Book *book)
@@ -454,6 +458,58 @@ namespace
       return false;
     book->ClearFocusedInlineLink();
     return SetBookPage(book, ts, target_page);
+  }
+
+  // Check if touch point (tx, ty) in bottom-screen text coordinates hits a
+  // link on the second screen. If so, focus and follow it.
+  // Tiny link rects are inflated to kTouchLinkMinHitPx x kTouchLinkMinHitPx
+  // so footnote markers like "*" remain tappable.
+  bool TryFollowTouchLink(Book *book, Text *ts, int tx, int ty)
+  {
+    if (!book || !ts)
+      return false;
+    const std::vector<Page::InlineLinkRenderEntry> *links =
+        CurrentPageInlineLinks(book);
+    if (!links || links->empty())
+      return false;
+
+    int best_index = -1;
+    for (int i = 0; i < (int)links->size(); ++i) {
+      const Page::InlineLinkRenderEntry &entry = (*links)[(size_t)i];
+      if (entry.screen_index != 1)
+        continue; // only bottom/touch screen links
+
+      inline_link_utils::LinkRect r = entry.bounds;
+      // Inflate tiny rects around their center.
+      const int w = r.x1 - r.x0;
+      const int h = r.y1 - r.y0;
+      const int cx = r.x0 + w / 2;
+      const int cy = r.y0 + h / 2;
+      if (w < kTouchLinkMinHitPx) {
+        r.x0 = cx - kTouchLinkMinHitPx / 2;
+        r.x1 = cx + kTouchLinkMinHitPx / 2;
+      }
+      if (h < kTouchLinkMinHitPx) {
+        r.y0 = cy - kTouchLinkMinHitPx / 2;
+        r.y1 = cy + kTouchLinkMinHitPx / 2;
+      }
+      // Apply padding.
+      r.x0 -= kTouchLinkPadPx;
+      r.y0 -= kTouchLinkPadPx;
+      r.x1 += kTouchLinkPadPx;
+      r.y1 += kTouchLinkPadPx;
+
+      if (tx >= r.x0 && tx < r.x1 && ty >= r.y0 && ty < r.y1) {
+        best_index = i;
+        break;
+      }
+    }
+
+    if (best_index < 0)
+      return false;
+
+    book->SetFocusedInlineLinkIndex(best_index);
+    return FollowFocusedInlineLink(book, ts);
   }
 
   bool TurnBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 pagecount,
@@ -1412,18 +1468,27 @@ void ReaderController::HandleEventInBook()
   }
   else if (keys & KEY_TOUCH)
   {
-    // Page turn split follows visual horizontal axis (left/right) in both
-    // orientations after central touch un-mirroring.
+    // Check links on the bottom screen before triggering a page turn.
+    // mapped.px = text-x (column, 0-239), mapped.py = text-y (row, 0-319).
     touchPosition mapped = touch_read();
-    const bool forward_zone = ((int)mapped.px >= 120);
-    if (!forward_zone)
+    if (TryFollowTouchLink(bookcurrent_, ts, (int)mapped.px, (int)mapped.py))
     {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
-        status_dirty = true;
+      status_dirty = true;
     }
     else
     {
-      AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
+      // Page turn split follows visual horizontal axis (left/right) in both
+      // orientations after central touch un-mirroring.
+      const bool forward_zone = ((int)mapped.px >= 120);
+      if (!forward_zone)
+      {
+        if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
+          status_dirty = true;
+      }
+      else
+      {
+        AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
+      }
     }
   }
   else if (keys & back_to_library_keys)

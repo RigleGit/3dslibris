@@ -36,7 +36,7 @@ static const std::string &GetEffectiveCacheDir() {
   return kEpubCacheDir;
 }
 static const u32 kEpubPageCacheMagic = 0x45504347U;
-static const u16 kEpubPageCacheVersion = 8;
+static const u16 kEpubPageCacheVersion = 9;
 static const u16 kPageCacheTitleMaxBytes = 1000;
 static const u16 kPageCachePageMaxBytes = 4096;
 static const u16 kPageCacheChapterTitleMaxBytes = 2048;

@@ -734,11 +734,16 @@ static void QueueBlockSpacingFromMarginResult(
     QueueBlockSpacingLines(p, default_lf, tag, reason, false);
     return;
   }
-  if (mtr.negative || mtr.value == 0) {
-    // Explicit CSS zero or negative: mandatory block break remains, but no
-    // optional spacing.  The block still ends on its own visual line.
-    p->pending_block_break = true;           // mandatory: blocks must separate
-    SuppressPendingBlockSpacingFromCss(p, tag, reason);
+  if (mtr.negative) {
+    // CSS negative margin: mandatory break only, user preference overrides.
+    QueueBlockSpacingLines(p, default_lf, tag, reason, false);
+    return;
+  }
+  if (mtr.value == 0) {
+    // CSS margin:0 — publisher wants no extra gap. Still respect user's
+    // paragraph spacing preference (default_lf) as the minimum so that
+    // books using margin:0 don't override the user's spacing setting.
+    QueueBlockSpacingLines(p, default_lf, tag, reason, false);
     return;
   }
   // Explicit CSS positive: resolve to lines, max-collapse optional spacing.
