@@ -2986,14 +2986,18 @@ void start(void *data, const char *el, const char **attr) {
             has_spec = true;
           }
         }
-        // <small>/<big> are semantic/local size changes and remain active
-        // regardless of the publisher font-size preference.
+        // <small>/<big> and CSS keyword sizes (small, x-small, smaller, etc.)
+        // are semantic choices — apply regardless of the publisher font-size preference.
         if (!has_spec) {
           if (!strcmp(el, "small")) {
             spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Smaller;
             has_spec = true;
           } else if (!strcmp(el, "big")) {
             spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Larger;
+            has_spec = true;
+          } else if (elem_css.font_size.unit != book_xml_css_style_utils::FontSizeSpec::Unit::None &&
+                     elem_css.font_size.is_keyword) {
+            spec = elem_css.font_size;
             has_spec = true;
           }
         }

@@ -26,8 +26,9 @@ struct FontSizeSpec {
   enum class Unit { None, Px, Percent, Em, Rem, Smaller, Larger };
   int value_x100;
   Unit unit;
+  bool is_keyword;
 
-  FontSizeSpec() : value_x100(0), unit(Unit::None) {}
+  FontSizeSpec() : value_x100(0), unit(Unit::None), is_keyword(false) {}
 };
 
 bool TryParseFontSize(const char *style, FontSizeSpec *out);

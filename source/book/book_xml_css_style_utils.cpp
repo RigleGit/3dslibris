@@ -398,35 +398,37 @@ bool TryParseFontSize(const char *style, FontSizeSpec *out) {
   if (lc.compare(pos, 7, "smaller") == 0) {
     out->unit = FontSizeSpec::Unit::Smaller;
     out->value_x100 = 0;
+    out->is_keyword = true;
     return true;
   }
   if (lc.compare(pos, 6, "larger") == 0) {
     out->unit = FontSizeSpec::Unit::Larger;
     out->value_x100 = 0;
+    out->is_keyword = true;
     return true;
   }
   // Absolute keyword sizes — stored as Percent relative to base font.
   // Order: longer prefixes first to avoid xx-large matching x-large.
   if (lc.compare(pos, 8, "xx-large") == 0) {
-    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 20000; return true;
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 20000; out->is_keyword = true; return true;
   }
   if (lc.compare(pos, 7, "x-large") == 0) {
-    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 15000; return true;
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 15000; out->is_keyword = true; return true;
   }
   if (lc.compare(pos, 5, "large") == 0) {
-    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 12500; return true;
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 12500; out->is_keyword = true; return true;
   }
   if (lc.compare(pos, 6, "medium") == 0) {
-    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 10000; return true;
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 10000; out->is_keyword = true; return true;
   }
   if (lc.compare(pos, 8, "xx-small") == 0) {
-    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 5000;  return true;
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 5000;  out->is_keyword = true; return true;
   }
   if (lc.compare(pos, 7, "x-small") == 0) {
-    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 6250;  return true;
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 6250;  out->is_keyword = true; return true;
   }
   if (lc.compare(pos, 5, "small") == 0) {
-    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 8000;  return true;
+    out->unit = FontSizeSpec::Unit::Percent; out->value_x100 = 8000;  out->is_keyword = true; return true;
   }
 
   int value_x100 = 0;
