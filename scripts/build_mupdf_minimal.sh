@@ -33,6 +33,7 @@ cd "$MUPDF_DIR"
   extract=no \
   barcode=no \
   tofu=yes \
+  tofu_cjk=yes \
   clean >/dev/null 2>&1 || true
 
 "$MAKE_BIN" \
@@ -53,6 +54,7 @@ cd "$MUPDF_DIR"
   extract=no \
   barcode=no \
   tofu=yes \
+  tofu_cjk=yes \
   CC="$CC_BIN" \
   CXX="$CXX_BIN" \
   AR="$AR_BIN" \
