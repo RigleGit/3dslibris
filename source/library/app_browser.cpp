@@ -872,16 +872,18 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         const u64 free_bytes = (u64)osGetMemRegionFree(MEMREGION_ALL);
         if (!browser_warmup_utils::HasCoverExtractionHeadroom(
                 app_.IsNew3dsDevice(), is_selected_book, free_bytes)) {
+          book->coverAttempts++;
           const u64 retry_delay_ms = browser_warmup_utils::CoverRetryDelayMs(
               app_.IsNew3dsDevice(), is_selected_book, 4, false);
-          if (retry_delay_ms != 0)
+          if (retry_delay_ms != 0 && book->coverAttempts < kCoverMaxAttempts)
             book->coverRetryAfterMs = osGetTime() + retry_delay_ms;
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
           DBG_LOGF(&app_,
-                   "COVER: skip mem-pressure book=%s selected=%u free=%llu",
+                   "COVER: skip mem-pressure book=%s selected=%u free=%llu attempts=%u",
                    book->GetFileName() ? book->GetFileName() : "(null)",
                    is_selected_book ? 1u : 0u,
-                   (unsigned long long)free_bytes);
+                   (unsigned long long)free_bytes,
+                   (unsigned)book->coverAttempts);
 #endif
           continue;
         }

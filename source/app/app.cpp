@@ -826,13 +826,12 @@ void App::AptHookCallback(APT_HookType hook, void *param)
 // Handle app lifecycle events from the APT hook, such as suspend, resume, and exit.
 void App::HandleAppletHook(APT_HookType hook)
 {
-#ifdef DSLIBRIS_DEBUG
-  DBG_LOGF(this,
-           "APPLET hook=%s mode=%d current_session=%u opening_session=%u",
-           AppletHookName(hook), (int)nav_.mode,
-           reader_state_.current_book_session_id,
-           reader_state_.opening.session_id);
-#endif
+  // Do NOT log here. This callback runs on the APT system thread, not the main
+  // thread. Calling DBG_LOGF would access nav_/reader_state_ without
+  // synchronization and would invoke PrintStatus, which does LightLock + fflush
+  // (SD card I/O) from the hook thread — the same class of bug documented in
+  // the APTHOOK_ONEXIT comment below. Lifecycle events are logged in
+  // HandleAppletSuspend/HandleAppletResume on the main thread instead.
   switch (hook)
   {
   case APTHOOK_ONSUSPEND:
