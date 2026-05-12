@@ -8,9 +8,51 @@
 #include "formats/mupdf/mupdf_worker.h"
 #include "formats/common/pdf_view_utils.h"
 #include "shared/open_cancel_poll.h"
+#include "shared/path_utils.h"
 #include "shared/status_reporter.h"
 
 #include "shared/debug_log.h"
+
+#include <dirent.h>
+#include <string.h>
+
+// Scan the app font directory once for a CJK-compatible font and cache the
+// result. Returns the sdmc: path, or an empty string if none is found.
+static const std::string &FindUserCjkFontPath() {
+  static std::string s_path;
+  static bool s_scanned = false;
+  if (s_scanned)
+    return s_path;
+  s_scanned = true;
+  const std::string &font_dir = paths::GetFontDir();
+  DIR *dp = opendir(font_dir.c_str());
+  if (!dp)
+    return s_path;
+  struct dirent *ent;
+  while ((ent = readdir(dp)) != NULL) {
+    const char *name = ent->d_name;
+    for (int i = 0; i < paths::kCjkFontPatternCount; i++) {
+      if (strstr(name, paths::kCjkFontPatterns[i])) {
+        s_path = font_dir + "/" + name;
+        closedir(dp);
+        return s_path;
+      }
+    }
+  }
+  closedir(dp);
+  return s_path;
+}
+
+static fz_font *MuPdfLoadCjkFont(fz_context *ctx, const char * /*name*/,
+                                  int /*ordering*/, int /*serif*/) {
+  const std::string &path = FindUserCjkFontPath();
+  if (path.empty())
+    return NULL;
+  fz_font *font = NULL;
+  fz_try(ctx) { font = fz_new_font_from_file(ctx, NULL, path.c_str(), 0, 0); }
+  fz_catch(ctx) { font = NULL; }
+  return font;
+}
 
 void Book::ResetMuPdfState() {
   if (!mupdf_state)
@@ -82,6 +124,7 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
     return BOOK_ERR_CORRUPT;
 
   fz_set_aa_level(ctx, kMuPdfAaLevel);
+  fz_install_load_system_font_funcs(ctx, NULL, MuPdfLoadCjkFont, NULL);
 
   // Step 1: open the document.
   fz_var(doc);
