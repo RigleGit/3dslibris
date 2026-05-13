@@ -30,6 +30,7 @@
 #include "book/book_xml_element_style.h"
 #include "book/book_xml_flow_emission.h"
 #include "book/book_xml_inline_handler.h"
+#include "book/book_xml_block_handler.h"
 #include "book/book_xml_screen_advance.h"
 #include "book/book_xml_text_emit.h"
 #include "book/book_xml.h"
@@ -902,368 +903,55 @@ void start(void *data, const char *el, const char **attr) {
     }
   }
 
-  if (!strcmp(el, "html"))
-    parse_push(p, TAG_HTML);
-  else if (!strcmp(el, "aside")) {
-    parse_push(p, TAG_ASIDE);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    QueueBlockSpacingLines(p, 1, "aside", "aside-top", false);
-  } else if (!strcmp(el, "blockquote")) {
-    parse_push(p, TAG_BLOCKQUOTE);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    QueueBlockSpacingLines(p, 1, "blockquote", "blockquote-top", false);
-  } else if (!strcmp(el, "caption")) {
-    parse_push(p, TAG_CAPTION);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    QueueBlockSpacingLines(p, 1, "caption", "caption-top", false);
-  } else if (!strcmp(el, "dd")) {
-    parse_push(p, TAG_DD);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    if (elem_css.margin_left.unit ==
-        book_xml_css_style_utils::MarginTopResult::Unit::None) {
-      const int space_advance = ts->GetAdvance(' ');
-      const int legacy_dd_indent_px =
-          space_advance > 0 ? 2 * space_advance : 12;
-
-      parse_set_current_block_margins(
-          p,
-          parse_current_block_margin_left(p) + legacy_dd_indent_px,
-          parse_current_block_margin_right(p));
-    }
-
-    QueueBlockSpacingLines(p, 1, "dd", "dd-top", false);
-  }
-  else if (!strcmp(el, "body"))
-    parse_push(p, TAG_BODY);
-  else if (!strcmp(el, "div")) {
-    parse_push(p, TAG_DIV);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-  }
-  else if (!strcmp(el, "dt")) {
-    parse_push(p, TAG_DT);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-  }
-  else if (!strcmp(el, "figure")) {
-    parse_push(p, TAG_FIGURE);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    QueueBlockSpacingLines(p, 1, "figure", "figure-top", false);
-  }
-  else if (!strcmp(el, "h1")) {
+  if (!strcmp(el, "h1")) {
     HandleHeadingStart(p, ts, attr, elem_css, 1, MakeHeadingHandlerFns());
   } else if (!strcmp(el, "h2")) {
     HandleHeadingStart(p, ts, attr, elem_css, 2, MakeHeadingHandlerFns());
   } else if (!strcmp(el, "h3")) {
     HandleHeadingStart(p, ts, attr, elem_css, 3, MakeHeadingHandlerFns());
-  } else if (!strcmp(el, "h4")) {
-    parse_push(p, TAG_H4);
-    p->last_h_style = ExtractStyleAttr(attr);
-    p->last_h_class = ExtractClassAttr(attr);
-    ApplyHeadingFontSize(p, ts, 4, p->last_h_style, p->last_h_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map, "h4"));
-    AppendParsedByte(p, TEXT_BOLD_ON);
-    p->pos++;
-    p->bold = true;
-    {
-      const book_xml_css_style_utils::MarginTopResult mtr =
-          ParseElementMarginTopWithClass(attr, elem_css);
-      ApplyElementBlockMargins(p, ts, attr, elem_css);
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const int default_lf = !blankline(p) ? 2 : 0;
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
-      LogResolvedBlockMargin(p, "h4", "top", p->last_h_style,
-                             p->last_h_class, mtr, line_h, default_lf,
-                             lf_count);
-      QueueBlockSpacingFromMarginResult(p, "h4", "heading-top", mtr, line_h, default_lf);
-      if (p->pending_block_spacing_lf < 1)
-        p->pending_block_spacing_lf = 1;
-    }
-  } else if (!strcmp(el, "h5")) {
-    parse_push(p, TAG_H5);
-    p->last_h_style = ExtractStyleAttr(attr);
-    p->last_h_class = ExtractClassAttr(attr);
-    ApplyHeadingFontSize(p, ts, 5, p->last_h_style, p->last_h_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map, "h5"));
-    AppendParsedByte(p, TEXT_BOLD_ON);
-    p->pos++;
-    p->bold = true;
-    {
-      const book_xml_css_style_utils::MarginTopResult mtr =
-          ParseElementMarginTopWithClass(attr, elem_css);
-      ApplyElementBlockMargins(p, ts, attr, elem_css);
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const int default_lf = !blankline(p) ? 2 : 0;
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
-      LogResolvedBlockMargin(p, "h5", "top", p->last_h_style,
-                             p->last_h_class, mtr, line_h, default_lf,
-                             lf_count);
-      QueueBlockSpacingFromMarginResult(p, "h5", "heading-top", mtr, line_h, default_lf);
-      if (p->pending_block_spacing_lf < 1)
-        p->pending_block_spacing_lf = 1;
-    }
-  } else if (!strcmp(el, "h6")) {
-    parse_push(p, TAG_H6);
-    p->last_h_style = ExtractStyleAttr(attr);
-    p->last_h_class = ExtractClassAttr(attr);
-    ApplyHeadingFontSize(p, ts, 6, p->last_h_style, p->last_h_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map, "h6"));
-    AppendParsedByte(p, TEXT_BOLD_ON);
-    p->pos++;
-    p->bold = true;
-    {
-      const book_xml_css_style_utils::MarginTopResult mtr =
-          ParseElementMarginTopWithClass(attr, elem_css);
-      ApplyElementBlockMargins(p, ts, attr, elem_css);
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const int default_lf = !blankline(p) ? 2 : 0;
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
-      LogResolvedBlockMargin(p, "h6", "top", p->last_h_style,
-                             p->last_h_class, mtr, line_h, default_lf,
-                             lf_count);
-      QueueBlockSpacingFromMarginResult(p, "h6", "heading-top", mtr, line_h, default_lf);
-      if (p->pending_block_spacing_lf < 1)
-        p->pending_block_spacing_lf = 1;
-    }
-  } else if (!strcmp(el, "head"))
-    parse_push(p, TAG_HEAD);
-  else if (!strcmp(el, "ol")) {
-    parse_push(p, TAG_OL);
-    book_xml_list_utils::ConfigureElementListSemantics(p, attr);
-  } else if (!strcmp(el, "p")) {
-    EnsureBlockBoundaryBeforeBlockStart(p, "p", "paragraph-block-boundary");
-    parse_push(p, TAG_P);
-    p->in_paragraph = true;
-    p->paragraph_has_content = false;
-    p->text_transform_word_start = true;
-    p->last_p_style = ExtractStyleAttr(attr);
-    p->last_p_class = ExtractClassAttr(attr);
-    const book_xml_css_style_utils::TextAlign align =
-        ResolveElementTextAlignWithClass(p->last_p_style, p->last_p_class,
-                                         p, p->css_class_map, "p");
-    AppendParagraphAlignMarker(p, align);
-    const bool tight_list_paragraph =
-        book_xml_list_utils::HasPendingListItemContent(p);
-    const bool tight_block_paragraph = ParseInAnyEasyParagraphTightBlock(p);
-    const bool can_apply_top_margin =
-        !tight_list_paragraph && !tight_block_paragraph;
-    const book_xml_css_style_utils::MarginTopResult mtr =
-        ParseElementMarginTopWithClass(attr, elem_css);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    const int line_h = ts->GetHeight() + ts->linespacing;
-    if (can_apply_top_margin) {
-      const int default_lf = p->book->GetParagraphSpacing();
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
-      LogResolvedBlockMargin(p, "p", "top", p->last_p_style,
-                             p->last_p_class, mtr, line_h, default_lf,
-                             lf_count);
-      QueueBlockSpacingFromMarginResult(p, "p", "paragraph-top", mtr, line_h, default_lf);
-    } else {
-      const char *phase = "top-skipped";
-      if (tight_list_paragraph)
-        phase = "top-skipped-tight-list";
-      else if (tight_block_paragraph)
-        phase = "top-skipped-tight-block";
-      LogResolvedBlockMargin(p, "p", phase, p->last_p_style, p->last_p_class,
-                             mtr, line_h, 0, 0);
-    }
-  } else if (!strcmp(el, "hr")) {
-    parse_push(p, TAG_UNKNOWN);
-    p->last_hr_style = ExtractStyleAttr(attr);
-    p->last_hr_class = ExtractClassAttr(attr);
-    const book_xml_css_style_utils::MarginTopResult mtr =
-        ParseElementMarginTopWithClass(attr, elem_css);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    const int line_h = ts->GetHeight() + ts->linespacing;
-    const int default_lf = !blankline(p) ? 1 : 0;
-    const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-        default_lf, mtr, line_h);
-    LogResolvedBlockMargin(p, "hr", "top", p->last_hr_style,
-                           p->last_hr_class, mtr, line_h, default_lf,
-                           lf_count);
-    QueueBlockSpacingFromMarginResult(p, "hr", "hr-top", mtr, line_h, default_lf);
-    if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
-      FlushPendingBlockSpacingBeforeContent(p, "hr");
-      // Compute rule bounds: block margins (from margin-left/right CSS) narrow
-      // the content area; width CSS + alignment determine the rule width within
-      // that area.  For plain <hr/> all margins are 0 and the bounds match the
-      // old TEXT_HR full-width behavior exactly.
-      const int content_left =
-          ts->margin.left + parse_current_block_margin_left(p);
-      const int content_right =
-          ts->display.width - ts->margin.right - parse_current_block_margin_right(p);
-      const int content_w = std::max(0, content_right - content_left);
-
-      int rule_x0 = content_left;
-      int rule_x1 = content_right;
-
-      const book_xml_css_style_utils::MarginTopResult width_spec =
-          book_xml_css_style_utils::ParseWidth(p->last_hr_style.c_str());
-      if (width_spec.unit != book_xml_css_style_utils::MarginTopResult::Unit::None &&
-          !width_spec.negative && content_w > 0) {
-        const int css_w = book_xml_css_style_utils::ResolveHorizontalMarginPx(
-            width_spec, content_w);
-        const int rule_w = std::max(1, std::min(css_w, content_w));
-        // Alignment: inline style > class > center (hr HTML default)
-        book_xml_css_style_utils::TextAlign align =
-            book_xml_css_style_utils::TextAlign::Center;
-        book_xml_css_style_utils::TextAlign from_style;
-        if (book_xml_css_style_utils::TryParseTextAlign(
-                p->last_hr_style.c_str(), &from_style)) {
-          align = from_style;
-        } else if (elem_css.has_text_align) {
-          align = elem_css.text_align;
-        }
-        if (align == book_xml_css_style_utils::TextAlign::Left ||
-            align == book_xml_css_style_utils::TextAlign::Justify) {
-          rule_x0 = content_left;
-          rule_x1 = content_left + rule_w;
-        } else if (align == book_xml_css_style_utils::TextAlign::Right) {
-          rule_x1 = content_right;
-          rule_x0 = content_right - rule_w;
-        } else {
-          const int mid = (content_left + content_right) / 2;
-          rule_x0 = mid - rule_w / 2;
-          rule_x1 = rule_x0 + rule_w;
-        }
-        rule_x0 = std::max(content_left, std::min(content_right, rule_x0));
-        rule_x1 = std::max(rule_x0, std::min(content_right, rule_x1));
-      }
-
-      // Clamp to u8: display.width <= 240px on 3DS, so all positions fit.
-      const u32 x0_u = (u32)std::max(0, std::min(255, rule_x0));
-      const u32 x1_u = (u32)std::max(x0_u, (u32)std::min(255, rule_x1));
-
-      AppendParsedByte(p, TEXT_HR_BOUNDS);
-      AppendParsedByte(p, x0_u);
-      AppendParsedByte(p, x1_u);
-      // HR renders as a visible rule — mark the screen as having drawable content.
-      p->current_screen_has_drawable_content = true;
-      // The renderer calls PrintNewLine() for TEXT_HR_BOUNDS, advancing pen.y
-      // by one line. Mirror that here so overflow tracking stays in sync.
-      p->pen.y += ts->GetHeight() + ts->linespacing;
-      p->pen.x = ts->margin.left;
-      p->linebegan = false;
-    }
-  } else if (!strcmp(el, "pre")) {
-    parse_push(p, TAG_PRE);
-    p->preformatted_wrap_enabled = true;
-    AppendParsedByte(p, TEXT_PRE_ON);
-    if (!p->mono) {
-      AppendParsedByte(p, TEXT_MONO_ON);
-      p->mono = true;
-      SyncParsedTextStyle(ts, p->bold, p->italic, p->mono);
-    }
-  } else if (!strcmp(el, "li")) {
-    parse_push(p, TAG_LI);
-    book_xml_list_utils::MarkCurrentListItemPending(p, true);
-    if (HasActiveStackHiddenStyle(p))
-      return;
-    const context_t active_list = book_xml_list_utils::GetActiveListContext(p);
-    const int nested_indent = book_xml_list_utils::ResolveNestedListItemIndentPx(
-        book_xml_list_utils::GetActiveListDepth(p), ts->GetAdvance(' '));
-    if (nested_indent != 0) {
-      parse_set_current_block_margins(
-          p, parse_current_block_margin_left(p) + nested_indent,
-          parse_current_block_margin_right(p));
-    }
-    // HasSuppressedListMarkerContext checks ancestor elements (e.g. ol.classname).
-    // ParseListMarkerHiddenCssClass checks the <li> element's own class
-    // attribute, which ConfigureElementListSemantics hasn't processed yet.
-    const bool suppress_marker =
-        book_xml_list_utils::HasSuppressedListMarkerContext(p) ||
-        book_xml_list_utils::ParseListMarkerHiddenCssClass(p, attr);
-    if (active_list == TAG_UL || active_list == TAG_OL) {
-      if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
-        linefeed(p);
-      // Prevent orphan markers: if the marker's line is the last usable line on
-      // the screen (chardata would immediately advance before the first content
-      // character), push the marker to the next screen now.
-      AdvanceParsedPageOnOverflow(p, ts->GetHeight());
-      AlignFreshLineToBlockMargin(p, ts);
-      if (!suppress_marker) {
-        if (active_list == TAG_UL) {
-          AppendParsedByte(p, 0x2022); // bullet '•'
-          p->pen.x += ts->GetAdvance(0x2022) + ts->GetAdvance(' ');
-        } else {
-          const std::string marker = book_xml_list_utils::BuildOrderedListMarker(
-              book_xml_list_utils::AdvanceOrderedListOrdinal(p),
-              book_xml_list_utils::GetActiveOrderedListStyle(p));
-          for (size_t i = 0; i < marker.size(); i++) {
-            AppendParsedByte(p, (u32)(unsigned char)marker[i]);
-            p->pen.x += ts->GetAdvance((u32)(unsigned char)marker[i]);
-          }
-          p->pen.x += ts->GetAdvance(' ');
-        }
-        AppendParsedByte(p, ' ');
-        p->linebegan = true;
-        p->strip_leading_list_marker = true;
-      }
-    }
-  } else if (!strcmp(el, "script"))
-    parse_push(p, TAG_SCRIPT);
-  else if (!strcmp(el, "style"))
-    parse_push(p, TAG_STYLE);
-  else if (XmlNameEquals(el, "title"))
+  } else if (XmlNameEquals(el, "title")) {
     parse_push(p, TAG_TITLE);
-  else if (!strcmp(el, "ul")) {
-    parse_push(p, TAG_UL);
-    book_xml_list_utils::ConfigureElementListSemantics(p, attr);
-  } else if (book_xml_inline_handler::HandleNamedInlineElementStart(
-                 p, ts, el, attr, MakeInlineHandlerFns())) {
-    // handled
-  } else if (!strcmp(el, "a")) {
-    HandleAnchorStart(p, attr);
-  } else if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
-    HandleInlineImageStart(p, ts, attr, elem_css, MakeImageHandlerFns());
-  } else if (XmlNameEquals(el, "binary")) {
-    parse_push(p, TAG_UNKNOWN);
+  } else {
+    bool block_early_return = false;
+    if (book_xml_block_handler::HandleBlockElementStart(
+            p, ts, el, attr, elem_css, el_class_raw, &block_early_return)) {
+      if (block_early_return) return;
+    } else if (book_xml_inline_handler::HandleNamedInlineElementStart(
+                   p, ts, el, attr, MakeInlineHandlerFns())) {
+      // handled
+    } else if (!strcmp(el, "a")) {
+      HandleAnchorStart(p, attr);
+    } else if (XmlNameEquals(el, "img") || XmlNameEquals(el, "image")) {
+      HandleInlineImageStart(p, ts, attr, elem_css, MakeImageHandlerFns());
+    } else if (XmlNameEquals(el, "binary")) {
+      parse_push(p, TAG_UNKNOWN);
 
-    p->collecting_fb2_binary = false;
-    p->fb2_binary_too_large = false;
-    p->fb2_binary_id.clear();
-    p->fb2_binary_data.clear();
+      p->collecting_fb2_binary = false;
+      p->fb2_binary_too_large = false;
+      p->fb2_binary_id.clear();
+      p->fb2_binary_data.clear();
 
-    const char *id = NULL;
-    for (int i = 0; attr && attr[i]; i += 2) {
-      if (XmlNameEquals(attr[i], "id")) {
-        id = attr[i + 1];
+      const char *id = NULL;
+      for (int i = 0; attr && attr[i]; i += 2) {
+        if (XmlNameEquals(attr[i], "id")) {
+          id = attr[i + 1];
+        }
       }
-    }
 
-    if (id && *id && p->book) {
-      p->collecting_fb2_binary = true;
-      p->fb2_binary_id = id;
-      if (!p->fb2_binary_id.empty() && p->fb2_binary_id[0] == '#')
-        p->fb2_binary_id.erase(0, 1);
+      if (id && *id && p->book) {
+        p->collecting_fb2_binary = true;
+        p->fb2_binary_id = id;
+        if (!p->fb2_binary_id.empty() && p->fb2_binary_id[0] == '#')
+          p->fb2_binary_id.erase(0, 1);
+      }
+    } else {
+      parse_push(p, TAG_UNKNOWN);
     }
-  } else
-    parse_push(p, TAG_UNKNOWN);
+  }
 
   ConfigureBlockTextAlign(p, el, attr, elem_css);
 
-  // Promote inline elements with CSS display:block to block layout:
-  // margins, text-indent, and line breaks. Only for non-native-block elements
-  // that are NOT inside a paragraph or other inline context.
-  if (!IsBlockLevelElement(el) && !p->in_paragraph &&
-      elem_css.is_display_block && ts) {
-    if (!blankline(p))
-      linefeed(p);
-    const book_xml_css_style_utils::MarginTopResult mtr =
-        ParseElementMarginTopWithClass(attr, elem_css);
-    ApplyElementBlockMargins(p, ts, attr, elem_css);
-    const int line_h = ts->GetHeight() + ts->linespacing;
-    const int default_lf = 1;
-    QueueBlockSpacingFromMarginResult(p, el, "block-top", mtr, line_h, default_lf);
-  }
+  book_xml_block_handler::ApplyDisplayBlockPromotion(p, ts, el, attr, elem_css);
 
   book_xml_inline_handler::HandleCssInlineStylingStart(p, ts, el, attr, elem_css);
 
@@ -1422,158 +1110,10 @@ void end(void *data, const char *el) {
     return;
   }
 
-  if (!strcmp(el, "br")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    // <br> is real content; flush any pending layout-only block spacing first.
-    FlushPendingBlockSpacingBeforeContent(p, "br");
-    linefeed(p);
-  } else if (!strcmp(el, "a")) {
+  if (!strcmp(el, "a")) {
     HandleAnchorEnd(p, MakeAnchorHandlerFns());
-  } else if (!strcmp(el, "aside")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    QueueBlockSpacingLines(p, 2, "aside", "aside-bottom", false);
-    p->block_margin_left = 0;
-    p->block_margin_right = 0;
-  } else if (!strcmp(el, "blockquote") || !strcmp(el, "caption") ||
-             !strcmp(el, "dd") || !strcmp(el, "figure")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    QueueBlockSpacingLines(p, 1, el, "block-bottom", false);
-    p->block_margin_left = 0;
-    p->block_margin_right = 0;
-  } else if (!strcmp(el, "p")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    if (p->paragraph_has_content &&
-        !book_xml_list_utils::IsInsideListItem(p) &&
-        !ParseInAnyEasyParagraphTightBlock(p)) {
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const book_xml_css_style_utils::MarginTopResult mbr =
-          ParseElementMarginBottomWithClass(p->last_p_style, p->last_p_class,
-                                            p->css_class_map, "p");
-      const int default_lf = 2;
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
-      LogResolvedBlockMargin(p, "p", "bottom", p->last_p_style,
-                             p->last_p_class, mbr, line_h, default_lf,
-                             lf_count);
-      // Queue spacing (mandatory break + optional). CSS zero/negative keeps the
-      // mandatory break but suppresses optional spacing — the block still ends on
-      // its own visual line.
-      QueueBlockSpacingFromMarginResult(p, "p", "paragraph-bottom", mbr, line_h, default_lf);
-      if (p->pending_block_spacing_lf < 1)
-        p->pending_block_spacing_lf = 1;
-    }
-    RestoreActiveBlockTextAlignMarker(p);
-    p->in_paragraph = false;
-    p->paragraph_has_content = false;
-    p->block_margin_left = 0;
-    p->block_margin_right = 0;
-  } else if (!strcmp(el, "div")) {
-    p->block_margin_left = 0;
-    p->block_margin_right = 0;
-  } else if (!strcmp(el, "h1")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    {
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const book_xml_css_style_utils::MarginTopResult mbr =
-          ParseElementMarginBottomWithClass(p->last_h1_style, p->last_h1_class,
-                                            p->css_class_map, "h1");
-      const int default_lf = 2;
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
-      LogResolvedBlockMargin(p, "h1", "bottom", p->last_h1_style,
-                             p->last_h1_class, mbr, line_h, default_lf,
-                             lf_count);
-      QueueBlockSpacingFromMarginResult(p, "h1", "heading-bottom", mbr, line_h, default_lf);
-    }
-    RestoreHeadingFontSize(p, ts);
-    RestoreActiveBlockTextAlignMarker(p);
-    if (!Trim(p->doc_heading).empty())
-      p->doc_heading_complete = true;
-    p->block_margin_left = 0;
-    p->block_margin_right = 0;
-  } else if (!strcmp(el, "h2")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    {
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const book_xml_css_style_utils::MarginTopResult mbr =
-          ParseElementMarginBottomWithClass(p->last_h2_style, p->last_h2_class,
-                                            p->css_class_map, "h2");
-      const int default_lf = 1;
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
-      LogResolvedBlockMargin(p, "h2", "bottom", p->last_h2_style,
-                             p->last_h2_class, mbr, line_h, default_lf,
-                             lf_count);
-      QueueBlockSpacingFromMarginResult(p, "h2", "heading-bottom", mbr, line_h, default_lf);
-    }
-    RestoreHeadingFontSize(p, ts);
-    RestoreActiveBlockTextAlignMarker(p);
-    if (!Trim(p->doc_heading).empty())
-      p->doc_heading_complete = true;
-    p->block_margin_left = 0;
-    p->block_margin_right = 0;
-  } else if (!strcmp(el, "h3") || !strcmp(el, "h4") || !strcmp(el, "h5") ||
-             !strcmp(el, "h6") || !strcmp(el, "hr")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    if (!strcmp(el, "hr")) {
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const book_xml_css_style_utils::MarginTopResult mbr =
-          ParseElementMarginBottomWithClass(p->last_hr_style, p->last_hr_class,
-                                            p->css_class_map, "hr");
-      const int default_lf = 2;
-      const int lf_count =
-          book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-              default_lf, mbr, line_h);
-      LogResolvedBlockMargin(p, "hr", "bottom", p->last_hr_style,
-                             p->last_hr_class, mbr, line_h, default_lf,
-                             lf_count);
-      if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
-        // TEXT_HR_BOUNDS was emitted, so the renderer has linebegan=false.  It will
-        // never call PrintNewLine() for these \n bytes — only the WouldOverflow
-        // path fires to advance screens.  Emit the bytes for that check but do
-        // NOT advance pen.y: doing so would diverge from the renderer and
-        // cause premature page/screen breaks (Bug: text cut off midline).
-        for (int i = 0; i < lf_count; i++)
-          AppendParsedByte(p, '\n');
-      } else {
-        for (int i = 0; i < lf_count; i++)
-          linefeed(p);
-      }
-    } else {
-      const int line_h = ts->GetHeight() + ts->linespacing;
-      const book_xml_css_style_utils::MarginTopResult mbr =
-          ParseElementMarginBottomWithClass(p->last_h_style, p->last_h_class,
-                                            p->css_class_map, el);
-      const int default_lf = 2;
-      const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
-      LogResolvedBlockMargin(p, el, "bottom", p->last_h_style,
-                             p->last_h_class, mbr, line_h, default_lf,
-                             lf_count);
-      QueueBlockSpacingFromMarginResult(p, el, "heading-bottom", mbr, line_h, default_lf);
-      RestoreHeadingFontSize(p, ts);
-    }
-    if (strcmp(el, "hr"))
-      RestoreActiveBlockTextAlignMarker(p);
-    if ((!strcmp(el, "h3")) && !Trim(p->doc_heading).empty())
-      p->doc_heading_complete = true;
-    p->block_margin_left = 0;
-    p->block_margin_right = 0;
-  } else if (!strcmp(el, "pre")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    AppendParsedByte(p, TEXT_PRE_OFF);
-    p->preformatted_wrap_enabled = false;
-    QueueBlockSpacingLines(p, 2, "pre", "block-bottom", false);
-  } else if (!strcmp(el, "code") || !strcmp(el, "tt") ||
-             !strcmp(el, "kbd") || !strcmp(el, "samp")) {
-  } else if (!strcmp(el, "li") || !strcmp(el, "ul") || !strcmp(el, "ol")) {
-    FlushInlineTailAndDeferredStyle(p, ts);
-    if (!strcmp(el, "li"))
-      p->strip_leading_list_marker = false;
-    // Only queue spacing when we're mid-line; if we're already at a line start
-    // (linebegan=false), the previous linefeed already separated items.
-    if (p->linebegan)
-      QueueBlockSpacingLines(p, 1, el, "list-item-bottom", false);
+  } else if (book_xml_block_handler::HandleBlockElementEnd(p, ts, el)) {
+    // handled
   } else if (!IsBlockLevelElement(el) && p->stacksize > 0 &&
              p->block_text_align_stack[(u8)(p->stacksize - 1)]) {
     FlushInlineTailAndDeferredStyle(p, ts);
