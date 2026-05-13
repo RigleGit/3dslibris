@@ -44,6 +44,7 @@ fi
   "$TEST_ROOT/source/book/book_xml_image_handler.cpp" \
   "$TEST_ROOT/source/book/book_xml_anchor_handler.cpp" \
   "$TEST_ROOT/source/book/book_xml_flow_emission.cpp" \
+  "$TEST_ROOT/source/book/book_xml_screen_advance.cpp" \
   "$TEST_ROOT/source/book/book_xml_block_utils.cpp" \
   "$TEST_ROOT/source/book/book_xml_css_resolver.cpp" \
   "$TEST_ROOT/source/book/book_xml_css_style_utils.cpp" \

@@ -11,6 +11,7 @@
 #include "book/book_xml_flow_emission.h"
 
 #include "book/book.h"
+#include "book/book_xml_screen_advance.h"
 #include "ui/text.h"
 #include "book/book_xml_css_style_utils.h"
 #include "book/book_xml_parser_style_utils.h"
@@ -143,19 +144,6 @@ ResolveActiveWhiteSpaceLocal(const parsedata_t *p) {
   if (parse_in((parsedata_t *)p, TAG_PRE))
     return WhiteSpaceMode::PreWrap;
   return WhiteSpaceMode::Normal;
-}
-
-static bool IsCurrentReadingScreenVisuallyEmptyLocal(const parsedata_t *p) {
-  return p && !p->current_screen_has_drawable_content;
-}
-
-static void ClearPendingBlockSpacingLocal(parsedata_t *p) {
-  if (!p)
-    return;
-  p->pending_block_break = false;
-  p->pending_block_spacing_lf = 0;
-  p->pending_block_spacing_reason = NULL;
-  p->pending_block_spacing_from_css = false;
 }
 
 struct OverflowThunkCtx {
@@ -501,7 +489,7 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
     p->pen.x = ts->margin.left;
     p->pen.y = ts->margin.top + lineheight;
     p->linebegan = false;
-    ClearPendingBlockSpacingLocal(p); // already at top of screen; discard spacing
+    book_xml_screen_advance::ClearPendingBlockSpacing(p); // already at top of screen; discard spacing
   } else {
     // Flush any accumulated layout-only block spacing before the first real
     // text token using the two-phase content-aware rule.
@@ -511,7 +499,7 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
     // normal flowed paragraph and the current screen has fewer than 2 visible
     // line slots remaining, advance to the next screen/page before emitting.
     if (p->in_paragraph && !p->paragraph_has_content &&
-        !IsCurrentReadingScreenVisuallyEmptyLocal(p)) {
+        !book_xml_screen_advance::IsCurrentReadingScreenVisuallyEmpty(p)) {
       const book_xml_css_style_utils::WhiteSpaceMode ws_mode =
           ResolveActiveWhiteSpaceLocal(p);
       const bool is_pre =
