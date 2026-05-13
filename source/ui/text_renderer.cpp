@@ -224,7 +224,7 @@ TextRenderer::TextRenderer(Text *owner)
       splash_light_loaded(false), splash_light_pixels(nullptr),
       splash_dark_attempted(false), splash_dark_loaded(false),
       splash_dark_pixels(nullptr), stats_hits(0), stats_misses(0),
-      auto_wrap_enabled(true), clip_to_content_enabled(false) {
+      auto_wrap_enabled(true), clip_to_content_enabled(false), script_scale_(1.0f) {
   pen.x = 0;
   pen.y = 0;
 }
@@ -458,10 +458,6 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
     return;
   }
 
-  MarkCurrentScreenDirtyRect((int)pen.x + (int)bx, (int)pen.y - (int)by,
-                             (int)pen.x + (int)bx + (int)width,
-                             (int)pen.y - (int)by + (int)height);
-
   // Pre-resolve foreground color components (constant for this character)
   int fg_r, fg_g, fg_b;
   const u16 fg_color = GetFgColor();
@@ -477,87 +473,165 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
     clipRight = std::min(screenWidth, clipRight + kGlyphRightBleedPx);
   }
 
-  // For wide glyphs (CJK/RTL), line-breaking can land exactly at the right
-  // boundary and overflow visually. Wrap before drawing when possible.
   const bool is_browser_style = (face == parent->GetFace(TEXT_STYLE_BROWSER));
-  if (width > 0) {
-    const int glyph_right = (int)pen.x + bx + (int)width;
-    if (text_render_layout_utils::ShouldAutoWrapGlyph(
-            auto_wrap_enabled, is_browser_style, (int)pen.x,
-            (int)parent->margin.left, glyph_right, contentRight)) {
-      if (PrintNewLine()) {
-        // Recompute line clip reference after wrap.
-      } else {
-        pen.x += advance;
-        codeprev = ucs;
-        return;
+
+  if (script_scale_ != 1.0f && script_scale_ > 0.0f) {
+    const float s = script_scale_;
+    const int sc_bx = (int)(bx * s);
+    const int sc_by = (int)(by * s);
+    const int sc_w = std::max(1, (int)((int)width * s));
+    const int sc_h = std::max(1, (int)((int)height * s));
+    const int sc_adv = std::max(1, (int)(advance * s));
+
+    MarkCurrentScreenDirtyRect((int)pen.x + sc_bx, (int)pen.y - sc_by,
+                               (int)pen.x + sc_bx + sc_w,
+                               (int)pen.y - sc_by + sc_h);
+
+    const int glyph_right_sc = (int)pen.x + sc_bx + sc_w;
+    if (width > 0) {
+      if (text_render_layout_utils::ShouldAutoWrapGlyph(
+              auto_wrap_enabled, is_browser_style, (int)pen.x,
+              (int)parent->margin.left, glyph_right_sc, contentRight)) {
+        if (PrintNewLine()) {
+        } else {
+          pen.x += sc_adv;
+          codeprev = ucs;
+          return;
+        }
       }
     }
-  }
-#ifdef DSLIBRIS_DEBUG
-  const int pen_x_before = (int)pen.x;
-  const bool on_left_screen = (parent->screen == parent->screenleft);
-  int clipped_right_pixels = 0;
-  int layout_overflow_pixels = 0;
-  if (parent->reporter_ && g_text_margin_diag_budget > 0 &&
-      (contentRight <= 0 || contentRight > screenWidth ||
-       contentRight < screenWidth - 32)) {
-    DBG_LOGF_CAT(parent->reporter_, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
-                 "TXT margin side=%s sw=%d mr=%d content_right=%d pen=%d,%d style=%d",
-                 on_left_screen ? "left" : "right", screenWidth,
-                 (int)parent->margin.right, contentRight, pen_x_before,
-                 (int)pen.y, (int)style);
-    g_text_margin_diag_budget--;
-  }
-#endif
-  
-  for (u16 gy = 0; gy < height; gy++) {
-    for (u16 gx = 0; gx < width; gx++) {
-      u8 a = buffer[gy * width + gx];
-      if (!a)
-        continue;
-      int sx = (int)pen.x + (int)gx + bx;
-      int sy = (int)pen.y + (int)gy - by;
-      if (sy < 0 || sy >= maxY - bottomClip || sx < 0 || sx >= screenWidth)
-        continue;
-#ifdef DSLIBRIS_DEBUG
-      if (sx >= contentRight)
-        layout_overflow_pixels++;
-#endif
-      if (!GlyphWithinContentRight(sx, clipRight)) {
-#ifdef DSLIBRIS_DEBUG
-        clipped_right_pixels++;
-#endif
-        continue;
+
+    // Box-filter downscale: each destination pixel averages all source pixels
+    // whose source-space footprint overlaps it. Prevents missing strokes from
+    // nearest-neighbor skipping at scale ~0.70 (inv_s ~1.43).
+    // Alternative: render at scaled pixelsize via SetPixelSize(size*s) for
+    // native FreeType hinting. Costs ~2 full glyph-cache flushes per
+    // superscript character (SetPixelSize clears render cache each call).
+    const float inv_s = 1.0f / s;
+    const int src_w = (int)width;
+    const int src_h = (int)height;
+    for (int dy = 0; dy < sc_h; dy++) {
+      const int sy0 = (int)(dy * inv_s);
+      const int sy1 = std::min((int)((dy + 1) * inv_s), src_h - 1);
+      for (int dx = 0; dx < sc_w; dx++) {
+        const int sx0 = (int)(dx * inv_s);
+        const int sx1 = std::min((int)((dx + 1) * inv_s), src_w - 1);
+        // Accumulate source alpha over the box region
+        int sum = 0, count = 0;
+        for (int ky = sy0; ky <= sy1; ky++) {
+          for (int kx = sx0; kx <= sx1; kx++) {
+            sum += buffer[ky * src_w + kx];
+            count++;
+          }
+        }
+        u8 a = (u8)(sum / count);
+        if (!a)
+          continue;
+        int sx = (int)pen.x + dx + sc_bx;
+        int sy = (int)pen.y + dy - sc_by;
+        if (sy < 0 || sy >= maxY - bottomClip || sx < 0 || sx >= screenWidth)
+          continue;
+        if (!GlyphWithinContentRight(sx, clipRight))
+          continue;
+        const size_t dst_index =
+            (size_t)sy * (size_t)parent->display.height + (size_t)sx;
+        int br, bgc, bb;
+        RGB565ToU8(parent->screen[dst_index], &br, &bgc, &bb);
+        const int ia = 255 - (int)a;
+        const int r = div255(fg_r * (int)a + br * ia + 127);
+        const int g = div255(fg_g * (int)a + bgc * ia + 127);
+        const int b = div255(fg_b * (int)a + bb * ia + 127);
+        parent->screen[dst_index] =
+            (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
       }
-      const size_t dst_index =
-          (size_t)sy * (size_t)parent->display.height + (size_t)sx;
-
-      int br, bgc, bb;
-      RGB565ToU8(parent->screen[dst_index], &br, &bgc, &bb);
-      const int ia = 255 - (int)a;
-      const int r = div255(fg_r * (int)a + br * ia + 127);
-      const int g = div255(fg_g * (int)a + bgc * ia + 127);
-      const int b = div255(fg_b * (int)a + bb * ia + 127);
-      parent->screen[dst_index] = (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
     }
-  }
+    pen.x += sc_adv;
+  } else {
+    MarkCurrentScreenDirtyRect((int)pen.x + (int)bx, (int)pen.y - (int)by,
+                               (int)pen.x + (int)bx + (int)width,
+                               (int)pen.y - (int)by + (int)height);
 
+    // For wide glyphs (CJK/RTL), line-breaking can land exactly at the right
+    // boundary and overflow visually. Wrap before drawing when possible.
+    if (width > 0) {
+      const int glyph_right = (int)pen.x + bx + (int)width;
+      if (text_render_layout_utils::ShouldAutoWrapGlyph(
+              auto_wrap_enabled, is_browser_style, (int)pen.x,
+              (int)parent->margin.left, glyph_right, contentRight)) {
+        if (PrintNewLine()) {
+          // Recompute line clip reference after wrap.
+        } else {
+          pen.x += advance;
+          codeprev = ucs;
+          return;
+        }
+      }
+    }
 #ifdef DSLIBRIS_DEBUG
-  if (parent->reporter_ &&
-      (clipped_right_pixels > 0 || layout_overflow_pixels > 0) &&
-      g_text_clip_right_budget > 0) {
-    DBG_LOGF_CAT(parent->reporter_, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
-                 "TXT clipR side=%s ucs=%lu pen=%d bx=%d w=%u overflow=%d clip=%d layout_right=%d clip_right=%d mr=%d style=%d",
-                 on_left_screen ? "left" : "right", (unsigned long)ucs,
-                 pen_x_before, bx, (unsigned)width, layout_overflow_pixels,
-                 clipped_right_pixels, contentRight, clipRight,
-                 (int)parent->margin.right, (int)style);
-    g_text_clip_right_budget--;
-  }
+    const int pen_x_before = (int)pen.x;
+    const bool on_left_screen = (parent->screen == parent->screenleft);
+    int clipped_right_pixels = 0;
+    int layout_overflow_pixels = 0;
+    if (parent->reporter_ && g_text_margin_diag_budget > 0 &&
+        (contentRight <= 0 || contentRight > screenWidth ||
+         contentRight < screenWidth - 32)) {
+      DBG_LOGF_CAT(parent->reporter_, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
+                   "TXT margin side=%s sw=%d mr=%d content_right=%d pen=%d,%d style=%d",
+                   on_left_screen ? "left" : "right", screenWidth,
+                   (int)parent->margin.right, contentRight, pen_x_before,
+                   (int)pen.y, (int)style);
+      g_text_margin_diag_budget--;
+    }
 #endif
 
-  pen.x += advance;
+    for (u16 gy = 0; gy < height; gy++) {
+      for (u16 gx = 0; gx < width; gx++) {
+        u8 a = buffer[gy * width + gx];
+        if (!a)
+          continue;
+        int sx = (int)pen.x + (int)gx + bx;
+        int sy = (int)pen.y + (int)gy - by;
+        if (sy < 0 || sy >= maxY - bottomClip || sx < 0 || sx >= screenWidth)
+          continue;
+#ifdef DSLIBRIS_DEBUG
+        if (sx >= contentRight)
+          layout_overflow_pixels++;
+#endif
+        if (!GlyphWithinContentRight(sx, clipRight)) {
+#ifdef DSLIBRIS_DEBUG
+          clipped_right_pixels++;
+#endif
+          continue;
+        }
+        const size_t dst_index =
+            (size_t)sy * (size_t)parent->display.height + (size_t)sx;
+
+        int br, bgc, bb;
+        RGB565ToU8(parent->screen[dst_index], &br, &bgc, &bb);
+        const int ia = 255 - (int)a;
+        const int r = div255(fg_r * (int)a + br * ia + 127);
+        const int g = div255(fg_g * (int)a + bgc * ia + 127);
+        const int b = div255(fg_b * (int)a + bb * ia + 127);
+        parent->screen[dst_index] = (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+      }
+    }
+
+#ifdef DSLIBRIS_DEBUG
+    if (parent->reporter_ &&
+        (clipped_right_pixels > 0 || layout_overflow_pixels > 0) &&
+        g_text_clip_right_budget > 0) {
+      DBG_LOGF_CAT(parent->reporter_, DBG_LEVEL_TRACE, DBG_CAT_CLIP,
+                   "TXT clipR side=%s ucs=%lu pen=%d bx=%d w=%u overflow=%d clip=%d layout_right=%d clip_right=%d mr=%d style=%d",
+                   on_left_screen ? "left" : "right", (unsigned long)ucs,
+                   pen_x_before, bx, (unsigned)width, layout_overflow_pixels,
+                   clipped_right_pixels, contentRight, clipRight,
+                   (int)parent->margin.right, (int)style);
+      g_text_clip_right_budget--;
+    }
+#endif
+
+    pen.x += advance;
+  }
   codeprev = ucs;
 }
 
@@ -973,6 +1047,9 @@ bool TextRenderer::IsClipToContentEnabled() const {
 void TextRenderer::SetClipToContentEnabled(bool enabled) {
   clip_to_content_enabled = enabled;
 }
+
+void TextRenderer::SetScriptScale(float s) { script_scale_ = s; }
+float TextRenderer::GetScriptScale() const { return script_scale_; }
 
 void TextRenderer::InitPen() {
   pen.x = parent->margin.left;

@@ -708,6 +708,7 @@ void Page::Draw(Text *ts) {
                         : std::max(2, ts->GetHeight() / 4);
         const int shifted_y = std::max(0, base_pen_y + y_offset);
         ts->SetPen((u16)glyph_x0, (u16)shifted_y);
+        ts->SetScriptScale(0.70f);
       }
       if (mono && ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_MONO_BOLDITALIC);
@@ -735,8 +736,10 @@ void Page::Draw(Text *ts) {
         ExpandLinkBounds(&entry.bounds, glyph_x0, base_pen_y - ts->GetHeight(),
                          glyph_x1, base_pen_y + 2);
       }
-      if (superscript || subscript)
+      if (superscript || subscript) {
+        ts->SetScriptScale(1.0f);
         ts->SetPen((u16)glyph_x1, (u16)base_pen_y);
+      }
       const int baseline_y = (int)ts->GetPenY();
       const u16 deco_color = ts->GetFgColor();
       if (glyph_x1 > glyph_x0) {

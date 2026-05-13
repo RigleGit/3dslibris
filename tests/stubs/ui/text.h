@@ -88,4 +88,8 @@ public:
   void SetAutoWrapEnabled(bool) {}
   bool IsClipToContentEnabled() const { return false; }
   void SetClipToContentEnabled(bool) {}
+
+  // Script scale (superscript/subscript)
+  void SetScriptScale(float) {}
+  float GetScriptScale() const { return 1.0f; }
 };

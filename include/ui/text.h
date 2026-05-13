@@ -109,6 +109,8 @@ public:
   void SetAutoWrapEnabled(bool enabled);
   bool IsClipToContentEnabled() const;
   void SetClipToContentEnabled(bool enabled);
+  void SetScriptScale(float s);
+  float GetScriptScale() const;
   void SetOrientation(bool turned_right);
   bool GetOrientation() const;
   void SetPen(u16 x, u16 y);

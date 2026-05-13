@@ -86,6 +86,8 @@ public:
   void SetAutoWrapEnabled(bool enabled);
   bool IsClipToContentEnabled() const;
   void SetClipToContentEnabled(bool enabled);
+  void SetScriptScale(float s);
+  float GetScriptScale() const;
 
 private:
   Text *parent;
@@ -109,6 +111,7 @@ private:
   int stats_misses;
   bool auto_wrap_enabled;
   bool clip_to_content_enabled;
+  float script_scale_;
 
   bool EnsureSplashLoaded(bool dark);
   void DrawFallbackSplash();

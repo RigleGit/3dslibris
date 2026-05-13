@@ -163,6 +163,9 @@ void Text::SetClipToContentEnabled(bool enabled) {
   tr->SetClipToContentEnabled(enabled);
 }
 
+void Text::SetScriptScale(float s) { if (tr) tr->SetScriptScale(s); }
+float Text::GetScriptScale() const { return tr ? tr->GetScriptScale() : 1.0f; }
+
 void Text::SetOrientation(bool turned_right) { tr->SetOrientation(turned_right); }
 
 bool Text::GetOrientation() const { return tr->GetOrientation(); }
