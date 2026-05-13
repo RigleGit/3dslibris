@@ -84,6 +84,7 @@ fi
   "$TEST_ROOT/source/book/book_parser.cpp" \
   "$TEST_ROOT/source/book/book_xml_parser.cpp" \
   "$TEST_ROOT/source/book/book_xml_table_handler.cpp" \
+  "$TEST_ROOT/source/book/book_xml_heading_handler.cpp" \
   "$TEST_ROOT/source/book/book_xml_block_utils.cpp" \
   "$TEST_ROOT/source/book/book_xml_css_resolver.cpp" \
   "$TEST_ROOT/source/book/book_xml_css_style_utils.cpp" \

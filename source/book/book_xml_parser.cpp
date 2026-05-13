@@ -24,6 +24,7 @@
 #include "book/book_xml_parser_style_utils.h"
 #include "book/book_xml_table_utils.h"
 #include "book/book_xml_table_handler.h"
+#include "book/book_xml_heading_handler.h"
 #include "book/book_xml_text_emit.h"
 #include "book/book_xml.h"
 #include "book/inline_image_layout.h"
@@ -426,85 +427,6 @@ static void RestoreActiveBlockTextAlignMarker(parsedata_t *p) {
     return;
   }
   AppendParagraphAlignMarker(p, book_xml_css_style_utils::TextAlign::Left);
-}
-
-static void ApplyHeadingFontSize(parsedata_t *p, Text *ts, int heading_level,
-                                 const std::string &style_attr,
-                                 const std::string &class_attr) {
-  if (!p || !ts || p->stacksize == 0)
-    return;
-
-  const u8 current = (u8)(p->stacksize - 1);
-  const int inherited_px = (int)ts->GetPixelSize();
-  const int default_heading_base =
-      (p->base_font_size_px != 0) ? (int)p->base_font_size_px : inherited_px;
-  p->heading_saved_font_size_stack[current] = (u8)inherited_px;
-  p->heading_font_size_emitted_stack[current] = false;
-
-  const int heading_px = book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
-      inherited_px, default_heading_base, heading_level,
-      style_attr, class_attr, p->css_class_map);
-  if (heading_px == inherited_px)
-    return;
-
-  ts->SetPixelSize((u8)heading_px);
-  AppendParsedByte(p, TEXT_FONT_SIZE);
-  AppendParsedByte(p, (u32)heading_px);
-  p->heading_font_size_emitted_stack[current] = true;
-}
-
-static void RestoreHeadingFontSize(parsedata_t *p, Text *ts) {
-  if (!p || !ts || p->stacksize == 0)
-    return;
-
-  const u8 current = (u8)(p->stacksize - 1);
-  if (!p->heading_font_size_emitted_stack[current])
-    return;
-
-  ts->SetPixelSize(p->heading_saved_font_size_stack[current]);
-  AppendParsedByte(p, TEXT_FONT_SIZE);
-  AppendParsedByte(p, p->heading_saved_font_size_stack[current]);
-  p->heading_font_size_emitted_stack[current] = false;
-}
-
-static int ResolveHeadingFontSizePx(parsedata_t *p, Text *ts, int heading_level,
-                                    const std::string &style_attr,
-                                    const std::string &class_attr) {
-  if (!p || !ts)
-    return 0;
-  const int inherited_px = (int)ts->GetPixelSize();
-  const int default_heading_base =
-      (p->base_font_size_px != 0) ? (int)p->base_font_size_px : inherited_px;
-  return book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
-      inherited_px, default_heading_base, heading_level, style_attr, class_attr,
-      p->css_class_map);
-}
-
-static int MeasureLineHeightForPixelSize(Text *ts, int pixel_size) {
-  if (!ts || pixel_size <= 0)
-    return 0;
-  const u8 saved_px = ts->GetPixelSize();
-  if ((int)saved_px == pixel_size)
-    return ts->GetHeight();
-  ts->SetPixelSize((u8)pixel_size);
-  const int line_height = ts->GetHeight();
-  ts->SetPixelSize(saved_px);
-  return line_height;
-}
-
-static bool ShouldRenderHrRule(const std::string &style_attr,
-                               const std::string &class_attr) {
-  if (ContainsAsciiNoCase(class_attr, "transition"))
-    return false;
-  if (ContainsAsciiNoCase(style_attr, "border:none") ||
-      ContainsAsciiNoCase(style_attr, "border: none") ||
-      ContainsAsciiNoCase(style_attr, "border-top:none") ||
-      ContainsAsciiNoCase(style_attr, "border-top: none") ||
-      ContainsAsciiNoCase(style_attr, "border-bottom:none") ||
-      ContainsAsciiNoCase(style_attr, "border-bottom: none")) {
-    return false;
-  }
-  return true;
 }
 
 static bool ImagePathLooksLikeSvgWrapper(const std::string &path) {
@@ -1859,92 +1781,23 @@ static void EnsureBlockBoundaryBeforeBlockStart(parsedata_t *p,
   advance_or_linefeed();
 }
 
-static void HandleHeadingStart(parsedata_t *p, Text *ts, const char **attr,
-                               const epub_css_class_map::CssClassMargins &elem_css,
-                               int heading_level) {
-  const std::string heading_style = ExtractStyleAttr(attr);
-  const std::string heading_class = ExtractClassAttr(attr);
-
-  // Ensure block boundary: if any inline content exists on the current line
-  // (e.g. this heading is nested inside a <small>/<big> wrapper), emit a
-  // mandatory '\n' now — BEFORE any font-size tokens — so the heading starts
-  // on its own line.  This is an immediate emission, not via pending model.
-  EnsureBlockBoundaryBeforeBlockStart(p, "heading", "heading-block-boundary");
-
-  const int heading_px =
-      ResolveHeadingFontSizePx(p, ts, heading_level, heading_style, heading_class);
-  heading_layout::KeepWithNextRequest req{};
-  // Account for any pending block spacing when checking keep-with-next.
-  // Pending spacing will be flushed before the heading text, advancing pen.y.
-  {
-    const int pending_lf = p->pending_block_spacing_lf;
-    const int lh_step = ts->GetHeight() + std::max(0, ts->linespacing);
-    req.pen_y = p->pen.y + (pending_lf > 0 ? pending_lf * lh_step : 0);
-  }
-  const text_render_layout_utils::ReadingScreenMetrics metrics =
-      text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
-          p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
-          text_render_layout_utils::ResolveCompactReadingBottomMargin(ts->margin.bottom));
-  req.screen_height = metrics.max_height;
-  req.bottom_margin = metrics.bottom_margin;
-  req.line_height = MeasureLineHeightForPixelSize(ts, heading_px);
-  req.linespacing = ts->linespacing;
-  req.heading_level = heading_level;
-  if (heading_layout::ShouldAdvanceHeadingForKeepWithNext(req))
-    AdvanceParsedScreen(p);
-
-  const char *tag_name = "h1";
-  if (heading_level == 1) {
-    parse_push(p, TAG_H1);
-    p->last_h1_style = heading_style;
-    p->last_h1_class = heading_class;
-    ApplyHeadingFontSize(p, ts, 1, p->last_h1_style, p->last_h1_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h1_style,
-                                            p->last_h1_class, p, p->css_class_map, "h1"));
-    tag_name = "h1";
-  } else if (heading_level == 2) {
-    parse_push(p, TAG_H2);
-    p->last_h2_style = heading_style;
-    p->last_h2_class = heading_class;
-    ApplyHeadingFontSize(p, ts, 2, p->last_h2_style, p->last_h2_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h2_style,
-                                            p->last_h2_class, p, p->css_class_map, "h2"));
-    tag_name = "h2";
-  } else {
-    parse_push(p, TAG_H3);
-    p->last_h_style = heading_style;
-    p->last_h_class = heading_class;
-    ApplyHeadingFontSize(p, ts, 3, p->last_h_style, p->last_h_class);
-    AppendParagraphAlignMarker(
-        p, ResolveElementTextAlignWithClass(p->last_h_style, p->last_h_class,
-                                            p, p->css_class_map, "h3"));
-    tag_name = "h3";
-  }
-
-  AppendParsedByte(p, TEXT_BOLD_ON);
-  p->pos++;
-  p->bold = true;
-  const book_xml_css_style_utils::MarginTopResult mtr =
-      ParseElementMarginTopWithClass(attr, elem_css);
-  ApplyElementBlockMargins(p, ts, attr, elem_css);
-  const int line_h = ts->GetHeight() + ts->linespacing;
-  const int default_lf = 2;
-  const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-      default_lf, mtr, line_h);
-  if (heading_level == 1)
-    LogResolvedBlockMargin(p, tag_name, "top", p->last_h1_style,
-                           p->last_h1_class, mtr, line_h, default_lf, lf_count);
-  else if (heading_level == 2)
-    LogResolvedBlockMargin(p, tag_name, "top", p->last_h2_style,
-                           p->last_h2_class, mtr, line_h, default_lf, lf_count);
-  else
-    LogResolvedBlockMargin(p, tag_name, "top", p->last_h_style,
-                           p->last_h_class, mtr, line_h, default_lf, lf_count);
-  QueueBlockSpacingFromMarginResult(p, tag_name, "heading-top", mtr, line_h, default_lf);
-  if (p->pending_block_spacing_lf < 1)
-    p->pending_block_spacing_lf = 1;
+static void HeadingEnsureBlockBoundary(parsedata_t *p, const char *tag,
+                                       const char *phase) {
+  EnsureBlockBoundaryBeforeBlockStart(p, tag, phase);
+}
+static void HeadingAdvanceScreen(parsedata_t *p) { AdvanceParsedScreen(p); }
+static void HeadingQueueBlockSpacing(
+    parsedata_t *p, const char *tag, const char *phase,
+    const book_xml_css_style_utils::MarginTopResult &mtr, int line_h,
+    int default_lf) {
+  QueueBlockSpacingFromMarginResult(p, tag, phase, mtr, line_h, default_lf);
+}
+static HeadingHandlerFns MakeHeadingHandlerFns() {
+  HeadingHandlerFns f;
+  f.ensure_block_boundary = HeadingEnsureBlockBoundary;
+  f.advance_screen = HeadingAdvanceScreen;
+  f.queue_block_spacing = HeadingQueueBlockSpacing;
+  return f;
 }
 
 void start(void *data, const char *el, const char **attr) {
@@ -2073,11 +1926,11 @@ void start(void *data, const char *el, const char **attr) {
     QueueBlockSpacingLines(p, 1, "figure", "figure-top", false);
   }
   else if (!strcmp(el, "h1")) {
-    HandleHeadingStart(p, ts, attr, elem_css, 1);
+    HandleHeadingStart(p, ts, attr, elem_css, 1, MakeHeadingHandlerFns());
   } else if (!strcmp(el, "h2")) {
-    HandleHeadingStart(p, ts, attr, elem_css, 2);
+    HandleHeadingStart(p, ts, attr, elem_css, 2, MakeHeadingHandlerFns());
   } else if (!strcmp(el, "h3")) {
-    HandleHeadingStart(p, ts, attr, elem_css, 3);
+    HandleHeadingStart(p, ts, attr, elem_css, 3, MakeHeadingHandlerFns());
   } else if (!strcmp(el, "h4")) {
     parse_push(p, TAG_H4);
     p->last_h_style = ExtractStyleAttr(attr);
