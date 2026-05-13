@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "shared/string_utils.h"
+#include "shared/text_token_constants.h"
 
 namespace book_xml_table_utils {
 namespace {
@@ -17,6 +18,11 @@ std::string JoinParts(const std::vector<std::string> &parts) {
     out += parts[i];
   }
   return out;
+}
+
+static std::string BoldWrap(const std::string &s) {
+  return std::string(1, (char)TEXT_BOLD_ON) + s +
+         std::string(1, (char)TEXT_BOLD_OFF);
 }
 
 std::vector<std::string> BuildRowBlockWithHeaders(const TableRow &row,
@@ -37,7 +43,7 @@ std::vector<std::string> BuildRowBlockWithHeaders(const TableRow &row,
       const std::string label =
           NormalizeTableCellText(header_row->cells[i].text);
       if (!label.empty()) {
-        line = "- " + label + ": " + value;
+        line = "- " + BoldWrap(label) + ": " + value;
       }
     }
     lines.push_back(line);
@@ -63,7 +69,7 @@ std::vector<std::string> BuildRowBlockWithoutHeaders(const TableRow &row) {
   }
 
   if (!row_header.empty()) {
-    lines.push_back(row_header);
+    lines.push_back(BoldWrap(row_header));
     for (size_t i = 0; i < parts.size(); i++)
       lines.push_back("- " + parts[i]);
     return lines;

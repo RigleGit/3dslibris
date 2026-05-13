@@ -1,7 +1,14 @@
 #include "book/book_xml_table_utils.h"
 #include "test_assert.h"
+#include "shared/text_token_constants.h"
 
+#include <string>
 #include <vector>
+
+static std::string B(const char *s) {
+  return std::string(1, (char)TEXT_BOLD_ON) + s +
+         std::string(1, (char)TEXT_BOLD_OFF);
+}
 
 namespace {
 
@@ -41,14 +48,16 @@ void TestBuildTableLinesUsesCaptionAndColumnHeaders() {
   test::ExpectStrEq("caption line", lines[0].c_str(), "Dataset Fields");
   test::ExpectStrEq("row title", lines[1].c_str(), "abstract");
   test::ExpectStrEq("row second field", lines[2].c_str(),
-                    "- Description: paper abstract");
-  test::ExpectStrEq("row third field", lines[3].c_str(), "- Type: string");
+                    ("- " + B("Description") + ": paper abstract").c_str());
+  test::ExpectStrEq("row third field", lines[3].c_str(),
+                    ("- " + B("Type") + ": string").c_str());
   test::ExpectStrEq("row separator", lines[4].c_str(), "");
   test::ExpectStrEq("second row first field", lines[5].c_str(),
                     "listen_count");
   test::ExpectStrEq("second row second field", lines[6].c_str(),
-                    "- Description: user song listen count");
-  test::ExpectStrEq("second row third field", lines[7].c_str(), "- Type: integer");
+                    ("- " + B("Description") + ": user song listen count").c_str());
+  test::ExpectStrEq("second row third field", lines[7].c_str(),
+                    ("- " + B("Type") + ": integer").c_str());
 }
 
 void TestBuildTableLinesUsesRowHeaderWhenPresent() {
@@ -67,12 +76,12 @@ void TestBuildTableLinesUsesRowHeaderWhenPresent() {
       book_xml_table_utils::BuildTableLines("", NULL, rows);
 
   test::ExpectEq("two row blocks", (int)lines.size(), 7);
-  test::ExpectStrEq("row header title", lines[0].c_str(), "BoW");
+  test::ExpectStrEq("row header title", lines[0].c_str(), B("BoW").c_str());
   test::ExpectStrEq("row item one", lines[1].c_str(),
                     "- l2 regularization: 0.1");
   test::ExpectStrEq("row item two", lines[2].c_str(), "- accuracy: 95%");
   test::ExpectStrEq("row separator", lines[3].c_str(), "");
-  test::ExpectStrEq("second row header title", lines[4].c_str(), "TF-IDF");
+  test::ExpectStrEq("second row header title", lines[4].c_str(), B("TF-IDF").c_str());
   test::ExpectStrEq("second row item one", lines[5].c_str(), "- min_df: 3");
   test::ExpectStrEq("second row item two", lines[6].c_str(), "- accuracy: 96%");
 }
