@@ -3002,7 +3002,20 @@ void start(void *data, const char *el, const char **attr) {
             has_spec = true;
           } else if (elem_css.font_size.unit != book_xml_css_style_utils::FontSizeSpec::Unit::None &&
                      elem_css.font_size.is_keyword) {
-            spec = elem_css.font_size;
+            // In user-size mode the absolute CSS baseline (browser 16px) is
+            // irrelevant. Remap absolute keyword percents to the same semantic
+            // steps used by <small>/<big> so that "font-size: small" and
+            // <small> produce identical output.
+            using U = book_xml_css_style_utils::FontSizeSpec::Unit;
+            if (elem_css.font_size.unit == U::Percent) {
+              spec.unit = (elem_css.font_size.value_x100 < 10000) ? U::Smaller
+                        : (elem_css.font_size.value_x100 > 10000) ? U::Larger
+                        : U::None;
+              spec.value_x100 = 0;
+              spec.is_keyword = true;
+            } else {
+              spec = elem_css.font_size; // Smaller/Larger already semantic
+            }
             has_spec = true;
           }
         }
