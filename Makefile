@@ -62,7 +62,8 @@ EXTRA_CPPFILES	:=	source/book/book_xml_parser.cpp \
 					source/book/book_xml_table_handler.cpp \
 					source/book/book_xml_heading_handler.cpp \
 					source/book/book_xml_image_handler.cpp \
-					source/book/book_xml_anchor_handler.cpp
+					source/book/book_xml_anchor_handler.cpp \
+					source/book/book_xml_flow_emission.cpp
 
 DATA		:=
 INCLUDES	:=	include third_party/stb third_party/utf8proc third_party/libunibreak/src \
