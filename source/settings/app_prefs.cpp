@@ -32,13 +32,11 @@
 #include "ui/button.h"
 #include "ui/ui_button_skin.h"
 #include "shared/color_utils.h"
-#include "ui/theme_colors.h"
 #include "shared/debug_log.h"
 #include "parse.h"
 #include "shared/path_utils.h"
 #include "settings/prefs.h"
 #include "settings/prefs_button_context_utils.h"
-#include "settings/go_to_page_slider_utils.h"
 #include "ui/text.h"
 #include "ui/text_limits.h"
 
@@ -67,24 +65,6 @@ static const u32 kGoToPageCoarseStep = 10;
 
 static bool CurrentBookShowsLineWrapFix(Book *book, bool is_book_ctx);
 
-struct GoToPagePopupLayout {
-  int box_x;
-  int box_y;
-  int box_w;
-  int box_h;
-  int slider_x;
-  int slider_y;
-  int slider_w;
-  int slider_h;
-  int cancel_x;
-  int cancel_y;
-  int cancel_w;
-  int cancel_h;
-  int go_x;
-  int go_y;
-  int go_w;
-  int go_h;
-};
 
 static u8 NormalizeVisibleCount(u8 count) { return count == 0 ? 1 : count; }
 
@@ -194,33 +174,8 @@ static void ToggleFixedLayoutReadingDirection(Prefs *prefs) {
   prefs->Write();
 }
 
-static GoToPagePopupLayout BuildGoToPagePopupLayout() {
-  GoToPagePopupLayout layout;
-  layout.box_x = 18;
-  layout.box_y = 92;
-  layout.box_w = 204;
-  layout.box_h = 122;
-  layout.slider_x = layout.box_x + 16;
-  layout.slider_y = layout.box_y + 58;
-  layout.slider_w = layout.box_w - 32;
-  layout.slider_h = 12;
-  layout.cancel_x = layout.box_x + 16;
-  layout.cancel_y = layout.box_y + 82;
-  layout.cancel_w = 72;
-  layout.cancel_h = 24;
-  layout.go_x = layout.box_x + layout.box_w - 88;
-  layout.go_y = layout.cancel_y;
-  layout.go_w = 72;
-  layout.go_h = 24;
-  return layout;
-}
-
-static bool PointInRect(int x, int y, int rx, int ry, int rw, int rh) {
-  return x >= rx && y >= ry && x < rx + rw && y < ry + rh;
-}
 SettingsController::SettingsController(App &app)
-    : app_(app), go_to_page_popup_open_(false), go_to_page_target_page_(0),
-      prefs_general_page_(0) {}
+    : app_(app), go_to_page_dialog_(app), prefs_general_page_(0) {}
 
 int SettingsController::EffectiveVisibleCount() const {
   if (!app_.IsBookSettingsContext() && prefs_general_page_ == 1)
@@ -248,7 +203,7 @@ void SettingsController::GoToPrefsPage(int page) {
 
 void SettingsController::ShowSettingsView(bool from_book) {
   prefs_general_page_ = 0;
-  CloseGoToPagePopup();
+  go_to_page_dialog_.Close();
   app_.SetBookSettingsContext(from_book);
   app_.SetPrefsLayoutNoticePending(
       from_book && app_.GetCurrentBook() &&
@@ -281,170 +236,6 @@ void SettingsController::ToggleCurrentBookMobiLineWrapFix() {
   app_.MarkPrefsDirty();
 }
 
-void SettingsController::OpenGoToPagePopup() {
-  Book *book = app_.GetCurrentBook();
-  if (!book || book->GetPageCount() <= 0)
-    return;
-  go_to_page_popup_open_ = true;
-  go_to_page_target_page_ =
-      settings::ClampGoToPageTarget(book->GetPosition(), book->GetPageCount());
-  app_.MarkPrefsDirty();
-}
-
-void SettingsController::CloseGoToPagePopup() {
-  go_to_page_popup_open_ = false;
-  app_.MarkPrefsDirty();
-}
-
-bool SettingsController::IsGoToPagePopupOpen() const {
-  return go_to_page_popup_open_;
-}
-
-void SettingsController::AdjustGoToPageTarget(int delta) {
-  Book *book = app_.GetCurrentBook();
-  if (!book || book->GetPageCount() <= 0)
-    return;
-  go_to_page_target_page_ = settings::ClampGoToPageTarget(
-      go_to_page_target_page_ + delta, book->GetPageCount());
-  app_.MarkPrefsDirty();
-}
-
-bool SettingsController::ConfirmGoToPageSelection() {
-  Book *book = app_.GetCurrentBook();
-  if (!book || book->GetPageCount() <= 0)
-    return false;
-
-  const int target_page = settings::ClampGoToPageTarget(
-      go_to_page_target_page_, book->GetPageCount());
-
-  if (book->IsFixedLayout())
-    book_renderer::CancelFixedLayoutDeferredWork(book);
-  book->SetPosition(target_page);
-  if (book->IsFixedLayout())
-    book_renderer::ResetFixedLayoutViewportForNavigation(book);
-
-  app_.ShowCurrentBookView();
-  book_renderer::DrawCurrentView(book, app_.ts.get());
-  app_.SetPdfDeferredReadyAtMs(
-      (book->IsFixedLayout() && book_renderer::HasPendingFixedLayoutDeferredWork(book))
-          ? (osGetTime() + book_renderer::GetFixedLayoutDeferredDelayMs(book))
-          : 0);
-  app_.RequestStatusRedraw();
-  go_to_page_popup_open_ = false;
-  return true;
-}
-
-void SettingsController::DrawGoToPagePopup() {
-  Book *book = app_.GetCurrentBook();
-  if (!app_.ts || !book || book->GetPageCount() <= 0 || !go_to_page_popup_open_)
-    return;
-
-  const GoToPagePopupLayout layout = BuildGoToPagePopupLayout();
-  const int page_count = book->GetPageCount();
-  const int target_page = settings::ClampGoToPageTarget(go_to_page_target_page_,
-                                                        page_count);
-  const int fill_w = settings::SliderPageIndexToFillWidth(target_page, page_count,
-                                                          layout.slider_w);
-  const int color_mode = app_.ts->GetColorMode();
-  const ThemePalette &palette = GetThemePalette(color_mode);
-  const u16 box_bg = RGB565FromU8(
-      (palette.bgTopR + palette.btnFillTopR) * 0.5f,
-      (palette.bgTopG + palette.btnFillTopG) * 0.5f,
-      (palette.bgTopB + palette.btnFillTopB) * 0.5f);
-  const u16 box_border = RGB565FromU8(
-      palette.btnBorderOuterR, palette.btnBorderOuterG, palette.btnBorderOuterB);
-  const u16 slider_bg = RGB565FromU8(
-      palette.btnFillBotR, palette.btnFillBotG, palette.btnFillBotB);
-  const u16 slider_fill = RGB565FromU8(
-      palette.iconR, palette.iconG, palette.iconB);
-  const u16 button_bg = RGB565FromU8(
-      palette.btnFillTopR, palette.btnFillTopG, palette.btnFillTopB);
-  const u16 text_color = palette.textFgColor;
-
-  char page_msg[48];
-  snprintf(page_msg, sizeof(page_msg), "Pg %d / %d", target_page + 1, page_count);
-
-  Text *ts = app_.ts.get();
-  ts->FillRect((u16)layout.box_x, (u16)layout.box_y,
-               (u16)(layout.box_x + layout.box_w),
-               (u16)(layout.box_y + layout.box_h), box_bg);
-  ts->DrawRect((u16)layout.box_x, (u16)layout.box_y,
-               (u16)(layout.box_x + layout.box_w),
-               (u16)(layout.box_y + layout.box_h), box_border);
-
-  ts->SetTextColorOverride(text_color);
-  ts->SetPen((u16)(layout.box_x + 16), (u16)(layout.box_y + 20));
-  ts->PrintString("go to page");
-  ts->SetPen((u16)(layout.box_x + 16), (u16)(layout.box_y + 40));
-  ts->PrintString(page_msg);
-
-  ts->FillRect((u16)layout.slider_x, (u16)layout.slider_y,
-               (u16)(layout.slider_x + layout.slider_w),
-               (u16)(layout.slider_y + layout.slider_h), slider_bg);
-  ts->DrawRect((u16)layout.slider_x, (u16)layout.slider_y,
-               (u16)(layout.slider_x + layout.slider_w),
-               (u16)(layout.slider_y + layout.slider_h), box_border);
-  if (fill_w > 0) {
-    ts->FillRect((u16)layout.slider_x, (u16)layout.slider_y,
-                 (u16)(layout.slider_x + fill_w),
-                 (u16)(layout.slider_y + layout.slider_h), slider_fill);
-  }
-
-  const int knob_half = 4;
-  const int knob_center_x = layout.slider_x + fill_w;
-  ts->FillRect((u16)(knob_center_x - knob_half),
-               (u16)(layout.slider_y - 3),
-               (u16)(knob_center_x + knob_half + 1),
-               (u16)(layout.slider_y + layout.slider_h + 4), text_color);
-
-  ts->FillRect((u16)layout.cancel_x, (u16)layout.cancel_y,
-               (u16)(layout.cancel_x + layout.cancel_w),
-               (u16)(layout.cancel_y + layout.cancel_h), button_bg);
-  ts->DrawRect((u16)layout.cancel_x, (u16)layout.cancel_y,
-               (u16)(layout.cancel_x + layout.cancel_w),
-               (u16)(layout.cancel_y + layout.cancel_h), box_border);
-  ts->FillRect((u16)layout.go_x, (u16)layout.go_y,
-               (u16)(layout.go_x + layout.go_w),
-               (u16)(layout.go_y + layout.go_h), button_bg);
-  ts->DrawRect((u16)layout.go_x, (u16)layout.go_y,
-               (u16)(layout.go_x + layout.go_w),
-               (u16)(layout.go_y + layout.go_h), box_border);
-
-  ts->SetPen((u16)(layout.cancel_x + 14), (u16)(layout.cancel_y + 16));
-  ts->PrintString("cancel");
-  ts->SetPen((u16)(layout.go_x + 24), (u16)(layout.go_y + 16));
-  ts->PrintString("go");
-  ts->ClearTextColorOverride();
-}
-
-void SettingsController::HandleGoToPagePopupTouch(bool touch_down) {
-  Book *book = app_.GetCurrentBook();
-  if (!book || book->GetPageCount() <= 0 || !go_to_page_popup_open_)
-    return;
-
-  const touchPosition coord = app_.TouchRead();
-  const GoToPagePopupLayout layout = BuildGoToPagePopupLayout();
-  if (PointInRect(coord.px, coord.py, layout.slider_x - 4, layout.slider_y - 8,
-                  layout.slider_w + 8, layout.slider_h + 16)) {
-    go_to_page_target_page_ = settings::SliderTouchXToPageIndex(
-        coord.px, layout.slider_x, layout.slider_w, book->GetPageCount());
-    app_.MarkPrefsDirty();
-    return;
-  }
-
-  if (!touch_down)
-    return;
-
-  if (PointInRect(coord.px, coord.py, layout.cancel_x, layout.cancel_y,
-                  layout.cancel_w, layout.cancel_h)) {
-    CloseGoToPagePopup();
-    return;
-  }
-  if (PointInRect(coord.px, coord.py, layout.go_x, layout.go_y, layout.go_w,
-                  layout.go_h)) {
-    ConfirmGoToPageSelection();
-  }
-}
 
 u8 SettingsController::PrefsVisibleButtonCount() const {
   return (u8)EffectiveVisibleCount();
@@ -505,8 +296,8 @@ void SettingsController::PrefsDraw() {
                                       slot == app_.GetPrefsSelectedIndex());
   }
 
-  if (go_to_page_popup_open_)
-    DrawGoToPagePopup();
+  if (go_to_page_dialog_.IsOpen())
+    go_to_page_dialog_.Draw();
 
   const bool paged = !app_.IsBookSettingsContext();
   SyncLibraryButtonLayout(&app_.buttonprefs, paged);
@@ -587,28 +378,28 @@ void SettingsController::PrefsHandleEvent() {
   app_.SetPrefsSelectedIndex(selected_index);
   const int selected_button = EffectiveButtonForSlot(app_.GetPrefsSelectedIndex());
 
-  if (go_to_page_popup_open_) {
+  if (go_to_page_dialog_.IsOpen()) {
     if (keys & KEY_A) {
-      ConfirmGoToPageSelection();
+      go_to_page_dialog_.Confirm();
       return;
     }
     if (keys & (KEY_B | KEY_SELECT | KEY_START | KEY_Y)) {
-      CloseGoToPagePopup();
+      go_to_page_dialog_.Close();
       if (app_.IsPrefsDirty())
         PrefsDraw();
       return;
     }
     if (keys & app_.key.left) {
-      AdjustGoToPageTarget(-1);
+      go_to_page_dialog_.AdjustTarget(-1);
     } else if (keys & app_.key.right) {
-      AdjustGoToPageTarget(1);
+      go_to_page_dialog_.AdjustTarget(1);
     } else if (keys & (app_.key.up | app_.key.l)) {
-      AdjustGoToPageTarget(-(int)kGoToPageCoarseStep);
+      go_to_page_dialog_.AdjustTarget(-(int)kGoToPageCoarseStep);
     } else if (keys & (app_.key.down | app_.key.r)) {
-      AdjustGoToPageTarget((int)kGoToPageCoarseStep);
+      go_to_page_dialog_.AdjustTarget((int)kGoToPageCoarseStep);
     }
     if ((keys & KEY_TOUCH) || (held & KEY_TOUCH))
-      HandleGoToPagePopupTouch((keys & KEY_TOUCH) != 0);
+      go_to_page_dialog_.HandleTouch((keys & KEY_TOUCH) != 0);
     if (app_.IsPrefsDirty())
       PrefsDraw();
     return;
@@ -1016,7 +807,7 @@ void SettingsController::PrefsHandlePress() {
       if (book->GetPageCount() <= 1) {
         app_.PrintStatus("This book has only one page");
       } else {
-        OpenGoToPagePopup();
+        go_to_page_dialog_.Open();
       }
     } else {
       ToggleClockFormatSetting(app_.prefs.get());

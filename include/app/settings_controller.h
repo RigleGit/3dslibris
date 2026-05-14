@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/button.h"
+#include "menus/go_to_page_dialog.h"
 
 class App;
 
@@ -25,18 +26,10 @@ public:
 
 private:
   App &app_;
-  bool go_to_page_popup_open_;
-  int go_to_page_target_page_;
+  GoToPageDialog go_to_page_dialog_;
   int prefs_general_page_;
   Button button_prefs_page_nav_;
 
-  void OpenGoToPagePopup();
-  void CloseGoToPagePopup();
-  bool IsGoToPagePopupOpen() const;
-  void AdjustGoToPageTarget(int delta);
-  bool ConfirmGoToPageSelection();
-  void DrawGoToPagePopup();
-  void HandleGoToPagePopupTouch(bool touch_down);
   void ResetToDefaults();
   void ClearAllCaches();
   int EffectiveVisibleCount() const;
