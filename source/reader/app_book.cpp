@@ -31,17 +31,16 @@
 #include "formats/common/book_error.h"
 #include "shared/app_flow_utils.h"
 #include "shared/debug_runtime_mode.h"
-#include "reader/deferred_relayout_utils.h"
+#include "reader/book_page_nav.h"
 #include "reader/book_switch_utils.h"
-#include "reader/fixed_layout_input_utils.h"
-#include "reader/inline_link_utils.h"
+#include "reader/deferred_relayout_utils.h"
+#include "reader/fixed_layout_reader_input.h"
 #include "reader/reader_controls.h"
+#include "reader/reflow_reader_input.h"
 #include "reader/suspend_policy_utils.h"
-#include "formats/common/pdf_view_utils.h"
 #include "ui/button.h"
 #include "shared/debug_log.h"
 #include "book/layout_reflow.h"
-#include "book/page.h"
 #include "parse.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
@@ -51,20 +50,9 @@
 namespace
 {
 
-  static const int kPdfTouchRerenderDelta = 4;
   static const int kOpeningTitleMaxWidth = 216;
   static const int kOpeningTitleMaxLines = 3;
   static const int kOpeningTitleLineHeight = 16;
-  static const int kViewportStickDeadZone = 15;
-  static const int kViewportCStickDeadZone = 8;
-  static const float kViewportStickBaseScale = 0.048f / 154.0f;
-  static const int kViewportStickAccelFrames = 24;
-  static const u64 kInlineLinkHoldThresholdMs = 350;
-  static const int kInlineLinkSecondScreenYOffset = 420;
-  // Minimum hit rect dimensions for touch link activation. Tiny inline links
-  // (e.g. footnote asterisks) get inflated to this size around their center.
-  static const int kTouchLinkMinHitPx = 12;
-  static const int kTouchLinkPadPx = 4;
 
   // Returns a human-readable name for the book, for debug logging.
   [[gnu::unused]] static const char *SafeBookName(Book *book)
@@ -126,37 +114,6 @@ namespace
       end--;
     }
     return s.substr(begin, end - begin);
-  }
-
-  float BuildViewportStickAxis(int raw_value, int dead_zone, float scale)
-  {
-    return (std::abs(raw_value) > dead_zone) ? ((float)raw_value * scale) : 0.0f;
-  }
-
-  float BuildViewportStickAccel(int active_frames)
-  {
-    if (active_frames <= 0)
-      return 1.0f;
-    const int capped_frames =
-        (active_frames < kViewportStickAccelFrames) ? active_frames
-                                                    : kViewportStickAccelFrames;
-    return 1.0f + ((float)capped_frames / (float)kViewportStickAccelFrames);
-  }
-
-  void MapViewportPanToReadingOrientation(bool turned_right, float physical_x,
-                                          float physical_y, float *screen_dx,
-                                          float *screen_dy)
-  {
-    if (!screen_dx || !screen_dy)
-      return;
-    if (!turned_right)
-    {
-      *screen_dx = physical_y;
-      *screen_dy = -physical_x;
-      return;
-    }
-    *screen_dx = -physical_y;
-    *screen_dy = physical_x;
   }
 
   std::string EllipsizeToWidth(Text *ts, const std::string &text, int max_width,
@@ -255,13 +212,6 @@ namespace
     return lines;
   }
 
-  void DrawBookPage(Book *book, Text *ts)
-  {
-    if (!book || !ts || book->GetPageCount() == 0)
-      return;
-    book_renderer::DrawCurrentView(book, ts);
-  }
-
   void ResetBookRenderState(App *app, bool clear_glyph_cache,
                             const char *reason)
   {
@@ -273,280 +223,6 @@ namespace
     app->RequestStatusRedraw();
     if (reason)
       DBG_LOG(app, reason);
-  }
-
-  bool SetBookPage(Book *book, Text *ts, u16 page)
-  {
-    if (!book || !ts || page >= book->GetPageCount())
-      return false;
-    if (book->IsCbz())
-      book->ResetCbzFailureState();
-    if (book->IsFixedLayout())
-      book_renderer::CancelFixedLayoutDeferredWork(book);
-    book->SetPosition(page);
-    book->ClearFocusedInlineLink();
-    if (book->IsFixedLayout())
-      book_renderer::ResetFixedLayoutViewportForNavigation(book);
-    DrawBookPage(book, ts);
-    return true;
-  }
-
-  const std::vector<Page::InlineLinkRenderEntry> *CurrentPageInlineLinks(Book *book)
-  {
-    if (!book || book->GetPageCount() == 0 || book->IsFixedLayout())
-      return NULL;
-    Page *page = book->GetPage();
-    if (!page)
-      return NULL;
-    return &page->GetRenderedInlineLinks();
-  }
-
-  bool CurrentPageHasInlineLinks(Book *book)
-  {
-    const std::vector<Page::InlineLinkRenderEntry> *links =
-        CurrentPageInlineLinks(book);
-    return links && !links->empty();
-  }
-
-  void ExitInlineLinkFocus(App *app, Book *book)
-  {
-    if (book)
-      book->ClearFocusedInlineLink();
-    if (app)
-      app->SetInlineLinkFocusActive(false);
-  }
-
-  bool EnterInlineLinkFocus(App *app, Book *book, Text *ts)
-  {
-    if (!app || !book || !ts)
-      return false;
-    const std::vector<Page::InlineLinkRenderEntry> *links =
-        CurrentPageInlineLinks(book);
-    if (!links || links->empty())
-      return false;
-    int focus_index = book->GetFocusedInlineLinkIndex();
-    if (focus_index < 0 || focus_index >= (int)links->size())
-      focus_index = 0;
-    book->SetFocusedInlineLinkIndex(focus_index);
-    app->SetInlineLinkFocusActive(true);
-    DrawBookPage(book, ts);
-    return true;
-  }
-
-  bool MoveInlineLinkFocus(Book *book, Text *ts,
-                           inline_link_utils::InlineLinkNavDirection direction)
-  {
-    if (!book || !ts)
-      return false;
-    const std::vector<Page::InlineLinkRenderEntry> *links =
-        CurrentPageInlineLinks(book);
-    if (!links || links->empty())
-      return false;
-
-    std::vector<inline_link_utils::LinkRect> nav_rects;
-    nav_rects.reserve(links->size());
-    for (size_t i = 0; i < links->size(); ++i)
-    {
-      inline_link_utils::LinkRect rect = (*links)[i].bounds;
-      if ((*links)[i].screen_index != 0)
-      {
-        rect.y0 += kInlineLinkSecondScreenYOffset;
-        rect.y1 += kInlineLinkSecondScreenYOffset;
-      }
-      nav_rects.push_back(rect);
-    }
-
-    int current_index = book->GetFocusedInlineLinkIndex();
-    if (current_index < 0 || current_index >= (int)nav_rects.size())
-      current_index = 0;
-    const int next_index =
-        inline_link_utils::FindNeighborIndex(nav_rects, current_index, direction);
-    if (next_index < 0 || next_index == current_index)
-      return false;
-    book->SetFocusedInlineLinkIndex(next_index);
-    DrawBookPage(book, ts);
-    return true;
-  }
-
-  size_t InlineLinkCountForPage(Book *book, int page_index)
-  {
-    if (!book || book->IsFixedLayout() || page_index < 0 ||
-        page_index >= book->GetPageCount())
-      return 0;
-    Page *page = book->GetPage(page_index);
-    return page ? page->GetInlineLinkCount() : 0;
-  }
-
-  bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction)
-  {
-    if (!book || !ts || direction == 0 || book->IsFixedLayout())
-      return false;
-    const std::vector<Page::InlineLinkRenderEntry> *links =
-        CurrentPageInlineLinks(book);
-    if (!links || links->empty())
-      return false;
-
-    int current_index = book->GetFocusedInlineLinkIndex();
-    if (current_index < 0 || current_index >= (int)links->size())
-      current_index = 0;
-
-    if (direction > 0 && current_index + 1 < (int)links->size())
-    {
-      book->SetFocusedInlineLinkIndex(current_index + 1);
-      DrawBookPage(book, ts);
-      return true;
-    }
-    if (direction < 0 && current_index > 0)
-    {
-      book->SetFocusedInlineLinkIndex(current_index - 1);
-      DrawBookPage(book, ts);
-      return true;
-    }
-
-    const int page_count = (int)book->GetPageCount();
-    const int current_page = book->GetPosition();
-    if (direction > 0)
-    {
-      for (int page_index = current_page + 1; page_index < page_count;
-           ++page_index)
-      {
-        const size_t link_count = InlineLinkCountForPage(book, page_index);
-        if (link_count == 0)
-          continue;
-        book->SetPosition(page_index);
-        book->SetFocusedInlineLinkIndex(0);
-        DrawBookPage(book, ts);
-        return true;
-      }
-      return false;
-    }
-
-    for (int page_index = current_page - 1; page_index >= 0; --page_index)
-    {
-      const size_t link_count = InlineLinkCountForPage(book, page_index);
-      if (link_count == 0)
-        continue;
-      book->SetPosition(page_index);
-      book->SetFocusedInlineLinkIndex((int)link_count - 1);
-      DrawBookPage(book, ts);
-      return true;
-    }
-    return false;
-  }
-
-  bool FollowFocusedInlineLink(Book *book, Text *ts)
-  {
-    if (!book || !ts)
-      return false;
-    const std::vector<Page::InlineLinkRenderEntry> *links =
-        CurrentPageInlineLinks(book);
-    if (!links || links->empty())
-      return false;
-    const int focus_index = book->GetFocusedInlineLinkIndex();
-    if (focus_index < 0 || focus_index >= (int)links->size())
-      return false;
-    const u16 href_id = (*links)[(size_t)focus_index].href_id;
-    const std::string *href =
-        book->GetInlineLinkHref(href_id);
-    if (!href || href->empty())
-      return false;
-    u16 target_page = 0;
-    bool found_anchor = book->FindChapterAnchorPage(*href, &target_page);
-    bool found_doc = false;
-    if (!found_anchor)
-      found_doc = book->FindChapterDocStartPage(*href, &target_page);
-    if (!found_anchor && !found_doc)
-      return false;
-    book->ClearFocusedInlineLink();
-    return SetBookPage(book, ts, target_page);
-  }
-
-  // Check if touch point (tx, ty) in bottom-screen text coordinates hits a
-  // link on the second screen. If so, focus and follow it.
-  // Tiny link rects are inflated to kTouchLinkMinHitPx x kTouchLinkMinHitPx
-  // so footnote markers like "*" remain tappable.
-  bool TryFollowTouchLink(Book *book, Text *ts, int tx, int ty)
-  {
-    if (!book || !ts)
-      return false;
-    const std::vector<Page::InlineLinkRenderEntry> *links =
-        CurrentPageInlineLinks(book);
-    if (!links || links->empty())
-      return false;
-
-    int best_index = -1;
-    for (int i = 0; i < (int)links->size(); ++i) {
-      const Page::InlineLinkRenderEntry &entry = (*links)[(size_t)i];
-      if (entry.screen_index != 1)
-        continue; // only bottom/touch screen links
-
-      inline_link_utils::LinkRect r = entry.bounds;
-      // Inflate tiny rects around their center.
-      const int w = r.x1 - r.x0;
-      const int h = r.y1 - r.y0;
-      const int cx = r.x0 + w / 2;
-      const int cy = r.y0 + h / 2;
-      if (w < kTouchLinkMinHitPx) {
-        r.x0 = cx - kTouchLinkMinHitPx / 2;
-        r.x1 = cx + kTouchLinkMinHitPx / 2;
-      }
-      if (h < kTouchLinkMinHitPx) {
-        r.y0 = cy - kTouchLinkMinHitPx / 2;
-        r.y1 = cy + kTouchLinkMinHitPx / 2;
-      }
-      // Apply padding.
-      r.x0 -= kTouchLinkPadPx;
-      r.y0 -= kTouchLinkPadPx;
-      r.x1 += kTouchLinkPadPx;
-      r.y1 += kTouchLinkPadPx;
-
-      if (tx >= r.x0 && tx < r.x1 && ty >= r.y0 && ty < r.y1) {
-        best_index = i;
-        break;
-      }
-    }
-
-    if (best_index < 0)
-      return false;
-
-    book->SetFocusedInlineLinkIndex(best_index);
-    return FollowFocusedInlineLink(book, ts);
-  }
-
-  bool TurnBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 pagecount,
-                    int delta)
-  {
-    if (!book || !ts || !pagecurrent || pagecount == 0)
-      return false;
-    if (delta < 0)
-    {
-      if (*pagecurrent == 0)
-        return false;
-    }
-    else if (*pagecurrent >= pagecount - 1)
-    {
-      return false;
-    }
-
-    *pagecurrent = (u16)((int)*pagecurrent + delta);
-    return SetBookPage(book, ts, *pagecurrent);
-  }
-
-  // Advances the book page by one.
-  // Returns true if the page was advanced, false if no advancement was possible.
-  bool AdvanceBookPage(Book *book, Text *ts, u16 *pagecurrent, u16 *pagecount,
-                       bool *status_dirty)
-  {
-    if (!book || !ts || !pagecurrent || !pagecount || !status_dirty)
-    {
-      return false;
-    }
-    if (TurnBookPage(book, ts, pagecurrent, *pagecount, 1))
-    {
-      *status_dirty = true;
-      return true;
-    }
-    return false;
   }
 
   // Attempts to reuse the currently selected book by resetting transient state and redrawing the current page, returning whether the reuse was successful.
@@ -575,7 +251,7 @@ namespace
     Book *current = app->GetCurrentBook();
     if (current->GetPosition() >= current->GetPageCount())
       current->SetPosition(0);
-    DrawBookPage(current, app->ts.get());
+    book_nav::DrawPage(current, app->ts.get());
     return true;
   }
 
@@ -1085,7 +761,7 @@ void ReaderController::HandleEventInOpening()
 
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
-  DrawBookPage(bookcurrent_, ts);
+  book_nav::DrawPage(bookcurrent_, ts);
   if (bookcurrent_ && bookcurrent_->IsFixedLayout())
     app_.SetPdfDeferredReadyAtMs(
         book_renderer::HasPendingFixedLayoutDeferredWork(bookcurrent_)
@@ -1099,413 +775,32 @@ void ReaderController::HandleEventInOpening()
 void ReaderController::HandleEventInBook()
 {
   Book *bookcurrent_ = app_.GetCurrentBook();
-  Prefs *prefs = app_.prefs.get();
   Text *ts = app_.ts.get();
   if (app_.ShouldAbortWork() || !bookcurrent_)
     return;
-  decltype(App::key) &key = app_.key;
 
-  const ReaderControls ctrl = BuildPortraitControls(key);
-  auto touch_read = [&]()
-  { return app_.TouchRead(); };
-  auto request_status_redraw = [&]()
-  { app_.RequestStatusRedraw(); };
-  auto show_library_view = [&]()
-  { app_.ShowLibraryView(); };
-  auto show_settings_view = [&](bool from_book)
-  { app_.ShowSettingsView(from_book); };
-
+  const ReaderControls ctrl = BuildPortraitControls(app_.key);
+  const u32 keys = hidKeysDown();
+  const u32 held = hidKeysHeld();
   u16 pagecurrent = bookcurrent_->GetPosition();
   u16 pagecount = bookcurrent_->GetPageCount();
-  bool status_dirty = false;
 
-  // Use 3DS edge-triggered key state to avoid carry-over/repeat from the key
-  // press used to open the book.
-  u32 keys = hidKeysDown();
-  u32 held = hidKeysHeld();
-
-  if (bookcurrent_ && bookcurrent_->IsFixedLayout())
-  {
-    const auto delay_fixed_layout_deferred = [&]()
-    {
-      const u32 delay_ms = book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_);
-      app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
-    };
-    if (keys & ctrl.zoom_in)
-    {
-      if (book_renderer::ChangeFixedLayoutZoom(bookcurrent_, 1))
-      {
-        DrawBookPage(bookcurrent_, ts);
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (keys & ctrl.zoom_out)
-    {
-      if (book_renderer::ChangeFixedLayoutZoom(bookcurrent_, -1))
-      {
-        DrawBookPage(bookcurrent_, ts);
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (reader_input_utils::FixedLayoutSupportsShoulderPageTurn(
-                 bookcurrent_->format) &&
-             (keys & (key.r | key.zl)))
-    {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1))
-      {
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (reader_input_utils::FixedLayoutSupportsShoulderPageTurn(
-                 bookcurrent_->format) &&
-             (keys & (key.l | key.zr)))
-    {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
-      {
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (keys & ctrl.fixed_page_next)
-    {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1))
-      {
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (keys & ctrl.fixed_page_prev)
-    {
-      if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
-      {
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (keys & ctrl.fixed_chapter_next)
-    {
-      if (!bookcurrent_->GetChapters().empty())
-      {
-        if (book_renderer::JumpFixedLayoutChapter(bookcurrent_, 1))
-        {
-          book_renderer::ResetFixedLayoutViewportForNavigation(bookcurrent_);
-          DrawBookPage(bookcurrent_, ts);
-          status_dirty = true;
-          delay_fixed_layout_deferred();
-        }
-      }
-      else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, 1))
-      {
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (keys & ctrl.fixed_chapter_prev)
-    {
-      if (!bookcurrent_->GetChapters().empty())
-      {
-        if (book_renderer::JumpFixedLayoutChapter(bookcurrent_, -1))
-        {
-          book_renderer::ResetFixedLayoutViewportForNavigation(bookcurrent_);
-          DrawBookPage(bookcurrent_, ts);
-          status_dirty = true;
-          delay_fixed_layout_deferred();
-        }
-      }
-      else if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
-      {
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (keys & KEY_TOUCH)
-    {
-      touchPosition mapped = touch_read();
-      app_.SetPdfTouchDragActive(true);
-      book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, true);
-      app_.SetPdfTouchLastX((int)mapped.px);
-      app_.SetPdfTouchLastY((int)mapped.py);
-      if (book_renderer::MoveFixedLayoutViewportToPreview(bookcurrent_, (int)mapped.px,
-                                                         (int)mapped.py))
-      {
-        DrawBookPage(bookcurrent_, ts);
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-    else if (held & KEY_TOUCH)
-    {
-      touchPosition mapped = touch_read();
-      if (!app_.IsPdfTouchDragActive() ||
-          pdf_view_utils::TouchMovementExceedsThreshold(
-              app_.GetPdfTouchLastX(), app_.GetPdfTouchLastY(), (int)mapped.px,
-              (int)mapped.py, kPdfTouchRerenderDelta))
-      {
-        app_.SetPdfTouchDragActive(true);
-        book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, true);
-        app_.SetPdfTouchLastX((int)mapped.px);
-        app_.SetPdfTouchLastY((int)mapped.py);
-        if (book_renderer::MoveFixedLayoutViewportToPreview(bookcurrent_, (int)mapped.px,
-                                                           (int)mapped.py))
-        {
-          // DrawCurrentView now uses the full-page zoom cache for viewport
-          // extraction (no MuPDF re-render), so updating both screens is fast.
-          DrawBookPage(bookcurrent_, ts);
-          status_dirty = true;
-          delay_fixed_layout_deferred();
-        }
-      }
-    }
-    else if (keys & ctrl.back_to_library)
-    {
-      show_library_view();
-      prefs->Write();
-    }
-    else if (keys & ctrl.open_settings)
-    {
-      show_settings_view(true);
-      prefs->Write();
-    }
-
-    if (!(held & KEY_TOUCH))
-    {
-      if (app_.IsPdfTouchDragActive())
-      {
-        book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, false);
-        DrawBookPage(bookcurrent_, ts);
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-      book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, false);
-      app_.SetPdfTouchDragActive(false);
-      app_.SetPdfTouchLastX(-1);
-      app_.SetPdfTouchLastY(-1);
-    }
-
-    // Circle Pad/C-Stick smooth viewport pan. Only active when touch is not
-    // dragging. Input follows the current reading orientation and ramps up
-    // slightly while held for faster long-distance traversal.
-    if (!app_.IsPdfTouchDragActive())
-    {
-      static int s_viewport_stick_active_frames = 0;
-      circlePosition cpad;
-      circlePosition cstick = {0, 0};
-      hidCircleRead(&cpad);
-      if (app_.IsNew3dsDevice())
-        hidCstickRead(&cstick);
-
-      const float physical_x =
-          BuildViewportStickAxis((int)cpad.dx, kViewportStickDeadZone,
-                                 kViewportStickBaseScale) +
-          BuildViewportStickAxis((int)cstick.dx, kViewportCStickDeadZone,
-                                 kViewportStickBaseScale);
-      const float physical_y =
-          BuildViewportStickAxis(-(int)cpad.dy, kViewportStickDeadZone,
-                                 kViewportStickBaseScale) +
-          BuildViewportStickAxis(-(int)cstick.dy, kViewportCStickDeadZone,
-                                 kViewportStickBaseScale);
-      const bool stick_active = (physical_x != 0.0f || physical_y != 0.0f);
-      s_viewport_stick_active_frames =
-          stick_active ? (s_viewport_stick_active_frames + 1) : 0;
-
-      float viewport_dx = 0.0f;
-      float viewport_dy = 0.0f;
-      const float accel =
-          BuildViewportStickAccel(s_viewport_stick_active_frames);
-      MapViewportPanToReadingOrientation(app_.orientation, physical_x * accel,
-                                        physical_y * accel, &viewport_dx,
-                                        &viewport_dy);
-
-      if (stick_active &&
-          book_renderer::TranslateFixedLayoutViewport(bookcurrent_, viewport_dx, viewport_dy))
-      {
-        book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, true);
-        DrawBookPage(bookcurrent_, ts);
-        status_dirty = true;
-        delay_fixed_layout_deferred();
-      }
-    }
-
-    if (status_dirty)
-    {
-      request_status_redraw();
-    }
-    else if (!(held & KEY_TOUCH) && keys == 0 &&
-             book_renderer::HasPendingFixedLayoutDeferredWork(bookcurrent_) &&
-             osGetTime() >= app_.GetPdfDeferredReadyAtMs())
-    {
-      const u32 budget_ms = 4;
-      const bool worked = book_renderer::PumpDeferredFixedLayoutWork(bookcurrent_, budget_ms);
-      const u32 delay_ms = book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_);
-      app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
-      if (worked)
-      {
-        DrawBookPage(bookcurrent_, ts);
-        request_status_redraw();
-      }
-    }
+  if (bookcurrent_->IsFixedLayout()) {
+    if (fixed_layout_input::HandleInBook(app_, bookcurrent_, ts, keys, held,
+                                         &pagecurrent, pagecount, ctrl))
+      app_.RequestStatusRedraw();
     return;
   }
 
-  const bool has_inline_links = CurrentPageHasInlineLinks(bookcurrent_);
-  const u64 now_ms = osGetTime();
-  if (!app_.IsInlineLinkFocusActive() && (keys & key.y))
-  {
-    app_.SetInlineLinkHoldArmed(true);
-    app_.SetInlineLinkHoldConsumed(false);
-    app_.SetInlineLinkHoldStartedAtMs(now_ms);
-  }
-
-  if (!app_.IsInlineLinkFocusActive() && app_.IsInlineLinkHoldArmed() &&
-      (held & key.y) && !app_.IsInlineLinkHoldConsumed() && has_inline_links &&
-      now_ms >= app_.GetInlineLinkHoldStartedAtMs() + kInlineLinkHoldThresholdMs)
-  {
-    if (EnterInlineLinkFocus(&app_, bookcurrent_, ts))
-    {
-      app_.SetInlineLinkHoldConsumed(true);
-      status_dirty = true;
-    }
-  }
-
-  if (app_.IsInlineLinkFocusActive())
-  {
-    if (keys & (key.b | key.y))
-    {
-      ExitInlineLinkFocus(&app_, bookcurrent_);
-      DrawBookPage(bookcurrent_, ts);
-      status_dirty = true;
-    }
-    else if (keys & key.a)
-    {
-      if (FollowFocusedInlineLink(bookcurrent_, ts))
-      {
-        app_.SetInlineLinkFocusActive(false);
-        status_dirty = true;
-      }
-    }
-    else if (keys & ctrl.link_next)
-    {
-      if (MoveInlineLinkFocusSequential(bookcurrent_, ts, 1))
-        status_dirty = true;
-    }
-    else if (keys & ctrl.link_prev)
-    {
-      if (MoveInlineLinkFocusSequential(bookcurrent_, ts, -1))
-        status_dirty = true;
-    }
-    else if (keys & ctrl.back_to_library)
-    {
-      ExitInlineLinkFocus(&app_, bookcurrent_);
-      show_library_view();
-      prefs->Write();
-    }
-    else if (keys & ctrl.open_settings)
-    {
-      ExitInlineLinkFocus(&app_, bookcurrent_);
-      show_settings_view(true);
-      prefs->Write();
-    }
-  }
-  else if (keys & ctrl.page_next)
-  {
-    // page forward.
-    AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
-  }
-  else if (keys & ctrl.page_prev)
-  {
-    // page back.
-    if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
-      status_dirty = true;
-  }
-  else if (keys & key.x)
-  {
-    int mode = ts->GetColorMode();
-    int next = (mode + 1) % 6;
-    app_.colorMode = next;
-    ts->SetColorMode(next);
-    UiButtonSkin_SetColorMode(next);
-    ts->MarkAllScreensDirty();
-    DrawBookPage(bookcurrent_, ts);
+  bool status_dirty = reflow_input::HandleInBook(
+      app_, bookcurrent_, ts, app_.prefs.get(), keys, held,
+      &pagecurrent, &pagecount, ctrl);
+  if (MaybeFinalizeDeferredRelayout(bookcurrent_, (int)pagecount)) {
+    book_nav::DrawPage(bookcurrent_, ts);
     status_dirty = true;
   }
-  else if (keys & key.y)
-  {
-  }
-  else if (keys & KEY_TOUCH)
-  {
-    // Check links on the bottom screen before triggering a page turn.
-    // mapped.px = text-x (column, 0-239), mapped.py = text-y (row, 0-319).
-    touchPosition mapped = touch_read();
-    if (TryFollowTouchLink(bookcurrent_, ts, (int)mapped.px, (int)mapped.py))
-    {
-      status_dirty = true;
-    }
-    else
-    {
-      // Page turn split follows visual horizontal axis (left/right) in both
-      // orientations after central touch un-mirroring.
-      const bool forward_zone = ((int)mapped.px >= 120);
-      if (!forward_zone)
-      {
-        if (TurnBookPage(bookcurrent_, ts, &pagecurrent, pagecount, -1))
-          status_dirty = true;
-      }
-      else
-      {
-        AdvanceBookPage(bookcurrent_, ts, &pagecurrent, &pagecount, &status_dirty);
-      }
-    }
-  }
-  else if (keys & ctrl.back_to_library)
-  {
-    // Return to browser without reparsing the current book later.
-    // Keep one parsed book resident in memory for fast reopen.
-    show_library_view();
-    prefs->Write();
-  }
-  else if (keys & ctrl.open_settings)
-  {
-    // Go directly to settings from book.
-    show_settings_view(true);
-    prefs->Write();
-  }
-  else if (keys & (ctrl.bookmark_prev | ctrl.bookmark_next))
-  {
-    // Navigate bookmarks.
-    app_flow_utils::BookmarkJumpResult jump = app_flow_utils::FindBookmarkJumpTarget(
-        bookcurrent_->GetBookmarks(), bookcurrent_->GetPosition(),
-        (keys & ctrl.bookmark_prev) ? app_flow_utils::BookmarkJumpDirection::Previous
-                                    : app_flow_utils::BookmarkJumpDirection::Next);
-
-    if (jump.found)
-    {
-      bookcurrent_->SetPosition(jump.page);
-      DrawBookPage(bookcurrent_, ts);
-      status_dirty = true;
-    }
-  }
-
-  if (app_.IsInlineLinkHoldArmed() && !(held & key.y))
-  {
-    const bool consumed = app_.IsInlineLinkHoldConsumed();
-    app_.SetInlineLinkHoldArmed(false);
-    app_.SetInlineLinkHoldStartedAtMs(0);
-    app_.SetInlineLinkHoldConsumed(false);
-    if (!consumed && !app_.IsInlineLinkFocusActive())
-      ToggleBookmark();
-  }
-
-  if (MaybeFinalizeDeferredRelayout(bookcurrent_, pagecount))
-  {
-    DrawBookPage(bookcurrent_, ts);
-    status_dirty = true;
-  }
-
   if (status_dirty)
-    request_status_redraw();
+    app_.RequestStatusRedraw();
 }
 
 void ReaderController::ToggleBookmark()
@@ -1537,7 +832,7 @@ void ReaderController::ToggleBookmark()
     bookmarks.insert(it, pagecurrent);
   }
 
-  DrawBookPage(bookcurrent_, ts);
+  book_nav::DrawPage(bookcurrent_, ts);
   const u32 delay_ms =
       bookcurrent_ ? book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_) : 0;
   app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
@@ -1771,7 +1066,7 @@ u8 ReaderController::OpenBook()
 
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
-  DrawBookPage(bookcurrent_, ts);
+  book_nav::DrawPage(bookcurrent_, ts);
   if (bookcurrent_ && bookcurrent_->IsFixedLayout())
     app_.SetPdfDeferredReadyAtMs(
         book_renderer::HasPendingFixedLayoutDeferredWork(bookcurrent_)
