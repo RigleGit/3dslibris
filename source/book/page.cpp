@@ -657,12 +657,20 @@ void Page::Draw(Text *ts) {
         } else {
           // Fallback: re-measure by scanning forward (used for LTR text in
           // mixed paragraphs or legacy page buffers without the token).
+          auto rtl_measure_fn = [](u32 codepoint, unsigned char style,
+                                   void *ctx) -> int {
+            return ((Text *)ctx)->GetAdvance(codepoint, style);
+          };
+          const int rtl_available =
+              ts->display.width - ts->margin.left - ts->margin.right;
           line_width = page_alignment_utils::MeasureAlignedLineWidth(
               buf, length, (size_t)(i - 1), ts->bold, ts->italic, mono,
-              [](u32 codepoint, unsigned char style, void *ctx) -> int {
-                return ((Text *)ctx)->GetAdvance(codepoint, style);
-              },
-              ts);
+              rtl_measure_fn, ts);
+          if (line_width > rtl_available) {
+            line_width = page_alignment_utils::MeasureFirstVisualLineWidth(
+                buf, length, (size_t)(i - 1), ts->bold, ts->italic, mono,
+                rtl_available, rtl_measure_fn, ts);
+          }
         }
         int right_edge = ts->display.width - ts->margin.right;
         int rtl_x = text_render_layout_utils::ComputeRtlLineStartX(
@@ -678,13 +686,18 @@ void Page::Draw(Text *ts) {
       } else if (ts->GetPenX() == ts->margin.left &&
                  (paragraph_align == book_xml_css_style_utils::TextAlign::Center ||
                   paragraph_align == book_xml_css_style_utils::TextAlign::Right)) {
+        int available_width = ts->display.width - ts->margin.left - ts->margin.right;
+        auto measure_fn = [](u32 codepoint, unsigned char style, void *ctx) -> int {
+          return ((Text *)ctx)->GetAdvance(codepoint, style);
+        };
         int line_width = page_alignment_utils::MeasureAlignedLineWidth(
             buf, length, (size_t)(i - 1), ts->bold, ts->italic, mono,
-            [](u32 codepoint, unsigned char style, void *ctx) -> int {
-              return ((Text *)ctx)->GetAdvance(codepoint, style);
-            },
-            ts);
-        int available_width = ts->display.width - ts->margin.left - ts->margin.right;
+            measure_fn, ts);
+        if (line_width > available_width) {
+          line_width = page_alignment_utils::MeasureFirstVisualLineWidth(
+              buf, length, (size_t)(i - 1), ts->bold, ts->italic, mono,
+              available_width, measure_fn, ts);
+        }
         int x_offset = 0;
         if (paragraph_align == book_xml_css_style_utils::TextAlign::Center) {
           x_offset = (available_width - line_width) / 2;
