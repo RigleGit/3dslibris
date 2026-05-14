@@ -111,6 +111,29 @@ void ParseSelectorList(const std::string &selector_list,
   }
 }
 
+template <typename Fn>
+static bool ForEachClass(const std::string &class_attr,
+                         const CssClassMap &class_map, Fn fn) {
+  if (class_attr.empty() || class_map.empty())
+    return false;
+  size_t pos = 0;
+  while (pos < class_attr.size()) {
+    while (pos < class_attr.size() &&
+           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
+            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
+      ++pos;
+    const size_t start = pos;
+    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+      ++pos;
+    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
+    const std::string class_name = class_attr.substr(start, pos - start);
+    CssClassMap::const_iterator it = class_map.find(class_name);
+    if (it != class_map.end() && fn(it->second))
+      return true;
+  }
+  return false;
+}
+
 } // namespace
 
 void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
@@ -301,503 +324,187 @@ bool LookupMarginsForClassAttr(const std::string &class_attr,
   if (!out)
     return false;
   *out = CssClassMargins{};
-  if (class_attr.empty() || class_map.empty())
-    return false;
-
   bool found_any = false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it == class_map.end())
-      continue;
-    if (it->second.margin_top.unit != MarginTopResult::Unit::None)
-      out->margin_top = it->second.margin_top;
-    if (it->second.margin_bottom.unit != MarginTopResult::Unit::None)
-      out->margin_bottom = it->second.margin_bottom;
-    if (it->second.margin_left.unit != MarginTopResult::Unit::None)
-      out->margin_left = it->second.margin_left;
-    if (it->second.margin_right.unit != MarginTopResult::Unit::None)
-      out->margin_right = it->second.margin_right;
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.margin_top.unit != MarginTopResult::Unit::None) out->margin_top = m.margin_top;
+    if (m.margin_bottom.unit != MarginTopResult::Unit::None) out->margin_bottom = m.margin_bottom;
+    if (m.margin_left.unit != MarginTopResult::Unit::None) out->margin_left = m.margin_left;
+    if (m.margin_right.unit != MarginTopResult::Unit::None) out->margin_right = m.margin_right;
     found_any = true;
-  }
-
+    return false;
+  });
   return found_any;
 }
 
 bool LookupHideListMarkersForClassAttr(const std::string &class_attr,
                                        const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return false;
-
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.hide_list_markers)
-      return true;
-  }
-
-  return false;
+  return ForEachClass(class_attr, class_map,
+    [](const CssClassMargins &m) { return m.hide_list_markers; });
 }
 
 bool LookupTextAlignForClassAttr(const std::string &class_attr,
                                  const CssClassMap &class_map,
                                  TextAlign *out) {
-  if (!out || class_attr.empty() || class_map.empty())
+  if (!out)
     return false;
-
   bool found = false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it == class_map.end() || !it->second.has_text_align)
-      continue;
-    *out = it->second.text_align;
-    found = true;
-  }
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.has_text_align) { *out = m.text_align; found = true; }
+    return false;
+  });
   return found;
 }
 
 bool LookupFontSizeForClassAttr(const std::string &class_attr,
                                 const CssClassMap &class_map,
                                 FontSizeSpec *out) {
-  if (!out || class_attr.empty() || class_map.empty())
+  if (!out)
     return false;
-
   bool found = false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it == class_map.end() ||
-        it->second.font_size.unit == FontSizeSpec::Unit::None)
-      continue;
-    *out = it->second.font_size;
-    found = true;
-  }
-
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.font_size.unit != FontSizeSpec::Unit::None) { *out = m.font_size; found = true; }
+    return false;
+  });
   return found;
 }
 
 bool LookupSuperSubForClassAttr(const std::string &class_attr,
                                 const CssClassMap &class_map,
                                 bool *superscript_out, bool *subscript_out) {
-  if (class_attr.empty() || class_map.empty())
-    return false;
-
   bool found = false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it == class_map.end())
-      continue;
-    if (superscript_out && it->second.superscript) {
-      *superscript_out = true;
-      found = true;
-    }
-    if (subscript_out && it->second.subscript) {
-      *subscript_out = true;
-      found = true;
-    }
-  }
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (superscript_out && m.superscript) { *superscript_out = true; found = true; }
+    if (subscript_out && m.subscript) { *subscript_out = true; found = true; }
+    return false;
+  });
   return found;
 }
 
 bool LookupPageBreakBeforeForClassAttr(const std::string &class_attr,
                                        const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.page_break_before)
-      return true;
-  }
-  return false;
+  return ForEachClass(class_attr, class_map,
+    [](const CssClassMargins &m) { return m.page_break_before; });
 }
 
 bool LookupPageBreakAfterForClassAttr(const std::string &class_attr,
                                       const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.page_break_after)
-      return true;
-  }
-  return false;
+  return ForEachClass(class_attr, class_map,
+    [](const CssClassMargins &m) { return m.page_break_after; });
 }
 
 bool LookupPageBreakInsideAvoidForClassAttr(const std::string &class_attr,
                                             const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.page_break_inside_avoid)
-      return true;
-  }
-  return false;
+  return ForEachClass(class_attr, class_map,
+    [](const CssClassMargins &m) { return m.page_break_inside_avoid; });
 }
 
 bool LookupFloatForClassAttr(const std::string &class_attr,
                              const CssClassMap &class_map,
                              FloatMode *out) {
-  if (!out || class_attr.empty() || class_map.empty())
+  if (!out)
     return false;
   bool found = false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.has_float) {
-      *out = it->second.float_mode;
-      found = true;
-    }
-  }
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.has_float) { *out = m.float_mode; found = true; }
+    return false;
+  });
   return found;
 }
 
 bool LookupClearForClassAttr(const std::string &class_attr,
                              const CssClassMap &class_map,
                              ClearMode *out) {
-  if (!out || class_attr.empty() || class_map.empty())
+  if (!out)
     return false;
   bool found = false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.has_clear) {
-      *out = it->second.clear_mode;
-      found = true;
-    }
-  }
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.has_clear) { *out = m.clear_mode; found = true; }
+    return false;
+  });
   return found;
 }
 
 bool LookupNoUnderlineForClassAttr(const std::string &class_attr,
                                    const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.no_underline)
-      return true;
-  }
-  return false;
+  return ForEachClass(class_attr, class_map,
+    [](const CssClassMargins &m) { return m.no_underline; });
 }
 
 bool LookupWhiteSpaceForClassAttr(const std::string &class_attr,
                                   const CssClassMap &class_map,
                                   WhiteSpaceMode *out) {
-  if (!out || class_attr.empty() || class_map.empty())
+  if (!out)
     return false;
-  size_t pos = 0;
   bool found = false;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.has_white_space) {
-      *out = it->second.white_space;
-      found = true;
-    }
-  }
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.has_white_space) { *out = m.white_space; found = true; }
+    return false;
+  });
   return found;
 }
 
 bool LookupResetBoldForClassAttr(const std::string &class_attr,
                                  const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.reset_bold)
-      return true;
-  }
-  return false;
+  return ForEachClass(class_attr, class_map,
+    [](const CssClassMargins &m) { return m.reset_bold; });
 }
 
 MarginTopResult LookupTextIndentForClassAttr(const std::string &class_attr,
                                              const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return MarginTopResult{};
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() &&
-        it->second.text_indent.unit != MarginTopResult::Unit::None)
-      return it->second.text_indent;
-  }
-  return MarginTopResult{};
+  MarginTopResult result{};
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.text_indent.unit != MarginTopResult::Unit::None) {
+      result = m.text_indent;
+      return true;
+    }
+    return false;
+  });
+  return result;
 }
 
 bool LookupTextTransformForClassAttr(const std::string &class_attr,
                                      const CssClassMap &class_map,
                                      TextTransform *out) {
-  if (!out || class_attr.empty() || class_map.empty())
+  if (!out)
     return false;
   bool found = false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.has_text_transform) {
-      *out = it->second.text_transform;
-      found = true;
-    }
-  }
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.has_text_transform) { *out = m.text_transform; found = true; }
+    return false;
+  });
   return found;
 }
 
 bool LookupResetItalicForClassAttr(const std::string &class_attr,
                                    const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() && it->second.reset_italic)
-      return true;
-  }
-  return false;
+  return ForEachClass(class_attr, class_map,
+    [](const CssClassMargins &m) { return m.reset_italic; });
 }
 
 MarginTopResult LookupMarginLeftForClassAttr(const std::string &class_attr,
                                              const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return MarginTopResult{};
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() &&
-        it->second.margin_left.unit != MarginTopResult::Unit::None)
-      return it->second.margin_left;
-  }
-  return MarginTopResult{};
+  MarginTopResult result{};
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.margin_left.unit != MarginTopResult::Unit::None) {
+      result = m.margin_left;
+      return true;
+    }
+    return false;
+  });
+  return result;
 }
 
 MarginTopResult LookupMarginRightForClassAttr(const std::string &class_attr,
                                               const CssClassMap &class_map) {
-  if (class_attr.empty() || class_map.empty())
-    return MarginTopResult{};
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it != class_map.end() &&
-        it->second.margin_right.unit != MarginTopResult::Unit::None)
-      return it->second.margin_right;
-  }
-  return MarginTopResult{};
+  MarginTopResult result{};
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &m) {
+    if (m.margin_right.unit != MarginTopResult::Unit::None) {
+      result = m.margin_right;
+      return true;
+    }
+    return false;
+  });
+  return result;
 }
 
 bool LookupAllForClassAttr(const std::string &class_attr,
@@ -812,81 +519,32 @@ bool LookupAllForClassAttr(const std::string &class_attr,
     return false;
 
   bool found_any = false;
-  size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
-           (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
-            class_attr[pos] == '\r' || class_attr[pos] == '\n'))
-      ++pos;
-    const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
-      ++pos;
-    if (pos == start) {
-      if (pos < class_attr.size())
-        ++pos;
-      continue;
-    }
-    const std::string class_name = class_attr.substr(start, pos - start);
-    CssClassMap::const_iterator it = class_map.find(class_name);
-    if (it == class_map.end())
-      continue;
-    const CssClassMargins &src = it->second;
-    if (src.margin_top.unit != MarginTopResult::Unit::None)
-      out->margin_top = src.margin_top;
-    if (src.margin_bottom.unit != MarginTopResult::Unit::None)
-      out->margin_bottom = src.margin_bottom;
-    if (src.margin_left.unit != MarginTopResult::Unit::None)
-      out->margin_left = src.margin_left;
-    if (src.margin_right.unit != MarginTopResult::Unit::None)
-      out->margin_right = src.margin_right;
-    if (src.font_size.unit != FontSizeSpec::Unit::None)
-      out->font_size = src.font_size;
-    if (src.hide_list_markers)
-      out->hide_list_markers = true;
-    if (src.has_text_align) {
-      out->has_text_align = true;
-      out->text_align = src.text_align;
-    }
-    if (src.has_white_space) {
-      out->has_white_space = true;
-      out->white_space = src.white_space;
-    }
-    if (src.superscript)
-      out->superscript = true;
-    if (src.subscript)
-      out->subscript = true;
-    if (src.page_break_before)
-      out->page_break_before = true;
-    if (src.page_break_after)
-      out->page_break_after = true;
-    if (src.page_break_inside_avoid)
-      out->page_break_inside_avoid = true;
-    if (src.has_float) {
-      out->has_float = true;
-      out->float_mode = src.float_mode;
-    }
-    if (src.has_clear) {
-      out->has_clear = true;
-      out->clear_mode = src.clear_mode;
-    }
-    if (src.no_underline)
-      out->no_underline = true;
-    if (src.reset_bold)
-      out->reset_bold = true;
-    if (src.reset_italic)
-      out->reset_italic = true;
-    if (src.text_indent.unit != MarginTopResult::Unit::None)
-      out->text_indent = src.text_indent;
-    if (src.has_text_transform) {
-      out->has_text_transform = true;
-      out->text_transform = src.text_transform;
-    }
-    if (src.is_display_block)
-      out->is_display_block = true;
-    if (src.is_display_none)
-      out->is_display_none = true;
+  ForEachClass(class_attr, class_map, [&](const CssClassMargins &src) {
+    if (src.margin_top.unit != MarginTopResult::Unit::None) out->margin_top = src.margin_top;
+    if (src.margin_bottom.unit != MarginTopResult::Unit::None) out->margin_bottom = src.margin_bottom;
+    if (src.margin_left.unit != MarginTopResult::Unit::None) out->margin_left = src.margin_left;
+    if (src.margin_right.unit != MarginTopResult::Unit::None) out->margin_right = src.margin_right;
+    if (src.font_size.unit != FontSizeSpec::Unit::None) out->font_size = src.font_size;
+    if (src.hide_list_markers) out->hide_list_markers = true;
+    if (src.has_text_align) { out->has_text_align = true; out->text_align = src.text_align; }
+    if (src.has_white_space) { out->has_white_space = true; out->white_space = src.white_space; }
+    if (src.superscript) out->superscript = true;
+    if (src.subscript) out->subscript = true;
+    if (src.page_break_before) out->page_break_before = true;
+    if (src.page_break_after) out->page_break_after = true;
+    if (src.page_break_inside_avoid) out->page_break_inside_avoid = true;
+    if (src.has_float) { out->has_float = true; out->float_mode = src.float_mode; }
+    if (src.has_clear) { out->has_clear = true; out->clear_mode = src.clear_mode; }
+    if (src.no_underline) out->no_underline = true;
+    if (src.reset_bold) out->reset_bold = true;
+    if (src.reset_italic) out->reset_italic = true;
+    if (src.text_indent.unit != MarginTopResult::Unit::None) out->text_indent = src.text_indent;
+    if (src.has_text_transform) { out->has_text_transform = true; out->text_transform = src.text_transform; }
+    if (src.is_display_block) out->is_display_block = true;
+    if (src.is_display_none) out->is_display_none = true;
     found_any = true;
-  }
+    return false;
+  });
   return found_any;
 }
 
