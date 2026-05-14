@@ -9,11 +9,13 @@
 
 #pragma once
 
+#include "shared/screen_dimensions.h"
+
 namespace screen_layout {
 
-// Physical pixel heights of the two 3DS screens in landscape mode.
-static const int kTopScreenHeightPx    = 400;
-static const int kBottomScreenHeightPx = 320;
+// Aliases into screen_dims — single source of truth is screen_dimensions.h.
+static const int kTopScreenHeightPx    = screen_dims::kTopScreenHeightPx;
+static const int kBottomScreenHeightPx = screen_dims::kBottomScreenHeightPx;
 
 static const int kFooterY       = 296;
 static const int kFooterButtonH = 22;
