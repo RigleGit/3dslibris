@@ -1,7 +1,7 @@
 #include "formats/common/book_meta_cache.h"
 
 #include "formats/common/binary_io_utils.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "shared/string_utils.h"
 
 #include <stdio.h>

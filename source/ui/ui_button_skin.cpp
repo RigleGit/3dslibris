@@ -11,7 +11,7 @@
 #include "ui/ui_button_skin.h"
 
 #include "shared/color_utils.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "ui/theme_colors.h"
 #include <algorithm>
 #include <cmath>

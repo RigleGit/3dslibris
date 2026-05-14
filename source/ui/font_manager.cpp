@@ -10,7 +10,7 @@
 #include "shared/debug_log.h"
 #include "shared/main.h"
 #include "ui/font_constants.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "ui/screen_constants.h"
 #include "ui/text.h"
 #include "ui/text_cache_utils.h"

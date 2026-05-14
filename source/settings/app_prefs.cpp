@@ -34,7 +34,7 @@
 #include "shared/color_utils.h"
 #include "shared/debug_log.h"
 #include "parse.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "settings/prefs.h"
 #include "settings/prefs_button_context_utils.h"
 #include "ui/text.h"

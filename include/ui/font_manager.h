@@ -11,7 +11,7 @@
 #include FT_FREETYPE_H
 #include FT_CACHE_H
 
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "ui/glyph_cache_lru.h"
 
 class Text;

@@ -12,7 +12,7 @@
 #include "shared/debug_log.h"
 #include "formats/common/page_cache_field_limits.h"
 #include "formats/common/page_cache_utils.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "shared/open_cancel_poll.h"
 #include <3ds.h>
 #include <string.h>

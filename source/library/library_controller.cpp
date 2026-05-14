@@ -16,7 +16,7 @@ void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
 #include "ui/gradient_utils.h"
 #include "book/book_context.h"
 #include "shared/debug_log.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "shared/app_flow_utils.h"
 #include "shared/utf8_utils.h"
 

@@ -20,7 +20,7 @@
 #include "book/book_xml.h"
 #include "formats/common/xml_parse_utils.h"
 #include "library/browser_view_utils.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "settings/font_config_utils.h"
 #include "sys/stat.h"
 #include "sys/time.h"

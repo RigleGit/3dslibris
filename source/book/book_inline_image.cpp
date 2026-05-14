@@ -19,7 +19,7 @@
 #include "formats/epub/epub_cover_decode_utils.h"
 #include "formats/mobi/mobi.h"
 #include "formats/mobi/mobi_record_scan.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "shared/status_reporter.h"
 #include "stb_image.h"
 #include "shared/string_utils.h"

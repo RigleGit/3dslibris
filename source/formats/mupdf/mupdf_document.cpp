@@ -8,7 +8,7 @@
 #include "formats/mupdf/mupdf_worker.h"
 #include "formats/common/pdf_view_utils.h"
 #include "shared/open_cancel_poll.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "shared/status_reporter.h"
 
 #include "shared/debug_log.h"

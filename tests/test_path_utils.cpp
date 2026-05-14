@@ -1,3 +1,4 @@
+#include "../include/shared/path_constants.h"
 #include "../include/shared/path_utils.h"
 #include "test_assert.h"
 

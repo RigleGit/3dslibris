@@ -11,7 +11,8 @@
 #include "ui/theme_colors.h"
 #include "shared/bugfix_utils.h"
 #include "shared/text_render_layout_utils.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
+#include "ui/screen_layout_constants.h"
 #include "stb_image.h"
 #include "string.h"
 #include "ui/frame_debug_utils.h"
@@ -19,6 +20,13 @@
 #include "ui/text_buffer_utils.h"
 
 namespace {
+
+// Snaps an arbitrary logical height to one of the two valid 3DS screen heights.
+static inline int SnapToScreenHeight(int h) {
+  return h <= screen_layout::kBottomScreenHeightPx
+             ? screen_layout::kBottomScreenHeightPx
+             : screen_layout::kTopScreenHeightPx;
+}
 
 static inline void RGB565ToU8(u16 c, int *r, int *g, int *b) {
   const int r5 = (c >> 11) & 0x1F;
@@ -123,7 +131,7 @@ static void FillSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
 
   std::vector<u16> *grad = nullptr;
   int *cached_w = nullptr;
-  const int h = (logical_h <= 320) ? 320 : 400;
+  const int h = SnapToScreenHeight(logical_h);
   if (h == 320) {
     grad = &grad320;
     cached_w = &grad320w;
@@ -189,7 +197,7 @@ static void FillDarkSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
 
   std::vector<u16> *grad = nullptr;
   int *cached_w = nullptr;
-  const int h = (logical_h <= 320) ? 320 : 400;
+  const int h = SnapToScreenHeight(logical_h);
   if (h == 320) {
     grad = &grad320_ds;
     cached_w = &grad320w_ds;

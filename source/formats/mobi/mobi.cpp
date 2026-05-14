@@ -15,7 +15,7 @@
 #include "formats/mobi/mobi_record_scan.h"
 #include "formats/mobi/mobi_cover_utils.h"
 #include "shared/aspect_fit_utils.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "shared/status_reporter.h"
 #include "stb_image.h"
 #include "shared/string_utils.h"

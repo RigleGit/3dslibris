@@ -11,6 +11,10 @@
 
 namespace screen_layout {
 
+// Physical pixel heights of the two 3DS screens in landscape mode.
+static const int kTopScreenHeightPx    = 400;
+static const int kBottomScreenHeightPx = 320;
+
 static const int kFooterY       = 296;
 static const int kFooterButtonH = 22;
 static const int kFooterNavW    = 66;

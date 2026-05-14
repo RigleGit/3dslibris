@@ -39,7 +39,7 @@
 #include "app/startup_controller.h"
 #include "app/main_loop_controller.h"
 #include "shared/debug_log.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "parse.h"
 #include "shared/debug_runtime_mode.h"
 #include "settings/prefs.h"

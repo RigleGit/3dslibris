@@ -53,7 +53,7 @@
 #include "shared/debug_runtime_mode.h"
 #include "shared/string_utils.h"
 #include "settings/prefs.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "ui/text.h"
 #include "shared/utf8_utils.h"
 #include "app/version.h"

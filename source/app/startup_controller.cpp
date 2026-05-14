@@ -25,7 +25,7 @@
 #include "book/book.h"
 #include "shared/debug_log.h"
 #include "shared/main.h"
-#include "shared/path_utils.h"
+#include "shared/path_constants.h"
 #include "settings/prefs.h"
 #include "ui/text.h"
 #include "ui/ui_button_skin.h"

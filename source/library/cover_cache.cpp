@@ -31,6 +31,7 @@
 #include "formats/pdf/pdf_parser.h"
 #include "shared/debug_log.h"
 #include "shared/debug_runtime_mode.h"
+#include "shared/path_constants.h"
 #include "shared/path_utils.h"
 #include "shared/string_utils.h"
 
