@@ -17,8 +17,6 @@
 #include <algorithm>
 #include <dirent.h>
 #include <errno.h>
-#include <list>
-#include <set>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +30,6 @@
 #include "book/book_parser.h"
 #include "ui/browser_nav.h"
 #include "formats/common/book_error.h"
-#include "book/cover_layout_constants.h"
 #include "ui/button.h"
 #include "menus/chapter_menu.h"
 #include "shared/debug_log.h"
@@ -45,6 +42,7 @@
 #include "shared/app_flow_utils.h"
 #include "shared/color_utils.h"
 #include "library/browser_cover_cache_utils.h"
+#include "library/cover_cache.h"
 #include "library/browser_grid_view.h"
 #include "library/browser_job_queue_utils.h"
 #include "library/browser_list_view.h"
@@ -73,14 +71,9 @@
 
 namespace {
 
-static const std::string &kCoverCacheBaseDir = paths::GetCacheBaseDir();
-static const std::string &kCoverCacheDir = paths::GetCoverCacheDir();
-static const char *kCoverCacheMagic = "CVR3";
-static const size_t kCoverCacheMaxFiles = 512;
-static const size_t kCoverCacheMaxBytes = 16 * 1024 * 1024;
 // Max extraction attempts per session before a book is skipped.
 // Two retries absorb transient SD-card read failures without retrying forever.
-static const uint8_t kCoverMaxAttempts = 3;
+static const uint8_t kCoverMaxAttempts = cover_cache::kMaxAttempts;
 static const int kBrowserFooterY = 296;
 
 static BrowserViewMode CurrentBrowserViewMode(const App &app) {
@@ -147,355 +140,6 @@ static std::string BuildBookPath(Book *book) {
   return path;
 }
 
-struct CoverCacheEntry {
-  std::string path;
-  long long mtime;
-  size_t size;
-};
-
-static bool CoverCacheEntryOlderFirst(const CoverCacheEntry &a,
-                                      const CoverCacheEntry &b) {
-  if (a.mtime != b.mtime)
-    return a.mtime < b.mtime;
-  return a.path < b.path;
-}
-
-static void PruneCoverCache(bool force) {
-  static u64 last_prune_ms = 0;
-  u64 now = osGetTime();
-  if (!force && now - last_prune_ms < 5000)
-    return;
-  last_prune_ms = now;
-
-  DIR *dp = opendir(kCoverCacheDir.c_str());
-  if (!dp)
-    return;
-
-  std::list<CoverCacheEntry> entries;
-  size_t total_bytes = 0;
-
-  struct dirent *ent;
-  while ((ent = readdir(dp)) != NULL) {
-    if (ent->d_name[0] == '.')
-      continue;
-    if (!HasExtCI(ent->d_name, ".cvr"))
-      continue;
-
-    char full[512];
-    snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir.c_str(), ent->d_name);
-    struct stat st;
-    if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
-      continue;
-
-    CoverCacheEntry ce;
-    ce.path = full;
-    ce.mtime = (long long)st.st_mtime;
-    ce.size = (st.st_size > 0) ? (size_t)st.st_size : 0;
-    total_bytes += ce.size;
-    entries.push_back(ce);
-  }
-  closedir(dp);
-
-  if (entries.size() <= kCoverCacheMaxFiles &&
-      total_bytes <= kCoverCacheMaxBytes)
-    return;
-
-  entries.sort(CoverCacheEntryOlderFirst);
-
-  size_t remaining_count = entries.size();
-  bool removed_any = false;
-  while ((remaining_count > kCoverCacheMaxFiles ||
-          total_bytes > kCoverCacheMaxBytes) &&
-         !entries.empty()) {
-    const CoverCacheEntry &oldest = entries.front();
-    remove(oldest.path.c_str());
-    removed_any = true;
-    if (remaining_count > 0)
-      remaining_count--;
-    if (oldest.size <= total_bytes)
-      total_bytes -= oldest.size;
-    else
-      total_bytes = 0;
-    entries.pop_front();
-  }
-
-  // Rewrite the manifest to drop entries for pruned files.
-  if (removed_any) {
-    std::set<std::string> alive;
-    for (std::list<CoverCacheEntry>::const_iterator it = entries.begin();
-         it != entries.end(); ++it) {
-      alive.insert(BasenamePath(it->path));
-    }
-    std::vector<std::string> kept;
-    FILE *rf = fopen(paths::GetCoverCacheManifest().c_str(), "r");
-    if (rf) {
-      char line[1024];
-      while (fgets(line, sizeof(line), rf)) {
-        std::string l = line;
-        size_t tab = l.find('\t');
-        std::string fname = (tab != std::string::npos) ? l.substr(0, tab) : l;
-        while (!fname.empty() && (fname.back() == '\n' || fname.back() == '\r'))
-          fname.pop_back();
-        if (alive.count(fname))
-          kept.push_back(l);
-      }
-      fclose(rf);
-    }
-    FILE *wf = fopen(paths::GetCoverCacheManifest().c_str(), "w");
-    if (wf) {
-      for (size_t i = 0; i < kept.size(); i++)
-        fputs(kept[i].c_str(), wf);
-      fclose(wf);
-    }
-  }
-}
-
-static void EnsureCoverCacheDirs() {
-  static bool initialized = false;
-  if (initialized)
-    return;
-  mkdir(kCoverCacheBaseDir.c_str(), 0777);
-  mkdir(kCoverCacheDir.c_str(), 0777);
-
-  // One-time cleanup: remove legacy CVR2 cache files whose names are bare
-  // 16-hex-digit hashes (e.g., "a1b2c3d4e5f6g7h8.cvr").
-  DIR *legacy_dp = opendir(kCoverCacheDir.c_str());
-  if (legacy_dp) {
-    struct dirent *ent;
-    while ((ent = readdir(legacy_dp)) != NULL) {
-      if (!HasExtCI(ent->d_name, ".cvr"))
-        continue;
-      size_t nlen = strlen(ent->d_name);
-      if (nlen == 20) { // 16 hex digits + ".cvr"
-        bool all_hex = true;
-        for (int i = 0; i < 16 && all_hex; i++)
-          all_hex = isxdigit((unsigned char)ent->d_name[i]);
-        if (all_hex) {
-          char full[512];
-          snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir.c_str(), ent->d_name);
-          remove(full);
-        }
-      }
-    }
-    closedir(legacy_dp);
-  }
-
-  PruneCoverCache(true);
-  initialized = true;
-}
-
-static std::string BuildCoverCachePath(Book *book,
-                                       const std::string &book_path) {
-  struct stat st;
-  long long fsize = 0;
-  long long fmtime = 0;
-  if (stat(book_path.c_str(), &st) == 0) {
-    fsize = (long long)st.st_size;
-    fmtime = (long long)st.st_mtime;
-  }
-
-  std::string key = book_path;
-  key.push_back('|');
-  key += std::to_string(fsize);
-  key.push_back('|');
-  key += std::to_string(fmtime);
-  uint64_t h = Fnv1a64(key);
-
-  // Use the book filename (sans extension) as a human-readable label.
-  // Title is not used because it may not be available at cache-load time.
-  std::string label;
-  if (book && book->GetFileName() && book->GetFileName()[0] != '\0') {
-    label = book->GetFileName();
-    size_t dot = label.rfind('.');
-    if (dot != std::string::npos && dot > 0)
-      label = label.substr(0, dot);
-  }
-  if (label.empty())
-    label = "book";
-  label = SanitizeFat32Name(label, 80);
-
-  char out[512];
-  snprintf(out, sizeof(out), "%s/%s_%08llx.cvr", kCoverCacheDir.c_str(), label.c_str(),
-           (unsigned long long)(h & 0xFFFFFFFFULL));
-  return std::string(out);
-}
-
-static bool SaveCoverCache(Book *book, const std::string &book_path);
-
-static bool TryLoadCoverCache(Book *book, const std::string &book_path) {
-  if (!book)
-    return false;
-  EnsureCoverCacheDirs();
-
-  std::string cache_path = BuildCoverCachePath(book, book_path);
-  FILE *fp = fopen(cache_path.c_str(), "rb");
-  if (!fp) {
-#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
-    if (book->GetStatusReporter()) {
-      DBG_LOGF(book->GetStatusReporter(), "COVER: cache miss book=%s path=%s",
-               book->GetFileName() ? book->GetFileName() : "(null)",
-               cache_path.c_str());
-    }
-#endif
-    if (debug_runtime::BackgroundWorkersDisabled() &&
-        debug_runtime::BrowserWarmupDisabled() && !book_path.empty() &&
-        !book->coverPixels && book->coverAttempts < kCoverMaxAttempts) {
-      int src_rc = -1;
-      if (book->format == FORMAT_EPUB) {
-        // Metadata indexing jobs may not have run yet; index synchronously
-        // here so coverImagePath gets populated before extraction.
-        if (!book->metadataIndexTried) {
-          if (book_parser::Index(book) == 0)
-            book->ClearBrowserDisplayNameCache();
-        }
-        if (book->metadataIndexTried && !book->coverImagePath.empty())
-          src_rc = epub_parser::ExtractCover(book, book_path);
-      } else if (book->format == FORMAT_XHTML &&
-                 HasExtCI(book->GetFileName(), ".fb2")) {
-        src_rc = fb2_parser::ExtractCover(book, book_path);
-      } else if (book->format == FORMAT_XHTML &&
-                 HasExtCI(book->GetFileName(), ".mobi")) {
-        src_rc = mobi_parser::ExtractCover(book, book_path);
-      } else if (book->format == FORMAT_PDF) {
-        src_rc = pdf_parser::ExtractCover(book, book_path);
-      } else if (book->format == FORMAT_CBZ) {
-        src_rc = cbz_parser::ExtractCover(book, book_path);
-      }
-      if (src_rc == 0 && book->coverPixels) {
-        SaveCoverCache(book, book_path);
-        return true;
-      }
-      book->coverAttempts++;
-    }
-    return false;
-  }
-
-  u8 header[8];
-  bool ok = fread(header, 1, sizeof(header), fp) == sizeof(header);
-  // Ignore thumbnails written by older extractors once the cache format/magic
-  // changes, so stale covers do not survive heuristic fixes.
-  if (!ok || memcmp(header, kCoverCacheMagic, 4) != 0) {
-    fclose(fp);
-#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
-    if (book->GetStatusReporter()) {
-      DBG_LOGF(book->GetStatusReporter(),
-               "COVER: cache corrupt (bad magic/header) book=%s path=%s",
-               book->GetFileName() ? book->GetFileName() : "(null)",
-               cache_path.c_str());
-    }
-#endif
-    return false;
-  }
-
-  u16 w = (u16)header[4] | ((u16)header[5] << 8);
-  u16 h = (u16)header[6] | ((u16)header[7] << 8);
-  if (w == 0 || h == 0 || w > cover_layout::kBrowserCoverThumbWidth ||
-      h > cover_layout::kBrowserCoverThumbHeight) {
-    fclose(fp);
-#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
-    if (book->GetStatusReporter()) {
-      DBG_LOGF(book->GetStatusReporter(),
-               "COVER: cache corrupt (bad dims %ux%u) book=%s path=%s",
-               (unsigned)w, (unsigned)h,
-               book->GetFileName() ? book->GetFileName() : "(null)",
-               cache_path.c_str());
-    }
-#endif
-    return false;
-  }
-
-  size_t count = (size_t)w * (size_t)h;
-  u16 *pixels = new u16[count];
-  if (!pixels) {
-    fclose(fp);
-    return false;
-  }
-  if (fread(pixels, sizeof(u16), count, fp) != count) {
-    delete[] pixels;
-    fclose(fp);
-#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
-    if (book->GetStatusReporter()) {
-      DBG_LOGF(book->GetStatusReporter(),
-               "COVER: cache truncated (expected %zu pixels) book=%s path=%s",
-               count,
-               book->GetFileName() ? book->GetFileName() : "(null)",
-               cache_path.c_str());
-    }
-#endif
-    return false;
-  }
-  fclose(fp);
-
-  if (book->coverPixels) {
-    delete[] book->coverPixels;
-    book->coverPixels = nullptr;
-  }
-  book->coverPixels = pixels;
-  book->coverWidth = w;
-  book->coverHeight = h;
-#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
-  if (book->GetStatusReporter()) {
-    DBG_LOGF(book->GetStatusReporter(),
-             "COVER: cache hit book=%s path=%s size=%ux%u",
-             book->GetFileName() ? book->GetFileName() : "(null)",
-             cache_path.c_str(), (unsigned)w, (unsigned)h);
-  }
-#endif
-  return true;
-}
-
-static bool SaveCoverCache(Book *book, const std::string &book_path) {
-  if (!book || !book->coverPixels || book->coverWidth <= 0 ||
-      book->coverHeight <= 0) {
-    return false;
-  }
-  if (book->coverWidth > cover_layout::kBrowserCoverThumbWidth ||
-      book->coverHeight > cover_layout::kBrowserCoverThumbHeight)
-    return false;
-
-  EnsureCoverCacheDirs();
-  std::string cache_path = BuildCoverCachePath(book, book_path);
-  FILE *fp = fopen(cache_path.c_str(), "wb");
-  if (!fp)
-    return false;
-
-  u8 header[8];
-  // Bump the cache magic when extractor heuristics change so stale MOBI
-  // thumbnails do not mask newer cover fixes.
-  memcpy(header, kCoverCacheMagic, 4);
-  header[4] = (u8)(book->coverWidth & 0xFF);
-  header[5] = (u8)((book->coverWidth >> 8) & 0xFF);
-  header[6] = (u8)(book->coverHeight & 0xFF);
-  header[7] = (u8)((book->coverHeight >> 8) & 0xFF);
-  bool ok = fwrite(header, 1, sizeof(header), fp) == sizeof(header);
-  size_t count = (size_t)book->coverWidth * (size_t)book->coverHeight;
-  if (ok) {
-    ok = fwrite(book->coverPixels, sizeof(u16), count, fp) == count;
-  }
-  fclose(fp);
-  if (ok) {
-    FILE *mf = fopen(paths::GetCoverCacheManifest().c_str(), "a");
-    if (mf) {
-      const char *t = book->GetTitle();
-      const char *f = book->GetFileName();
-      const char *display = (t && t[0] != '\0') ? t : (f ? f : "");
-      std::string cache_base = BasenamePath(cache_path);
-      fprintf(mf, "%s\t%s\t%s\n", cache_base.c_str(), display, book_path.c_str());
-      fclose(mf);
-    }
-    PruneCoverCache(false);
-  }
-#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
-  if (book->GetStatusReporter()) {
-    DBG_LOGF(book->GetStatusReporter(),
-             "COVER: cache save %s book=%s path=%s size=%dx%d",
-             ok ? "ok" : "fail",
-             book->GetFileName() ? book->GetFileName() : "(null)",
-             cache_path.c_str(), book->coverWidth, book->coverHeight);
-  }
-#endif
-  return ok;
-}
 
 } // namespace
 
@@ -558,7 +202,7 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
     std::string path = BuildBookPath(book);
     if (path.empty())
       continue;
-    if (TryLoadCoverCache(book, path)) {
+    if (cover_cache::TryLoad(book, path)) {
       book->coverAttempts = kCoverMaxAttempts;
       book->coverRetryAfterMs = 0;
     }
@@ -888,7 +532,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
             if (!book->coverImagePath.empty()) {
               rc = epub_parser::ExtractCover(book, path);
               if (rc == 0 && book->coverPixels) {
-                SaveCoverCache(book, path);
+                cover_cache::Save(book, path);
                 book->coverAttempts = kCoverMaxAttempts;
                 book->coverRetryAfterMs = 0;
               } else if (rc == BOOK_ERR_CANCELLED) {
@@ -905,7 +549,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
                    HasExtCI(book->GetFileName(), ".fb2")) {
           rc = fb2_parser::ExtractCover(book, path);
           if (rc == 0 && book->coverPixels) {
-            SaveCoverCache(book, path);
+            cover_cache::Save(book, path);
             book->coverAttempts = kCoverMaxAttempts;
             book->coverRetryAfterMs = 0;
           } else if (rc == BOOK_ERR_CANCELLED) {
@@ -918,7 +562,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
                    HasExtCI(book->GetFileName(), ".mobi")) {
           rc = mobi_parser::ExtractCover(book, path);
           if (rc == 0 && book->coverPixels) {
-            SaveCoverCache(book, path);
+            cover_cache::Save(book, path);
             book->coverAttempts = kCoverMaxAttempts;
             book->coverRetryAfterMs = 0;
           } else if (rc == BOOK_ERR_CANCELLED) {
@@ -930,7 +574,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         } else if (book->format == FORMAT_PDF) {
           rc = pdf_parser::ExtractCover(book, path);
           if (rc == 0 && book->coverPixels) {
-            SaveCoverCache(book, path);
+            cover_cache::Save(book, path);
             book->coverAttempts = kCoverMaxAttempts;
             book->coverRetryAfterMs = 0;
           } else if (rc == BOOK_ERR_CANCELLED) {
@@ -945,7 +589,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         } else if (book->format == FORMAT_CBZ) {
           rc = cbz_parser::ExtractCover(book, path);
           if (rc == 0 && book->coverPixels) {
-            SaveCoverCache(book, path);
+            cover_cache::Save(book, path);
             book->coverAttempts = kCoverMaxAttempts;
             book->coverRetryAfterMs = 0;
           } else if (rc == BOOK_ERR_CANCELLED) {
