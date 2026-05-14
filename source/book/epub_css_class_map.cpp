@@ -1,6 +1,7 @@
 #include "book/epub_css_class_map.h"
 
 #include "book/book_xml_css_style_utils.h"
+#include "book/epub_css_tokenizer.h"
 #include "shared/string_utils.h"
 
 #include <string.h>
@@ -9,107 +10,6 @@
 namespace epub_css_class_map {
 
 namespace {
-
-bool IsIdentChar(char c) {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-         (c >= '0' && c <= '9') || c == '-' || c == '_';
-}
-
-void SkipWhitespace(const char *s, size_t len, size_t *pos) {
-  while (*pos < len && (s[*pos] == ' ' || s[*pos] == '\t' ||
-                        s[*pos] == '\r' || s[*pos] == '\n'))
-    ++(*pos);
-}
-
-void SkipToChar(const char *s, size_t len, size_t *pos, char target) {
-  while (*pos < len && s[*pos] != target)
-    ++(*pos);
-}
-
-void SkipBlockComment(const char *s, size_t len, size_t *pos) {
-  if (*pos + 1 < len && s[*pos] == '/' && s[*pos + 1] == '*') {
-    *pos += 2;
-    while (*pos + 1 < len) {
-      if (s[*pos] == '*' && s[*pos + 1] == '/') {
-        *pos += 2;
-        return;
-      }
-      ++(*pos);
-    }
-    *pos = len;
-  }
-}
-
-bool ExtractSingleClassSelectorName(const std::string &selector,
-                                    std::string *class_name_out) {
-  if (!class_name_out)
-    return false;
-
-  const std::string trimmed = Trim(selector);
-  if (trimmed.empty())
-    return false;
-
-  // Support ".class" and "tag.class". Reject combinators, descendant
-  // selectors, pseudo classes, and compound selectors.
-  size_t pos = 0;
-  while (pos < trimmed.size() && IsIdentChar(trimmed[pos]))
-    ++pos;
-  if (pos >= trimmed.size() || trimmed[pos] != '.')
-    return false;
-  ++pos;
-
-  const size_t class_start = pos;
-  while (pos < trimmed.size() && IsIdentChar(trimmed[pos]))
-    ++pos;
-  if (pos == class_start || pos != trimmed.size())
-    return false;
-
-  *class_name_out = trimmed.substr(class_start, pos - class_start);
-  return true;
-}
-
-// Recognises bare element selectors like "p", "body", "li", "h1".
-// Rejects anything with dots, hashes, colons, spaces, brackets, or @.
-static bool ExtractBareElementSelectorName(const std::string &selector,
-                                           std::string *el_out) {
-  if (!el_out)
-    return false;
-  const std::string trimmed = Trim(selector);
-  if (trimmed.empty())
-    return false;
-  // Must start with a letter (tag names never start with a digit).
-  if (!(trimmed[0] >= 'a' && trimmed[0] <= 'z') &&
-      !(trimmed[0] >= 'A' && trimmed[0] <= 'Z'))
-    return false;
-  // Must be purely ident chars — no dot, hash, colon, bracket, space, @.
-  for (size_t i = 0; i < trimmed.size(); i++) {
-    if (!IsIdentChar(trimmed[i]))
-      return false;
-  }
-  *el_out = trimmed;
-  return true;
-}
-
-void ParseSelectorList(const std::string &selector_list,
-                       std::vector<std::string> *class_names_out,
-                       std::vector<std::string> *element_names_out) {
-  size_t start = 0;
-  while (start <= selector_list.size()) {
-    size_t comma = selector_list.find(',', start);
-    std::string selector =
-        selector_list.substr(start, comma == std::string::npos
-                                        ? std::string::npos
-                                        : comma - start);
-    std::string name;
-    if (class_names_out && ExtractSingleClassSelectorName(selector, &name))
-      class_names_out->push_back(name);
-    else if (element_names_out && ExtractBareElementSelectorName(selector, &name))
-      element_names_out->push_back(name);
-    if (comma == std::string::npos)
-      break;
-    start = comma + 1;
-  }
-}
 
 template <typename Fn>
 static bool ForEachClass(const std::string &class_attr,
@@ -123,7 +23,7 @@ static bool ForEachClass(const std::string &class_attr,
             class_attr[pos] == '\r' || class_attr[pos] == '\n'))
       ++pos;
     const size_t start = pos;
-    while (pos < class_attr.size() && IsIdentChar(class_attr[pos]))
+    while (pos < class_attr.size() && epub_css_tokenizer::IsIdentChar(class_attr[pos]))
       ++pos;
     if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
     const std::string class_name = class_attr.substr(start, pos - start);
@@ -142,27 +42,27 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
 
   size_t pos = 0;
   while (pos < len) {
-    SkipWhitespace(css_text, len, &pos);
+    epub_css_tokenizer::SkipWhitespace(css_text, len, &pos);
     if (pos >= len)
       break;
 
     if (pos + 1 < len && css_text[pos] == '/' && css_text[pos + 1] == '*') {
-      SkipBlockComment(css_text, len, &pos);
+      epub_css_tokenizer::SkipBlockComment(css_text, len, &pos);
       continue;
     }
 
     size_t selector_start = pos;
-    SkipToChar(css_text, len, &pos, '{');
+    epub_css_tokenizer::SkipToChar(css_text, len, &pos, '{');
     if (pos >= len || css_text[pos] != '{')
       break;
     std::string selector_list(css_text + selector_start, pos - selector_start);
     std::vector<std::string> class_names;
     std::vector<std::string> element_names;
-    ParseSelectorList(selector_list, &class_names, &element_names);
+    epub_css_tokenizer::ParseSelectorList(selector_list, &class_names, &element_names);
     ++pos;
 
     size_t block_start = pos;
-    SkipToChar(css_text, len, &pos, '}');
+    epub_css_tokenizer::SkipToChar(css_text, len, &pos, '}');
     size_t block_end = pos;
     if (pos < len)
       ++pos;

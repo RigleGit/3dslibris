@@ -7,4 +7,5 @@ build_test test_book_xml_parser_style_utils \
   "$TEST_ROOT/source/book/book_xml_parser_style_utils.cpp" \
   "$TEST_ROOT/source/book/book_xml_css_style_utils.cpp" \
   "$TEST_ROOT/source/book/epub_css_class_map.cpp" \
+  "$TEST_ROOT/source/book/epub_css_tokenizer.cpp" \
   -I"$TEST_ROOT/tests/stubs"

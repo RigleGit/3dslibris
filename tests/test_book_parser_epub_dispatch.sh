@@ -104,6 +104,7 @@ fi
   "$TEST_ROOT/source/book/book_xml_text_emit.cpp" \
   "$TEST_ROOT/source/book/book_open_index.cpp" \
   "$TEST_ROOT/source/book/epub_css_class_map.cpp" \
+  "$TEST_ROOT/source/book/epub_css_tokenizer.cpp" \
   "$TEST_ROOT/source/book/heading_layout.cpp" \
   "$TEST_ROOT/source/book/inline_image_layout.cpp" \
   "$TEST_ROOT/source/book/inline_image_page_layout_utils.cpp" \
