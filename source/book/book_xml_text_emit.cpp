@@ -1,5 +1,6 @@
 #include "book/book_xml_text_emit.h"
 
+#include "shared/debug_log.h"
 #include "shared/text_token_constants.h"
 #include "shared/text_render_layout_utils.h"
 #include "utf8proc.h"
@@ -56,6 +57,11 @@ void AlignFreshLineToEffectiveLeftMargin(parsedata_t *p,
 void EmitFreshLineStartX(parsedata_t *p, const FlowEmitMetrics &metrics) {
   if (!p || p->linebegan || p->pen.x == metrics.base_margin_left)
     return;
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF_CAT(p->reporter, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
+               "EmitFreshLineStartX: pen.x=%d base=%d buflen=%d screen=%d",
+               p->pen.x, metrics.base_margin_left, (int)p->buflen, p->screen);
+#endif
   parse_append_page_byte(p, TEXT_LINE_START_X);
   parse_append_page_byte(p, (u32)p->pen.x);
 }
@@ -239,7 +245,7 @@ void EmitFlowedShapedText(
       metrics.display_width - metrics.margin_right - metrics.margin_left;
   size_t unit_index = 0;
   AlignFreshLineToEffectiveLeftMargin(p, metrics);
-  if (metrics.text_indent_px > 0) {
+  if (metrics.text_indent_px > 0 && !p->linebegan) {
     const int indent_limit =
         metrics.display_width - metrics.margin_right - p->pen.x - 1;
     p->pen.x += std::min(metrics.text_indent_px, std::max(0, indent_limit));
@@ -427,8 +433,21 @@ void EmitFlowedShapedText(
     // even when there is no room for a following line.
     {
       if (!CurrentLineFitsEmitMetrics(p->pen.y, metrics)) {
+#ifdef DSLIBRIS_DEBUG
+        const int pre_scr = p->screen;
+#endif
         AdvancePageIfNeeded(p, metrics.lineheight, advance_page_on_overflow,
                             advance_ctx);
+#ifdef DSLIBRIS_DEBUG
+        if (p->screen != pre_scr || (pre_scr == 1 && p->screen == 0)) {
+          DBG_LOGF_CAT(p->reporter, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
+                       "ScreenAdv in EmitFlowedShapedText: scr %d->%d "
+                       "pen.x=%d base=%d linebegan=%d buflen=%d",
+                       pre_scr, p->screen, p->pen.x,
+                       metrics.base_margin_left, p->linebegan ? 1 : 0,
+                       (int)p->buflen);
+        }
+#endif
       }
     }
     EmitFreshLineStartX(p, metrics);

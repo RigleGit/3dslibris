@@ -146,6 +146,15 @@ void TestVisualLineWidthStopsAtParagraphAlignToken() {
                  2);
 }
 
+void TestVisualLineWidthSkipsControlTokens() {
+  const uint32_t buf[] = {TEXT_LINK_START, 99, 'A', TEXT_LINK_END, 'B', '\n'};
+  test::ExpectEq("visual line: link markers ignored",
+                 page_alignment_utils::MeasureFirstVisualLineWidth(
+                     buf, sizeof(buf) / sizeof(buf[0]), 0, false, false, false,
+                     10, MeasureGlyph, NULL),
+                 2);
+}
+
 void TestVisualLineWidthMultipleWordBoundaries() {
   // "A B C D" each 1px, spaces 1px; available = 5
   // "A " = 2, "A B " = 4, "A B C" = 5, "A B C " = 6 > 5
