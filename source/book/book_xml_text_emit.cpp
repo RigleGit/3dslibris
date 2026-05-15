@@ -374,6 +374,7 @@ void EmitFlowedShapedText(
         }
         AdvancePageIfNeeded(p, metrics.lineheight, advance_page_on_overflow,
                             advance_ctx);
+        AlignFreshLineToEffectiveLeftMargin(p, metrics);
         if (nbsp_did_wrap && p->pen.y == pen_y_before_nbsp)
           p->pen.y += (metrics.lineheight + metrics.linespacing);
         EmitFreshLineStartX(p, metrics);
@@ -448,6 +449,7 @@ void EmitFlowedShapedText(
                        (int)p->buflen);
         }
 #endif
+        AlignFreshLineToEffectiveLeftMargin(p, metrics);
       }
     }
     EmitFreshLineStartX(p, metrics);
