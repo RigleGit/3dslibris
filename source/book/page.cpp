@@ -203,6 +203,8 @@ void Page::Draw(Text *ts) {
   bool strikethrough = false;
   bool superscript = false;
   bool subscript = false;
+  int script_normal_height = 0;
+  u8 script_saved_pixelsize = 0;
   bool mono = false;
   bool link_active = false;
   u16 active_link_href_id = 0;
@@ -478,16 +480,28 @@ void Page::Draw(Text *ts) {
       i++;
       superscript = true;
       subscript = false;
+      script_normal_height = ts->GetHeight();
+      script_saved_pixelsize = ts->GetPixelSize();
+      ts->SetPixelSize((u8)std::max(6, (int)(script_saved_pixelsize * 0.70f)));
     } else if (c == TEXT_SUPERSCRIPT_OFF) {
       i++;
       superscript = false;
+      ts->SetPixelSize(script_saved_pixelsize);
+      script_normal_height = 0;
+      script_saved_pixelsize = 0;
     } else if (c == TEXT_SUBSCRIPT_ON) {
       i++;
       subscript = true;
       superscript = false;
+      script_normal_height = ts->GetHeight();
+      script_saved_pixelsize = ts->GetPixelSize();
+      ts->SetPixelSize((u8)std::max(6, (int)(script_saved_pixelsize * 0.70f)));
     } else if (c == TEXT_SUBSCRIPT_OFF) {
       i++;
       subscript = false;
+      ts->SetPixelSize(script_saved_pixelsize);
+      script_normal_height = 0;
+      script_saved_pixelsize = 0;
     } else if (c == TEXT_MONO_ON) {
       i++;
       mono = true;
@@ -711,12 +725,13 @@ void Page::Draw(Text *ts) {
       else
         ts->ClearTextColorOverride();
       if (superscript || subscript) {
+        const int ref_h = script_normal_height > 0 ? script_normal_height
+                                                    : ts->GetHeight();
         const int y_offset =
-            superscript ? -std::max(2, ts->GetHeight() / 3)
-                        : std::max(2, ts->GetHeight() / 4);
+            superscript ? -std::max(2, ref_h / 3)
+                        : std::max(2, ref_h / 4);
         const int shifted_y = std::max(0, base_pen_y + y_offset);
         ts->SetPen((u16)glyph_x0, (u16)shifted_y);
-        ts->SetScriptScale(0.70f);
       }
       if (mono && ts->bold && ts->italic)
         ts->PrintChar(c, TEXT_STYLE_MONO_BOLDITALIC);
@@ -745,7 +760,6 @@ void Page::Draw(Text *ts) {
                          glyph_x1, base_pen_y + 2);
       }
       if (superscript || subscript) {
-        ts->SetScriptScale(1.0f);
         ts->SetPen((u16)glyph_x1, (u16)base_pen_y);
       }
       const int baseline_y = (int)ts->GetPenY();

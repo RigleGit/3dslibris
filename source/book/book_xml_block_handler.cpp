@@ -258,8 +258,9 @@ bool HandleBlockElementStart(
     parse_push(p, TAG_OL);
     book_xml_list_utils::ConfigureElementListSemantics(p, attr);
   } else if (!strcmp(el, "p")) {
-    book_xml_element_style::EnsureBlockBoundaryBeforeBlockStart(
-        p, "p", "paragraph-block-boundary");
+    if (!p->strip_leading_list_marker)
+      book_xml_element_style::EnsureBlockBoundaryBeforeBlockStart(
+          p, "p", "paragraph-block-boundary");
     parse_push(p, TAG_P);
     p->in_paragraph = true;
     p->paragraph_has_content = false;
