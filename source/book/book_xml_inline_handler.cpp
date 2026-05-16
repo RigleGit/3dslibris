@@ -238,6 +238,18 @@ void HandleCssInlineStylingStart(
             spec = elem_css.font_size; // Smaller/Larger already semantic
           }
           has_spec = true;
+        } else {
+          // Keyword font-sizes in inline style= (e.g. font-size: x-large) are
+          // semantic layout intent, not publisher baseline tuning. Apply them
+          // even in user-size mode, capped to the same ±2x range as headings.
+          book_xml_css_style_utils::FontSizeSpec inline_spec;
+          if (book_xml_css_style_utils::TryParseFontSize(
+                  book_xml_css_resolver::ExtractStyleAttr(attr).c_str(),
+                  &inline_spec) &&
+              inline_spec.is_keyword) {
+            spec = inline_spec;
+            has_spec = true;
+          }
         }
       }
       if (has_spec &&
