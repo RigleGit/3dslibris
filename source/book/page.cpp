@@ -584,6 +584,21 @@ void Page::Draw(Text *ts) {
           ts->linebegan = false;
         }
 
+        if (image_plan.mode == INLINE_IMAGE_LAYOUT_INLINE &&
+            !ts->linebegan && ts->GetPenX() == ts->margin.left &&
+            (paragraph_align == book_xml_css_style_utils::TextAlign::Center ||
+             paragraph_align == book_xml_css_style_utils::TextAlign::Right)) {
+          const int available =
+              ts->display.width - ts->margin.left - ts->margin.right;
+          if (image_plan.draw_width < available) {
+            int x_off = paragraph_align ==
+                                book_xml_css_style_utils::TextAlign::Center
+                            ? (available - image_plan.draw_width) / 2
+                            : available - image_plan.draw_width;
+            ts->SetPen((u16)(ts->margin.left + x_off), ts->GetPenY());
+          }
+        }
+
         const int image_pen_x = (int)ts->GetPenX();
         const int image_line_top = (int)ts->GetPenY() - ts->GetHeight();
         const bool image_drawn =
