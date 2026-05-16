@@ -118,6 +118,8 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
     book_xml_css_style_utils::InlineStyleFlags isf{};
     book_xml_css_style_utils::ParseInlineStyleFlags(b, &isf);
     const bool no_underline = isf.no_underline;
+    const bool force_bold   = isf.bold;
+    const bool force_italic = isf.italic;
     const bool reset_bold   = isf.reset_bold;
     const bool reset_italic = isf.reset_italic;
     const MarginTopResult text_indent =
@@ -142,7 +144,8 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
         is_superscript || is_subscript ||
         has_page_break_before || has_page_break_after ||
         has_page_break_inside_avoid ||
-        no_underline || reset_bold || reset_italic ||
+        no_underline || force_bold || force_italic ||
+        reset_bold || reset_italic ||
         text_indent.unit != MarginTopResult::Unit::None ||
         has_text_transform || is_display_block || is_display_none;
 
@@ -189,6 +192,10 @@ void ParseCssIntoClassMap(const char *css_text, size_t len, CssClassMap *out) {
           entry.page_break_inside_avoid = true;
         if (no_underline)
           entry.no_underline = true;
+        if (force_bold)
+          entry.force_bold = true;
+        if (force_italic)
+          entry.force_italic = true;
         if (reset_bold)
           entry.reset_bold = true;
         if (reset_italic)
@@ -436,6 +443,8 @@ bool LookupAllForClassAttr(const std::string &class_attr,
     if (src.has_float) { out->has_float = true; out->float_mode = src.float_mode; }
     if (src.has_clear) { out->has_clear = true; out->clear_mode = src.clear_mode; }
     if (src.no_underline) out->no_underline = true;
+    if (src.force_bold) out->force_bold = true;
+    if (src.force_italic) out->force_italic = true;
     if (src.reset_bold) out->reset_bold = true;
     if (src.reset_italic) out->reset_italic = true;
     if (src.text_indent.unit != MarginTopResult::Unit::None) out->text_indent = src.text_indent;

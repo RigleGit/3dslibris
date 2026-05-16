@@ -36,6 +36,8 @@ struct CssClassMargins {
   bool has_clear;
   ClearMode clear_mode;
   bool no_underline;   // text-decoration: none
+  bool force_bold;     // font-weight: bold/bolder/600+
+  bool force_italic;   // font-style: italic/oblique
   bool reset_bold;     // font-weight: normal/lighter/100-500
   bool reset_italic;   // font-style: normal
   MarginTopResult text_indent;
@@ -52,7 +54,8 @@ struct CssClassMargins {
         page_break_inside_avoid(false), has_float(false),
         float_mode(FloatMode::None), has_clear(false),
         clear_mode(ClearMode::None),
-        no_underline(false), reset_bold(false), reset_italic(false),
+        no_underline(false), force_bold(false), force_italic(false),
+        reset_bold(false), reset_italic(false),
         has_text_transform(false), text_transform(TextTransform::None),
         is_display_block(false), is_display_none(false) {}
 };

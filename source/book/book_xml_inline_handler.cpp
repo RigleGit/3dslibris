@@ -161,6 +161,8 @@ void HandleCssInlineStylingStart(
   if (!style_no_underline) style_no_underline = elem_css.no_underline;
   if (!style_reset_bold) style_reset_bold = elem_css.reset_bold;
   if (!style_reset_italic) style_reset_italic = elem_css.reset_italic;
+  if (!style_bold) style_bold = elem_css.force_bold;
+  if (!style_italic) style_italic = elem_css.force_italic;
   book_xml_css_resolver::ParseElementHiddenFlags(attr, &style_hidden);
   if (elem_css.is_display_none)
     style_hidden = true;
