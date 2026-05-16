@@ -9,6 +9,7 @@
 */
 
 #include "book/book.h"
+#include "shared/screen_dimensions.h"
 
 #include "book/inline_image_page_layout_utils.h"
 #include "book/inline_image_screen_layout.h"
@@ -743,7 +744,7 @@ bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
       ResolveInlineImageScreenLayoutForReadingScreen(
           GetOrientation() != 0, current_screen, ts->margin.bottom,
           ts->GetHeight());
-  req.screen_width = 240;
+  req.screen_width = screen_dims::kTopScreenWidthPx;
   req.screen_height = screen_layout.current_screen_height;
   req.next_screen_height = screen_layout.next_screen_height;
   req.margin_left = ts->margin.left;
@@ -791,7 +792,7 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   }
   const InlineImageLayoutPlan &plan = *plan_ptr;
 
-  const int screen_w = 240;
+  const int screen_w = screen_dims::kTopScreenWidthPx;
   const InlineImageScreenLayout draw_screen_layout =
       ResolveInlineImageScreenLayoutForReadingScreen(
           GetOrientation() != 0, current_screen, ts->margin.bottom,

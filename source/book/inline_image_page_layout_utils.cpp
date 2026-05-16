@@ -1,6 +1,7 @@
 #include "book/inline_image_page_layout_utils.h"
 
 #include "shared/aspect_fit_utils.h"
+#include "shared/screen_dimensions.h"
 
 #include <algorithm>
 
@@ -18,8 +19,8 @@ InlineImagePagePlacement ResolveInlineImagePagePlacement(
     int horizontal_padding, int top_padding, int bottom_padding) {
   InlineImagePagePlacement out{};
 
-  screen_width = ClampPositive(screen_width, 240);
-  screen_height = ClampPositive(screen_height, 320);
+  screen_width = ClampPositive(screen_width, screen_dims::kTopScreenWidthPx);
+  screen_height = ClampPositive(screen_height, screen_dims::kBottomScreenHeightPx);
   src_width = ClampPositive(src_width, 1);
   src_height = ClampPositive(src_height, 1);
   horizontal_padding = std::max(0, horizontal_padding);

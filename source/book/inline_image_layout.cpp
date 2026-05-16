@@ -1,6 +1,7 @@
 #include "book/inline_image_layout.h"
 
 #include "shared/aspect_fit_utils.h"
+#include "shared/screen_dimensions.h"
 #include "shared/text_render_layout_utils.h"
 #include <algorithm>
 
@@ -98,8 +99,8 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
   const bool figure_with_caption =
       req.image_context == INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION;
   const int line_height = aspect_fit_utils::ClampPositive(req.line_height, 16);
-  const int screen_width = aspect_fit_utils::ClampPositive(req.screen_width, 240);
-  const int screen_height = aspect_fit_utils::ClampPositive(req.screen_height, 400);
+  const int screen_width = aspect_fit_utils::ClampPositive(req.screen_width, screen_dims::kTopScreenWidthPx);
+  const int screen_height = aspect_fit_utils::ClampPositive(req.screen_height, screen_dims::kTopScreenHeightPx);
   const int text_width =
       std::max(1, screen_width - req.margin_left - req.margin_right);
   const int limit_y = screen_height - req.margin_bottom;

@@ -28,6 +28,7 @@
 #include "book/page.h"
 
 #include "book/book.h"
+#include "shared/screen_dimensions.h"
 #include "book/inline_image_layout.h"
 #include "book/page_alignment_utils.h"
 #include "book/book_xml_css_style_utils.h"
@@ -601,7 +602,7 @@ void Page::Draw(Text *ts) {
             image_x0 = 0;
             image_y0 = 0;
             image_x1 = ts->display.width;
-            image_y1 = on_first_screen ? 400 : 320;
+            image_y1 = on_first_screen ? screen_dims::kTopScreenHeightPx : screen_dims::kBottomScreenHeightPx;
           } else if (image_plan.mode == INLINE_IMAGE_LAYOUT_BAND) {
             image_x0 = ts->margin.left;
             image_x1 = ts->display.width - ts->margin.right;
@@ -802,7 +803,7 @@ void Page::Draw(Text *ts) {
         const int x0 = std::max(0, entry.bounds.x0 - 1);
         const int y0 = std::max(0, entry.bounds.y0 - 1);
         const int x1 = std::min((int)ts->display.width, entry.bounds.x1 + 1);
-        const int max_y = (target == ts->screenleft) ? 400 : 320;
+        const int max_y = (target == ts->screenleft) ? screen_dims::kTopScreenHeightPx : screen_dims::kBottomScreenHeightPx;
         const int y1 = std::min(max_y, entry.bounds.y1 + 1);
         const u16 focus_color = 0xF800;
         ts->FillRect((u16)x0, (u16)y0, (u16)x1, (u16)(y0 + 1), focus_color);

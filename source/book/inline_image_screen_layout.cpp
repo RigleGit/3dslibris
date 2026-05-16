@@ -1,6 +1,7 @@
 #include "book/inline_image_screen_layout.h"
 
 #include "app/status_layout_utils.h"
+#include "shared/screen_dimensions.h"
 #include "shared/text_render_layout_utils.h"
 
 namespace {
@@ -21,18 +22,18 @@ InlineImageScreenLayout ResolveInlineImageScreenLayout(
       text_render_layout_utils::ResolveCompactReadingBottomMargin(
           full_bottom_margin);
   const int content_full_bottom_margin =
-      ResolveFullReadingImageBottomMargin(400, line_height, full_bottom_margin);
+      ResolveFullReadingImageBottomMargin(screen_dims::kTopScreenHeightPx, line_height, full_bottom_margin);
 
   InlineImageScreenLayout layout{};
   if (current_screen_is_left) {
-    layout.current_screen_height = 400;
+    layout.current_screen_height = screen_dims::kTopScreenHeightPx;
     layout.current_margin_bottom = content_full_bottom_margin;
-    layout.next_screen_height = 320;
+    layout.next_screen_height = screen_dims::kBottomScreenHeightPx;
     layout.next_margin_bottom = compact_bottom_margin;
   } else {
-    layout.current_screen_height = 320;
+    layout.current_screen_height = screen_dims::kBottomScreenHeightPx;
     layout.current_margin_bottom = compact_bottom_margin;
-    layout.next_screen_height = 400;
+    layout.next_screen_height = screen_dims::kTopScreenHeightPx;
     layout.next_margin_bottom = content_full_bottom_margin;
   }
   return layout;

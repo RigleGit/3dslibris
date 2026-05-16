@@ -13,6 +13,7 @@
 
 #include "app/app.h"
 #include "app/library_controller.h"
+#include "shared/screen_dimensions.h"
 
 #include <algorithm>
 #include <dirent.h>
@@ -1044,7 +1045,7 @@ void LibraryController::browser_draw(void) {
     snprintf(versionMsg, sizeof(versionMsg), "v%s", VERSION);
     const int versionWidth =
         app_.ts->GetStringWidth(versionMsg, TEXT_STYLE_BROWSER);
-    int versionX = (240 - versionWidth) / 2;
+    int versionX = (screen_dims::kTopScreenWidthPx - versionWidth) / 2;
     if (versionX < 0)
       versionX = 0;
     app_.ts->SetPixelSize(10);

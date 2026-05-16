@@ -12,6 +12,7 @@
 */
 
 #include "app/app.h"
+#include "shared/screen_dimensions.h"
 
 #include <algorithm>
 #include <dirent.h>
@@ -339,7 +340,7 @@ void SettingsController::PrefsDraw() {
     const int line_gap = 3;
     const int box_w = text_w + pad_x * 2;
     const int box_h = line_h * 2 + line_gap + pad_y * 2;
-    const int box_x = (240 - box_w) / 2;
+    const int box_x = (screen_dims::kTopScreenWidthPx - box_w) / 2;
     const int box_y = 90;
     const int line1x = box_x + (box_w - line1w) / 2;
     const int line2x = box_x + (box_w - line2w) / 2;
