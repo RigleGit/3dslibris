@@ -18,6 +18,7 @@
 #include "book/page.h"
 #include "reader/book_page_nav.h"
 #include "reader/inline_link_utils.h"
+#include "reader/page_repeat_utils.h"
 #include "settings/prefs.h"
 #include "shared/app_flow_utils.h"
 #include "ui/text.h"
@@ -26,6 +27,8 @@
 namespace {
 
 static const uint64_t kInlineLinkHoldThresholdMs = 350;
+static const uint64_t kPageRepeatInitialDelayMs = 400;
+static const uint64_t kPageRepeatIntervalMs = 150;
 static const int kInlineLinkSecondScreenYOffset = 420;
 static const int kTouchLinkMinHitPx = 12;
 static const int kTouchLinkPadPx = 4;
@@ -249,53 +252,84 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
       app.ShowSettingsView(true);
       app.prefs->Write();
     }
-  } else if (keys & ctrl.page_next) {
-    book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty);
-  } else if (keys & ctrl.page_prev) {
-    if (book_nav::TurnPage(book, ts, pagecurrent, *pagecount, -1))
-      status_dirty = true;
-  } else if (keys & app.key.x) {
-    int mode = ts->GetColorMode();
-    int next = (mode + 1) % 6;
-    app.colorMode = next;
-    ts->SetColorMode(next);
-    UiButtonSkin_SetColorMode(next);
-    ts->MarkAllScreensDirty();
-    book_nav::DrawPage(book, ts);
-    status_dirty = true;
-  } else if (keys & app.key.y) {
-    // y without hold: consumed by hold-arm; no-op here
-  } else if (keys & KEY_TOUCH) {
-    touchPosition mapped = app.TouchRead();
-    if (TryFollowTouchLink(book, ts, (int)mapped.px, (int)mapped.py)) {
-      status_dirty = true;
-    } else {
-      const bool forward_zone = ((int)mapped.px >= 120);
-      if (!forward_zone) {
-        if (book_nav::TurnPage(book, ts, pagecurrent, *pagecount, -1))
-          status_dirty = true;
-      } else {
-        book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty);
-      }
+  } else {
+    // D-pad up/down support page repeat: holding the key fires repeated page
+    // turns after an initial delay. Other page-turn keys (A, R, shoulder) do
+    // not repeat.
+    const uint32_t dpad_repeat_keys = app.key.ddown | app.key.dup;
+    const uint32_t non_repeat_held = held & ~dpad_repeat_keys;
+    const uint32_t non_repeat_keys = keys & ~dpad_repeat_keys;
+    bool repeat_next = false;
+    bool repeat_prev = false;
+    if (non_repeat_held == 0 && non_repeat_keys == 0 && (held & app.key.ddown)) {
+      repeat_next = app.ShouldFirePageRepeat(
+          reader::PAGE_REPEAT_NEXT, (keys & app.key.ddown) != 0,
+          (held & app.key.ddown) != 0, now_ms,
+          kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
+    } else if (non_repeat_held == 0 && non_repeat_keys == 0 && (held & app.key.dup)) {
+      repeat_prev = app.ShouldFirePageRepeat(
+          reader::PAGE_REPEAT_PREVIOUS, (keys & app.key.dup) != 0,
+          (held & app.key.dup) != 0, now_ms,
+          kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
+    } else if ((held & dpad_repeat_keys) == 0 || non_repeat_held != 0) {
+      app.ResetPageRepeat();
     }
-  } else if (keys & ctrl.back_to_library) {
-    app.ShowLibraryView();
-    app.prefs->Write();
-  } else if (keys & ctrl.open_settings) {
-    app.ShowSettingsView(true);
-    app.prefs->Write();
-  } else if (keys & (ctrl.bookmark_prev | ctrl.bookmark_next)) {
-    app_flow_utils::BookmarkJumpResult jump = app_flow_utils::FindBookmarkJumpTarget(
-        book->GetBookmarks(), book->GetPosition(),
-        (keys & ctrl.bookmark_prev)
-            ? app_flow_utils::BookmarkJumpDirection::Previous
-            : app_flow_utils::BookmarkJumpDirection::Next);
-    if (jump.found) {
-      book->SetPosition(jump.page);
+
+    if ((keys & ctrl.page_next) || repeat_next) {
+      if (!book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty))
+        app.ResetPageRepeat();
+    } else if ((keys & ctrl.page_prev) || repeat_prev) {
+      if (book_nav::TurnPage(book, ts, pagecurrent, *pagecount, -1))
+        status_dirty = true;
+      else
+        app.ResetPageRepeat();
+    } else if (keys & app.key.x) {
+      int mode = ts->GetColorMode();
+      int next = (mode + 1) % 6;
+      app.colorMode = next;
+      ts->SetColorMode(next);
+      UiButtonSkin_SetColorMode(next);
+      ts->MarkAllScreensDirty();
       book_nav::DrawPage(book, ts);
       status_dirty = true;
+    } else if (keys & app.key.y) {
+      // y without hold: consumed by hold-arm; no-op here
+    } else if (keys & KEY_TOUCH) {
+      app.ResetPageRepeat();
+      touchPosition mapped = app.TouchRead();
+      if (TryFollowTouchLink(book, ts, (int)mapped.px, (int)mapped.py)) {
+        status_dirty = true;
+      } else {
+        const bool forward_zone = ((int)mapped.px >= 120);
+        if (!forward_zone) {
+          if (book_nav::TurnPage(book, ts, pagecurrent, *pagecount, -1))
+            status_dirty = true;
+        } else {
+          book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty);
+        }
+      }
+    } else if (keys & ctrl.back_to_library) {
+      app.ResetPageRepeat();
+      app.ShowLibraryView();
+      app.prefs->Write();
+    } else if (keys & ctrl.open_settings) {
+      app.ResetPageRepeat();
+      app.ShowSettingsView(true);
+      app.prefs->Write();
+    } else if (keys & (ctrl.bookmark_prev | ctrl.bookmark_next)) {
+      app.ResetPageRepeat();
+      app_flow_utils::BookmarkJumpResult jump = app_flow_utils::FindBookmarkJumpTarget(
+          book->GetBookmarks(), book->GetPosition(),
+          (keys & ctrl.bookmark_prev)
+              ? app_flow_utils::BookmarkJumpDirection::Previous
+              : app_flow_utils::BookmarkJumpDirection::Next);
+      if (jump.found) {
+        book->SetPosition(jump.page);
+        book_nav::DrawPage(book, ts);
+        status_dirty = true;
+      }
     }
-  }
+  } // end else (reflowable input)
 
   if (app.IsInlineLinkHoldArmed() && !(held & app.key.y)) {
     const bool consumed = app.IsInlineLinkHoldConsumed();
