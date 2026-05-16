@@ -778,6 +778,14 @@ static void DeleteDirContents(const char *dir) {
 }
 
 void SettingsController::ClearAllCaches() {
+  for (int i = 0; i < app_.BookCount(); i++) {
+    Book *b = app_.books[i];
+    if (!b)
+      continue;
+    b->SetPendingEpubPageCacheSave(false);
+    b->SetPendingMobiPageCacheSave(false);
+  }
+
   DeleteDirContents(paths::GetEpubCacheDir().c_str());
   DeleteDirContents(paths::GetMobiCacheDir().c_str());
   DeleteDirContents(paths::GetMobiCoverMetaCacheDir().c_str());
@@ -797,6 +805,8 @@ void SettingsController::ClearAllCaches() {
     b->coverAttempts = 0;
     b->metadataIndexTried = false;
   }
+
+  app_.MarkBookLayoutDirty();
 
   app_.prefsButtons[PREFS_BUTTON_CLEAR_CACHE].SetLabel2(std::string("cleared!"));
   app_.PrintStatus("Caches cleared");
