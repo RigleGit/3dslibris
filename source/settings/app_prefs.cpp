@@ -403,7 +403,7 @@ void SettingsController::PrefsHandleEvent() {
     if (app_.GetMode() != AppMode::Prefs)
       return;
   } else if (keys & (KEY_SELECT | KEY_START | KEY_B | KEY_Y)) {
-    app_.ShowLibraryView();
+    app_.ReturnFromPrefs();
   } else if (keys & (app_.key.left | app_.key.l)) {
     if (app_.GetPrefsSelectedIndex() > 0) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() - 1);
@@ -457,7 +457,7 @@ void SettingsController::PrefsHandleTouch() {
   };
 
   if (enclosesWithSlack(app_.buttonprefs, footerX, footerY)) {
-    app_.ShowLibraryView();
+    app_.ReturnFromPrefs();
     return;
   }
 

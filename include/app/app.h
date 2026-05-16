@@ -297,6 +297,7 @@ public:
   void SetOrientation(bool flipped);
   void ShowFontView(AppMode app_mode);
   void ShowLibraryView();
+  void ReturnFromPrefs();
   void ShowBookmarksView();
   void ShowChaptersView();
   bool BookNeedsRelayout(Book *book) const;

@@ -1032,6 +1032,21 @@ void App::ShowSettingsView(bool from_book)
   settings_controller_->ShowSettingsView(from_book);
 }
 
+void App::ReturnFromPrefs()
+{
+  if (IsBookSettingsContext() && GetCurrentBook()) {
+    Book *book = GetCurrentBook();
+    if (BookNeedsRelayout(book)) {
+      SetSelectedBook(book);
+      OpenBook();
+    } else {
+      ShowCurrentBookView();
+    }
+  } else {
+    ShowLibraryView();
+  }
+}
+
 void App::MarkBookLayoutDirty()
 {
   // Bump the global layout generation so already-paginated books are reopened
