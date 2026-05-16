@@ -46,11 +46,12 @@ static const int PREFS_LIBRARY_BTN_Y = 286;
 static const int PREFS_LIBRARY_BTN_W = 104;
 static const int PREFS_LIBRARY_BTN_H = 26;
 
-// Book context: two footer buttons side-by-side
-static const int PREFS_BOOK_BACK_BTN_X = 5;
-static const int PREFS_BOOK_BACK_BTN_W = 140;
-static const int PREFS_BOOK_LIB_BTN_X  = 152;
-static const int PREFS_BOOK_LIB_BTN_W  = 160;
+// Book context: two equal footer buttons, 10px margins, 10px gap → 145px each
+static const int PREFS_BOOK_BTN_W       = 145;
+static const int PREFS_BOOK_BACK_BTN_X  = 10;
+static const int PREFS_BOOK_BACK_BTN_W  = PREFS_BOOK_BTN_W;
+static const int PREFS_BOOK_LIB_BTN_X   = 10 + PREFS_BOOK_BTN_W + 10;
+static const int PREFS_BOOK_LIB_BTN_W   = PREFS_BOOK_BTN_W;
 
 static const int kPage2Buttons[] = {
     PREFS_BUTTON_PUBLISHER_FONTSIZE,
