@@ -46,11 +46,6 @@ static const int PREFS_LIBRARY_BTN_Y = 286;
 static const int PREFS_LIBRARY_BTN_W = 104;
 static const int PREFS_LIBRARY_BTN_H = 26;
 
-// Book context: mirror browser footer — back=prev slot, library=settings slot
-static const int PREFS_BOOK_BACK_BTN_X  = screen_layout::kFooterLeftX;
-static const int PREFS_BOOK_BACK_BTN_W  = screen_layout::kFooterNavW;
-static const int PREFS_BOOK_LIB_BTN_X   = screen_layout::kFooterMidX;
-static const int PREFS_BOOK_LIB_BTN_W   = screen_layout::kFooterMidW;
 
 static const int kPage2Buttons[] = {
     PREFS_BUTTON_PUBLISHER_FONTSIZE,
@@ -82,8 +77,8 @@ static void SyncLibraryButtonLayout(Button *button, bool paged, bool book_ctx) {
     button->Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
     button->Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
   } else if (book_ctx) {
-    button->Move(PREFS_BOOK_BACK_BTN_X, screen_layout::kFooterY);
-    button->Resize(PREFS_BOOK_BACK_BTN_W, screen_layout::kFooterButtonH);
+    button->Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
+    button->Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
   } else {
     button->Move(PREFS_LIBRARY_BTN_X, PREFS_LIBRARY_BTN_Y);
     button->Resize(PREFS_LIBRARY_BTN_W, PREFS_LIBRARY_BTN_H);
@@ -269,7 +264,7 @@ void SettingsController::PrefsInit() {
   button_prefs_library_.Init(app_.ts.get());
   button_prefs_library_.SetStyle(BUTTON_STYLE_BOOK);
   button_prefs_library_.Label("library");
-  button_prefs_library_.Resize(PREFS_BOOK_LIB_BTN_W, screen_layout::kFooterButtonH);
+  button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
 }
 
 void SettingsController::PrefsDraw() {
@@ -311,8 +306,8 @@ void SettingsController::PrefsDraw() {
   SyncLibraryButtonLayout(&app_.buttonprefs, paged, book_ctx);
   app_.buttonprefs.Draw(ts->screenright);
   if (book_ctx) {
-    button_prefs_library_.Move(PREFS_BOOK_LIB_BTN_X, screen_layout::kFooterY);
-    button_prefs_library_.Resize(PREFS_BOOK_LIB_BTN_W, screen_layout::kFooterButtonH);
+    button_prefs_library_.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
+    button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
     button_prefs_library_.Draw(ts->screenright);
   } else if (paged) {
     if (prefs_general_page_ == 0) {
@@ -466,8 +461,8 @@ void SettingsController::PrefsHandleTouch() {
   const bool book_ctx_touch = app_.IsBookSettingsContext();
   SyncLibraryButtonLayout(&app_.buttonprefs, !book_ctx_touch, book_ctx_touch);
   if (book_ctx_touch) {
-    button_prefs_library_.Move(PREFS_BOOK_LIB_BTN_X, screen_layout::kFooterY);
-    button_prefs_library_.Resize(PREFS_BOOK_LIB_BTN_W, screen_layout::kFooterButtonH);
+    button_prefs_library_.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
+    button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
   }
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
     for (int dy = -8; dy <= 8; dy += 4) {
