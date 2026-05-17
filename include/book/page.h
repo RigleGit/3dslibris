@@ -52,8 +52,10 @@ class Page {
 	class Book *book;
 	std::vector<u32> storage;
 	std::vector<InlineLinkRenderEntry> rendered_inline_links_;
+	mutable int cached_inline_link_count_;
 	void DrawNumber(Text *ts, u16 *number_screen);
 	void SyncBufferAlias();
+	void InvalidateLinkCountCache();
 
  public:
 	//! Pre-decoded Unicode codepoints, allocated per-page at parse time.

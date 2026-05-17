@@ -120,14 +120,20 @@ Page::Page(Book *b) {
   capacity = 0;
   start = 0;
   end = 0;
+  cached_inline_link_count_ = -1;
 }
 
 Page::~Page() { buf = NULL; }
+
+void Page::InvalidateLinkCountCache() {
+  cached_inline_link_count_ = -1;
+}
 
 void Page::SyncBufferAlias() {
   buf = storage.empty() ? NULL : storage.data();
   length = (int)storage.size();
   capacity = (int)storage.capacity();
+  cached_inline_link_count_ = -1;
 }
 
 void Page::SetBuffer(const u32 *src, int len) {
@@ -172,7 +178,10 @@ void Page::FreeBuffer() {
 }
 
 size_t Page::GetInlineLinkCount() const {
-  return inline_link_utils::CountInlineLinksInBuffer(buf, length);
+  if (cached_inline_link_count_ < 0)
+    cached_inline_link_count_ =
+        (int)inline_link_utils::CountInlineLinksInBuffer(buf, length);
+  return (size_t)cached_inline_link_count_;
 }
 
 void Page::Draw(Text *ts) {
