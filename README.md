@@ -19,6 +19,8 @@
 
 Nintendo 3DS homebrew ebook and manga reader based on the original Nintendo DS project [`dslibris`](https://github.com/rhaleblian/dslibris).
 
+<b>This project was primarily coded using Claude, an LLM, via opencode.</b>
+
 ## Features
 
 - Reads ebooks and manga on Nintendo 3DS hardware and Azahar.
