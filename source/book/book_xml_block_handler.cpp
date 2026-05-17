@@ -335,6 +335,10 @@ bool HandleBlockElementStart(
                              p->last_p_class, mtr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "p", "paragraph-top", mtr, line_h, default_lf);
+      using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
+      if (mtr.unit != Unit::None && !mtr.negative && mtr.value > 0 &&
+          p->pending_block_spacing_lf < 1)
+        p->pending_block_spacing_lf = 1;
     } else {
       const char *phase = "top-skipped";
       if (tight_list_paragraph)
@@ -576,7 +580,7 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
                              p->last_p_class, mbr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "p", "paragraph-bottom", mbr, line_h, default_lf);
-      if (p->pending_block_spacing_lf < 1)
+      if (!p->pending_block_spacing_from_css && p->pending_block_spacing_lf < 1)
         p->pending_block_spacing_lf = 1;
     }
     RestoreActiveBlockTextAlignMarker(p);

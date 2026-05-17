@@ -193,16 +193,12 @@ void QueueBlockSpacingFromMarginResult(
     QueueBlockSpacingLines(p, default_lf, tag, reason, false);
     return;
   }
-  if (mtr.negative) {
-    QueueBlockSpacingLines(p, default_lf, tag, reason, false);
+  if (mtr.negative || mtr.value == 0) {
+    SuppressPendingBlockSpacingFromCss(p, tag, reason);
     return;
   }
-  if (mtr.value == 0) {
-    QueueBlockSpacingLines(p, default_lf, tag, reason, false);
-    return;
-  }
-  const int css_lf = (line_h > 0) ? ((mtr.value + line_h - 1) / line_h) : 0;
-  const int resolved = (css_lf > default_lf) ? css_lf : default_lf;
+  const int css_lf = book_xml_parser_style_utils::ResolveCssMarginLinefeeds(mtr, line_h);
+  const int resolved = std::max(css_lf, default_lf);
   const int clamped = book_xml_parser_style_utils::ClampResolvedBlockLinefeeds(resolved);
   QueueBlockSpacingLines(p, clamped, tag, reason, true);
 }
