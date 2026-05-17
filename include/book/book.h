@@ -169,11 +169,10 @@ public:
     int margin_top;
     int margin_bottom;
     std::string regular_font;
-    bool respect_publisher_font_size;
     EpubCacheSaveParams()
         : pixel_size(0), line_spacing(0), paragraph_spacing(0),
           paragraph_indent(0), orientation(0), margin_left(0), margin_right(0),
-          margin_top(0), margin_bottom(0), respect_publisher_font_size(false) {}
+          margin_top(0), margin_bottom(0) {}
   };
   EpubCacheSaveParams epub_cache_save_params;
   bool mobi_page_cache_save_pending;
@@ -389,7 +388,7 @@ public:
       int pixel_size, int line_spacing, int paragraph_spacing,
       int paragraph_indent, int orientation,
       int margin_left, int margin_right, int margin_top, int margin_bottom,
-      const char *regular_font, bool respect_publisher_font_size = false);
+      const char *regular_font);
   const EpubCacheSaveParams &GetEpubCacheSaveParams() const;
   bool HasPendingMobiPageCacheSave() const;
   void SetPendingMobiPageCacheSave(bool pending);

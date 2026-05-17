@@ -366,7 +366,7 @@ void TestResolveFontSizePxHandlesRelativeValues() {
   px.unit = S::Unit::Px;
   px.value_x100 = 1950;
   test::ExpectEq("px resolved",
-                 book_xml_css_style_utils::ResolveFontSizePx(px, 14), 20);
+                 book_xml_css_style_utils::ResolveFontSizePx(px, 14), 17);
 
   S percent{};
   percent.unit = S::Unit::Percent;

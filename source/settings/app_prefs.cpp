@@ -50,11 +50,10 @@ static const int PREFS_LIBRARY_BTN_H = 26;
 
 static const int kPage2Buttons[] = {
     PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN,
-    PREFS_BUTTON_PUBLISHER_FONTSIZE,
     PREFS_BUTTON_RESET_DEFAULTS,
     PREFS_BUTTON_CLEAR_CACHE,
 };
-static const int kPage2ButtonCount = 4;
+static const int kPage2ButtonCount = 3;
 static const int PREFS_ROW_X = 5;
 static const int PREFS_ROW_W = 230;
 static const u32 kGoToPageCoarseStep = 10;
@@ -720,11 +719,6 @@ void SettingsController::PrefsRefreshButton(int index) {
                                 : std::string("(open selected book)"));
     }
     break;
-  case PREFS_BUTTON_PUBLISHER_FONTSIZE:
-    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_FONTSIZE].SetLabel2(
-        app_.prefs->respect_publisher_font_size ? std::string("On")
-                                                : std::string("Off"));
-    break;
   case PREFS_BUTTON_RESET_DEFAULTS:
     app_.prefsButtons[PREFS_BUTTON_RESET_DEFAULTS].SetLabel2(std::string("restore defaults >"));
     break;
@@ -830,7 +824,6 @@ void SettingsController::ResetToDefaults() {
   app_.prefs->swapshoulder = false;
   app_.prefs->browser_view_mode = BROWSER_VIEW_GALLERY;
   app_.prefs->fixed_layout_rtl = false;
-  app_.prefs->respect_publisher_font_size = false;
   app_.prefs->circle_pad_page_turn = true;
   app_.MarkBookLayoutDirty();
   app_.prefs->Write();
@@ -946,15 +939,6 @@ void SettingsController::PrefsHandlePress() {
 
   if (selected_button == PREFS_BUTTON_FONT_CONFIG) {
     app_.ShowFontView(AppMode::PrefsFont);
-    return;
-  }
-
-  if (selected_button == PREFS_BUTTON_PUBLISHER_FONTSIZE) {
-    app_.prefs->respect_publisher_font_size = !app_.prefs->respect_publisher_font_size;
-    PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_FONTSIZE);
-    app_.MarkBookLayoutDirty();
-    app_.prefs->Write();
-    app_.MarkPrefsDirty();
     return;
   }
 

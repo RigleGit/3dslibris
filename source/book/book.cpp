@@ -722,8 +722,7 @@ void Book::SetPendingEpubPageCacheSave(bool pending) {
 void Book::SetPendingEpubPageCacheSaveWithParams(
     int pixel_size, int line_spacing, int paragraph_spacing,
     int paragraph_indent, int orientation, int margin_left, int margin_right,
-    int margin_top, int margin_bottom, const char *regular_font,
-    bool respect_publisher_font_size) {
+    int margin_top, int margin_bottom, const char *regular_font) {
   epub_page_cache_save_pending = true;
   epub_cache_save_params.pixel_size = pixel_size;
   epub_cache_save_params.line_spacing = line_spacing;
@@ -735,8 +734,6 @@ void Book::SetPendingEpubPageCacheSaveWithParams(
   epub_cache_save_params.margin_top = margin_top;
   epub_cache_save_params.margin_bottom = margin_bottom;
   epub_cache_save_params.regular_font = regular_font ? regular_font : "";
-  epub_cache_save_params.respect_publisher_font_size =
-      respect_publisher_font_size;
 }
 
 const Book::EpubCacheSaveParams &Book::GetEpubCacheSaveParams() const {

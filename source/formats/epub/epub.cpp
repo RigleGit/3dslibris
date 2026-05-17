@@ -435,8 +435,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
                                 deps.ts ? (int)deps.ts->margin.right : 0,
                                 deps.ts ? (int)deps.ts->margin.top : 0,
                                 deps.ts ? (int)deps.ts->margin.bottom : 0,
-                                deps.ts ? deps.ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : NULL,
-                                deps.prefs ? deps.prefs->respect_publisher_font_size : false)) {
+                                deps.ts ? deps.ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : NULL)) {
     if (reporter) {
       DBG_LOGF(reporter, "EPUB: page cache hit pages=%u chapters=%u",
                (unsigned)book->GetPageCount(),
@@ -462,8 +461,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
             deps.ts ? (int)deps.ts->margin.top : 0,
             deps.ts ? (int)deps.ts->margin.bottom : 0,
             deps.ts ? deps.ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : NULL,
-            false,
-            deps.prefs ? deps.prefs->respect_publisher_font_size : false);
+            false);
       }
     }
     return FinalizeEpubParse(uf, &parsedata, book, name, deps, 0, false);

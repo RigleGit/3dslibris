@@ -252,7 +252,7 @@ static void CallTryLoad(Book *book, const char *path, bool *result) {
   *result = epub_page_cache::TryLoad(book, path,
                                      14, 2, 0, 0, 0,
                                      12, 12, 10, 36,
-                                     nullptr, false);
+                                     nullptr);
 }
 
 void TestEpubPageCacheTryLoadNullBook() {
@@ -284,7 +284,7 @@ void TestEpubPageCacheSaveNullBook() {
   // Save with null book must not crash (bails immediately).
   epub_page_cache::Save(nullptr, "/tmp/x.epub",
                         14, 2, 0, 0, 0, 12, 12, 10, 36,
-                        nullptr, false, false);
+                        nullptr, false);
   g_pass++;  // no crash
 }
 
@@ -293,7 +293,7 @@ void TestEpubPageCacheSaveZeroPages() {
   Book *book = MakeEpubBook("/tmp", "x.epub");
   epub_page_cache::Save(book, "/tmp/x.epub",
                         14, 2, 0, 0, 0, 12, 12, 10, 36,
-                        nullptr, false, false);
+                        nullptr, false);
   g_pass++;  // no crash
   book->Close();
   delete book;
@@ -302,7 +302,7 @@ void TestEpubPageCacheSaveZeroPages() {
 void TestEpubStreamWriterNullBook() {
   epub_page_cache::StreamWriter sw;
   bool ok = sw.Begin(nullptr, "/tmp/x.epub",
-                     14, 2, 0, 0, 0, 12, 12, 10, 36, nullptr, false);
+                     14, 2, 0, 0, 0, 12, 12, 10, 36, nullptr);
   ExpectFalse("StreamWriter::Begin null book returns false", ok);
   ExpectFalse("StreamWriter not open after failed Begin", sw.IsOpen());
 }
@@ -311,7 +311,7 @@ void TestEpubStreamWriterNullPath() {
   Book *book = MakeEpubBook("/tmp", "x.epub");
   epub_page_cache::StreamWriter sw;
   bool ok = sw.Begin(book, nullptr,
-                     14, 2, 0, 0, 0, 12, 12, 10, 36, nullptr, false);
+                     14, 2, 0, 0, 0, 12, 12, 10, 36, nullptr);
   ExpectFalse("StreamWriter::Begin null path returns false", ok);
   ExpectFalse("StreamWriter not open after null path", sw.IsOpen());
   book->Close();
@@ -365,6 +365,7 @@ static std::string CacheFilePath(const char *cache_dir) {
   lp.margin_top = kCacheMt;
   lp.margin_bottom = kCacheMb;
   lp.regular_font = "";
+  lp.variant_token = "pub2";
   return page_cache_utils::BuildPageCachePath(cache_dir, ".epc", kCacheBookPath, lp);
 }
 
@@ -372,14 +373,14 @@ static void InvokeSave(Book *book, const char *path) {
   epub_page_cache::Save(book, path,
                         kCachePx, kCacheLS, kCachePS, kCachePI, kCacheOri,
                         kCacheMl, kCacheMr, kCacheMt, kCacheMb,
-                        nullptr, false, false);
+                        nullptr, false);
 }
 
 static bool InvokeTryLoad(Book *book, const char *path) {
   return epub_page_cache::TryLoad(book, path,
                                   kCachePx, kCacheLS, kCachePS, kCachePI, kCacheOri,
                                   kCacheMl, kCacheMr, kCacheMt, kCacheMb,
-                                  nullptr, false);
+                                  nullptr);
 }
 
 // ---------------------------------------------------------------------------

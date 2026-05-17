@@ -268,7 +268,9 @@ bool TryParseFontSize(const char *style, FontSizeSpec *out) {
 int ResolveFontSizePx(const FontSizeSpec &spec, int base_px) {
   switch (spec.unit) {
   case FontSizeSpec::Unit::Px:
-    return RoundDivInt(spec.value_x100, 100);
+    // Scale publisher px relative to the standard 16px CSS baseline so that
+    // the user's font-size preference acts as a global scale factor.
+    return RoundDivInt(spec.value_x100 * base_px, 16 * 100);
   case FontSizeSpec::Unit::Percent:
     return RoundDivInt(base_px * spec.value_x100, 10000);
   case FontSizeSpec::Unit::Em:

@@ -6,7 +6,7 @@ int main() {
   test::ExpectEq("general visible count",
                  settings::VisiblePrefsButtonCount(false, false), 7);
   test::ExpectEq("book visible count without line wrap",
-                 settings::VisiblePrefsButtonCount(true, false), 7);
+                 settings::VisiblePrefsButtonCount(true, false), 6);
   test::ExpectEq("book visible count with line wrap",
                  settings::VisiblePrefsButtonCount(true, true), 7);
 
@@ -28,10 +28,8 @@ int main() {
   test::ExpectEq("book slot 3", settings::PrefsButtonForVisibleSlot(true, false, 3),
                  PREFS_BUTTON_ORIENTATION);
   test::ExpectEq("book slot 4", settings::PrefsButtonForVisibleSlot(true, false, 4),
-                 PREFS_BUTTON_PUBLISHER_FONTSIZE);
-  test::ExpectEq("book slot 5", settings::PrefsButtonForVisibleSlot(true, false, 5),
                  PREFS_BUTTON_INDEX);
-  test::ExpectEq("book slot 6", settings::PrefsButtonForVisibleSlot(true, false, 6),
+  test::ExpectEq("book slot 5", settings::PrefsButtonForVisibleSlot(true, false, 5),
                  PREFS_BUTTON_BOOKMARKS);
 
   test::ExpectEq("book slot 0 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 0),

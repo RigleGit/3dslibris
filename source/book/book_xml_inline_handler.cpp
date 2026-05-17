@@ -194,25 +194,18 @@ void HandleCssInlineStylingStart(
     if (!is_heading_el) {
       book_xml_css_style_utils::FontSizeSpec spec;
       bool has_spec = false;
-      // Publisher CSS font-size (inline style= and class-based) is gated
-      // behind the respect_publisher_font_size preference. When off (User
-      // size mode), only <small>/<big> semantic tags are allowed to change
-      // inline font size. Element selectors such as body/p/div from
-      // stylesheets are not resolved here and are therefore unaffected.
-      const bool use_publisher_font_size =
-          p->prefs && p->prefs->respect_publisher_font_size;
-      if (use_publisher_font_size) {
-        has_spec = book_xml_css_style_utils::TryParseFontSize(
-            book_xml_css_resolver::ExtractStyleAttr(attr).c_str(), &spec);
-        if (!has_spec &&
-            elem_css.font_size.unit !=
-                book_xml_css_style_utils::FontSizeSpec::Unit::None) {
-          spec = elem_css.font_size;
-          has_spec = true;
-        }
+      // Always honor publisher CSS font-size. Absolute px values are scaled
+      // relative to the 16px CSS baseline so the user's font-size preference
+      // acts as a global scale factor on all publisher proportions.
+      has_spec = book_xml_css_style_utils::TryParseFontSize(
+          book_xml_css_resolver::ExtractStyleAttr(attr).c_str(), &spec);
+      if (!has_spec &&
+          elem_css.font_size.unit !=
+              book_xml_css_style_utils::FontSizeSpec::Unit::None) {
+        spec = elem_css.font_size;
+        has_spec = true;
       }
-      // <small>/<big> and CSS keyword sizes (small, x-small, smaller, etc.)
-      // are semantic choices — apply regardless of the publisher font-size preference.
+      // <small>/<big> semantic elements override if no CSS font-size present.
       if (!has_spec) {
         if (!strcmp(el, "small")) {
           spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Smaller;
@@ -220,36 +213,6 @@ void HandleCssInlineStylingStart(
         } else if (!strcmp(el, "big")) {
           spec.unit = book_xml_css_style_utils::FontSizeSpec::Unit::Larger;
           has_spec = true;
-        } else if (elem_css.font_size.unit !=
-                       book_xml_css_style_utils::FontSizeSpec::Unit::None &&
-                   elem_css.font_size.is_keyword) {
-          // In user-size mode the absolute CSS baseline (browser 16px) is
-          // irrelevant. Remap absolute keyword percents to the same semantic
-          // steps used by <small>/<big> so that "font-size: small" and
-          // <small> produce identical output.
-          using U = book_xml_css_style_utils::FontSizeSpec::Unit;
-          if (elem_css.font_size.unit == U::Percent) {
-            spec.unit = (elem_css.font_size.value_x100 < 10000) ? U::Smaller
-                      : (elem_css.font_size.value_x100 > 10000) ? U::Larger
-                      : U::None;
-            spec.value_x100 = 0;
-            spec.is_keyword = true;
-          } else {
-            spec = elem_css.font_size; // Smaller/Larger already semantic
-          }
-          has_spec = true;
-        } else {
-          // Keyword font-sizes in inline style= (e.g. font-size: x-large) are
-          // semantic layout intent, not publisher baseline tuning. Apply them
-          // even in user-size mode, capped to the same ±2x range as headings.
-          book_xml_css_style_utils::FontSizeSpec inline_spec;
-          if (book_xml_css_style_utils::TryParseFontSize(
-                  book_xml_css_resolver::ExtractStyleAttr(attr).c_str(),
-                  &inline_spec) &&
-              inline_spec.is_keyword) {
-            spec = inline_spec;
-            has_spec = true;
-          }
         }
       }
       if (has_spec &&

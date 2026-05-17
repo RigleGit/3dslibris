@@ -47,8 +47,7 @@ int FinalizeEpubParse(unzFile uf, epub_data_t *parsedata, Book *book,
           deps.ts ? (int)deps.ts->margin.bottom : 0,
           deps.regular_font_path.empty()
               ? NULL
-              : deps.regular_font_path.c_str(),
-          deps.prefs ? deps.prefs->respect_publisher_font_size : false);
+              : deps.regular_font_path.c_str());
     }
   }
   if (uf)

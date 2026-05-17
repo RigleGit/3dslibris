@@ -248,7 +248,7 @@ void TestComputeHeadingFontSizeUsesCssAndClamps() {
   test::ExpectEq("inline font-size overrides class",
                  book_xml_parser_style_utils::ComputeHeadingFontSize(
                      14, 3, "font-size: 19px;", "tiny", classes),
-                 19);
+                 17);
 }
 
 void TestComputeHeadingFontSizeSupportsRelativeCssUnits() {
