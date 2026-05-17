@@ -18,6 +18,7 @@
 #include "book/book_xml_text_emit.h"
 #include "book/epub_css_class_map.h"
 #include "parse.h"
+#include "shared/debug_log.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_render_layout_utils.h"
 #include "shared/text_unicode_utils.h"
@@ -493,9 +494,32 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
     if (ti.unit == MarginTopResult::Unit::None)
       ti = epub_css_class_map::LookupTextIndentForClassAttr(
           p->last_p_class, p->css_class_map);
+    // CSS text-indent is inherited — fall back to the parent div's class if
+    // neither the inline style nor the <p> class defines one.
+    if (ti.unit == MarginTopResult::Unit::None && !p->last_div_class.empty())
+      ti = epub_css_class_map::LookupTextIndentForClassAttr(
+          p->last_div_class, p->css_class_map);
+#ifdef DSLIBRIS_DEBUG
+    {
+      const char *unit_str = (ti.unit == MarginTopResult::Unit::None) ? "none" :
+                             (ti.unit == MarginTopResult::Unit::Px) ? "px" :
+                             (ti.unit == MarginTopResult::Unit::Percent) ? "%" :
+                             (ti.unit == MarginTopResult::Unit::Em) ? "em" : "?";
+      DBG_LOGF(p->book->GetStatusReporter(),
+        "TextIndent cls=%s sty=%s unit=%s val=%d neg=%d dispw=%d pxsz=%d",
+        p->last_p_class.empty() ? "-" : p->last_p_class.c_str(),
+        p->last_p_style.empty() ? "-" : p->last_p_style.c_str(),
+        unit_str, ti.value, ti.negative ? 1 : 0,
+        ts->display.width, (int)ts->GetPixelSize());
+    }
+#endif
     if (ti.unit != MarginTopResult::Unit::None && !ti.negative) {
       const int px = book_xml_css_style_utils::ResolveHorizontalMarginPx(
           ti, ts->display.width, (int)ts->GetPixelSize());
+#ifdef DSLIBRIS_DEBUG
+      DBG_LOGF(p->book->GetStatusReporter(),
+        "TextIndent resolved px=%d (applied=%d)", px, px > 0 ? 1 : 0);
+#endif
       if (px > 0)
         emit_metrics.text_indent_px = px;
     }

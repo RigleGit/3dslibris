@@ -12,6 +12,7 @@
 #include "book/book_xml_parser_style_utils.h"
 #include "book/page.h"
 #include "parse.h"
+#include "shared/debug_log.h"
 #include "shared/text_render_layout_utils.h"
 #include "ui/text.h"
 
@@ -69,6 +70,7 @@ void ClearPendingBlockSpacing(parsedata_t *p) {
   p->pending_block_spacing_lf = 0;
   p->pending_block_spacing_reason = NULL;
   p->pending_block_spacing_from_css = false;
+  p->pending_block_spacing_suppress_only = false;
 }
 
 void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
@@ -162,25 +164,49 @@ void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
   if (!p || lines <= 0)
     return;
   p->pending_block_break = true;
+  p->pending_block_spacing_suppress_only = false;
   const int new_opt = lines - 1;
   const int prev_opt = p->pending_block_spacing_lf;
-  const int next_opt = (new_opt > prev_opt) ? new_opt : prev_opt;
+  // When CSS explicitly specifies spacing after non-CSS default accumulation,
+  // CSS takes precedence (margin collapsing: CSS value overrides default).
+  const bool css_overrides_default = from_css && !p->pending_block_spacing_from_css;
+  const int next_opt = css_overrides_default
+      ? new_opt
+      : (new_opt > prev_opt ? new_opt : prev_opt);
   p->pending_block_spacing_lf = next_opt;
   if (reason)
     p->pending_block_spacing_reason = reason;
   if (from_css)
     p->pending_block_spacing_from_css = true;
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(p->book->GetStatusReporter(),
+    "Queue[%s/%s] lines=%d opt=%d->%d from_css=%d pen_y=%d lb=%d",
+    tag ? tag : "?", reason ? reason : "?",
+    lines, prev_opt, next_opt, from_css ? 1 : 0,
+    p->pen.y, p->linebegan ? 1 : 0);
+#else
   (void)tag;
+#endif
 }
 
 void SuppressPendingBlockSpacingFromCss(parsedata_t *p, const char *tag,
                                         const char *reason) {
   if (!p)
     return;
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(p->book->GetStatusReporter(),
+    "Suppress[%s/%s] pbb=%d pbl=%d->0 pen_y=%d lb=%d",
+    tag ? tag : "?", reason ? reason : "?",
+    p->pending_block_break ? 1 : 0,
+    p->pending_block_spacing_lf,
+    p->pen.y, p->linebegan ? 1 : 0);
+#else
   (void)tag; (void)reason;
+#endif
   p->pending_block_spacing_lf = 0;
   p->pending_block_spacing_reason = "css-suppress";
   p->pending_block_spacing_from_css = true;
+  p->pending_block_spacing_suppress_only = true;
   // pending_block_break is intentionally NOT cleared.
 }
 
@@ -189,6 +215,20 @@ void QueueBlockSpacingFromMarginResult(
     const book_xml_css_style_utils::MarginTopResult &mtr,
     int line_h, int default_lf) {
   using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
+#ifdef DSLIBRIS_DEBUG
+  {
+    const char *unit_str = (mtr.unit == Unit::None) ? "none" :
+                           (mtr.unit == Unit::Px) ? "px" :
+                           (mtr.unit == Unit::Percent) ? "%" :
+                           (mtr.unit == Unit::Em) ? "em" : "?";
+    DBG_LOGF(p->book->GetStatusReporter(),
+      "QueueFromMargin[%s/%s]: unit=%s val=%d neg=%d lh=%d def=%d pbb=%d pbl=%d",
+      tag ? tag : "?", reason ? reason : "?",
+      unit_str, mtr.value, mtr.negative ? 1 : 0,
+      line_h, default_lf,
+      p->pending_block_break ? 1 : 0, p->pending_block_spacing_lf);
+  }
+#endif
   if (mtr.unit == Unit::None) {
     QueueBlockSpacingLines(p, default_lf, tag, reason, false);
     return;
@@ -197,16 +237,34 @@ void QueueBlockSpacingFromMarginResult(
     SuppressPendingBlockSpacingFromCss(p, tag, reason);
     return;
   }
+  // Snapshot suppress_only before the queue clears it: if the preceding element
+  // explicitly suppressed its bottom margin (via CSS margin: 0), we need to
+  // restore one line of spacing after this element's CSS margin-top queues.
+  const bool was_suppressed = p->pending_block_spacing_suppress_only;
   const int css_lf = book_xml_parser_style_utils::ResolveCssMarginLinefeeds(mtr, line_h);
   const int resolved = std::max(css_lf, default_lf);
   const int clamped = book_xml_parser_style_utils::ClampResolvedBlockLinefeeds(resolved);
   QueueBlockSpacingLines(p, clamped, tag, reason, true);
+  // After a CSS suppress → CSS margin-top sequence, ensure at least one optional
+  // spacing line so the stanza/section separator renders visibly.
+  if (was_suppressed && p->pending_block_spacing_lf < 1)
+    p->pending_block_spacing_lf = 1;
 }
 
 void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
                                            const char *next_tag) {
   if (!p || !p->ts || !p->book)
     return;
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(p->book->GetStatusReporter(),
+    "FlushPending ENTER[->%s] pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d vis=%d",
+    next_tag ? next_tag : "?",
+    p->pending_block_break ? 1 : 0,
+    p->pending_block_spacing_lf,
+    p->pending_block_spacing_from_css ? 1 : 0,
+    p->pen.y, p->linebegan ? 1 : 0, p->screen,
+    p->current_screen_has_drawable_content ? 1 : 0);
+#endif
   if (!p->pending_block_break && p->pending_block_spacing_lf <= 0) {
     ClearPendingBlockSpacing(p);
     return;
@@ -267,6 +325,12 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
     for (int i = 0; i < emit_opt; i++)
       LinefeedRLocal(p, next_tag ? next_tag : "?", "pending-spacing", 0);
   }
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(p->book->GetStatusReporter(),
+    "FlushPending EXIT[->%s] opt=%d avail=%d emit_opt=%d pen_y=%d scr=%d lb=%d",
+    next_tag ? next_tag : "?",
+    opt, available, emit_opt, p->pen.y, p->screen, p->linebegan ? 1 : 0);
+#endif
 
   ClearPendingBlockSpacing(p);
 }

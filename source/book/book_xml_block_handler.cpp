@@ -22,6 +22,7 @@
 #include "book/page.h"
 #include "book/page_buffer_utils.h"
 #include "parse.h"
+#include "shared/debug_log.h"
 #include "shared/string_utils.h"
 #include "shared/text_token_constants.h"
 #include "ui/text.h"
@@ -95,8 +96,28 @@ static void LogResolvedBlockMargin(
     const std::string &style_attr, const std::string &class_attr,
     const book_xml_css_style_utils::MarginTopResult &m,
     int line_h, int default_lf, int final_lf) {
+#ifdef DSLIBRIS_DEBUG
+  using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
+  const char *unit_str = (m.unit == Unit::None) ? "none" :
+                         (m.unit == Unit::Px) ? "px" :
+                         (m.unit == Unit::Percent) ? "%" :
+                         (m.unit == Unit::Em) ? "em" : "?";
+  DBG_LOGF(p->book->GetStatusReporter(),
+    "Margin[%s/%s] cls=%s sty=%s unit=%s val=%d neg=%d lh=%d def=%d final=%d "
+    "pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d",
+    tag, phase,
+    class_attr.empty() ? "-" : class_attr.c_str(),
+    style_attr.empty() ? "-" : style_attr.c_str(),
+    unit_str, m.value, m.negative ? 1 : 0,
+    line_h, default_lf, final_lf,
+    p->pending_block_break ? 1 : 0,
+    p->pending_block_spacing_lf,
+    p->pending_block_spacing_from_css ? 1 : 0,
+    p->pen.y, p->linebegan ? 1 : 0);
+#else
   (void)p; (void)tag; (void)phase; (void)style_attr;
   (void)class_attr; (void)m; (void)line_h; (void)default_lf; (void)final_lf;
+#endif
 }
 
 static FlowEmissionFns MakeLocalFlowEmissionFns() {
@@ -335,10 +356,15 @@ bool HandleBlockElementStart(
                              p->last_p_class, mtr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "p", "paragraph-top", mtr, line_h, default_lf);
-      using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
-      if (mtr.unit != Unit::None && !mtr.negative && mtr.value > 0 &&
-          p->pending_block_spacing_lf < 1)
-        p->pending_block_spacing_lf = 1;
+#ifdef DSLIBRIS_DEBUG
+      DBG_LOGF(p->book->GetStatusReporter(),
+        "P-START cls=%s pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d buflen=%d",
+        p->last_p_class.empty() ? "-" : p->last_p_class.c_str(),
+        p->pending_block_break ? 1 : 0,
+        p->pending_block_spacing_lf,
+        p->pending_block_spacing_from_css ? 1 : 0,
+        p->pen.y, p->linebegan ? 1 : 0, p->screen, p->buflen);
+#endif
     } else {
       const char *phase = "top-skipped";
       if (tight_list_paragraph)
@@ -582,6 +608,15 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
           p, "p", "paragraph-bottom", mbr, line_h, default_lf);
       if (!p->pending_block_spacing_from_css && p->pending_block_spacing_lf < 1)
         p->pending_block_spacing_lf = 1;
+#ifdef DSLIBRIS_DEBUG
+      DBG_LOGF(p->book->GetStatusReporter(),
+        "P-END cls=%s pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d",
+        p->last_p_class.empty() ? "-" : p->last_p_class.c_str(),
+        p->pending_block_break ? 1 : 0,
+        p->pending_block_spacing_lf,
+        p->pending_block_spacing_from_css ? 1 : 0,
+        p->pen.y, p->linebegan ? 1 : 0, p->screen);
+#endif
     }
     RestoreActiveBlockTextAlignMarker(p);
     p->in_paragraph = false;
@@ -600,6 +635,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     }
     p->block_margin_left = 0;
     p->block_margin_right = 0;
+    p->last_div_class.clear();
+    p->last_div_style.clear();
   } else if (!strcmp(el, "h1")) {
     book_xml_flow_emission::FlushInlineTailAndDeferredStyle(p, ts, fns);
     {

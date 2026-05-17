@@ -13,6 +13,7 @@
 #include "book/book_xml_screen_advance.h"
 #include "book/epub_css_class_map.h"
 #include "parse.h"
+#include "shared/debug_log.h"
 #include "shared/text_render_layout_utils.h"
 #include "ui/text.h"
 
@@ -215,6 +216,16 @@ void EnsureBlockBoundaryBeforeBlockStart(parsedata_t *p, const char *tag,
                                           const char *reason) {
   if (!p || !p->ts || !p->book)
     return;
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(p->book->GetStatusReporter(),
+    "EnsureBoundary ENTER[%s/%s] pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d vis=%d buflen=%d",
+    tag ? tag : "?", reason ? reason : "?",
+    p->pending_block_break ? 1 : 0,
+    p->pending_block_spacing_lf,
+    p->pending_block_spacing_from_css ? 1 : 0,
+    p->pen.y, p->linebegan ? 1 : 0, p->screen,
+    p->current_screen_has_drawable_content ? 1 : 0, p->buflen);
+#endif
 
   if (book_xml_screen_advance::IsCurrentReadingScreenVisuallyEmpty(p)) {
     p->pending_block_break = false;
@@ -255,6 +266,11 @@ void EnsureBlockBoundaryBeforeBlockStart(parsedata_t *p, const char *tag,
   };
 
   if (p->pending_block_break) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(p->book->GetStatusReporter(),
+      "EnsureBoundary PBB-path[%s] pen_y=%d lb=%d scr=%d",
+      tag ? tag : "?", p->pen.y, p->linebegan ? 1 : 0, p->screen);
+#endif
     advance_or_linefeed();
     p->pending_block_break = false;
     return;
@@ -268,6 +284,14 @@ void EnsureBlockBoundaryBeforeBlockStart(parsedata_t *p, const char *tag,
       (p->buflen > 0 &&
        !buffer_already_broken &&
        !book_xml_screen_advance::IsCurrentReadingScreenVisuallyEmpty(p));
+
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(p->book->GetStatusReporter(),
+    "EnsureBoundary needs=%d lb=%d buf_broken=%d pen_y=%d scr=%d",
+    needs_boundary ? 1 : 0,
+    p->linebegan ? 1 : 0, buffer_already_broken ? 1 : 0,
+    p->pen.y, p->screen);
+#endif
 
   if (!needs_boundary)
     return;
