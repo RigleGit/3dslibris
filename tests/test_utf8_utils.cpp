@@ -97,6 +97,12 @@ void TestNormalizeFsFilenameForIo() {
   ExpectEq("leave utf8 filename",
            utf8_utils::NormalizeFsFilenameForIo("libro\xc3\xb1.epub"),
            "libro\xc3\xb1.epub");
+  ExpectEq("compose acute accented filename",
+           utf8_utils::NormalizeFsFilenameForIo("cai\xcc\x81" "das.epub"),
+           "ca\xc3\xad" "das.epub");
+  ExpectEq("compose acute accented title filename",
+           utf8_utils::NormalizeFsFilenameForIo("La ilusio\xcc\x81n.epub"),
+           "La ilusi\xc3\xb3n.epub");
 }
 
 void TestDecodeMostlyUtf8WithCp1252Fallback() {

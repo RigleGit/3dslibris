@@ -304,8 +304,8 @@ bool Utf16NameToUtf8(const uint16_t *name, std::string *out, size_t max_units) {
 std::string NormalizeFsFilenameForIo(const std::string &raw_name) {
   std::string repaired;
   if (TryRepairFullwidthByteMojibake(raw_name, &repaired))
-    return repaired;
-  return raw_name;
+    return ComposeLatinCombiningMarks(repaired);
+  return ComposeLatinCombiningMarks(raw_name);
 }
 
 size_t CountUtf8InvalidLeadBytes(const std::string &bytes) {
