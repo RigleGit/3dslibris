@@ -86,7 +86,7 @@ _build_expat_objs() {
   local -a objs
   objs=()
   if [ -f "$TEST_ROOT/third_party/expat/xmlparse.c" ]; then
-    local expat_flags="-DXML_CONTEXT_BYTES=1024 -DHAVE_ARC4RANDOM_BUF"
+    local expat_flags="-DXML_CONTEXT_BYTES=1024 -DXML_DTD=1 -DXML_GE=1 -DXML_NS=1 -DHAVE_GETRANDOM -DHAVE_SYS_RANDOM_H"
     local expat_inc="-I$TEST_ROOT/third_party/expat"
     for f in xmlparse xmlrole xmltok; do
       local src="$TEST_ROOT/third_party/expat/${f}.c"
