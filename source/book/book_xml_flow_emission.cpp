@@ -495,7 +495,7 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
           p->last_p_class, p->css_class_map);
     if (ti.unit != MarginTopResult::Unit::None && !ti.negative) {
       const int px = book_xml_css_style_utils::ResolveHorizontalMarginPx(
-          ti, ts->display.width);
+          ti, ts->display.width, (int)ts->GetPixelSize());
       if (px > 0)
         emit_metrics.text_indent_px = px;
     }

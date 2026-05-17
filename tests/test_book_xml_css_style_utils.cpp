@@ -114,8 +114,8 @@ void TestParseMarginTopNull() {
 void TestParseMarginTopEmUnit() {
   using R = book_xml_css_style_utils::MarginTopResult;
   R r = book_xml_css_style_utils::ParseMarginTop("margin-top: 2em;");
-  test::ExpectEq("em -> Px", (int)r.unit, (int)R::Unit::Px);
-  test::ExpectEq("em value (2 * 12px base)", r.value, 24);
+  test::ExpectEq("em -> Em", (int)r.unit, (int)R::Unit::Em);
+  test::ExpectEq("em value (2em = 200 hundredths)", r.value, 200);
 }
 
 void TestParseMarginTopPtUnit() {
@@ -405,8 +405,8 @@ void TestParseTextIndent() {
   test::ExpectEq("text-indent px value", px.value, 24);
 
   R em = book_xml_css_style_utils::ParseTextIndent("text-indent: 2em;");
-  test::ExpectEq("text-indent em -> Px unit", (int)em.unit, (int)R::Unit::Px);
-  test::ExpectEq("text-indent 2em value (2*12)", em.value, 24);
+  test::ExpectEq("text-indent em -> Em unit", (int)em.unit, (int)R::Unit::Em);
+  test::ExpectEq("text-indent 2em value (200 hundredths)", em.value, 200);
 
   R none = book_xml_css_style_utils::ParseTextIndent("color: red;");
   test::ExpectEq("no text-indent -> None", (int)none.unit, (int)R::Unit::None);

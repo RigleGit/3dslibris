@@ -268,6 +268,8 @@ inline int ResolveCssMarginLinefeeds(
   int px = m.value;
   if (m.unit == Unit::Percent)
     px = (m.value * PAGE_WIDTH) / 100;
+  else if (m.unit == Unit::Em)
+    px = (m.value * line_h) / 120;  // approximate: line_h ≈ 1.2 * font_size
   if (m.negative || px <= 0)
     return 0;
   const int linefeeds = (px + line_h - 1) / line_h;

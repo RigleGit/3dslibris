@@ -166,10 +166,10 @@ void ApplyElementBlockMargins(
 
   if (ml.unit != MarginTopResult::Unit::None)
     effective_left +=
-        book_xml_css_style_utils::ResolveHorizontalMarginPx(ml, ts->display.width);
+        book_xml_css_style_utils::ResolveHorizontalMarginPx(ml, ts->display.width, (int)ts->GetPixelSize());
   if (mr.unit != MarginTopResult::Unit::None)
     effective_right +=
-        book_xml_css_style_utils::ResolveHorizontalMarginPx(mr, ts->display.width);
+        book_xml_css_style_utils::ResolveHorizontalMarginPx(mr, ts->display.width, (int)ts->GetPixelSize());
   parse_set_current_block_margins(p, effective_left, effective_right);
 }
 

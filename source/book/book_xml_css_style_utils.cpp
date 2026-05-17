@@ -63,10 +63,9 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
   } else if ((p + 1 < lc.size() && lc[p] == 'e' && lc[p + 1] == 'm') ||
              (p + 2 < lc.size() && lc[p] == 'r' && lc[p + 1] == 'e' &&
               lc[p + 2] == 'm')) {
-    // Convert em/rem to approximate pixels (base: 12px).
     const int unit_len = (lc[p] == 'r') ? 3 : 2;
-    result.value = value * 12 + (frac_x10 * 12 + 9) / 10;
-    result.unit = MarginTopResult::Unit::Px;
+    result.value = value * 100 + frac_x10 * 10;
+    result.unit = MarginTopResult::Unit::Em;
     result.negative = negative;
     p += unit_len;
   } else if (p + 1 < lc.size() && lc[p] == 'p' && lc[p + 1] == 't') {
@@ -199,13 +198,16 @@ MarginTopResult ParseWidth(const char *style) {
   return ParseOneLengthToken(lc, &pos);
 }
 
-int ResolveHorizontalMarginPx(const MarginTopResult &mtr, int display_width) {
+int ResolveHorizontalMarginPx(const MarginTopResult &mtr, int display_width,
+                              int font_size_px) {
   if (mtr.unit == MarginTopResult::Unit::None)
     return 0;
 
   int resolved = 0;
   if (mtr.unit == MarginTopResult::Unit::Percent)
     resolved = (mtr.value * display_width) / 100;
+  else if (mtr.unit == MarginTopResult::Unit::Em)
+    resolved = (mtr.value * (font_size_px > 0 ? font_size_px : 12)) / 100;
   else
     resolved = mtr.value;
 

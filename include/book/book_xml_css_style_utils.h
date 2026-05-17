@@ -8,8 +8,8 @@
 namespace book_xml_css_style_utils {
 
 struct MarginTopResult {
-  enum class Unit { None, Px, Percent };
-  int value;
+  enum class Unit { None, Px, Percent, Em };
+  int value;  // for Em: hundredths of em (1.5em → 150)
   Unit unit;
   bool negative;
 
@@ -20,7 +20,8 @@ MarginTopResult ParseMarginTop(const char *style);
 MarginTopResult ParseMarginBottom(const char *style);
 MarginTopResult ParseMarginLeft(const char *style);
 MarginTopResult ParseMarginRight(const char *style);
-int ResolveHorizontalMarginPx(const MarginTopResult &mtr, int display_width);
+int ResolveHorizontalMarginPx(const MarginTopResult &mtr, int display_width,
+                              int font_size_px = 0);
 
 struct FontSizeSpec {
   enum class Unit { None, Px, Percent, Em, Rem, Smaller, Larger };
