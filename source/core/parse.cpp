@@ -144,6 +144,7 @@ void parse_init(parsedata_t *data) {
   data->paragraph_has_content = false;
   data->text_transform_word_start = true;
   data->base_font_size_px = 0;
+  data->css_px_baseline = 16;
   data->coalesce_text_segments = false;
   data->inline_text_tail.clear();
   data->latin1_advance_cache_next_slot = 0;

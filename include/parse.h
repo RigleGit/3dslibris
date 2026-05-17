@@ -113,6 +113,7 @@ struct parsedata_t {
 	u8 style_font_size_restore_stack[32]; // pre-change px to restore on element close; 0 = no change
 	bool text_transform_word_start;
 	u8 base_font_size_px;
+	u8 css_px_baseline; // publisher's body font-size px (default 16 = CSS standard)
 	bool coalesce_text_segments;
 	std::string inline_text_tail;
 	u8 latin1_advance_cache_next_slot;

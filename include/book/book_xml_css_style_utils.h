@@ -32,7 +32,8 @@ struct FontSizeSpec {
 };
 
 bool TryParseFontSize(const char *style, FontSizeSpec *out);
-int ResolveFontSizePx(const FontSizeSpec &spec, int base_px);
+int ResolveFontSizePx(const FontSizeSpec &spec, int base_px,
+                      int css_baseline_px = 16);
 
 struct InlineStyleFlags {
   bool bold;

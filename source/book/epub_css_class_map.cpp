@@ -501,6 +501,25 @@ bool LookupTextAlignForTag(const char *tag, const CssClassMap &class_map,
   return true;
 }
 
+bool LookupFontSizeForTag(const char *tag, const CssClassMap &class_map,
+                           FontSizeSpec *out) {
+  if (!tag || !tag[0] || !out || class_map.empty())
+    return false;
+  const size_t tag_len = strlen(tag);
+  if (tag_len >= 63)
+    return false;
+  char key_buf[64];
+  key_buf[0] = '*';
+  memcpy(key_buf + 1, tag, tag_len + 1);
+  CssClassMap::const_iterator it =
+      class_map.find(std::string(key_buf, tag_len + 1));
+  if (it == class_map.end() ||
+      it->second.font_size.unit == FontSizeSpec::Unit::None)
+    return false;
+  *out = it->second.font_size;
+  return true;
+}
+
 bool LookupHideListMarkersForTag(const char *tag,
                                   const CssClassMap &class_map) {
   if (!tag || !tag[0] || class_map.empty())

@@ -160,4 +160,8 @@ bool MergeClassRulesToStyle(const std::string &class_attr,
 bool LookupTextAlignForTag(const char *tag, const CssClassMap &class_map,
                             TextAlign *out);
 
+// Returns true if an element-type selector for tag specifies font-size.
+bool LookupFontSizeForTag(const char *tag, const CssClassMap &class_map,
+                           FontSizeSpec *out);
+
 } // namespace epub_css_class_map

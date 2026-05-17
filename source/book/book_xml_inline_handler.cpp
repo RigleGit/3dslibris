@@ -220,7 +220,7 @@ void HandleCssInlineStylingStart(
         if (p->base_font_size_px == 0)
           p->base_font_size_px = ts->GetPixelSize();
         const int px = book_xml_css_style_utils::ResolveFontSizePx(
-            spec, (int)ts->GetPixelSize());
+            spec, (int)ts->GetPixelSize(), (int)p->css_px_baseline);
         new_font_px = (u8)book_xml_parser_style_utils::ClampInlineFontSize(
             p->base_font_size_px, px);
         if (new_font_px == ts->GetPixelSize())

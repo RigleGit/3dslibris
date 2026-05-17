@@ -138,7 +138,7 @@ static int ResolveHeadingFontSizePx(parsedata_t *p, Text *ts, int heading_level,
       (p->base_font_size_px != 0) ? (int)p->base_font_size_px : inherited_px;
   return book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
       inherited_px, default_heading_base, heading_level, style_attr, class_attr,
-      p->css_class_map);
+      p->css_class_map, (int)p->css_px_baseline);
 }
 
 static int MeasureLineHeightForPixelSize(Text *ts, int pixel_size) {
@@ -170,7 +170,7 @@ void ApplyHeadingFontSize(parsedata_t *p, Text *ts, int heading_level,
 
   const int heading_px = book_xml_parser_style_utils::ComputeHeadingFontSizeForContext(
       inherited_px, default_heading_base, heading_level,
-      style_attr, class_attr, p->css_class_map);
+      style_attr, class_attr, p->css_class_map, (int)p->css_px_baseline);
   if (heading_px == inherited_px)
     return;
 

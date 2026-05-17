@@ -526,6 +526,16 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
     if (!epd->archive_path.empty())
       LoadCssClassMapForDoc(epd->archive_path, epd->docpath, deps.reporter,
                             epd, &pd.css_class_map, css_scan_uf);
+    {
+      epub_css_class_map::FontSizeSpec body_spec;
+      if (epub_css_class_map::LookupFontSizeForTag("body", pd.css_class_map,
+                                                    &body_spec) &&
+          body_spec.unit == epub_css_class_map::FontSizeSpec::Unit::Px) {
+        const int body_px = (body_spec.value_x100 + 50) / 100;
+        if (body_px >= 6 && body_px <= 72)
+          pd.css_px_baseline = (u8)body_px;
+      }
+    }
 #if defined(DSLIBRIS_DEBUG) && EPUB_LAYOUT_PROFILE
     log_content_layout = deps.reporter && epd->book;
     if (log_content_layout) {
