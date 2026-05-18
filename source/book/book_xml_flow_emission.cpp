@@ -576,8 +576,30 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
       }
     }
   }
-  // Text is about to be emitted — mark the screen as having drawable content.
-  p->current_screen_has_drawable_content = true;
+  // Mark screen as having drawable content only when this text node will
+  // actually produce visible glyphs. Whitespace-only text between block
+  // elements (e.g. "\n    " between <body> and <h1>) must not count —
+  // it produces no glyphs and should not suppress top-of-page margin
+  // collapsing for the first heading.
+  // Exception 1: pre/pre-wrap modes — whitespace is significant content.
+  // Exception 2: already on a line (lb=true) — inline spaces are meaningful.
+  if (!p->current_screen_has_drawable_content) {
+    const bool is_pre_mode =
+        white_space == book_xml_css_style_utils::WhiteSpaceMode::Pre ||
+        white_space == book_xml_css_style_utils::WhiteSpaceMode::PreWrap;
+    bool has_drawable = is_pre_mode || p->linebegan;
+    if (!has_drawable) {
+      for (size_t i = 0; i < flow_txtlen && !has_drawable; i++) {
+        const unsigned char c = (unsigned char)flow_txt[i];
+        // Any byte > 0x7F is part of a multi-byte UTF-8 sequence (non-ASCII
+        // character). ASCII non-whitespace also counts as drawable.
+        if (c > 0x7F || (c != ' ' && c != '\t' && c != '\n' && c != '\r'))
+          has_drawable = true;
+      }
+    }
+    if (has_drawable)
+      p->current_screen_has_drawable_content = true;
+  }
 
   {
     const text_render_layout_utils::ReadingScreenMetrics sm =
