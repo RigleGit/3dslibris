@@ -233,7 +233,11 @@ static bool FlowedTextFitsCurrentVisualLine(
 }
 
 static bool IsSimpleParagraphTextFlush(const parsedata_t *p) {
-  return p && p->stacksize > 0 && p->stack[p->stacksize - 1] == TAG_P;
+  // Use in_paragraph rather than checking the stack top: inline elements
+  // (<span>, <em>, etc.) push their own tags, so the top would not be TAG_P
+  // even though we are still emitting the first text of the paragraph.
+  // The caller already guards with !p->paragraph_has_content.
+  return p && p->in_paragraph;
 }
 
 static void EmitPreformattedUtf8Segment(
