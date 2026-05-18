@@ -266,9 +266,8 @@ static void PlainAdvanceScreenOnOverflow(parsedata_t *p) {
                 p->ts->margin.bottom)
           : (p->ts->margin.bottom +
              text_render_layout_utils::kFullReadingScreenFooterGuardPx);
-  if (text_render_layout_utils::WouldOverflowReadingScreen(
-          p->pen.y, p->ts->GetHeight(), p->ts->linespacing, screen_height,
-          bottom_margin)) {
+  if (text_render_layout_utils::CurrentLineBeyondReadingScreen(
+          p->pen.y, screen_height, bottom_margin)) {
     PlainAdvanceScreen(p);
   }
 }

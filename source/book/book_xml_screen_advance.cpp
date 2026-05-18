@@ -87,8 +87,8 @@ void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
           rightBottomMargin);
   int maxHeight = metrics.max_height;
   int bottomMargin = metrics.bottom_margin;
-  if (!text_render_layout_utils::WouldOverflowReadingScreen(
-          p->pen.y, lineheight, ts->linespacing, maxHeight, bottomMargin))
+  if (!text_render_layout_utils::CurrentLineBeyondReadingScreen(
+          p->pen.y, maxHeight, bottomMargin))
     return;
 
   p->perf_page_overflows++;
