@@ -736,61 +736,53 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
     AddRecordCandidate(&candidates, &seen, rec_idx, rec_count);
   };
 
-  auto add_cover_formula_set = [&](u32 base, u32 offset, float strong_bonus,
-                                   float weak_bonus) {
+  // Expand a single EXTH offset into bonuses against base+offset (strong) and
+  // raw offset (weak) plus ±1 fuzz, all writing to the same hint map. Both the
+  // cover and thumb scoring use this; previously two near-identical lambdas.
+  auto add_formula_set = [&](std::unordered_map<u32, float> *dest, u32 base,
+                             u32 offset, float strong_bonus, float weak_bonus) {
     if (offset == UINT_MAX)
       return;
     if (base > 0) {
-      add_meta_bonus(&cover_hint_bonus, (u64)base + (u64)offset, strong_bonus);
-      add_meta_bonus(&cover_hint_bonus, (u64)base + (u64)offset + 1,
-                     strong_bonus - 30.0f);
+      add_meta_bonus(dest, (u64)base + (u64)offset, strong_bonus);
+      add_meta_bonus(dest, (u64)base + (u64)offset + 1, strong_bonus - 30.0f);
       if (offset > 0)
-        add_meta_bonus(&cover_hint_bonus, (u64)base + (u64)(offset - 1),
-                       strong_bonus - 35.0f);
+        add_meta_bonus(dest, (u64)base + (u64)(offset - 1), strong_bonus - 35.0f);
     }
-    add_meta_bonus(&cover_hint_bonus, (u64)offset, weak_bonus);
-    add_meta_bonus(&cover_hint_bonus, (u64)offset + 1, weak_bonus - 20.0f);
+    add_meta_bonus(dest, (u64)offset, weak_bonus);
+    add_meta_bonus(dest, (u64)offset + 1, weak_bonus - 20.0f);
   };
 
-  auto add_thumb_formula_set = [&](u32 base, u32 offset, float strong_bonus,
-                                   float weak_bonus) {
-    if (offset == UINT_MAX)
-      return;
-    if (base > 0) {
-      add_meta_bonus(&thumb_hint_bonus, (u64)base + (u64)offset, strong_bonus);
-      add_meta_bonus(&thumb_hint_bonus, (u64)base + (u64)offset + 1,
-                     strong_bonus - 30.0f);
-      if (offset > 0)
-        add_meta_bonus(&thumb_hint_bonus, (u64)base + (u64)(offset - 1),
-                       strong_bonus - 35.0f);
-    }
-    add_meta_bonus(&thumb_hint_bonus, (u64)offset, weak_bonus);
-    add_meta_bonus(&thumb_hint_bonus, (u64)offset + 1, weak_bonus - 20.0f);
-  };
-
+  // Kindle metadata usually stores cover as offset from first image record,
+  // but malformed books can store it as absolute or 1-based. Probe each
+  // common variant before any heuristic global scan. The "inferred" base is
+  // always probed (even when 0, so weak/raw-offset bonus still applies); the
+  // other bases require index>0 to avoid double-counting the same weak slot.
   if (cover_offset != UINT_MAX) {
-    // Kindle metadata usually stores cover as offset from first image record,
-    // but malformed books can store it as absolute or 1-based. Probe all
-    // common variants before any heuristic global scan.
     if (detected_first_image_index > 0)
-      add_cover_formula_set(detected_first_image_index, cover_offset, 520.0f,
-                            365.0f);
-    add_cover_formula_set(inferred_image_base, cover_offset, 430.0f, 300.0f);
+      add_formula_set(&cover_hint_bonus, detected_first_image_index,
+                      cover_offset, 520.0f, 365.0f);
+    add_formula_set(&cover_hint_bonus, inferred_image_base, cover_offset,
+                    430.0f, 300.0f);
     if (first_image_index > 0)
-      add_cover_formula_set(first_image_index, cover_offset, 410.0f, 280.0f);
+      add_formula_set(&cover_hint_bonus, first_image_index, cover_offset,
+                      410.0f, 280.0f);
     if (first_non_book_index > 0)
-      add_cover_formula_set(first_non_book_index, cover_offset, 360.0f, 250.0f);
+      add_formula_set(&cover_hint_bonus, first_non_book_index, cover_offset,
+                      360.0f, 250.0f);
   }
-
   if (thumb_offset != UINT_MAX) {
     if (detected_first_image_index > 0)
-      add_thumb_formula_set(detected_first_image_index, thumb_offset, 305.0f,
-                            215.0f);
-    add_thumb_formula_set(inferred_image_base, thumb_offset, 250.0f, 170.0f);
+      add_formula_set(&thumb_hint_bonus, detected_first_image_index,
+                      thumb_offset, 305.0f, 215.0f);
+    add_formula_set(&thumb_hint_bonus, inferred_image_base, thumb_offset,
+                    250.0f, 170.0f);
     if (first_image_index > 0)
-      add_thumb_formula_set(first_image_index, thumb_offset, 235.0f, 160.0f);
+      add_formula_set(&thumb_hint_bonus, first_image_index, thumb_offset,
+                      235.0f, 160.0f);
     if (first_non_book_index > 0)
-      add_thumb_formula_set(first_non_book_index, thumb_offset, 210.0f, 145.0f);
+      add_formula_set(&thumb_hint_bonus, first_non_book_index, thumb_offset,
+                      210.0f, 145.0f);
   }
 
   if (has_kf8_hints) {
@@ -798,18 +790,24 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
     if (kf8_inferred_base == 0 && kf8_text_rec_count + 1 < rec_count)
       kf8_inferred_base = kf8_text_rec_count + 1;
     if (kf8_cover_offset != UINT_MAX) {
-      add_cover_formula_set(kf8_inferred_base, kf8_cover_offset, 470.0f, 335.0f);
+      add_formula_set(&cover_hint_bonus, kf8_inferred_base, kf8_cover_offset,
+                      470.0f, 335.0f);
       if (kf8_first_image > 0)
-        add_cover_formula_set(kf8_first_image, kf8_cover_offset, 450.0f, 320.0f);
+        add_formula_set(&cover_hint_bonus, kf8_first_image, kf8_cover_offset,
+                        450.0f, 320.0f);
       if (kf8_first_non_book > 0)
-        add_cover_formula_set(kf8_first_non_book, kf8_cover_offset, 390.0f, 280.0f);
+        add_formula_set(&cover_hint_bonus, kf8_first_non_book,
+                        kf8_cover_offset, 390.0f, 280.0f);
     }
     if (kf8_thumb_offset != UINT_MAX) {
-      add_thumb_formula_set(kf8_inferred_base, kf8_thumb_offset, 285.0f, 200.0f);
+      add_formula_set(&thumb_hint_bonus, kf8_inferred_base, kf8_thumb_offset,
+                      285.0f, 200.0f);
       if (kf8_first_image > 0)
-        add_thumb_formula_set(kf8_first_image, kf8_thumb_offset, 270.0f, 185.0f);
+        add_formula_set(&thumb_hint_bonus, kf8_first_image, kf8_thumb_offset,
+                        270.0f, 185.0f);
       if (kf8_first_non_book > 0)
-        add_thumb_formula_set(kf8_first_non_book, kf8_thumb_offset, 230.0f, 165.0f);
+        add_formula_set(&thumb_hint_bonus, kf8_first_non_book,
+                        kf8_thumb_offset, 230.0f, 165.0f);
     }
   }
 
@@ -829,55 +827,59 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   // rank them to avoid taking the first decodable (often wrong) record.
   std::vector<MobiCoverCandidate> meta_ranked;
   meta_ranked.reserve(cover_hint_bonus.size() + thumb_hint_bonus.size());
-  for (std::unordered_map<u32, float>::const_iterator it =
-           cover_hint_bonus.begin();
-       it != cover_hint_bonus.end(); ++it) {
-    MobiCoverCandidate c;
-    if (!ProbeRecordAsCoverCandidate(&reader, offsets, it->first, &c))
-      continue;
-    if (c.width < 24 || c.height < 24)
-      continue;
-    c.score += it->second;
-    meta_ranked.push_back(c);
-  }
-  for (std::unordered_map<u32, float>::const_iterator it =
-           thumb_hint_bonus.begin();
-       it != thumb_hint_bonus.end(); ++it) {
-    MobiCoverCandidate c;
-    if (!ProbeRecordAsCoverCandidate(&reader, offsets, it->first, &c))
-      continue;
-    if (c.width < 24 || c.height < 24)
-      continue;
-    c.score += it->second;
-    meta_ranked.push_back(c);
-  }
+  auto collect_hint_candidates =
+      [&](const std::unordered_map<u32, float> &hint_map) {
+        for (const auto &kv : hint_map) {
+          MobiCoverCandidate c;
+          if (!ProbeRecordAsCoverCandidate(&reader, offsets, kv.first, &c))
+            continue;
+          if (c.width < 24 || c.height < 24)
+            continue;
+          c.score += kv.second;
+          meta_ranked.push_back(c);
+        }
+      };
+  collect_hint_candidates(cover_hint_bonus);
+  collect_hint_candidates(thumb_hint_bonus);
+
+  // Sort highest-score-first (tie-break by record index) and try to decode
+  // each in turn; on first success, save the candidate to the meta cache and
+  // return. Shared by the meta-priority and heuristic+last-resort passes.
+  auto sort_by_score = [](MobiCoverCandidate &a, MobiCoverCandidate &b) {
+    if (a.score == b.score)
+      return a.record_idx < b.record_idx;
+    return a.score > b.score;
+  };
+  auto try_decode_ranked = [&](std::vector<MobiCoverCandidate> &v) -> bool {
+    std::sort(v.begin(), v.end(), sort_by_score);
+    for (const MobiCoverCandidate &c : v) {
+      if (TryDecodeCoverCandidate(book, &reader, offsets, c, reporter)) {
+        SaveMobiCoverMetaCandidate(meta_cache_path, offsets, c);
+        return true;
+      }
+    }
+    return false;
+  };
 
   if (!meta_ranked.empty()) {
-    std::sort(meta_ranked.begin(), meta_ranked.end(),
-              [](const MobiCoverCandidate &a, const MobiCoverCandidate &b) {
-                if (a.score == b.score)
-                  return a.record_idx < b.record_idx;
-                return a.score > b.score;
-              });
     if (reporter) {
-      const size_t preview = std::min((size_t)5, meta_ranked.size());
+      // Log the top-5 by score before iterating, so a wrong winner is easy to
+      // diagnose from the user's log without rebuilding with a deeper trace.
+      std::vector<MobiCoverCandidate> preview_copy = meta_ranked;
+      std::sort(preview_copy.begin(), preview_copy.end(), sort_by_score);
+      const size_t preview = std::min((size_t)5, preview_copy.size());
       for (size_t i = 0; i < preview; i++) {
         char meta_msg[224];
         snprintf(meta_msg, sizeof(meta_msg),
                  "MOBI: cover meta cand[%u] rec=%u dim=%dx%d score=%d",
-                 (unsigned)i, (unsigned)meta_ranked[i].record_idx,
-                 meta_ranked[i].width, meta_ranked[i].height,
-                 (int)meta_ranked[i].score);
+                 (unsigned)i, (unsigned)preview_copy[i].record_idx,
+                 preview_copy[i].width, preview_copy[i].height,
+                 (int)preview_copy[i].score);
         reporter->PrintStatus(meta_msg);
       }
     }
-    for (size_t i = 0; i < meta_ranked.size(); i++) {
-      if (TryDecodeCoverCandidate(book, &reader, offsets, meta_ranked[i],
-                                  reporter)) {
-        SaveMobiCoverMetaCandidate(meta_cache_path, offsets, meta_ranked[i]);
-        return 0;
-      }
-    }
+    if (try_decode_ranked(meta_ranked))
+      return 0;
   }
 
   std::vector<MobiCoverCandidate> ranked;
@@ -907,21 +909,8 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
     ranked.push_back(c);
   }
 
-  if (!ranked.empty()) {
-    std::sort(ranked.begin(), ranked.end(),
-              [](const MobiCoverCandidate &a, const MobiCoverCandidate &b) {
-                if (a.score == b.score)
-                  return a.record_idx < b.record_idx;
-                return a.score > b.score;
-              });
-    for (size_t i = 0; i < ranked.size(); i++) {
-      if (TryDecodeCoverCandidate(book, &reader, offsets, ranked[i],
-                                  reporter)) {
-        SaveMobiCoverMetaCandidate(meta_cache_path, offsets, ranked[i]);
-        return 0;
-      }
-    }
-  }
+  if (!ranked.empty() && try_decode_ranked(ranked))
+    return 0;
 
   SaveMobiCoverMetaMiss(meta_cache_path);
   if (reporter)
