@@ -46,6 +46,7 @@ int MainLoopController::RunMainLoop()
       }
 #endif
       app_.HandleAppletSuspend();
+      svcSleepThread(1000000LL); // 1ms yield: aptMainLoop() may return briefly while HOME transitions
       return true;
     }
     app_.HandleAppletResume();

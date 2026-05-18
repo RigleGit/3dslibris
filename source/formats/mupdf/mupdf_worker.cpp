@@ -338,6 +338,13 @@ void InitMuPdfWorker(Book::MuPdfState *mupdf_state) {
   }
 }
 
+void SignalMuPdfWorkerShutdown(Book::MuPdfState *mupdf_state) {
+  if (!mupdf_state || !mupdf_state->worker)
+    return;
+  __atomic_store_n(&mupdf_state->worker->shutdown_requested, true, __ATOMIC_RELEASE);
+  LightEvent_Signal(&mupdf_state->worker->submit_event);
+}
+
 void ShutdownMuPdfWorker(Book::MuPdfState *mupdf_state) {
   if (!mupdf_state || !mupdf_state->worker)
     return;
