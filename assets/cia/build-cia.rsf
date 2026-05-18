@@ -14,7 +14,7 @@ RomFs:
 
 Option:
   UseOnSD                 : true # true if App is to be installed to SD
-  EnableCompress          : false # Compresses exefs code
+  EnableCompress          : true # Compresses exefs code
   FreeProductCode         : true # Removes limitations on ProductCode
   EnableCrypt             : false # Enables encryption for NCCH and CIA
   MediaFootPadding        : false # If true CCI files are created with padding
@@ -51,7 +51,7 @@ AccessControlInfo:
 
 # Process Settings
   MemoryType                    : Application # Application/System/Base
-  SystemMode                    : 96MB # 64MB(Default)/96MB/80MB/72MB/32MB
+  SystemMode                    : 80MB # 64MB(Default)/96MB/80MB/72MB/32MB
   IdealProcessor                : 0
   AffinityMask                  : 3
   Priority                      : 16

@@ -1,7 +1,7 @@
 FROM devkitpro/devkitarm:20260221
 
 ARG TARGETPLATFORM
-ARG BANNERTOOL_REF=1.2.0
+ARG BANNERTOOL_REF=1.2.2
 ARG MAKEROM_VERSION=makerom-v0.18.4
 
 RUN set -eux; \
@@ -24,7 +24,7 @@ RUN set -eux; \
         "${tmpdir}/bannertool"; \
     cd "${tmpdir}/bannertool"; \
     g++ -std=c++11 -O2 \
-        -DVERSION_MAJOR=1 -DVERSION_MINOR=2 -DVERSION_MICRO=0 \
+        -DVERSION_MAJOR=1 -DVERSION_MINOR=2 -DVERSION_MICRO=2 \
         source/main.cpp source/cmd.cpp \
         source/3ds/cbmd.cpp source/3ds/cwav.cpp source/3ds/lz11.cpp \
         source/pc/wav.cpp source/pc/stb_image.c source/pc/stb_vorbis.c \
