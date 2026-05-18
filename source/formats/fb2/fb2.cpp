@@ -13,6 +13,7 @@
 #include "book/cover_layout_constants.h"
 #include "shared/aspect_fit_utils.h"
 #include "shared/base64_utils.h"
+#include "shared/cover_decode_utils.h"
 #include "formats/common/xml_parse_utils.h"
 #include "stb_image.h"
 #include <ctype.h>
@@ -184,50 +185,10 @@ static bool noop_done_check(void *) {
 static int DecodeAndScaleToCover(Book *book, const u8 *data, int size) {
   if (!book || !data || size <= 0)
     return 10;
-
-  int imgW = 0, imgH = 0, channels = 0;
-  unsigned char *pixels =
-      stbi_load_from_memory(data, size, &imgW, &imgH, &channels, 3);
-  if (!pixels)
+  if (!cover_decode_utils::DecodeImageToCoverThumb(book, data, (size_t)size,
+                                                    2048)) {
     return 11;
-  if (imgW <= 0 || imgH <= 0 || imgW > 2048 || imgH > 2048) {
-    stbi_image_free(pixels);
-    return 12;
   }
-
-  const aspect_fit_utils::Placement placement = aspect_fit_utils::FitInsideBox(
-      0, 0, cover_layout::kBrowserCoverThumbWidth,
-      cover_layout::kBrowserCoverThumbHeight, imgW, imgH, false);
-  int finalW = placement.width;
-  int finalH = placement.height;
-  const float scale =
-      std::max((float)imgW / (float)finalW, (float)imgH / (float)finalH);
-
-  if (book->coverPixels) {
-    delete[] book->coverPixels;
-    book->coverPixels = nullptr;
-  }
-  book->coverPixels = new u16[finalW * finalH];
-  book->coverWidth = finalW;
-  book->coverHeight = finalH;
-
-  for (int y = 0; y < finalH; y++) {
-    int srcY = (int)(y * scale);
-    if (srcY >= imgH)
-      srcY = imgH - 1;
-    for (int x = 0; x < finalW; x++) {
-      int srcX = (int)(x * scale);
-      if (srcX >= imgW)
-        srcX = imgW - 1;
-      unsigned char *px = &pixels[(srcY * imgW + srcX) * 3];
-      u16 r = (px[0] >> 3) & 0x1F;
-      u16 g = (px[1] >> 2) & 0x3F;
-      u16 b = (px[2] >> 3) & 0x1F;
-      book->coverPixels[y * finalW + x] = (r << 11) | (g << 5) | b;
-    }
-  }
-
-  stbi_image_free(pixels);
   return 0;
 }
 

@@ -20,6 +20,7 @@
 #include "formats/mobi/mobi_record_scan.h"
 #include "formats/mobi/mobi_cover_utils.h"
 #include "shared/aspect_fit_utils.h"
+#include "shared/cover_decode_utils.h"
 #include "shared/path_constants.h"
 #include "shared/status_reporter.h"
 #include "stb_image.h"
@@ -373,70 +374,8 @@ static size_t FindImageStartOffset(const u8 *data, size_t len) {
 }
 
 static bool DecodeAndScaleToCover(Book *book, const u8 *data, size_t size) {
-  if (!book || !data || size == 0 || size > (size_t)INT_MAX)
-    return false;
-
-  int info_w = 0, info_h = 0, info_c = 0;
-  bool has_info = stbi_info_from_memory(data, (int)size, &info_w, &info_h, &info_c) != 0;
-  if (!has_info)
-    return false;
-  if (info_w <= 0 || info_h <= 0 || info_w > kMobiCoverMaxDimension ||
-      info_h > kMobiCoverMaxDimension)
-    return false;
-
-  int img_w = 0, img_h = 0, channels = 0;
-  unsigned char *pixels =
-      stbi_load_from_memory(data, (int)size, &img_w, &img_h, &channels, 3);
-  if (!pixels)
-    return false;
-
-  if (img_w <= 0 || img_h <= 0 || img_w > kMobiCoverMaxDimension ||
-      img_h > kMobiCoverMaxDimension) {
-    stbi_image_free(pixels);
-    return false;
-  }
-
-  const aspect_fit_utils::Placement placement =
-      aspect_fit_utils::FitInsideBox(
-          0, 0, cover_layout::kBrowserCoverThumbWidth,
-          cover_layout::kBrowserCoverThumbHeight, img_w, img_h, false);
-  int final_w = placement.width;
-  int final_h = placement.height;
-  const float scale =
-      std::max((float)img_w / (float)final_w,
-               (float)img_h / (float)final_h);
-
-  if (book->coverPixels) {
-    delete[] book->coverPixels;
-    book->coverPixels = nullptr;
-  }
-
-  book->coverPixels = new u16[final_w * final_h];
-  if (!book->coverPixels) {
-    stbi_image_free(pixels);
-    return false;
-  }
-  book->coverWidth = final_w;
-  book->coverHeight = final_h;
-
-  for (int y = 0; y < final_h; y++) {
-    int src_y = (int)(y * scale);
-    if (src_y >= img_h)
-      src_y = img_h - 1;
-    for (int x = 0; x < final_w; x++) {
-      int src_x = (int)(x * scale);
-      if (src_x >= img_w)
-        src_x = img_w - 1;
-      unsigned char *px = &pixels[(src_y * img_w + src_x) * 3];
-      u16 r = (px[0] >> 3) & 0x1F;
-      u16 g = (px[1] >> 2) & 0x3F;
-      u16 b = (px[2] >> 3) & 0x1F;
-      book->coverPixels[y * final_w + x] = (r << 11) | (g << 5) | b;
-    }
-  }
-
-  stbi_image_free(pixels);
-  return true;
+  return cover_decode_utils::DecodeImageToCoverThumb(book, data, size,
+                                                     kMobiCoverMaxDimension);
 }
 
 static float ScoreCoverCandidate(const MobiCoverCandidate &c) {
