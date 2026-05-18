@@ -271,6 +271,50 @@ void Book::CancelAsyncReflowOpen() {
   }
 }
 
+void Book::SignalReflowWorkerShutdown() {
+  // Non-blocking shutdown for the APT suspend path. Marks the worker for
+  // exit and wakes it from LightEvent_Wait, but does NOT join. Joining can
+  // block 100ms+ if a parse is in flight, and any blocking inside the
+  // suspend handler risks exceeding the HOME menu's acknowledgment window
+  // (the same class of bug as the previous SD-card-I/O-in-APT-hook crash).
+  // FinishShutdownReflowWorker() on resume — or the existing non-blocking
+  // join branch in StartAsyncReflowOpen — completes cleanup.
+  if (!reflow_worker_state)
+    return;
+  Book::ReflowWorkerState::Worker *w = reflow_worker_state->worker;
+  reflow_worker_state->open_pending = false;
+  reflow_worker_state->open_completed = false;
+  reflow_worker_state->open_result = 1;
+  if (!w)
+    return;
+  __atomic_store_n(&w->shutdown_requested, true, __ATOMIC_RELEASE);
+  LightEvent_Signal(&w->submit_event);
+}
+
+void Book::FinishShutdownReflowWorker() {
+  // Completes the deferred cleanup from SignalReflowWorkerShutdown(). Called
+  // on resume from the main thread. Non-blocking: if the worker still hasn't
+  // exited (e.g. mid-parse strip), bail out and let the next
+  // StartAsyncReflowOpen call try again via its existing non-blocking branch.
+  if (!reflow_worker_state)
+    return;
+  Book::ReflowWorkerState::Worker *w = reflow_worker_state->worker;
+  if (!w)
+    return;
+  if (!__atomic_load_n(&w->shutdown_requested, __ATOMIC_ACQUIRE))
+    return;
+  if (w->thread_handle) {
+    Result join_rc = threadJoin(w->thread_handle, 0);
+    if (R_FAILED(join_rc))
+      return;
+    threadFree(w->thread_handle);
+    w->thread_handle = NULL;
+  }
+  delete w;
+  reflow_worker_state->worker = NULL;
+  reflow_worker_state->worker_init_attempted = false;
+}
+
 void Book::ResetReflowWorkerState() {
   if (!reflow_worker_state)
     return;

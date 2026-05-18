@@ -381,6 +381,12 @@ public:
   bool IsAsyncReflowOpenPending() const;
   u8 ConsumeAsyncReflowOpenResult();
   void CancelAsyncReflowOpen();
+  // APT-suspend safe shutdown: signal-only, no join. Resume completes via
+  // FinishShutdownReflowWorker(). See reflow_worker.cpp for the rationale —
+  // blocking joins inside HandleAppletSuspend risk HOME menu acknowledgment
+  // timeout. Do NOT call CancelAsyncReflowOpen() from the suspend path.
+  void SignalReflowWorkerShutdown();
+  void FinishShutdownReflowWorker();
   void FlushPendingCacheSaves();
   bool HasPendingEpubPageCacheSave() const;
   void SetPendingEpubPageCacheSave(bool pending);

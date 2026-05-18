@@ -479,6 +479,10 @@ void ReaderController::OnAppletSuspended()
     book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, false);
     book_renderer::CancelFixedLayoutDeferredWork(bookcurrent_);
     bookcurrent_->SuspendFixedLayoutWorkers();
+    // Reflow worker (EPUB/MOBI/FB2/...) on core 1 — same HOME-panic risk as
+    // MuPDF/CBZ workers when left alive across suspend. Signal-only; the
+    // join completes on resume.
+    bookcurrent_->SignalReflowWorkerShutdown();
   }
   if (!opening_book)
     return;
@@ -504,7 +508,10 @@ void ReaderController::OnAppletSuspended()
            opening_book->GetFileName() ? opening_book->GetFileName() : "");
 #endif
   opening_book->RequestAbortOpen();
-  opening_book->CancelAsyncReflowOpen();
+  // Suspend path: use signal-only shutdown. CancelAsyncReflowOpen blocks
+  // joining the worker (100ms loops, potentially seconds mid-parse), which
+  // delays HandleAppletSuspend past the HOME menu's acknowledgment window.
+  opening_book->SignalReflowWorkerShutdown();
   app_.SetOpeningPending(false);
   app_.SetOpeningBook(NULL);
   app_.SetOpeningSessionId(0);
@@ -532,6 +539,10 @@ void ReaderController::OnAppletResumed()
            bookcurrent_->IsFixedLayout() ? 1 : 0,
            bookcurrent_->GetFileName() ? bookcurrent_->GetFileName() : "");
 #endif
+  // Complete the deferred reflow-worker join from suspend. Non-blocking —
+  // if the worker hasn't exited yet, the next StartAsyncReflowOpen call
+  // picks it up via its existing non-blocking cleanup branch.
+  bookcurrent_->FinishShutdownReflowWorker();
   if (bookcurrent_->IsFixedLayout())
   {
     bookcurrent_->ResumeFixedLayoutWorkers();
