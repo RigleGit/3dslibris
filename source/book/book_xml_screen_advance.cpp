@@ -288,6 +288,13 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
   {
     const int usable = metrics.max_height - metrics.bottom_margin - p->pen.y;
     available = (usable > 0) ? (usable / line_step) : 0;
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(p->book->GetStatusReporter(),
+      "FlushPending METRICS lh=%d ls=%d step=%d maxH=%d botM=%d usable=%d avail=%d lb=%d",
+      lh, ls, line_step,
+      metrics.max_height, metrics.bottom_margin,
+      usable, available, p->linebegan ? 1 : 0);
+#endif
   }
 
   // ---- Phase 1: mandatory block break -----------------------------------
@@ -314,11 +321,25 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
 
   // ---- Phase 2: optional spacing ----------------------------------------
   const int opt = p->pending_block_spacing_lf;
+  const bool css_sourced = p->pending_block_spacing_from_css;
   int emit_opt = 0;
   if (opt > 0 && !IsCurrentReadingScreenVisuallyEmpty(p)) {
     const int required = 1;
     if (opt + required <= available) {
       emit_opt = opt;
+    } else if (css_sourced) {
+      // CSS-mandated spacing can't coexist with a content line on this screen.
+      // Advance to the next screen; the screen break already separates blocks.
+      AdvanceParsedScreen(p);
+      const text_render_layout_utils::ReadingScreenMetrics after_metrics =
+          text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(
+              p->book->GetOrientation() != 0, p->screen, ts->margin.bottom,
+              text_render_layout_utils::ResolveCompactReadingBottomMargin(
+                  ts->margin.bottom));
+      const int usable_after =
+          after_metrics.max_height - after_metrics.bottom_margin - p->pen.y;
+      available = (usable_after > 0) ? (usable_after / line_step) : 0;
+      emit_opt = 0;
     } else if (required <= available) {
       emit_opt = available - required;
       if (emit_opt < 0) emit_opt = 0;
