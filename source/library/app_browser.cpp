@@ -154,71 +154,8 @@ static std::string BuildBookPath(Book *book) {
 
 } // namespace
 
-void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
-  if (app_.BookCount() <= 0)
-    return;
-
-  if (!ShouldCurrentBrowserLoadCovers(app_)) {
-    for (int i = 0; i < app_.BookCount(); i++) {
-      Book *book = app_.books[i];
-      if (!book || book->IsBrowserFolder() || !book->coverPixels)
-        continue;
-      delete[] book->coverPixels;
-      book->coverPixels = nullptr;
-      book->coverWidth = 0;
-      book->coverHeight = 0;
-    }
-    return;
-  }
-
-  const browser_cover_cache_utils::VisibleRange visible =
-      browser_cover_cache_utils::ComputeVisibleRange(
-          app_.GetBrowserPageStart(), app_.BookCount(),
-          CurrentBrowserPageSize(app_));
-  for (int i = 0; i < app_.BookCount(); i++) {
-    if (browser_cover_cache_utils::RangeContains(visible, i))
-      continue;
-
-    Book *book = app_.books[i];
-    if (!book || book->IsBrowserFolder() || !book->coverPixels)
-      continue;
-    delete[] book->coverPixels;
-    book->coverPixels = nullptr;
-    book->coverWidth = 0;
-    book->coverHeight = 0;
-  }
-}
-
-void LibraryController::LoadVisibleBrowserCoverCaches() {
-  if (app_.BookCount() <= 0)
-    return;
-
-  if (!ShouldCurrentBrowserLoadCovers(app_)) {
-    UnloadNonVisibleBrowserCoverCaches();
-    return;
-  }
-
-  UnloadNonVisibleBrowserCoverCaches();
-  const browser_cover_cache_utils::VisibleRange visible =
-      browser_cover_cache_utils::ComputeVisibleRange(
-          app_.GetBrowserPageStart(), app_.BookCount(),
-          CurrentBrowserPageSize(app_));
-  const int start = visible.start;
-  const int end = visible.end;
-  for (int i = start; i < end; i++) {
-    Book *book = app_.books[i];
-    if (!book || book->IsBrowserFolder() || book->coverPixels)
-      continue;
-
-    std::string path = BuildBookPath(book);
-    if (path.empty())
-      continue;
-    if (cover_cache::TryLoad(book, path)) {
-      book->coverAttempts = kCoverMaxAttempts;
-      book->coverRetryAfterMs = 0;
-    }
-  }
-}
+// NOTE: UnloadNonVisibleBrowserCoverCaches / LoadVisibleBrowserCoverCaches
+// moved to app_browser_covers.cpp.
 
 namespace {
 
