@@ -350,6 +350,10 @@ public:
   // worker ownership is split safely.
   void SuspendFixedLayoutWorkers();
   void ResumeFixedLayoutWorkers();
+  // Drop MuPDF bitmap caches, adjacent-slot display lists, and the inline
+  // image cache so the HOME menu has room to allocate. Called from the APT
+  // suspend path. Bitmaps regenerate on resume from the live fz_document.
+  void ReleaseMuPdfMemoryForSuspend();
   void SetCbzViewportInteraction(bool active);
   void ResetCbzViewport();
   bool ChangeCbzZoom(int delta);

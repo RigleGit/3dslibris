@@ -8,6 +8,50 @@
 #include "shared/debug_runtime_mode.h"
 
 
+namespace {
+
+inline void ReleaseBitmapCacheMemory(Book::MuPdfState::BitmapCache *cache) {
+  if (!cache)
+    return;
+  ResetBitmapCache(cache);
+  std::vector<u16>().swap(cache->pixels); // force capacity to 0
+}
+
+inline void ReleaseAdjacentSlotMemory(Book::MuPdfState::AdjacentSlot *slot,
+                                       fz_context *ctx) {
+  if (!slot)
+    return;
+  if (slot->display_list && ctx)
+    fz_drop_display_list(ctx, slot->display_list);
+  slot->display_list = NULL;
+  slot->page = -1;
+  ReleaseBitmapCacheMemory(&slot->preview);
+  ReleaseBitmapCacheMemory(&slot->interactive_tile);
+}
+
+} // namespace
+
+void ReleaseMuPdfMemoryForSuspendImpl(Book::MuPdfState *mupdf_state) {
+  if (!mupdf_state)
+    return;
+  // Cancel any in-flight incremental render first. This stops the worker from
+  // writing into partial_pixels while we drop other buffers. (Worker never
+  // touches the bitmaps cleared below — it only writes job_pixel_buf, which
+  // aliases incremental.partial_pixels.)
+  CancelMuPdfIncrementalRenderState(mupdf_state);
+  ReleaseBitmapCacheMemory(&mupdf_state->current_preview);
+  ReleaseBitmapCacheMemory(&mupdf_state->current_interactive_tile);
+  ReleaseBitmapCacheMemory(&mupdf_state->current_final_zoom);
+  mupdf_state->final_cache_pending = false;
+  if (mupdf_state->cached_display_list && mupdf_state->ctx) {
+    fz_drop_display_list(mupdf_state->ctx, mupdf_state->cached_display_list);
+    mupdf_state->cached_display_list = NULL;
+  }
+  mupdf_state->cached_display_list_page = -1;
+  ReleaseAdjacentSlotMemory(&mupdf_state->prev_slot, mupdf_state->ctx);
+  ReleaseAdjacentSlotMemory(&mupdf_state->next_slot, mupdf_state->ctx);
+}
+
 void CancelMuPdfIncrementalRenderState(Book::MuPdfState *mupdf_state) {
   if (!mupdf_state)
     return;

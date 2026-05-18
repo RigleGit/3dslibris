@@ -38,6 +38,17 @@ void Book::SuspendFixedLayoutWorkers() {
     DBG_LOGF(GetStatusReporter(), "[APT][SUSPEND] CBZ worker shutdown done book=%s",
              GetFileName() ? GetFileName() : "");
   }
+  // Free MuPDF bitmap caches and inline image cache so the HOME menu has
+  // enough free RAM to launch its process. Held buffers can total 5-20MB
+  // for PDF (preview + interactive tile + final zoom + adjacent slots +
+  // display list) — enough to OOM the HOME menu on Old 3DS / 2DS.
+  ReleaseMuPdfMemoryForSuspend();
+  ClearInlineImageCache();
+}
+
+void Book::ReleaseMuPdfMemoryForSuspend() {
+  if (IsPdf() && mupdf_state)
+    ReleaseMuPdfMemoryForSuspendImpl(mupdf_state);
 }
 
 void Book::ResumeFixedLayoutWorkers() {
