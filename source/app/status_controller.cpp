@@ -77,8 +77,6 @@ void StatusController::UpdateStatus()
     return;
   u16 *screen = app_.ts->GetScreen();
   time_t unixTime = time(NULL);
-  // TODO: Move clock formatting into a small shared helper if status/date/time
-  // rendering grows further (12h/24h logic currently lives inline here).
   struct tm *timeStruct = localtime(&unixTime);
   int minute_of_day = -1;
   if (timeStruct)

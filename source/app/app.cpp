@@ -214,10 +214,6 @@ App::App()
 #endif
 }
 
-/* TODO: refactor app lifecycle management to better handle 3DS-specific events and states,
- such as app suspension, resumption, and homebrew vs CIA differences.
- This may involve more granular state tracking and event handling in the main loop and controllers.
- */
 App::~App()
 {
   PrepareForShutdown();
