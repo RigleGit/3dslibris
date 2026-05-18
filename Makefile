@@ -150,7 +150,7 @@ ARCH	:=	-march=armv6k -mtune=mpcore -mfloat-abi=hard -mtp=soft
 PORTLIBS := $(DEVKITPRO)/portlibs/3ds
 
 CFLAGS_BASE	:=	-Wall -mword-relocations \
-			-ffunction-sections \
+			-ffunction-sections -fdata-sections \
 			$(ARCH)
 
 CFLAGS	:=	$(CFLAGS_BASE) -O2
@@ -166,7 +166,7 @@ ifeq ($(DEBUG_LOGGING),1)
 CFLAGS	:=	$(filter-out -O2,$(CFLAGS)) -Og -g -DDSLIBRIS_DEBUG
 endif
 
-CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++11 -fstack-usage
+CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -std=gnu++11 -fstack-usage
 
 
 ASFLAGS	:=	-g $(ARCH)
