@@ -242,8 +242,9 @@ void QueueBlockSpacingFromMarginResult(
   // restore one line of spacing after this element's CSS margin-top queues.
   const bool was_suppressed = p->pending_block_spacing_suppress_only;
   const int css_lf = book_xml_parser_style_utils::ResolveCssMarginLinefeeds(mtr, line_h);
-  const int resolved = std::max(css_lf, default_lf);
-  const int clamped = book_xml_parser_style_utils::ClampResolvedBlockLinefeeds(resolved);
+  // CSS explicitly specifies the margin — use it directly. The default_lf is only
+  // the fallback for when no CSS is present (handled by the Unit::None branch above).
+  const int clamped = book_xml_parser_style_utils::ClampResolvedBlockLinefeeds(css_lf);
   QueueBlockSpacingLines(p, clamped, tag, reason, true);
   // After a CSS suppress → CSS margin-top sequence, ensure at least one optional
   // spacing line so the stanza/section separator renders visibly.
