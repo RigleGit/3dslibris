@@ -13,6 +13,111 @@
 #include "app/library_controller.h"
 #include "settings/prefs.h"
 
+bool App::IsFontMode(AppMode mode)
+{
+  return mode == AppMode::PrefsFont || mode == AppMode::PrefsFontBold ||
+         mode == AppMode::PrefsFontItalic ||
+         mode == AppMode::PrefsFontBoldItalic;
+}
+
+AppMode App::GetMode() const { return nav_.mode; }
+
+void App::SetMode(AppMode mode) { nav_.mode = mode; }
+
+Book *App::GetSelectedBook() const { return nav_.browser.selected_book; }
+
+void App::SetSelectedBook(Book *book) { nav_.browser.selected_book = book; }
+
+Book *App::GetCurrentBook() const { return reader_state_.bookcurrent; }
+
+void App::SetCurrentBook(Book *book) { reader_state_.bookcurrent = book; }
+
+int App::BookCount() const { return (int)books.size(); }
+
+int App::GetSelectedBookIndex() const
+{
+  if (!nav_.browser.selected_book)
+    return -1;
+  for (size_t i = 0; i < books.size(); i++)
+  {
+    if (books[i] == nav_.browser.selected_book)
+      return (int)i;
+  }
+  return -1;
+}
+
+int App::GetBrowserPageStart() const { return nav_.browser.page_start; }
+
+void App::SetBrowserPageStart(int page_start)
+{
+  if (page_start < 0)
+    page_start = 0;
+  nav_.browser.page_start = page_start;
+}
+
+u64 App::GetBrowserLastInteractionMs() const
+{
+  return nav_.browser.last_interaction_ms;
+}
+
+void App::SetBrowserLastInteractionMs(u64 ms)
+{
+  nav_.browser.last_interaction_ms = ms;
+}
+
+bool App::IsBrowserWaitingInputRelease() const
+{
+  return nav_.browser.wait_input_release;
+}
+
+void App::SetBrowserWaitingInputRelease(bool wait_input_release)
+{
+  nav_.browser.wait_input_release = wait_input_release;
+}
+
+void App::SetBrowserDirty(bool dirty) { nav_.browser.view_dirty = dirty; }
+
+void App::MarkBrowserDirty() { nav_.browser.view_dirty = true; }
+
+int App::GetPrefsSelectedIndex() const { return nav_.prefs.selected_index; }
+
+void App::SetPrefsSelectedIndex(int selected_index)
+{
+  nav_.prefs.selected_index = selected_index;
+}
+
+void App::SetBookSettingsContext(bool from_book)
+{
+  nav_.prefs.from_book = from_book;
+}
+
+bool App::IsPrefsLayoutNoticePending() const
+{
+  return nav_.prefs.layout_notice_pending;
+}
+
+void App::SetPrefsLayoutNoticePending(bool pending)
+{
+  nav_.prefs.layout_notice_pending = pending;
+}
+
+void App::SetPrefsDirty(bool dirty) { nav_.prefs.view_dirty = dirty; }
+
+void App::MarkPrefsDirty() { nav_.prefs.view_dirty = true; }
+
+bool App::IsPrefsDirty() const { return nav_.prefs.view_dirty; }
+
+bool App::IsBrowserDirty() const { return nav_.browser.view_dirty; }
+
+bool App::ShouldSkipNextBrowserPresent() const
+{
+  return skip_next_browser_present_;
+}
+
+void App::ClearSkipNextBrowserPresent() { skip_next_browser_present_ = false; }
+
+void App::PersistPrefs() { prefs->Write(); }
+
 int App::StartupFindBooks() { return library_controller_->FindBooks(); }
 
 void App::StartupPrepareLibrary() { library_controller_->PrepareLibrary(); }
