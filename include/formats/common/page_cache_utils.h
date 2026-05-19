@@ -96,4 +96,39 @@ bool ReadPages(BufReader *r, uint32_t count, uint16_t max_page_codepoints,
 bool ReadChapters(BufReader *r, uint32_t count, uint16_t max_title_bytes,
                   std::vector<CachedChapter> *chapters);
 
+// Buffer-writing analog of BufReader. Used by the page-cache save path to
+// build the body section in memory before deflating with zlib.
+struct BufWriter {
+  std::vector<uint8_t> *out;
+
+  explicit BufWriter(std::vector<uint8_t> *target) : out(target) {}
+
+  bool WriteRaw(const void *src, size_t n) {
+    if (!out)
+      return false;
+    if (n) {
+      const uint8_t *p = (const uint8_t *)src;
+      out->insert(out->end(), p, p + n);
+    }
+    return true;
+  }
+};
+
+bool WriteRawString(BufWriter *w, const std::string &value);
+bool WriteLengthPrefixedString16(BufWriter *w, const std::string &value,
+                                 uint16_t max_bytes, bool allow_empty = true,
+                                 uint16_t *written_length = NULL);
+bool WritePages(BufWriter *w, const std::vector<CachedPage> &pages,
+                uint16_t max_page_codepoints);
+bool WriteChapters(BufWriter *w, const std::vector<CachedChapter> &chapters,
+                   uint16_t max_title_bytes);
+
+// zlib helpers. Compress an in-memory body into `compressed` (deflated
+// payload only; caller writes lengths to disk). Decompress inflates a
+// known-uncompressed-size payload from a buffer.
+bool CompressBody(const std::vector<uint8_t> &body,
+                  std::vector<uint8_t> *compressed);
+bool DecompressBody(const uint8_t *compressed_data, size_t compressed_size,
+                    size_t uncompressed_size, std::vector<uint8_t> *out);
+
 } // namespace page_cache_utils

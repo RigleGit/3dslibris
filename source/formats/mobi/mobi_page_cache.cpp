@@ -17,7 +17,8 @@ namespace mobi_page_cache {
 namespace {
 
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-static const u16 kMobiPageCacheVersion = 19;
+// v20: body section zlib-deflated. See epub_page_cache.cpp for rationale.
+static const u16 kMobiPageCacheVersion = 20;
 static const size_t kPageCacheIoBufferBytes = 262144;
 
 struct MobiPageCacheHeader {
@@ -76,9 +77,9 @@ static std::string BuildCachePath(const char *book_path,
       paths::GetMobiCacheDir().c_str(), ".mpc", book_path, params);
 }
 
-static bool WritePagesFromBook(FILE *fp, Book *book,
+static bool WritePagesFromBook(page_cache_utils::BufWriter *w, Book *book,
                                uint16_t max_page_codepoints) {
-  if (!fp || !book)
+  if (!w || !book)
     return false;
   const u16 page_count = book->GetPageCount();
   for (u16 i = 0; i < page_count; i++) {
@@ -87,14 +88,13 @@ static bool WritePagesFromBook(FILE *fp, Book *book,
     if (length < 0 || (uint32_t)length > max_page_codepoints)
       return false;
     const uint16_t len16 = (uint16_t)length;
-    if (fwrite(&len16, 1, sizeof(len16), fp) != sizeof(len16))
+    if (!w->WriteRaw(&len16, sizeof(len16)))
       return false;
     if (length > 0) {
       const u32 *buf = page->GetBuffer();
       if (!buf)
         return false;
-      const size_t byte_count = (size_t)length * sizeof(u32);
-      if (fwrite(buf, 1, byte_count, fp) != byte_count)
+      if (!w->WriteRaw(buf, (size_t)length * sizeof(u32)))
         return false;
     }
   }
@@ -198,10 +198,10 @@ bool TryLoad(Book *book, const char *book_path,
   }
   fclose(fp);
 
-  page_cache_utils::BufReader reader(file_buf.data(), file_buf.size());
+  page_cache_utils::BufReader file_reader(file_buf.data(), file_buf.size());
 
   MobiPageCacheHeader hdr;
-  if (!reader.ReadRaw(&hdr, sizeof(hdr))) {
+  if (!file_reader.ReadRaw(&hdr, sizeof(hdr))) {
     remove(cache_path.c_str());
     return false;
   }
@@ -213,6 +213,26 @@ bool TryLoad(Book *book, const char *book_path,
     remove(cache_path.c_str());
     return false;
   }
+
+  // v20 body layout: uint32 uncompressed_size, uint32 compressed_size,
+  // deflated payload.
+  uint32_t body_uncompressed = 0;
+  uint32_t body_compressed = 0;
+  if (!file_reader.ReadRaw(&body_uncompressed, sizeof(body_uncompressed)) ||
+      !file_reader.ReadRaw(&body_compressed, sizeof(body_compressed)) ||
+      body_uncompressed == 0 || body_compressed == 0 ||
+      body_uncompressed > 32 * 1024 * 1024 ||
+      !file_reader.Remaining(body_compressed)) {
+    remove(cache_path.c_str());
+    return false;
+  }
+  std::vector<uint8_t> body_buf;
+  if (!page_cache_utils::DecompressBody(file_reader.cur, body_compressed,
+                                         body_uncompressed, &body_buf)) {
+    remove(cache_path.c_str());
+    return false;
+  }
+  page_cache_utils::BufReader reader(body_buf.data(), body_buf.size());
 
   std::string title;
   if (!page_cache_utils::ReadRawString(&reader, hdr.title_len, &title)) {
@@ -310,44 +330,59 @@ void Save(Book *book, const char *book_path,
   hdr.toc_heuristic = book->GetTocHeuristicCount();
   hdr.toc_unresolved = book->GetTocUnresolvedCount();
 
-  FILE *fp = fopen(cache_path.c_str(), "wb");
-  if (!fp)
-    return;
-  setvbuf(fp, NULL, _IOFBF, kPageCacheIoBufferBytes);
+  // Build body in memory, then compress before fwrite.
+  std::vector<uint8_t> body_buf;
+  body_buf.reserve((size_t)book->GetPageCount() * 64);
+  page_cache_utils::BufWriter w(&body_buf);
 
-  bool ok = fwrite(&hdr, 1, sizeof(hdr), fp) == sizeof(hdr);
+  bool ok = page_cache_utils::WriteRawString(&w, title);
   if (ok)
-    ok = page_cache_utils::WriteRawString(fp, title);
-
+    ok = WritePagesFromBook(&w, book, page_cache_limits::kPageMaxBytes);
   if (ok)
-    ok = WritePagesFromBook(fp, book, page_cache_limits::kPageMaxBytes);
-
-  if (ok)
-    ok = page_cache_utils::WriteChapters(fp, cached_chapters,
+    ok = page_cache_utils::WriteChapters(&w, cached_chapters,
                                          page_cache_limits::kChapterTitleMaxBytes);
-
   if (ok) {
     u32 img_count = book->GetInlineImageCount();
     for (u32 i = 0; i < img_count; i++) {
       const std::string *imgpath = book->GetInlineImagePath((u16)i);
-      if (!imgpath || imgpath->empty()) {
-        ok = false;
-        break;
-      }
+      if (!imgpath || imgpath->empty()) { ok = false; break; }
       if (!page_cache_utils::WriteLengthPrefixedString16(
-              fp, *imgpath, page_cache_limits::kPathMaxBytes, false)) {
+              &w, *imgpath, page_cache_limits::kPathMaxBytes, false)) {
         ok = false;
         break;
       }
       const u8 follow_lines = book->GetInlineImageFollowTextLines((u16)i);
-      if (fwrite(&follow_lines, 1, sizeof(follow_lines), fp) !=
-          sizeof(follow_lines)) {
+      if (!w.WriteRaw(&follow_lines, sizeof(follow_lines))) {
         ok = false;
         break;
       }
     }
   }
 
+  std::vector<uint8_t> compressed_body;
+  if (ok && !page_cache_utils::CompressBody(body_buf, &compressed_body))
+    ok = false;
+
+  if (!ok)
+    return;
+
+  FILE *fp = fopen(cache_path.c_str(), "wb");
+  if (!fp)
+    return;
+  setvbuf(fp, NULL, _IOFBF, kPageCacheIoBufferBytes);
+
+  const uint32_t body_uncompressed = (uint32_t)body_buf.size();
+  const uint32_t body_compressed = (uint32_t)compressed_body.size();
+  ok = fwrite(&hdr, 1, sizeof(hdr), fp) == sizeof(hdr);
+  if (ok)
+    ok = fwrite(&body_uncompressed, 1, sizeof(body_uncompressed), fp) ==
+         sizeof(body_uncompressed);
+  if (ok)
+    ok = fwrite(&body_compressed, 1, sizeof(body_compressed), fp) ==
+         sizeof(body_compressed);
+  if (ok)
+    ok = fwrite(compressed_body.data(), 1, compressed_body.size(), fp) ==
+         compressed_body.size();
   fclose(fp);
   if (!ok)
     remove(cache_path.c_str());

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <stdio.h>
 #include <string.h>
+#include <zlib.h>
 
 namespace page_cache_utils {
 
@@ -269,6 +270,107 @@ bool ReadChapters(BufReader *r, uint32_t count, uint16_t max_title_bytes,
       return false;
     }
     chapters->push_back(chapter);
+  }
+  return true;
+}
+
+// ---------- BufWriter helpers (in-memory body serialization) ----------
+
+bool WriteRawString(BufWriter *w, const std::string &value) {
+  if (!w)
+    return false;
+  return w->WriteRaw(value.data(), value.size());
+}
+
+bool WriteLengthPrefixedString16(BufWriter *w, const std::string &value,
+                                 uint16_t max_bytes, bool allow_empty,
+                                 uint16_t *written_length) {
+  if (!w)
+    return false;
+  const std::string bounded = ClampString(value, max_bytes);
+  const uint16_t length = (uint16_t)bounded.size();
+  if (!allow_empty && length == 0)
+    return false;
+  if (written_length)
+    *written_length = length;
+  if (!w->WriteRaw(&length, sizeof(length)))
+    return false;
+  return WriteRawString(w, bounded);
+}
+
+bool WritePages(BufWriter *w, const std::vector<CachedPage> &pages,
+                uint16_t max_page_codepoints) {
+  if (!w)
+    return false;
+  for (size_t i = 0; i < pages.size(); i++) {
+    const CachedPage &page = pages[i];
+    if (page.size() > max_page_codepoints)
+      return false;
+    const uint16_t length = (uint16_t)page.size();
+    if (!w->WriteRaw(&length, sizeof(length)))
+      return false;
+    if (length > 0 && !w->WriteRaw(page.data(), page.size() * sizeof(uint32_t)))
+      return false;
+  }
+  return true;
+}
+
+bool WriteChapters(BufWriter *w, const std::vector<CachedChapter> &chapters,
+                   uint16_t max_title_bytes) {
+  if (!w)
+    return false;
+  for (size_t i = 0; i < chapters.size(); i++) {
+    const CachedChapter &chapter = chapters[i];
+    if (!w->WriteRaw(&chapter.page, sizeof(chapter.page)) ||
+        !w->WriteRaw(&chapter.level, sizeof(chapter.level))) {
+      return false;
+    }
+    const std::string bounded = ClampString(chapter.title, max_title_bytes);
+    const uint16_t length = (uint16_t)bounded.size();
+    if (!w->WriteRaw(&length, sizeof(length)))
+      return false;
+    if (!bounded.empty() && !w->WriteRaw(bounded.data(), bounded.size()))
+      return false;
+  }
+  return true;
+}
+
+// ---------- zlib (de)compress for the page-cache body ----------
+
+bool CompressBody(const std::vector<uint8_t> &body,
+                  std::vector<uint8_t> *compressed) {
+  if (!compressed)
+    return false;
+  compressed->clear();
+  if (body.empty())
+    return true;
+  uLongf bound = compressBound((uLong)body.size());
+  compressed->resize((size_t)bound);
+  uLongf out_size = bound;
+  // Level 6 (default) on 3DS: ~10MB/s decompress, ~2-4MB/s compress.
+  // Cache files compress to ~30-50% original on Latin-heavy text — the
+  // payoff is read-time SD bandwidth savings.
+  int rc = compress2(compressed->data(), &out_size, body.data(),
+                     (uLong)body.size(), Z_DEFAULT_COMPRESSION);
+  if (rc != Z_OK) {
+    compressed->clear();
+    return false;
+  }
+  compressed->resize((size_t)out_size);
+  return true;
+}
+
+bool DecompressBody(const uint8_t *compressed_data, size_t compressed_size,
+                    size_t uncompressed_size, std::vector<uint8_t> *out) {
+  if (!out || !compressed_data || compressed_size == 0)
+    return false;
+  out->resize(uncompressed_size);
+  uLongf dest_len = (uLongf)uncompressed_size;
+  int rc = uncompress(out->data(), &dest_len, compressed_data,
+                      (uLong)compressed_size);
+  if (rc != Z_OK || dest_len != (uLongf)uncompressed_size) {
+    out->clear();
+    return false;
   }
   return true;
 }

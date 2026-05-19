@@ -37,7 +37,11 @@ static const std::string &GetEffectiveCacheDir() {
   return kEpubCacheDir;
 }
 static const u32 kEpubPageCacheMagic = 0x45504347U;
-static const u16 kEpubPageCacheVersion = 10;
+// v11: body section (everything after EpubPageCacheHeader) is now zlib-deflated.
+//      Saves ~50-70% on cache file size for Latin-heavy text, which on the
+//      3DS is SD-bandwidth-limited (~560 KB/s) — read time scales with file
+//      size, so compression directly translates to faster cache loads.
+static const u16 kEpubPageCacheVersion = 11;
 static const u16 kPageCacheHrefMaxBytes = 2048;
 
 struct EpubPageCacheHeader {
@@ -229,10 +233,10 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
   fclose(fp);
   fp = NULL;
 
-  page_cache_utils::BufReader reader(file_buf.data(), file_buf.size());
+  page_cache_utils::BufReader file_reader(file_buf.data(), file_buf.size());
 
   EpubPageCacheHeader hdr;
-  if (!reader.ReadRaw(&hdr, sizeof(hdr))) {
+  if (!file_reader.ReadRaw(&hdr, sizeof(hdr))) {
     remove(cache_path.c_str());
     return false;
   }
@@ -245,6 +249,26 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     remove(cache_path.c_str());
     return false;
   }
+
+  // v11 body layout: uint32 uncompressed_size, uint32 compressed_size,
+  // compressed_data[compressed_size]. Inflate, then parse body via BufReader.
+  uint32_t body_uncompressed = 0;
+  uint32_t body_compressed = 0;
+  if (!file_reader.ReadRaw(&body_uncompressed, sizeof(body_uncompressed)) ||
+      !file_reader.ReadRaw(&body_compressed, sizeof(body_compressed)) ||
+      body_uncompressed == 0 || body_compressed == 0 ||
+      body_uncompressed > 64 * 1024 * 1024 ||
+      !file_reader.Remaining(body_compressed)) {
+    remove(cache_path.c_str());
+    return false;
+  }
+  std::vector<uint8_t> body_buf;
+  if (!page_cache_utils::DecompressBody(file_reader.cur, body_compressed,
+                                         body_uncompressed, &body_buf)) {
+    remove(cache_path.c_str());
+    return false;
+  }
+  page_cache_utils::BufReader reader(body_buf.data(), body_buf.size());
 
   std::string title;
   if (!page_cache_utils::ReadRawString(&reader, hdr.title_len, &title)) {
@@ -430,53 +454,45 @@ void Save(Book *book, const char *book_path, int pixel_size,
   hdr.image_count = book->GetInlineImageCount();
   hdr.link_href_count = book->GetInlineLinkHrefCount();
 
-  DBG_LOGF(r, "EPUB cache save: fopen path=%s", cache_path.c_str());
-  FILE *fp = fopen(cache_path.c_str(), "wb");
-  if (!fp) {
-    DBG_LOGF(r, "EPUB cache save: fopen failed");
-    return;
-  }
-  setvbuf(fp, NULL, _IOFBF, 262144);
+  // Serialize the entire body section into a single in-memory buffer first.
+  // We compress it before fwrite()ing, so the disk layout is just:
+  //   header | uint32 uncompressed_size | uint32 compressed_size | deflated.
+  std::vector<uint8_t> body_buf;
+  body_buf.reserve((size_t)page_count * 64);
+  page_cache_utils::BufWriter w(&body_buf);
 
-  bool ok = fwrite(&hdr, 1, sizeof(hdr), fp) == sizeof(hdr);
-  DBG_LOGF(r, "EPUB cache save: write-hdr ok=%d", (int)ok);
-  if (ok)
-    ok = page_cache_utils::WriteRawString(fp, title);
-
+  bool ok = page_cache_utils::WriteRawString(&w, title);
   DBG_LOGF(r, "EPUB cache save: write-pages begin count=%d", (int)page_count);
   for (u16 i = 0; ok && i < page_count; i++) {
     Page *page = book->GetPage((int)i);
     const int length = page ? page->GetLength() : 0;
     const u16 len16 = (u16)(length > 0 ? length : 0);
     if (len16 > page_cache_limits::kPageMaxBytes) { ok = false; break; }
-    if (fwrite(&len16, 1, sizeof(len16), fp) != sizeof(len16)) { ok = false; break; }
+    if (!w.WriteRaw(&len16, sizeof(len16))) { ok = false; break; }
     if (len16 > 0) {
       const u32 *buffer = page->GetBuffer();
       if (!buffer) { ok = false; break; }
-      if (fwrite(buffer, 1, (size_t)len16 * sizeof(u32), fp) != (size_t)len16 * sizeof(u32)) { ok = false; break; }
+      if (!w.WriteRaw(buffer, (size_t)len16 * sizeof(u32))) { ok = false; break; }
     }
   }
   DBG_LOGF(r, "EPUB cache save: write-pages done ok=%d", (int)ok);
 
   if (ok)
-    ok = page_cache_utils::WriteChapters(fp, cached_chapters,
+    ok = page_cache_utils::WriteChapters(&w, cached_chapters,
                                          page_cache_limits::kChapterTitleMaxBytes);
-  DBG_LOGF(r, "EPUB cache save: write-chapters done ok=%d", (int)ok);
 
   if (ok) {
     for (auto &kv : doc_starts) {
-      if (open_cancel_poll::Poll(closing ? nullptr : book, book->GetStatusReporter(),
+      if (open_cancel_poll::Poll(closing ? nullptr : book,
+                                  book->GetStatusReporter(),
                                   "epub-cache-docstarts")) {
         ok = false;
         break;
       }
       u16 doc_page = kv.second;
-      if (fwrite(&doc_page, 1, sizeof(doc_page), fp) != sizeof(doc_page)) {
-        ok = false;
-        break;
-      }
+      if (!w.WriteRaw(&doc_page, sizeof(doc_page))) { ok = false; break; }
       if (!page_cache_utils::WriteLengthPrefixedString16(
-              fp, kv.first, page_cache_limits::kPathMaxBytes, true)) {
+              &w, kv.first, page_cache_limits::kPathMaxBytes, true)) {
         ok = false;
         break;
       }
@@ -485,19 +501,16 @@ void Save(Book *book, const char *book_path, int pixel_size,
 
   if (ok) {
     for (auto &kv : anchors) {
-      if (open_cancel_poll::Poll(closing ? nullptr : book, book->GetStatusReporter(),
+      if (open_cancel_poll::Poll(closing ? nullptr : book,
+                                  book->GetStatusReporter(),
                                   "epub-cache-anchors")) {
         ok = false;
         break;
       }
       u16 anchor_page = kv.second;
-      if (fwrite(&anchor_page, 1, sizeof(anchor_page), fp) !=
-          sizeof(anchor_page)) {
-        ok = false;
-        break;
-      }
+      if (!w.WriteRaw(&anchor_page, sizeof(anchor_page))) { ok = false; break; }
       if (!page_cache_utils::WriteLengthPrefixedString16(
-              fp, kv.first, kPageCacheHrefMaxBytes, true)) {
+              &w, kv.first, kPageCacheHrefMaxBytes, true)) {
         ok = false;
         break;
       }
@@ -507,18 +520,16 @@ void Save(Book *book, const char *book_path, int pixel_size,
   if (ok) {
     u32 img_count = book->GetInlineImageCount();
     for (u32 i = 0; i < img_count; i++) {
-      if (open_cancel_poll::Poll(closing ? nullptr : book, book->GetStatusReporter(),
+      if (open_cancel_poll::Poll(closing ? nullptr : book,
+                                  book->GetStatusReporter(),
                                   "epub-cache-images")) {
         ok = false;
         break;
       }
       const std::string *imgpath = book->GetInlineImagePath((u16)i);
-      if (!imgpath || imgpath->empty()) {
-        ok = false;
-        break;
-      }
+      if (!imgpath || imgpath->empty()) { ok = false; break; }
       if (!page_cache_utils::WriteLengthPrefixedString16(
-              fp, *imgpath, page_cache_limits::kPathMaxBytes, false)) {
+              &w, *imgpath, page_cache_limits::kPathMaxBytes, false)) {
         ok = false;
         break;
       }
@@ -528,30 +539,60 @@ void Save(Book *book, const char *book_path, int pixel_size,
   if (ok) {
     u32 link_count = book->GetInlineLinkHrefCount();
     for (u32 i = 1; i <= link_count; i++) {
-      if (open_cancel_poll::Poll(closing ? nullptr : book, book->GetStatusReporter(),
+      if (open_cancel_poll::Poll(closing ? nullptr : book,
+                                  book->GetStatusReporter(),
                                   "epub-cache-links")) {
         ok = false;
         break;
       }
       const std::string *href = book->GetInlineLinkHref((u16)i);
-      if (!href || href->empty()) {
-        ok = false;
-        break;
-      }
+      if (!href || href->empty()) { ok = false; break; }
       if (!page_cache_utils::WriteLengthPrefixedString16(
-              fp, *href, kPageCacheHrefMaxBytes, true)) {
+              &w, *href, kPageCacheHrefMaxBytes, true)) {
         ok = false;
         break;
       }
     }
   }
 
+  std::vector<uint8_t> compressed_body;
+  if (ok && !page_cache_utils::CompressBody(body_buf, &compressed_body))
+    ok = false;
+
+  if (!ok) {
+    DBG_LOGF(r, "EPUB cache save: body build failed");
+    return;
+  }
+
+  DBG_LOGF(r, "EPUB cache save: fopen path=%s", cache_path.c_str());
+  FILE *fp = fopen(cache_path.c_str(), "wb");
+  if (!fp) {
+    DBG_LOGF(r, "EPUB cache save: fopen failed");
+    return;
+  }
+  setvbuf(fp, NULL, _IOFBF, 262144);
+
+  const uint32_t body_uncompressed = (uint32_t)body_buf.size();
+  const uint32_t body_compressed = (uint32_t)compressed_body.size();
+  ok = fwrite(&hdr, 1, sizeof(hdr), fp) == sizeof(hdr);
+  if (ok)
+    ok = fwrite(&body_uncompressed, 1, sizeof(body_uncompressed), fp) ==
+         sizeof(body_uncompressed);
+  if (ok)
+    ok = fwrite(&body_compressed, 1, sizeof(body_compressed), fp) ==
+         sizeof(body_compressed);
+  if (ok)
+    ok = fwrite(compressed_body.data(), 1, compressed_body.size(), fp) ==
+         compressed_body.size();
   fclose(fp);
   if (!ok)
     remove(cache_path.c_str());
 #ifdef DSLIBRIS_DEBUG
-  DBG_LOGF(r, "EPUB cache save: done ok=%d ms=%u pages=%d",
-           (int)ok, (unsigned)(osGetTime() - t0_save), (int)book->GetPageCount());
+  DBG_LOGF(r,
+           "EPUB cache save: done ok=%d ms=%u pages=%d body=%u compressed=%u",
+           (int)ok, (unsigned)(osGetTime() - t0_save),
+           (int)book->GetPageCount(), (unsigned)body_uncompressed,
+           (unsigned)body_compressed);
 #endif
 }
 
