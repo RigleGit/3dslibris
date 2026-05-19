@@ -36,6 +36,7 @@ public:
   void ProcessJobs(u32 budget_ms);
   size_t PauseBrowserJobs();
   bool IsInsideFolder() const;
+  Book *RestoreSavedBookSelection(const char *folder, const char *filename);
 
 private:
   App &app_;
@@ -47,6 +48,8 @@ private:
 
   void RebuildRoot();
   void EnterFolder(Book *folder);
+  void LoadFolderPath(const std::string &folder_path,
+                      const std::string &folder_name);
   void LeaveFolder();
   void OpenSelectedBrowserEntry();
 };

@@ -309,6 +309,7 @@ public:
   size_t PauseBrowserJobs();
   void LoadVisibleBrowserCoverCaches();
   bool IsBrowserInsideFolder() const;
+  Book *RestoreSavedBookSelection(const char *folder, const char *filename);
 
 private:
   static App *s_instance_;

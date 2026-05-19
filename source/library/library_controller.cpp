@@ -53,6 +53,15 @@ static bool PathIsRegularFile(const std::string &path) {
   return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
+static std::string BasenameFromPath(const std::string &path) {
+  size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos)
+    return path;
+  if (slash + 1 >= path.size())
+    return std::string();
+  return path.substr(slash + 1);
+}
+
 #if UTF8_FILENAME_DIAG
 static bool LooksLikeValidUtf8(const char *s) { return utf8_utils::IsValidUtf8(s); }
 
@@ -124,6 +133,23 @@ static bool HasBookWithFileName(const std::vector<Book *> &books,
       return true;
   }
   return false;
+}
+
+static Book *FindBookByFolderAndFile(const std::vector<Book *> &books,
+                                     const char *folder,
+                                     const char *filename) {
+  if (!filename || !*filename)
+    return NULL;
+  for (size_t i = 0; i < books.size(); i++) {
+    Book *book = books[i];
+    if (!book || book->IsBrowserFolder() || !book->GetFileName())
+      continue;
+    if (folder && *folder && strcasecmp(book->GetFolderName(), folder) != 0)
+      continue;
+    if (strcasecmp(book->GetFileName(), filename) == 0)
+      return book;
+  }
+  return NULL;
 }
 
 static bool HasBrowserEntryKey(std::set<std::string> *seen,
@@ -468,8 +494,14 @@ void LibraryController::RebuildRoot() {
 void LibraryController::EnterFolder(Book *folder) {
   if (!folder || !folder->IsBrowserFolder())
     return;
-  const std::string folder_path = folder->GetBrowserFolderPath();
-  const std::string folder_name = folder->GetBrowserFolderDisplayName();
+  LoadFolderPath(folder->GetBrowserFolderPath(),
+                 folder->GetBrowserFolderDisplayName());
+}
+
+void LibraryController::LoadFolderPath(const std::string &folder_path,
+                                       const std::string &folder_name) {
+  if (folder_path.empty() || !PathIsDirectory(folder_path))
+    return;
   PauseBrowserJobs();
   ClearBrowserBooksAndButtons(&app_);
   inside_folder_ = true;
@@ -495,6 +527,63 @@ void LibraryController::EnterFolder(Book *folder) {
   ResetBrowserMarquee();
   app_.ts->MarkAllScreensDirty();
   app_.SetBrowserDirty(true);
+}
+
+Book *LibraryController::RestoreSavedBookSelection(const char *folder,
+                                                   const char *filename) {
+  if (!filename || !*filename)
+    return NULL;
+
+  Book *root_book = FindBookByFolderAndFile(app_.books, folder, filename);
+  if (!root_book && (!folder || !*folder))
+    root_book = FindBookByFolderAndFile(app_.books, NULL, filename);
+  if (root_book) {
+    app_.SetSelectedBook(root_book);
+    return root_book;
+  }
+
+  std::string folder_path = folder ? std::string(folder) : std::string();
+  if (folder_path.empty()) {
+    std::vector<std::string> scan_dirs;
+    scan_dirs.push_back(app_.bookdir);
+    if (app_.bookdir != paths::kRomfsBookDir)
+      scan_dirs.push_back(paths::kRomfsBookDir);
+    for (size_t i = 0; i < scan_dirs.size() && folder_path.empty(); i++) {
+      DIR *dp = opendir(scan_dirs[i].c_str());
+      if (!dp)
+        continue;
+      struct dirent *ent;
+      while ((ent = readdir(dp))) {
+        if (ent->d_name[0] == '.')
+          continue;
+        std::string child = scan_dirs[i] + "/" + ent->d_name;
+        if (!PathIsDirectory(child))
+          continue;
+        std::string candidate = child + "/" + filename;
+        if (PathIsRegularFile(candidate)) {
+          folder_path = child;
+          break;
+        }
+      }
+      closedir(dp);
+    }
+  }
+
+  if (folder_path.empty() || !PathIsDirectory(folder_path))
+    return NULL;
+
+  std::string file_path = folder_path + "/" + filename;
+  if (!PathIsRegularFile(file_path))
+    return NULL;
+
+  LoadFolderPath(folder_path, BasenameFromPath(folder_path));
+  Book *book = FindBookByFolderAndFile(app_.books, folder_path.c_str(), filename);
+  if (!book) {
+    RebuildRoot();
+    return NULL;
+  }
+  app_.SetSelectedBook(book);
+  return book;
 }
 
 void LibraryController::LeaveFolder() {
@@ -562,4 +651,9 @@ size_t App::PauseBrowserJobs() { return library_controller_->PauseBrowserJobs();
 
 bool App::IsBrowserInsideFolder() const {
   return library_controller_->IsInsideFolder();
+}
+
+Book *App::RestoreSavedBookSelection(const char *folder,
+                                     const char *filename) {
+  return library_controller_->RestoreSavedBookSelection(folder, filename);
 }

@@ -46,6 +46,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
   Text *ts = p->ts;
   int position = 0; //! Page position in book.
   char filename[MAXPATHLEN];
+  char folder[MAXPATHLEN];
   bool current = false;
   int i;
 
@@ -122,12 +123,16 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     }
   } else if (!strcmp(name, "book")) {
     strcpy(filename, "");
+    strcpy(folder, "");
+    p->book = NULL;
     current = false;
     position = 0;
     bool mobi_line_wrap_fix = false;
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "file"))
         snprintf(filename, sizeof(filename), "%s", attr[i + 1]);
+      if (!strcmp(attr[i], "folder"))
+        snprintf(folder, sizeof(folder), "%s", attr[i + 1]);
       if (!strcmp(attr[i], "page"))
         position = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "mobiLineWrapFix"))
@@ -142,26 +147,35 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
 
     // Find the book index for this library entry and set parsing context.
     // Subsequent <bookmark> tags attach to p->book until </book>.
-    std::vector<Book *>::iterator it;
-    for (it = app->books.begin(); it < app->books.end(); it++) {
-      const char *bookname = (*it)->GetFileName();
-      if (!strcmp(bookname, filename)) {
-        // bookmark tags will refer to this.
-        p->book = *it;
-        // Per-book render fixes live alongside progress/bookmarks in prefs.
-        (*it)->SetMobiLineWrapFix(mobi_line_wrap_fix);
-
-        if (current) {
-          // Set this book as current.
-          app->SetCurrentBook(*it);
-          app->SetSelectedBook(*it);
+    Book *matched = NULL;
+    if (current) {
+      matched = app->RestoreSavedBookSelection(folder, filename);
+    } else {
+      std::vector<Book *>::iterator it;
+      for (it = app->books.begin(); it < app->books.end(); it++) {
+        const char *bookname = (*it)->GetFileName();
+        if (!strcmp(bookname, filename) &&
+            (!folder[0] || !strcmp((*it)->GetFolderName(), folder))) {
+          matched = *it;
+          break;
         }
-        if (position)
-          // Set current page in this book.
-          (*it)->SetPosition(position - 1);
-
-        break;
       }
+    }
+
+    if (matched) {
+      // bookmark tags will refer to this.
+      p->book = matched;
+      // Per-book render fixes live alongside progress/bookmarks in prefs.
+      matched->SetMobiLineWrapFix(mobi_line_wrap_fix);
+
+      if (current) {
+        // Set this book as current.
+        app->SetCurrentBook(matched);
+        app->SetSelectedBook(matched);
+      }
+      if (position)
+        // Set current page in this book.
+        matched->SetPosition(position - 1);
     }
   } else if (!strcmp(name, "bookmark")) {
     for (i = 0; attr[i]; i += 2) {
@@ -387,7 +401,9 @@ int Prefs::Write() {
     if (!book || book->IsBrowserFolder())
       continue;
     const std::string escaped_filename = XmlEscapeAttr(book->GetFileName());
-    fprintf(fp, "\t\t<book file=\"%s\" page=\"%d\"", escaped_filename.c_str(),
+    const std::string escaped_folder = XmlEscapeAttr(book->GetFolderName());
+    fprintf(fp, "\t\t<book file=\"%s\" folder=\"%s\" page=\"%d\"",
+            escaped_filename.c_str(), escaped_folder.c_str(),
             book->GetPosition() + 1);
     // Only persist the override when enabled so old prefs stay readable.
     if (book->GetMobiLineWrapFix())
