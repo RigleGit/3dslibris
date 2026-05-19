@@ -91,6 +91,9 @@ APP_AUTHOR	:=	$(if $(APP_AUTHOR_OVERRIDE),$(APP_AUTHOR_OVERRIDE),$(DEFAULT_APP_A
 ICON		:=	assets/release/icon.png
 
 DEBUG_LOGGING	?=	0
+BLOCK_BOUNDARY_TRACE ?= 0
+BLOCK_SPACING_TRACE ?= 0
+SCREEN_ADVANCE_TRACE ?= 0
 EXPAT_ENABLE_DTD ?= 0
 EXPAT_ENABLE_NS ?= 0
 EXPAT_CONTEXT_BYTES ?= 0
@@ -164,6 +167,18 @@ CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include \
 
 ifeq ($(DEBUG_LOGGING),1)
 CFLAGS	:=	$(filter-out -O2,$(CFLAGS)) -Og -g -DDSLIBRIS_DEBUG
+endif
+
+ifeq ($(BLOCK_BOUNDARY_TRACE),1)
+CFLAGS	+=	-DBLOCK_BOUNDARY_TRACE=1
+endif
+
+ifeq ($(BLOCK_SPACING_TRACE),1)
+CFLAGS	+=	-DBLOCK_SPACING_TRACE=1
+endif
+
+ifeq ($(SCREEN_ADVANCE_TRACE),1)
+CFLAGS	+=	-DSCREEN_ADVANCE_TRACE=1
 endif
 
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -std=gnu++11 -fstack-usage

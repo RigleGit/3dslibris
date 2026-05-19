@@ -191,6 +191,7 @@ void Page::Draw(Text *ts) {
   // Reflowed page buffers already carry explicit line breaks/wrap decisions.
   // Runtime per-glyph wrapping in TextRenderer breaks RTL line anchoring.
   ts->SetAutoWrapEnabled(false);
+  ts->SetClipToContentEnabled(true);
 
   int savedBottomMargin = ts->margin.bottom;
   int leftBottomMargin = savedBottomMargin;
@@ -434,10 +435,12 @@ void Page::Draw(Text *ts) {
       // Forced screen break emitted by ForcePageBreak (CSS page-break-before).
       // On the first screen: advance to second screen so break-before content
       // starts at the top of screen=1 rather than continuing mid-screen=0.
-      // On the second screen: no-op (already there, or break came after a full
-      // page was committed so this token is at the start of a new buffer).
+      // On the second screen: if content already exists on the current line,
+      // separate the following content instead of letting block text run on.
       if (on_first_screen)
         advance_to_next_screen();
+      else if (ts->linebegan)
+        ts->PrintNewLine();
     } else if (c == TEXT_LINE_START_X) {
       if (i + 1 < length) {
         const int x = std::max(0, std::min((int)buf[i + 1], ts->display.width));

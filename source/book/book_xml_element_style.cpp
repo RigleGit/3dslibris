@@ -19,6 +19,10 @@
 
 #include <string>
 
+#ifndef BLOCK_BOUNDARY_TRACE
+#define BLOCK_BOUNDARY_TRACE 0
+#endif
+
 namespace {
 
 static bool EqualsAsciiNoCase(const char *a, const char *b) {
@@ -216,7 +220,7 @@ void EnsureBlockBoundaryBeforeBlockStart(parsedata_t *p, const char *tag,
                                           const char *reason) {
   if (!p || !p->ts || !p->book)
     return;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BLOCK_BOUNDARY_TRACE
   DBG_LOGF(p->book->GetStatusReporter(),
     "EnsureBoundary ENTER[%s/%s] pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d vis=%d buflen=%d",
     tag ? tag : "?", reason ? reason : "?",
@@ -266,7 +270,7 @@ void EnsureBlockBoundaryBeforeBlockStart(parsedata_t *p, const char *tag,
   };
 
   if (p->pending_block_break) {
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BLOCK_BOUNDARY_TRACE
     DBG_LOGF(p->book->GetStatusReporter(),
       "EnsureBoundary PBB-path[%s] pen_y=%d lb=%d scr=%d",
       tag ? tag : "?", p->pen.y, p->linebegan ? 1 : 0, p->screen);
@@ -285,7 +289,7 @@ void EnsureBlockBoundaryBeforeBlockStart(parsedata_t *p, const char *tag,
        !buffer_already_broken &&
        !book_xml_screen_advance::IsCurrentReadingScreenVisuallyEmpty(p));
 
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BLOCK_BOUNDARY_TRACE
   DBG_LOGF(p->book->GetStatusReporter(),
     "EnsureBoundary needs=%d lb=%d buf_broken=%d pen_y=%d scr=%d",
     needs_boundary ? 1 : 0,

@@ -8,6 +8,10 @@
 #include <algorithm>
 #include <string>
 
+#ifndef SCREEN_ADVANCE_TRACE
+#define SCREEN_ADVANCE_TRACE 0
+#endif
+
 namespace book_xml_text_emit {
 
 namespace {
@@ -57,7 +61,7 @@ void AlignFreshLineToEffectiveLeftMargin(parsedata_t *p,
 void EmitFreshLineStartX(parsedata_t *p, const FlowEmitMetrics &metrics) {
   if (!p || p->linebegan || p->pen.x == metrics.base_margin_left)
     return;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && SCREEN_ADVANCE_TRACE
   DBG_LOGF_CAT(p->reporter, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
                "EmitFreshLineStartX: pen.x=%d base=%d buflen=%d screen=%d",
                p->pen.x, metrics.base_margin_left, (int)p->buflen, p->screen);
@@ -434,12 +438,12 @@ void EmitFlowedShapedText(
     // even when there is no room for a following line.
     {
       if (!CurrentLineFitsEmitMetrics(p->pen.y, metrics)) {
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && SCREEN_ADVANCE_TRACE
         const int pre_scr = p->screen;
 #endif
         AdvancePageIfNeeded(p, metrics.lineheight, advance_page_on_overflow,
                             advance_ctx);
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && SCREEN_ADVANCE_TRACE
         if (p->screen != pre_scr || (pre_scr == 1 && p->screen == 0)) {
           DBG_LOGF_CAT(p->reporter, DBG_LEVEL_DEBUG, DBG_CAT_LAYOUT,
                        "ScreenAdv in EmitFlowedShapedText: scr %d->%d "

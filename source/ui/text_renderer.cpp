@@ -168,11 +168,6 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   const int contentRight = screenWidth - (int)parent->margin.right;
   int clipRight = text_render_layout_utils::ResolveClipRight(
       screenWidth, contentRight, clip_to_content_enabled);
-  if (clip_to_content_enabled) {
-    // Allow tiny glyph overhang past advance-based layout width.
-    const int kGlyphRightBleedPx = 2;
-    clipRight = std::min(screenWidth, clipRight + kGlyphRightBleedPx);
-  }
 
   const bool is_browser_style = (face == parent->GetFace(TEXT_STYLE_BROWSER));
 
@@ -188,8 +183,8 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
                                (int)pen.x + sc_bx + sc_w,
                                (int)pen.y - sc_by + sc_h);
 
-    const int glyph_right_sc = (int)pen.x + sc_bx + sc_w;
     if (width > 0) {
+      const int glyph_right_sc = (int)pen.x + sc_bx + sc_w;
       if (text_render_layout_utils::ShouldAutoWrapGlyph(
               auto_wrap_enabled, is_browser_style, (int)pen.x,
               (int)parent->margin.left, glyph_right_sc, contentRight)) {

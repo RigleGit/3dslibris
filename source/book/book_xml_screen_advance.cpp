@@ -16,6 +16,10 @@
 #include "shared/text_render_layout_utils.h"
 #include "ui/text.h"
 
+#ifndef BLOCK_SPACING_TRACE
+#define BLOCK_SPACING_TRACE 0
+#endif
+
 namespace {
 
 static void AppendScreenBreakIfNeeded(parsedata_t *p) {
@@ -178,7 +182,7 @@ void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
     p->pending_block_spacing_reason = reason;
   if (from_css)
     p->pending_block_spacing_from_css = true;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BLOCK_SPACING_TRACE
   DBG_LOGF(p->book->GetStatusReporter(),
     "Queue[%s/%s] lines=%d opt=%d->%d from_css=%d pen_y=%d lb=%d",
     tag ? tag : "?", reason ? reason : "?",
@@ -193,7 +197,7 @@ void SuppressPendingBlockSpacingFromCss(parsedata_t *p, const char *tag,
                                         const char *reason) {
   if (!p)
     return;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BLOCK_SPACING_TRACE
   DBG_LOGF(p->book->GetStatusReporter(),
     "Suppress[%s/%s] pbb=%d pbl=%d->0 pen_y=%d lb=%d",
     tag ? tag : "?", reason ? reason : "?",
