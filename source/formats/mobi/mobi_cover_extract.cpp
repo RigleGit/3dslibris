@@ -493,6 +493,152 @@ static u32 FindFirstImageRecordIndex(MobiRecordReader *reader,
   return 0;
 }
 
+// Bag of MOBI cover hints derived from the primary record-0 MOBI header
+// (and from a KF8-boundary record header if the file is a combo MOBI/KF8).
+// All offsets are PDB record indices; UINT_MAX means "absent". Used by
+// BuildCoverHintScoringMaps to seed the cover/thumb score maps.
+struct MobiCoverHints {
+  u32 rec_count = 0;
+  u32 text_rec_count = 0;
+  u32 first_non_book_index = 0;
+  u32 first_image_index = 0;
+  u32 inferred_image_base = 0;
+  u32 detected_first_image_index = 0;
+  u32 cover_offset = UINT_MAX;
+  u32 thumb_offset = UINT_MAX;
+  u32 kf8_boundary = UINT_MAX;
+
+  bool has_kf8 = false;
+  u32 kf8_text_rec_count = 0;
+  u32 kf8_first_non_book = 0;
+  u32 kf8_first_image = 0;
+  u32 kf8_inferred_base = 0;
+  u32 kf8_cover_offset = UINT_MAX;
+  u32 kf8_thumb_offset = UINT_MAX;
+};
+
+// Meta-cache probe: returns 0 on a successful cached decode, 5 on a cached
+// "no cover" outcome, and -1 when there is no cached answer (caller should
+// fall through to the full scan). On a cache hit that fails to decode, the
+// stale cache entry is removed so the next pass writes fresh.
+static int TryDecodeCoverFromMetaCache(Book *book, const std::string &mobipath,
+                                       const std::string &meta_cache_path,
+                                       IStatusReporter *reporter) {
+  if (meta_cache_path.empty())
+    return -1;
+  mobi_cover_meta_cache::CoverMeta cached_meta;
+  if (!mobi_cover_meta_cache::Load(meta_cache_path, &cached_meta))
+    return -1;
+  if (cached_meta.kind == mobi_cover_meta_cache::kNoCover) {
+    if (reporter)
+      reporter->PrintStatus("MOBI: cover meta cache none");
+    return 5;
+  }
+  if (TryDecodeCachedCoverMeta(book, mobipath, cached_meta, reporter))
+    return 0;
+  remove(meta_cache_path.c_str());
+  return -1;
+}
+
+// Read rec0 and the optional KF8 boundary record, parse cover hints from
+// both, log them, and fill `out`. Returns false on a malformed record-0;
+// the caller should treat that as a corrupt MOBI.
+static bool ParseAllMobiCoverHints(MobiRecordReader *reader,
+                                   const std::vector<u32> &offsets,
+                                   u32 rec_count, IStatusReporter *reporter,
+                                   MobiCoverHints *out) {
+  if (!reader || !out)
+    return false;
+  out->rec_count = rec_count;
+  const std::vector<u8> *rec0_buf = NULL;
+  if (!reader->GetRecord(offsets, 0, &rec0_buf) || !rec0_buf ||
+      rec0_buf->empty())
+    return false;
+  const u8 *rec0 = rec0_buf->data();
+  const size_t rec0_len = rec0_buf->size();
+  ParseMobiCoverHints(rec0, rec0_len, &out->text_rec_count,
+                      &out->first_non_book_index, &out->first_image_index,
+                      &out->cover_offset, &out->thumb_offset,
+                      &out->kf8_boundary);
+
+  if (out->text_rec_count >= rec_count)
+    out->text_rec_count = rec_count - 1;
+
+  // Some MOBI files leave first_image at 0 even when EXTH cover offsets are
+  // present. Fall back to "first non-text record" as the inferred base.
+  out->inferred_image_base = out->first_image_index;
+  if (out->inferred_image_base == 0 && out->text_rec_count + 1 < rec_count)
+    out->inferred_image_base = out->text_rec_count + 1;
+
+  // Probe forward to find the first record that decodes as an image. Many
+  // real-world MOBIs need this for the EXTH offsets to land correctly.
+  if (out->text_rec_count + 1 < rec_count) {
+    const u32 start_idx = out->text_rec_count + 1;
+    const u32 budget =
+        mobi_record_scan::FirstImageProbeLimit(rec_count - start_idx);
+    out->detected_first_image_index =
+        FindFirstImageRecordIndex(reader, offsets, start_idx, budget);
+  }
+  if (out->first_image_index == 0 && out->detected_first_image_index > 0)
+    out->inferred_image_base = out->detected_first_image_index;
+
+  if (reporter) {
+    char msg[288];
+    snprintf(msg, sizeof(msg),
+             "MOBI: cover hints primary text=%u first_non_book=%u first_image=%u inferred_base=%u detected_image=%u cover_off=%d thumb_off=%d kf8=%d",
+             (unsigned)out->text_rec_count,
+             (unsigned)out->first_non_book_index,
+             (unsigned)out->first_image_index,
+             (unsigned)out->inferred_image_base,
+             (unsigned)out->detected_first_image_index,
+             (out->cover_offset == UINT_MAX) ? -1 : (int)out->cover_offset,
+             (out->thumb_offset == UINT_MAX) ? -1 : (int)out->thumb_offset,
+             (out->kf8_boundary == UINT_MAX) ? -1 : (int)out->kf8_boundary);
+    reporter->PrintStatus(msg);
+  }
+
+  // KF8 combo files: parse the boundary record's MOBI header too.
+  if (out->kf8_boundary != UINT_MAX && out->kf8_boundary > 0 &&
+      out->kf8_boundary < rec_count) {
+    const u32 rec_start = offsets[(size_t)out->kf8_boundary];
+    const u32 rec_end = offsets[(size_t)out->kf8_boundary + 1];
+    const std::vector<u8> *kf8_record = NULL;
+    if (rec_end > rec_start &&
+        reader->GetRecord(offsets, out->kf8_boundary, &kf8_record) &&
+        kf8_record) {
+      u32 kf8_nested = UINT_MAX;
+      out->has_kf8 = ParseMobiCoverHints(
+          kf8_record->data(), kf8_record->size(), &out->kf8_text_rec_count,
+          &out->kf8_first_non_book, &out->kf8_first_image,
+          &out->kf8_cover_offset, &out->kf8_thumb_offset, &kf8_nested);
+      if (out->has_kf8) {
+        out->kf8_inferred_base = out->kf8_first_image;
+        if (out->kf8_inferred_base == 0 &&
+            out->kf8_text_rec_count + 1 < rec_count)
+          out->kf8_inferred_base = out->kf8_text_rec_count + 1;
+        if (reporter) {
+          char msg[256];
+          snprintf(msg, sizeof(msg),
+                   "MOBI: cover hints kf8 rec=%u text=%u first_image=%u inferred_base=%u cover_off=%d thumb_off=%d",
+                   (unsigned)out->kf8_boundary,
+                   (unsigned)out->kf8_text_rec_count,
+                   (unsigned)out->kf8_first_image,
+                   (unsigned)out->kf8_inferred_base,
+                   (out->kf8_cover_offset == UINT_MAX)
+                       ? -1
+                       : (int)out->kf8_cover_offset,
+                   (out->kf8_thumb_offset == UINT_MAX)
+                       ? -1
+                       : (int)out->kf8_thumb_offset);
+          reporter->PrintStatus(msg);
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
 static bool TryDecodeCoverCandidate(Book *book, MobiRecordReader *reader,
                                     const std::vector<u32> &offsets,
                                     const MobiCoverCandidate &cand,
@@ -531,19 +677,11 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
     reporter->PrintStatus("MOBI: cover scan begin");
 
   std::string meta_cache_path;
-  if (BuildMobiCoverMetaCachePath(mobipath, &meta_cache_path)) {
-    mobi_cover_meta_cache::CoverMeta cached_meta;
-    if (mobi_cover_meta_cache::Load(meta_cache_path, &cached_meta)) {
-      if (cached_meta.kind == mobi_cover_meta_cache::kNoCover) {
-        if (reporter)
-          reporter->PrintStatus("MOBI: cover meta cache none");
-        return 5;
-      }
-      if (TryDecodeCachedCoverMeta(book, mobipath, cached_meta, reporter))
-        return 0;
-      remove(meta_cache_path.c_str());
-    }
-  }
+  BuildMobiCoverMetaCachePath(mobipath, &meta_cache_path);
+  const int meta_rc =
+      TryDecodeCoverFromMetaCache(book, mobipath, meta_cache_path, reporter);
+  if (meta_rc >= 0)
+    return meta_rc;
 
   MobiRecordReader reader(mobipath);
   if (!reader.EnsureOpen())
@@ -570,94 +708,26 @@ int mobi_extract_cover(Book *book, const std::string &mobipath) {
   }
 
   const u32 rec_count = (u32)offsets.size() - 1;
-  const std::vector<u8> *rec0_buf = NULL;
-  if (!reader.GetRecord(offsets, 0, &rec0_buf) || !rec0_buf || rec0_buf->empty())
+  MobiCoverHints hints;
+  if (!ParseAllMobiCoverHints(&reader, offsets, rec_count, reporter, &hints))
     return 4;
 
-  const u8 *rec0 = rec0_buf->data();
-  const size_t rec0_len = rec0_buf->size();
-
-  u32 text_rec_count = 0;
-  u32 first_non_book_index = 0;
-  u32 first_image_index = 0;
-  u32 cover_offset = UINT_MAX;
-  u32 thumb_offset = UINT_MAX;
-  u32 kf8_boundary = UINT_MAX;
-  ParseMobiCoverHints(rec0, rec0_len, &text_rec_count, &first_non_book_index,
-                      &first_image_index, &cover_offset, &thumb_offset,
-                      &kf8_boundary);
-
-  if (text_rec_count >= rec_count)
-    text_rec_count = rec_count - 1;
-
-  // Some MOBI files leave first_image at 0 even when EXTH cover offsets are
-  // present. In that case, use the first non-text record as inferred base.
-  u32 inferred_image_base = first_image_index;
-  if (inferred_image_base == 0 && text_rec_count + 1 < rec_count)
-    inferred_image_base = text_rec_count + 1;
-
-  // First actual image record after text records. Many real-world MOBIs
-  // require this to interpret EXTH cover/thumb offsets correctly.
-  u32 detected_first_image_index = 0;
-  if (text_rec_count + 1 < rec_count) {
-    const u32 start_idx = text_rec_count + 1;
-    const u32 first_image_probe_budget =
-        mobi_record_scan::FirstImageProbeLimit(rec_count - start_idx);
-    detected_first_image_index =
-        FindFirstImageRecordIndex(&reader, offsets, start_idx,
-                                  first_image_probe_budget);
-  }
-  if (first_image_index == 0 && detected_first_image_index > 0)
-    inferred_image_base = detected_first_image_index;
-
-  if (reporter) {
-    char hint_msg[288];
-    snprintf(hint_msg, sizeof(hint_msg),
-             "MOBI: cover hints primary text=%u first_non_book=%u first_image=%u inferred_base=%u detected_image=%u cover_off=%d thumb_off=%d kf8=%d",
-             (unsigned)text_rec_count, (unsigned)first_non_book_index,
-             (unsigned)first_image_index, (unsigned)inferred_image_base,
-             (unsigned)detected_first_image_index,
-             (cover_offset == UINT_MAX) ? -1 : (int)cover_offset,
-             (thumb_offset == UINT_MAX) ? -1 : (int)thumb_offset,
-             (kf8_boundary == UINT_MAX) ? -1 : (int)kf8_boundary);
-    reporter->PrintStatus(hint_msg);
-  }
-
-  // If this is a combo MOBI/KF8, parse hints from KF8 boundary header too.
-  u32 kf8_text_rec_count = 0;
-  u32 kf8_first_non_book = 0;
-  u32 kf8_first_image = 0;
-  u32 kf8_cover_offset = UINT_MAX;
-  u32 kf8_thumb_offset = UINT_MAX;
-  u32 kf8_nested_boundary = UINT_MAX;
-  bool has_kf8_hints = false;
-  if (kf8_boundary != UINT_MAX && kf8_boundary > 0 && kf8_boundary < rec_count) {
-    const u32 rec_start = offsets[(size_t)kf8_boundary];
-    const u32 rec_end = offsets[(size_t)kf8_boundary + 1];
-    const std::vector<u8> *kf8_record = NULL;
-    if (rec_end > rec_start &&
-        reader.GetRecord(offsets, kf8_boundary, &kf8_record) && kf8_record) {
-      const u8 *kf8_rec = kf8_record->data();
-      const size_t kf8_len = kf8_record->size();
-      has_kf8_hints = ParseMobiCoverHints(
-          kf8_rec, kf8_len, &kf8_text_rec_count, &kf8_first_non_book,
-          &kf8_first_image, &kf8_cover_offset, &kf8_thumb_offset,
-          &kf8_nested_boundary);
-      if (has_kf8_hints && reporter) {
-        u32 kf8_inferred = kf8_first_image;
-        if (kf8_inferred == 0 && kf8_text_rec_count + 1 < rec_count)
-          kf8_inferred = kf8_text_rec_count + 1;
-        char kf8_msg[256];
-        snprintf(kf8_msg, sizeof(kf8_msg),
-                 "MOBI: cover hints kf8 rec=%u text=%u first_image=%u inferred_base=%u cover_off=%d thumb_off=%d",
-                 (unsigned)kf8_boundary, (unsigned)kf8_text_rec_count,
-                 (unsigned)kf8_first_image, (unsigned)kf8_inferred,
-                 (kf8_cover_offset == UINT_MAX) ? -1 : (int)kf8_cover_offset,
-                 (kf8_thumb_offset == UINT_MAX) ? -1 : (int)kf8_thumb_offset);
-        reporter->PrintStatus(kf8_msg);
-      }
-    }
-  }
+  // Expose hint fields under the names the scoring code below has always
+  // used, so the formula-set call sites stay one-to-one with the original
+  // implementation.
+  const u32 text_rec_count = hints.text_rec_count;
+  const u32 first_non_book_index = hints.first_non_book_index;
+  const u32 first_image_index = hints.first_image_index;
+  const u32 inferred_image_base = hints.inferred_image_base;
+  const u32 detected_first_image_index = hints.detected_first_image_index;
+  const u32 cover_offset = hints.cover_offset;
+  const u32 thumb_offset = hints.thumb_offset;
+  const bool has_kf8_hints = hints.has_kf8;
+  const u32 kf8_text_rec_count = hints.kf8_text_rec_count;
+  const u32 kf8_first_non_book = hints.kf8_first_non_book;
+  const u32 kf8_first_image = hints.kf8_first_image;
+  const u32 kf8_cover_offset = hints.kf8_cover_offset;
+  const u32 kf8_thumb_offset = hints.kf8_thumb_offset;
 
   std::vector<u32> candidates;
   std::set<u32> seen;
