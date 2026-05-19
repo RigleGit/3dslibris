@@ -189,6 +189,20 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
   if (cache_path.empty())
     return false;
 
+#ifdef DSLIBRIS_DEBUG
+  // Per-step timing: large books show ~700us per cached page; this breakdown
+  // identifies which section dominates (page deserialize vs anchor map vs
+  // inline-image registration) so optimization targets the right hot loop.
+  const u64 t_load_begin = osGetTime();
+  u64 t_after_hdr = t_load_begin;
+  u64 t_after_pages = t_load_begin;
+  u64 t_after_chapters = t_load_begin;
+  u64 t_after_doc_starts = t_load_begin;
+  u64 t_after_anchors = t_load_begin;
+  u64 t_after_images = t_load_begin;
+  u64 t_after_hrefs = t_load_begin;
+#endif
+
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp)
     return false;
@@ -217,6 +231,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     remove(cache_path.c_str());
     return false;
   }
+#ifdef DSLIBRIS_DEBUG
+  t_after_hdr = osGetTime();
+#endif
 
   bool ok = true;
   std::vector<page_cache_utils::CachedPage> pages;
@@ -224,6 +241,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
                                    &pages);
   if (ok)
     AppendPages(book, pages);
+#ifdef DSLIBRIS_DEBUG
+  t_after_pages = osGetTime();
+#endif
 
   if (ok) {
     std::vector<page_cache_utils::CachedChapter> chapters;
@@ -233,6 +253,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     if (ok)
       AppendChapters(book, chapters);
   }
+#ifdef DSLIBRIS_DEBUG
+  t_after_chapters = osGetTime();
+#endif
 
   if (ok) {
     for (u32 i = 0; i < hdr.doc_start_count; i++) {
@@ -250,6 +273,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
       book->SetChapterDocStartPage(docpath, doc_page);
     }
   }
+#ifdef DSLIBRIS_DEBUG
+  t_after_doc_starts = osGetTime();
+#endif
 
   if (ok) {
     for (u32 i = 0; i < hdr.anchor_count; i++) {
@@ -268,6 +294,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
       book->SetChapterAnchorPage(href, anchor_page);
     }
   }
+#ifdef DSLIBRIS_DEBUG
+  t_after_anchors = osGetTime();
+#endif
 
   if (ok) {
     for (u32 i = 0; i < hdr.image_count; i++) {
@@ -280,6 +309,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
       book->RegisterInlineImage(imgpath);
     }
   }
+#ifdef DSLIBRIS_DEBUG
+  t_after_images = osGetTime();
+#endif
 
   if (ok) {
     for (u32 i = 0; i < hdr.link_href_count; i++) {
@@ -295,8 +327,33 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
       }
     }
   }
+#ifdef DSLIBRIS_DEBUG
+  t_after_hrefs = osGetTime();
+#endif
 
   fclose(fp);
+#ifdef DSLIBRIS_DEBUG
+  if (book->GetStatusReporter()) {
+    DBG_LOGF(book->GetStatusReporter(),
+             "EPUB cache load: hdr=%llums pages=%llums(%u) chapters=%llums(%u) "
+             "doc_starts=%llums(%u) anchors=%llums(%u) images=%llums(%u) "
+             "hrefs=%llums(%u) total=%llums",
+             (unsigned long long)(t_after_hdr - t_load_begin),
+             (unsigned long long)(t_after_pages - t_after_hdr),
+             (unsigned)hdr.page_count,
+             (unsigned long long)(t_after_chapters - t_after_pages),
+             (unsigned)hdr.chapter_count,
+             (unsigned long long)(t_after_doc_starts - t_after_chapters),
+             (unsigned)hdr.doc_start_count,
+             (unsigned long long)(t_after_anchors - t_after_doc_starts),
+             (unsigned)hdr.anchor_count,
+             (unsigned long long)(t_after_images - t_after_anchors),
+             (unsigned)hdr.image_count,
+             (unsigned long long)(t_after_hrefs - t_after_images),
+             (unsigned)hdr.link_href_count,
+             (unsigned long long)(osGetTime() - t_load_begin));
+  }
+#endif
   if (!ok) {
     book->Close();
     remove(cache_path.c_str());
