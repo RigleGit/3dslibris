@@ -515,6 +515,11 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
   u32 overflow_before = 0;
   text_layout_utils::PerfStats layout_before;
 #endif
+#ifdef DSLIBRIS_DEBUG
+  // Snapshot lives at function scope so the post-parse Add() call sees it
+  // regardless of which PARSE_* branch ran. Zero-init for non-CONTENT paths.
+  epub_parse_perf::Snapshot perf_before_doc = {0, 0, 0, 0, 0, 0, 0};
+#endif
   xml_parse_utils::XmlParserOptions options;
   if (epd->type == PARSE_CONTAINER) {
     options.user_data = epd;
@@ -583,10 +588,10 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
 #endif
 #ifdef DSLIBRIS_DEBUG
     // Always-on snapshot for the spine-wide aggregator. Cheap struct copy.
-    const epub_parse_perf::Snapshot perf_before_doc = {
-        pd.perf_chardata_ms,    pd.perf_element_ms,    pd.perf_flush_ms,
-        pd.perf_chardata_calls, pd.perf_element_calls, pd.perf_flush_calls,
-        pd.perf_page_overflows};
+    perf_before_doc = {pd.perf_chardata_ms,    pd.perf_element_ms,
+                       pd.perf_flush_ms,       pd.perf_chardata_calls,
+                       pd.perf_element_calls,  pd.perf_flush_calls,
+                       pd.perf_page_overflows};
 #endif
     options.user_data = &pd;
     options.abort_parse = [](void *user_data) {
