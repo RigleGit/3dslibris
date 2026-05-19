@@ -18,5 +18,7 @@ uint32_t ReflowableBookmarkPrevKeys(uint32_t circle_right,
                                     uint32_t dpad_right);
 uint32_t ReflowableBookmarkNextKeys(uint32_t circle_left,
                                     uint32_t dpad_left);
+uint32_t ReflowablePageRepeatKeys(uint32_t circle_dir, uint32_t dpad_dir,
+                                  bool include_circle_pad);
 
 } // namespace reader_input_utils

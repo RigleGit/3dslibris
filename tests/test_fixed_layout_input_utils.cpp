@@ -89,5 +89,21 @@ int main() {
   ExpectHas("bookmark next accepts Circle Pad left", bookmark_next,
             key_cpad_left);
   ExpectHas("bookmark next accepts D-pad left", bookmark_next, key_dpad_left);
+
+  const uint32_t repeat_next_with_circle =
+      reader_input_utils::ReflowablePageRepeatKeys(
+          key_cpad_down, key_dpad_down, true);
+  ExpectHas("repeat with circle includes Circle Pad down",
+            repeat_next_with_circle, key_cpad_down);
+  ExpectHas("repeat with circle includes D-pad down",
+            repeat_next_with_circle, key_dpad_down);
+
+  const uint32_t repeat_next_without_circle =
+      reader_input_utils::ReflowablePageRepeatKeys(
+          key_cpad_down, key_dpad_down, false);
+  ExpectMissing("repeat without circle excludes Circle Pad down",
+                repeat_next_without_circle, key_cpad_down);
+  ExpectHas("repeat without circle keeps D-pad down",
+            repeat_next_without_circle, key_dpad_down);
   return 0;
 }

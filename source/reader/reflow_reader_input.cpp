@@ -253,25 +253,34 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
       app.prefs->Write();
     }
   } else {
-    // D-pad up/down support page repeat: holding the key fires repeated page
-    // turns after an initial delay. Other page-turn keys (A, R, shoulder) do
-    // not repeat.
-    const uint32_t dpad_repeat_keys = app.key.ddown | app.key.dup;
-    const uint32_t non_repeat_held = held & ~dpad_repeat_keys;
-    const uint32_t non_repeat_keys = keys & ~dpad_repeat_keys;
+    // D-pad up/down support page repeat. Circle Pad repeat is opt-in because
+    // analog drift can otherwise trigger fast accidental page turns.
+    const bool circle_repeat_enabled =
+        app.prefs.get() && app.prefs->circle_pad_page_turn;
+    const uint32_t repeat_next_keys =
+        reader_input_utils::ReflowablePageRepeatKeys(
+            app.key.down, app.key.ddown, circle_repeat_enabled);
+    const uint32_t repeat_prev_keys =
+        reader_input_utils::ReflowablePageRepeatKeys(
+            app.key.up, app.key.dup, circle_repeat_enabled);
+    const uint32_t repeat_keys = repeat_next_keys | repeat_prev_keys;
+    const uint32_t non_repeat_held = held & ~repeat_keys;
+    const uint32_t non_repeat_keys = keys & ~repeat_keys;
     bool repeat_next = false;
     bool repeat_prev = false;
-    if (non_repeat_held == 0 && non_repeat_keys == 0 && (held & app.key.ddown)) {
+    if (non_repeat_held == 0 && non_repeat_keys == 0 &&
+        (held & repeat_next_keys)) {
       repeat_next = app.ShouldFirePageRepeat(
-          reader::PAGE_REPEAT_NEXT, (keys & app.key.ddown) != 0,
-          (held & app.key.ddown) != 0, now_ms,
+          reader::PAGE_REPEAT_NEXT, (keys & repeat_next_keys) != 0,
+          (held & repeat_next_keys) != 0, now_ms,
           kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
-    } else if (non_repeat_held == 0 && non_repeat_keys == 0 && (held & app.key.dup)) {
+    } else if (non_repeat_held == 0 && non_repeat_keys == 0 &&
+               (held & repeat_prev_keys)) {
       repeat_prev = app.ShouldFirePageRepeat(
-          reader::PAGE_REPEAT_PREVIOUS, (keys & app.key.dup) != 0,
-          (held & app.key.dup) != 0, now_ms,
+          reader::PAGE_REPEAT_PREVIOUS, (keys & repeat_prev_keys) != 0,
+          (held & repeat_prev_keys) != 0, now_ms,
           kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
-    } else if ((held & dpad_repeat_keys) == 0 || non_repeat_held != 0) {
+    } else if ((held & repeat_keys) == 0 || non_repeat_held != 0) {
       app.ResetPageRepeat();
     }
 
