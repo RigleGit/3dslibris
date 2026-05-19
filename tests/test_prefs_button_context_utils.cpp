@@ -6,7 +6,7 @@ int main() {
   test::ExpectEq("general visible count",
                  settings::VisiblePrefsButtonCount(false, false), 7);
   test::ExpectEq("book visible count without line wrap",
-                 settings::VisiblePrefsButtonCount(true, false), 6);
+                 settings::VisiblePrefsButtonCount(true, false), 7);
   test::ExpectEq("book visible count with line wrap",
                  settings::VisiblePrefsButtonCount(true, true), 7);
 
@@ -28,8 +28,10 @@ int main() {
   test::ExpectEq("book slot 3", settings::PrefsButtonForVisibleSlot(true, false, 3),
                  PREFS_BUTTON_ORIENTATION);
   test::ExpectEq("book slot 4", settings::PrefsButtonForVisibleSlot(true, false, 4),
-                 PREFS_BUTTON_INDEX);
+                 PREFS_BUTTON_TIME24H);
   test::ExpectEq("book slot 5", settings::PrefsButtonForVisibleSlot(true, false, 5),
+                 PREFS_BUTTON_INDEX);
+  test::ExpectEq("book slot 6", settings::PrefsButtonForVisibleSlot(true, false, 6),
                  PREFS_BUTTON_BOOKMARKS);
 
   test::ExpectEq("book slot 0 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 0),
@@ -41,11 +43,24 @@ int main() {
   test::ExpectEq("book slot 3 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 3),
                  PREFS_BUTTON_ORIENTATION);
   test::ExpectEq("book slot 4 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 4),
-                 PREFS_BUTTON_INDEX);
+                 PREFS_BUTTON_TIME24H);
   test::ExpectEq("book slot 5 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 5),
-                 PREFS_BUTTON_BOOKMARKS);
+                 PREFS_BUTTON_INDEX);
   test::ExpectEq("book slot 6 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 6),
-                 PREFS_BUTTON_LIBRARY_VIEW);
+                 PREFS_BUTTON_BOOKMARKS);
+
+  for (unsigned char slot = 0; slot < settings::VisiblePrefsButtonCount(true, false);
+       slot++) {
+    test::ExpectNe("book settings exclude Circle Pad setting",
+                   settings::PrefsButtonForVisibleSlot(true, false, slot),
+                   PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN);
+  }
+  for (unsigned char slot = 0; slot < settings::VisiblePrefsButtonCount(true, true);
+       slot++) {
+    test::ExpectNe("book settings with line wrap exclude Circle Pad setting",
+                   settings::PrefsButtonForVisibleSlot(true, true, slot),
+                   PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN);
+  }
 
   return 0;
 }

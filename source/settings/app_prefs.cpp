@@ -165,6 +165,10 @@ static bool CurrentBookCanGoToPage(Book *book, bool is_book_ctx) {
   return is_book_ctx && book && book->GetPageCount() > 0;
 }
 
+static bool CurrentBookHasExtraPrefsPage(Book *book, bool is_book_ctx) {
+  return CurrentBookShowsLineWrapFix(book, is_book_ctx);
+}
+
 static void ToggleFixedLayoutReadingDirection(Prefs *prefs) {
   if (!prefs)
     return;
@@ -183,17 +187,21 @@ SettingsController::SettingsController(App &app)
     : app_(app), go_to_page_dialog_(app), prefs_general_page_(0) {}
 
 int SettingsController::EffectiveVisibleCount() const {
-  if (!app_.IsBookSettingsContext() && prefs_general_page_ == 1)
-    return kPage2ButtonCount;
   const bool is_book_ctx = app_.IsBookSettingsContext();
+  if (!is_book_ctx && prefs_general_page_ == 1)
+    return kPage2ButtonCount;
+  if (is_book_ctx && prefs_general_page_ == 1)
+    return CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), is_book_ctx) ? 1 : 0;
   return (int)settings::VisiblePrefsButtonCount(
       is_book_ctx, CurrentBookShowsLineWrapFix(app_.GetCurrentBook(), is_book_ctx));
 }
 
 int SettingsController::EffectiveButtonForSlot(int slot) const {
-  if (!app_.IsBookSettingsContext() && prefs_general_page_ == 1)
-    return (slot >= 0 && slot < kPage2ButtonCount) ? kPage2Buttons[slot] : kPage2Buttons[0];
   const bool is_book_ctx = app_.IsBookSettingsContext();
+  if (!is_book_ctx && prefs_general_page_ == 1)
+    return (slot >= 0 && slot < kPage2ButtonCount) ? kPage2Buttons[slot] : kPage2Buttons[0];
+  if (is_book_ctx && prefs_general_page_ == 1)
+    return PREFS_BUTTON_LIBRARY_VIEW;
   return settings::PrefsButtonForVisibleSlot(
       is_book_ctx, CurrentBookShowsLineWrapFix(app_.GetCurrentBook(), is_book_ctx), (u8)slot);
 }
@@ -250,8 +258,8 @@ void SettingsController::PrefsInit() {
   const std::vector<std::string> labels{
       "font configuration", "font size",    "paragraph spacing",
       "screen orientation", "clock format", "color mode", "library view",
-      "index",              "bookmarks",    "reset settings", "clear cache",
-      "publisher font sizes"};
+      "circle pad pages",   "index",        "bookmarks", "reset settings",
+      "clear cache"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -309,15 +317,24 @@ void SettingsController::PrefsDraw() {
   if (go_to_page_dialog_.IsOpen())
     go_to_page_dialog_.Draw();
 
-  const bool paged = !app_.IsBookSettingsContext();
   const bool book_ctx = app_.IsBookSettingsContext();
-  SyncLibraryButtonLayout(&app_.buttonprefs, paged, book_ctx);
-  app_.buttonprefs.Draw(ts->screenright);
+  const bool book_extra_page =
+      CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), book_ctx);
+  const bool general_paged = !book_ctx;
   if (book_ctx) {
+    SyncLibraryButtonLayout(&app_.buttonprefs, false, true);
+    app_.buttonprefs.Draw(ts->screenright);
     button_prefs_library_.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
     button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
     button_prefs_library_.Draw(ts->screenright);
-  } else if (paged) {
+    if (book_extra_page) {
+      button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "next" : "prev");
+      button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
+      button_prefs_page_nav_.Draw(ts->screenright);
+    }
+  } else if (general_paged) {
+    SyncLibraryButtonLayout(&app_.buttonprefs, true, false);
+    app_.buttonprefs.Draw(ts->screenright);
     if (prefs_general_page_ == 0) {
       button_prefs_page_nav_.Label("next");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
@@ -392,6 +409,9 @@ void SettingsController::PrefsHandleEvent() {
   ClampSelectedIndex(&selected_index, visibleCount);
   app_.SetPrefsSelectedIndex(selected_index);
   const int selected_button = EffectiveButtonForSlot(app_.GetPrefsSelectedIndex());
+  const bool book_ctx = app_.IsBookSettingsContext();
+  const bool book_extra_page =
+      CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), book_ctx);
 
   if (go_to_page_dialog_.IsOpen()) {
     if (keys & KEY_A) {
@@ -424,7 +444,7 @@ void SettingsController::PrefsHandleEvent() {
     PrefsHandlePress();
     if (app_.GetMode() != AppMode::Prefs)
       return;
-  } else if (app_.IsBookSettingsContext() && (keys & KEY_START)) {
+  } else if (book_ctx && (keys & KEY_START)) {
     app_.ShowLibraryView();
     app_.prefs->Write();
   } else if (keys & (KEY_SELECT | KEY_B | KEY_Y)) {
@@ -433,14 +453,16 @@ void SettingsController::PrefsHandleEvent() {
     if (app_.GetPrefsSelectedIndex() > 0) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() - 1);
       app_.MarkPrefsDirty();
-    } else if (!app_.IsBookSettingsContext() && prefs_general_page_ == 1) {
+    } else if (prefs_general_page_ == 1 &&
+               (!book_ctx || book_extra_page)) {
       GoToPrefsPage(0);
     }
   } else if (keys & (app_.key.right | app_.key.r)) {
     if (app_.GetPrefsSelectedIndex() < visibleCount - 1) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() + 1);
       app_.MarkPrefsDirty();
-    } else if (!app_.IsBookSettingsContext() && prefs_general_page_ == 0) {
+    } else if (prefs_general_page_ == 0 &&
+               (!book_ctx || book_extra_page)) {
       GoToPrefsPage(1);
     }
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
@@ -467,10 +489,14 @@ void SettingsController::PrefsHandleTouch() {
   const int footerY = (int)coord.py;
 
   const bool book_ctx_touch = app_.IsBookSettingsContext();
+  const bool book_extra_page =
+      CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), book_ctx_touch);
   SyncLibraryButtonLayout(&app_.buttonprefs, !book_ctx_touch, book_ctx_touch);
   if (book_ctx_touch) {
     button_prefs_library_.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
     button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
+    if (book_extra_page)
+      button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
   }
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
     for (int dy = -8; dy <= 8; dy += 4) {
@@ -498,8 +524,10 @@ void SettingsController::PrefsHandleTouch() {
     return;
   }
 
-  if (!book_ctx_touch &&
-      enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) {
+  if ((book_ctx_touch && book_extra_page &&
+       enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) ||
+      (!book_ctx_touch &&
+       enclosesWithSlack(button_prefs_page_nav_, footerX, footerY))) {
     GoToPrefsPage(prefs_general_page_ == 0 ? 1 : 0);
     return;
   }
