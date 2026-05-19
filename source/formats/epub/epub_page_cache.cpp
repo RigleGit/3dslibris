@@ -203,14 +203,36 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
   u64 t_after_hrefs = t_load_begin;
 #endif
 
+  // Bulk-read whole file into memory; on a 7706-page book the per-record
+  // fread() path was costing ~10s here (1.3ms per page) because each page
+  // = 2 stdio reads (length + body) plus locking. One fread() replaces ~15k.
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp)
     return false;
-  setvbuf(fp, NULL, _IOFBF, 262144);
+  if (fseek(fp, 0, SEEK_END) != 0) {
+    fclose(fp);
+    return false;
+  }
+  long file_size_long = ftell(fp);
+  if (file_size_long <= (long)sizeof(EpubPageCacheHeader)) {
+    fclose(fp);
+    remove(cache_path.c_str());
+    return false;
+  }
+  rewind(fp);
+  std::vector<uint8_t> file_buf((size_t)file_size_long);
+  if (fread(file_buf.data(), 1, file_buf.size(), fp) != file_buf.size()) {
+    fclose(fp);
+    remove(cache_path.c_str());
+    return false;
+  }
+  fclose(fp);
+  fp = NULL;
+
+  page_cache_utils::BufReader reader(file_buf.data(), file_buf.size());
 
   EpubPageCacheHeader hdr;
-  if (fread(&hdr, 1, sizeof(hdr), fp) != sizeof(hdr)) {
-    fclose(fp);
+  if (!reader.ReadRaw(&hdr, sizeof(hdr))) {
     remove(cache_path.c_str());
     return false;
   }
@@ -220,14 +242,12 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
       hdr.title_len > 1000 || hdr.doc_start_count > 4000 ||
       hdr.anchor_count > 8192 ||
       hdr.image_count > 65535 || hdr.link_href_count > 65535) {
-    fclose(fp);
     remove(cache_path.c_str());
     return false;
   }
 
   std::string title;
-  if (!page_cache_utils::ReadRawString(fp, hdr.title_len, &title)) {
-    fclose(fp);
+  if (!page_cache_utils::ReadRawString(&reader, hdr.title_len, &title)) {
     remove(cache_path.c_str());
     return false;
   }
@@ -237,8 +257,8 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
 
   bool ok = true;
   std::vector<page_cache_utils::CachedPage> pages;
-  ok = page_cache_utils::ReadPages(fp, hdr.page_count, page_cache_limits::kPageMaxBytes,
-                                   &pages);
+  ok = page_cache_utils::ReadPages(&reader, hdr.page_count,
+                                   page_cache_limits::kPageMaxBytes, &pages);
   if (ok)
     AppendPages(book, pages);
 #ifdef DSLIBRIS_DEBUG
@@ -247,7 +267,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
 
   if (ok) {
     std::vector<page_cache_utils::CachedChapter> chapters;
-    ok = page_cache_utils::ReadChapters(fp, hdr.chapter_count,
+    ok = page_cache_utils::ReadChapters(&reader, hdr.chapter_count,
                                         page_cache_limits::kChapterTitleMaxBytes,
                                         &chapters);
     if (ok)
@@ -260,13 +280,13 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
   if (ok) {
     for (u32 i = 0; i < hdr.doc_start_count; i++) {
       u16 doc_page = 0;
-      if (fread(&doc_page, 1, sizeof(doc_page), fp) != sizeof(doc_page)) {
+      if (!reader.ReadRaw(&doc_page, sizeof(doc_page))) {
         ok = false;
         break;
       }
       std::string docpath;
       if (!page_cache_utils::ReadLengthPrefixedString16(
-              fp, page_cache_limits::kPathMaxBytes, true, &docpath)) {
+              &reader, page_cache_limits::kPathMaxBytes, true, &docpath)) {
         ok = false;
         break;
       }
@@ -280,14 +300,13 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
   if (ok) {
     for (u32 i = 0; i < hdr.anchor_count; i++) {
       u16 anchor_page = 0;
-      if (fread(&anchor_page, 1, sizeof(anchor_page), fp) !=
-          sizeof(anchor_page)) {
+      if (!reader.ReadRaw(&anchor_page, sizeof(anchor_page))) {
         ok = false;
         break;
       }
       std::string href;
       if (!page_cache_utils::ReadLengthPrefixedString16(
-              fp, kPageCacheHrefMaxBytes, true, &href)) {
+              &reader, kPageCacheHrefMaxBytes, true, &href)) {
         ok = false;
         break;
       }
@@ -302,7 +321,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     for (u32 i = 0; i < hdr.image_count; i++) {
       std::string imgpath;
       if (!page_cache_utils::ReadLengthPrefixedString16(
-              fp, page_cache_limits::kPathMaxBytes, false, &imgpath)) {
+              &reader, page_cache_limits::kPathMaxBytes, false, &imgpath)) {
         ok = false;
         break;
       }
@@ -317,7 +336,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     for (u32 i = 0; i < hdr.link_href_count; i++) {
       std::string href;
       if (!page_cache_utils::ReadLengthPrefixedString16(
-              fp, kPageCacheHrefMaxBytes, true, &href)) {
+              &reader, kPageCacheHrefMaxBytes, true, &href)) {
         ok = false;
         break;
       }
@@ -330,8 +349,6 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
 #ifdef DSLIBRIS_DEBUG
   t_after_hrefs = osGetTime();
 #endif
-
-  fclose(fp);
 #ifdef DSLIBRIS_DEBUG
   if (book->GetStatusReporter()) {
     DBG_LOGF(book->GetStatusReporter(),

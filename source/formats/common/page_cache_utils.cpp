@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <stdio.h>
+#include <string.h>
 
 namespace page_cache_utils {
 
@@ -193,6 +194,78 @@ bool ReadChapters(FILE *fp, uint32_t count, uint16_t max_title_bytes,
             sizeof(chapter.level) ||
         !ReadLengthPrefixedString16(fp, max_title_bytes, true,
                                     &chapter.title)) {
+      return false;
+    }
+    chapters->push_back(chapter);
+  }
+  return true;
+}
+
+// ---------- Cursor-based (memory buffer) variants ----------
+//
+// Eliminate the stdio overhead that dominates cache-hit time on large
+// EPUBs. Wire format is identical to the FILE* path — these helpers walk a
+// pre-fetched buffer with bounds-checked pointer reads.
+
+bool ReadRawString(BufReader *r, size_t length, std::string *out) {
+  if (!r || !out)
+    return false;
+  out->clear();
+  if (length == 0)
+    return true;
+  if (!r->Remaining(length))
+    return false;
+  out->assign((const char *)r->cur, length);
+  r->cur += length;
+  return true;
+}
+
+bool ReadLengthPrefixedString16(BufReader *r, uint16_t max_bytes,
+                                bool allow_empty, std::string *out) {
+  if (!r || !out)
+    return false;
+  uint16_t length = 0;
+  if (!r->ReadRaw(&length, sizeof(length)) || length > max_bytes ||
+      (!allow_empty && length == 0)) {
+    return false;
+  }
+  return ReadRawString(r, length, out);
+}
+
+bool ReadPages(BufReader *r, uint32_t count, uint16_t max_page_codepoints,
+               std::vector<CachedPage> *pages) {
+  if (!r || !pages)
+    return false;
+  pages->clear();
+  pages->reserve(count);
+  for (uint32_t i = 0; i < count; i++) {
+    uint16_t length = 0;
+    if (!r->ReadRaw(&length, sizeof(length)) || length > max_page_codepoints)
+      return false;
+    CachedPage page(length);
+    const size_t byte_count = (size_t)length * sizeof(uint32_t);
+    if (length > 0) {
+      if (!r->Remaining(byte_count))
+        return false;
+      memcpy(page.data(), r->cur, byte_count);
+      r->cur += byte_count;
+    }
+    pages->push_back(std::move(page));
+  }
+  return true;
+}
+
+bool ReadChapters(BufReader *r, uint32_t count, uint16_t max_title_bytes,
+                  std::vector<CachedChapter> *chapters) {
+  if (!r || !chapters)
+    return false;
+  chapters->clear();
+  chapters->reserve(count);
+  for (uint32_t i = 0; i < count; i++) {
+    CachedChapter chapter;
+    if (!r->ReadRaw(&chapter.page, sizeof(chapter.page)) ||
+        !r->ReadRaw(&chapter.level, sizeof(chapter.level)) ||
+        !ReadLengthPrefixedString16(r, max_title_bytes, true, &chapter.title)) {
       return false;
     }
     chapters->push_back(chapter);

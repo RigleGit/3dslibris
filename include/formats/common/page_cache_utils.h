@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,37 @@ bool ReadPages(FILE *fp, uint32_t count, uint16_t max_page_codepoints,
 bool WriteChapters(FILE *fp, const std::vector<CachedChapter> &chapters,
                    uint16_t max_title_bytes);
 bool ReadChapters(FILE *fp, uint32_t count, uint16_t max_title_bytes,
+                  std::vector<CachedChapter> *chapters);
+
+// Cursor-based variants. Same wire format as the FILE* path above; reading
+// from a pre-fetched memory buffer avoids the per-record stdio overhead that
+// dominates cache-hit time on large EPUBs (~1.3ms per page via fread()).
+struct BufReader {
+  const uint8_t *cur;
+  const uint8_t *end;
+
+  BufReader(const uint8_t *data, size_t size)
+      : cur(data), end(data + size) {}
+
+  bool Remaining(size_t n) const {
+    return (size_t)(end - cur) >= n;
+  }
+  bool ReadRaw(void *dst, size_t n) {
+    if (!Remaining(n))
+      return false;
+    if (n)
+      memcpy(dst, cur, n);
+    cur += n;
+    return true;
+  }
+};
+
+bool ReadRawString(BufReader *r, size_t length, std::string *out);
+bool ReadLengthPrefixedString16(BufReader *r, uint16_t max_bytes,
+                                bool allow_empty, std::string *out);
+bool ReadPages(BufReader *r, uint32_t count, uint16_t max_page_codepoints,
+               std::vector<CachedPage> *pages);
+bool ReadChapters(BufReader *r, uint32_t count, uint16_t max_title_bytes,
                   std::vector<CachedChapter> *chapters);
 
 } // namespace page_cache_utils
