@@ -9,6 +9,7 @@
 #include "book/book.h"
 #include "shared/debug_log.h"
 #include "book/cover_layout_constants.h"
+#include "shared/cover_decode_utils.h"
 #include "formats/common/book_error.h"
 #include "formats/common/epub_image_utils.h"
 #include "formats/epub/epub.h"
@@ -489,66 +490,24 @@ int Extract(Book *book, const std::string &epubpath) {
       return 9;
   }
 
-  int imgW, imgH, channels;
-  unsigned char *pixels =
-      stbi_load_from_memory(decodebuf.data(), (int)decodebuf.size(), &imgW,
-                            &imgH, &channels, 3);
-
-  if (!pixels) {
-    if (png_cover) {
-      std::vector<u16> png_pixels;
-      int png_w = 0;
-      int png_h = 0;
-      if (DecodePngCoverThumbnail(decodebuf, &png_pixels, &png_w, &png_h) &&
-          AdoptCoverPixels(book, png_pixels, png_w, png_h)) {
-        return 0;
-      }
-    }
-    return 4;
+  if (cover_decode_utils::DecodeImageToCoverThumb(
+          book, decodebuf.data(), decodebuf.size(),
+          epub_limits::kCoverMaxDimension)) {
+    return 0;
   }
 
-  if (imgW <= 0 || imgH <= 0 || imgW > epub_limits::kCoverMaxDimension ||
-      imgH > epub_limits::kCoverMaxDimension) {
-    stbi_image_free(pixels);
-    return 7;
-  }
-
-  int finalW = 0;
-  int finalH = 0;
-  float scale = 1.0f;
-  if (!epub_cover_decode_utils::ComputeCoverThumbSize(
-          imgW, imgH, cover_layout::kBrowserCoverThumbWidth,
-          cover_layout::kBrowserCoverThumbHeight, &finalW, &finalH, &scale)) {
-    stbi_image_free(pixels);
-    return 7;
-  }
-
-  if (book->coverPixels) {
-    delete[] book->coverPixels;
-    book->coverPixels = nullptr;
-  }
-  book->coverPixels = new u16[finalW * finalH];
-  book->coverWidth = finalW;
-  book->coverHeight = finalH;
-
-  for (int y = 0; y < finalH; y++) {
-    int srcY = (int)(y * scale);
-    if (srcY >= imgH)
-      srcY = imgH - 1;
-    for (int x = 0; x < finalW; x++) {
-      int srcX = (int)(x * scale);
-      if (srcX >= imgW)
-        srcX = imgW - 1;
-      unsigned char *px = &pixels[(srcY * imgW + srcX) * 3];
-      u16 r = (px[0] >> 3) & 0x1F;
-      u16 g = (px[1] >> 2) & 0x3F;
-      u16 b = (px[2] >> 3) & 0x1F;
-      book->coverPixels[y * finalW + x] = (r << 11) | (g << 5) | b;
+  // stb_image couldn't decode; for PNG payloads fall back to libpng so
+  // alpha/16-bit/oddly-encoded covers we know exist in the wild still load.
+  if (png_cover) {
+    std::vector<u16> png_pixels;
+    int png_w = 0;
+    int png_h = 0;
+    if (DecodePngCoverThumbnail(decodebuf, &png_pixels, &png_w, &png_h) &&
+        AdoptCoverPixels(book, png_pixels, png_w, png_h)) {
+      return 0;
     }
   }
-
-  stbi_image_free(pixels);
-  return 0;
+  return 4;
 }
 
 bool FindLikelyImagePath(epub_data_t &data, const std::string &opf_folder,
