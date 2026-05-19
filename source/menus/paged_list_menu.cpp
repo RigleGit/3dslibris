@@ -486,8 +486,6 @@ void PagedListMenu::Back() {
 }
 
 void PagedListMenu::HandleTouchInput() {
-  if (buttons.empty())
-    return;
   LayoutFooterButtons();
   TouchCandidates candidates;
   touch::BuildCandidates(app->TouchRead(), &candidates);
@@ -497,16 +495,18 @@ void PagedListMenu::HandleTouchInput() {
   int footerX = -1;
   touch::FirstXInBottomBand(candidates, 284, &footerX);
 
-  for (int i = 0; i < TouchCandidates::kCount; i++) {
-    int x = candidates.points[i].x;
-    int y = candidates.points[i].y;
-    u16 page_start = GetPageStart(page);
-    u16 page_end = page_start + GetPageSize(page);
-    for (u16 idx = page_start; idx < page_end; idx++) {
-      if (buttons[idx]->EnclosesPoint((u16)x, (u16)y)) {
-        selected = idx;
-        ActivateSelected();
-        return;
+  if (!buttons.empty()) {
+    for (int i = 0; i < TouchCandidates::kCount; i++) {
+      int x = candidates.points[i].x;
+      int y = candidates.points[i].y;
+      u16 page_start = GetPageStart(page);
+      u16 page_end = page_start + GetPageSize(page);
+      for (u16 idx = page_start; idx < page_end; idx++) {
+        if (buttons[idx]->EnclosesPoint((u16)x, (u16)y)) {
+          selected = idx;
+          ActivateSelected();
+          return;
+        }
       }
     }
   }
@@ -539,15 +539,17 @@ void PagedListMenu::HandleTouchInput() {
     return;
   }
 
-  u16 start = GetPageStart(page);
-  u16 end = (u16)std::min(buttons.size(), (size_t)(start + GetPageSize(page)));
-  for (u16 i = start; i < end; i++) {
-    if (touch::HitsButton(candidates, buttons[i], 4)) {
-      selected = i;
-      DBG_LOGF(app, "LIST touch button-hit title=%s sel=%u",
-               header_title.c_str(), (unsigned)selected);
-      ActivateSelected();
-      return;
+  if (!buttons.empty()) {
+    u16 start = GetPageStart(page);
+    u16 end = (u16)std::min(buttons.size(), (size_t)(start + GetPageSize(page)));
+    for (u16 i = start; i < end; i++) {
+      if (touch::HitsButton(candidates, buttons[i], 4)) {
+        selected = i;
+        DBG_LOGF(app, "LIST touch button-hit title=%s sel=%u",
+                 header_title.c_str(), (unsigned)selected);
+        ActivateSelected();
+        return;
+      }
     }
   }
   DBG_LOGF(app, "LIST touch no-hit title=%s", header_title.c_str());
