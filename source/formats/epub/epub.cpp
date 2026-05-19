@@ -56,6 +56,24 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
 #include "shared/text_layout_utils.h"
+
+#ifdef DSLIBRIS_DEBUG
+// Process-wide aggregator defined in epub_manifest.cpp. Forward-declared
+// here to keep the per-doc accumulator private to that translation unit
+// while still letting the spine-level summary read it.
+namespace epub_parse_perf {
+struct Snapshot {
+  u64 chardata_ms;
+  u64 element_ms;
+  u64 flush_ms;
+  u32 chardata_calls;
+  u32 element_calls;
+  u32 flush_calls;
+  u32 page_overflows;
+};
+Snapshot Get();
+} // namespace epub_parse_perf
+#endif
 #include "parse.h"
 #include "book/reflow_cache_save_utils.h"
 #include "stb_image.h"
@@ -229,6 +247,7 @@ static int ParseEpubSpineDocuments(
   const u64 t_spine_begin = osGetTime();
   const text_layout_utils::PerfStats spine_layout_before =
       text_layout_utils::GetPerfStats();
+  const epub_parse_perf::Snapshot spine_parse_before = epub_parse_perf::Get();
 #endif
   unzFile inline_probe_uf = unzOpen(archive_path.c_str());
   book->SetInlineImageProbeZip(inline_probe_uf);
@@ -381,6 +400,7 @@ static int ParseEpubSpineDocuments(
   if (app) {
     const text_layout_utils::PerfStats after =
         text_layout_utils::GetPerfStats();
+    const epub_parse_perf::Snapshot parse_after = epub_parse_perf::Get();
     const u64 spine_ms = osGetTime() - t_spine_begin;
     const u64 shape_ms = after.shape_ms - spine_layout_before.shape_ms;
     const u64 measure_ms = after.measure_ms - spine_layout_before.measure_ms;
@@ -388,6 +408,20 @@ static int ParseEpubSpineDocuments(
     const u64 pre_break_ms =
         after.pre_line_break_ms - spine_layout_before.pre_line_break_ms;
     const u64 layout_ms = shape_ms + measure_ms + break_ms + pre_break_ms;
+    const u64 elem_ms =
+        parse_after.element_ms - spine_parse_before.element_ms;
+    const u64 chardata_ms =
+        parse_after.chardata_ms - spine_parse_before.chardata_ms;
+    const u64 flush_ms =
+        parse_after.flush_ms - spine_parse_before.flush_ms;
+    const u32 elem_calls =
+        parse_after.element_calls - spine_parse_before.element_calls;
+    const u32 chardata_calls =
+        parse_after.chardata_calls - spine_parse_before.chardata_calls;
+    const u32 flush_calls =
+        parse_after.flush_calls - spine_parse_before.flush_calls;
+    const u32 overflows =
+        parse_after.page_overflows - spine_parse_before.page_overflows;
     const unsigned shape_pct =
         spine_ms ? (unsigned)((shape_ms * 100ULL) / spine_ms) : 0;
     const unsigned measure_pct =
@@ -397,14 +431,25 @@ static int ParseEpubSpineDocuments(
                  : 0;
     const unsigned layout_pct =
         spine_ms ? (unsigned)((layout_ms * 100ULL) / spine_ms) : 0;
+    const unsigned elem_pct =
+        spine_ms ? (unsigned)((elem_ms * 100ULL) / spine_ms) : 0;
+    const unsigned chardata_pct =
+        spine_ms ? (unsigned)((chardata_ms * 100ULL) / spine_ms) : 0;
+    const unsigned flush_pct =
+        spine_ms ? (unsigned)((flush_ms * 100ULL) / spine_ms) : 0;
     DBG_LOGF(app,
              "EPUB: spine breakdown total=%llums layout=%llums(%u%%) "
              "shape=%llums(%u%%) measure=%llums(%u%%) linebreak=%llums(%u%%) "
-             "glyphs=%u",
+             "elem=%llums(%u%%)/%u chardata=%llums(%u%%)/%u "
+             "flush=%llums(%u%%)/%u overflows=%u glyphs=%u",
              (unsigned long long)spine_ms, (unsigned long long)layout_ms,
              layout_pct, (unsigned long long)shape_ms, shape_pct,
              (unsigned long long)measure_ms, measure_pct,
              (unsigned long long)(break_ms + pre_break_ms), break_pct,
+             (unsigned long long)elem_ms, elem_pct, (unsigned)elem_calls,
+             (unsigned long long)chardata_ms, chardata_pct,
+             (unsigned)chardata_calls, (unsigned long long)flush_ms,
+             flush_pct, (unsigned)flush_calls, (unsigned)overflows,
              (unsigned)(after.shaped_glyphs -
                         spine_layout_before.shaped_glyphs));
   }
