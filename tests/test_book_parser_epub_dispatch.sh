@@ -163,10 +163,12 @@ fi
   "$TEST_ROOT/source/shared/open_cancel_poll_utils.cpp" \
   "$TEST_ROOT/source/shared/app_flow_utils.cpp" \
   "$TEST_ROOT/source/shared/utf8_utils.cpp" \
+  "$TEST_ROOT/source/shared/cover_decode_utils.cpp" \
   "${THIRD_PARTY_OBJS[@]}" \
   "${EXPAT_OBJS[@]}" \
   "${ZLIB_MINIZIP_OBJS[@]}" \
   ${LDFLAGS:-} \
+  -lz \
   -o "$TEST_OUTDIR/test_book_parser_epub_dispatch"
 
 "$TEST_OUTDIR/test_book_parser_epub_dispatch"

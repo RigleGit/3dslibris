@@ -112,9 +112,11 @@ done
   "$TEST_ROOT/source/shared/open_cancel_poll_utils.cpp" \
   "$TEST_ROOT/source/shared/app_flow_utils.cpp" \
   "$TEST_ROOT/source/shared/utf8_utils.cpp" \
+  "$TEST_ROOT/source/shared/cover_decode_utils.cpp" \
   "${THIRD_PARTY_OBJS[@]}" \
   "${EXPAT_OBJS[@]}" \
   ${LDFLAGS:-} \
+  -lz \
   -o "$TEST_OUTDIR/test_fb2_parser"
 
 "$TEST_OUTDIR/test_fb2_parser"
