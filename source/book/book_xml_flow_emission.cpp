@@ -503,7 +503,13 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
     if (ti.unit == MarginTopResult::Unit::None && !p->last_div_class.empty())
       ti = epub_css_class_map::LookupTextIndentForClassAttr(
           p->last_div_class, p->css_class_map);
-#ifdef DSLIBRIS_DEBUG
+// TEXTINDENT_TRACE: per-paragraph TextIndent diagnostics. Off by default;
+// fires once per paragraph (thousands per large EPUB), enough to slow parse
+// noticeably via fflush. Flip to 1 only when debugging text-indent rules.
+#ifndef TEXTINDENT_TRACE
+#define TEXTINDENT_TRACE 0
+#endif
+#if defined(DSLIBRIS_DEBUG) && TEXTINDENT_TRACE
     {
       const char *unit_str = (ti.unit == MarginTopResult::Unit::None) ? "none" :
                              (ti.unit == MarginTopResult::Unit::Px) ? "px" :
@@ -520,7 +526,7 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
     if (ti.unit != MarginTopResult::Unit::None && !ti.negative) {
       const int px = book_xml_css_style_utils::ResolveHorizontalMarginPx(
           ti, ts->display.width, (int)ts->GetPixelSize());
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && TEXTINDENT_TRACE
       DBG_LOGF(p->book->GetStatusReporter(),
         "TextIndent resolved px=%d (applied=%d)", px, px > 0 ? 1 : 0);
 #endif

@@ -4,6 +4,7 @@
 
 #include <map>
 #include <string>
+#include <unordered_map>
 
 namespace epub_css_class_map {
 
@@ -60,8 +61,11 @@ struct CssClassMargins {
         is_display_block(false), is_display_none(false) {}
 };
 
-// Map: bare class name (no '.') → extracted margins.
-using CssClassMap = std::map<std::string, CssClassMargins>;
+// Map: bare class name (no '.') or '*tag' for element-type selectors → rules.
+// std::unordered_map: lookup is called ~170k+ times per large EPUB parse;
+// O(1) hash beats the previous std::map's O(log n) string-compare per node
+// by a meaningful margin in the parse hot path.
+using CssClassMap = std::unordered_map<std::string, CssClassMargins>;
 
 // Parses raw CSS text; populates *out with class selectors that have
 // margin-top/bottom rules. Other selectors and properties are skipped.

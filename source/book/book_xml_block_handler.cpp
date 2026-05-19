@@ -91,12 +91,19 @@ static bool IsBlockLevelElement(const char *el) {
          !strcmp(el, "dt") || !strcmp(el, "dd");
 }
 
+// BLOCK_MARGIN_TRACE: per-block Margin[...] diagnostics. Off by default;
+// fires twice (top + bottom) per block element on every page-emit call —
+// dominant log volume on large EPUBs (~700k entries observed). Flip to 1
+// only when debugging CSS margin resolution.
+#ifndef BLOCK_MARGIN_TRACE
+#define BLOCK_MARGIN_TRACE 0
+#endif
 static void LogResolvedBlockMargin(
     parsedata_t *p, const char *tag, const char *phase,
     const std::string &style_attr, const std::string &class_attr,
     const book_xml_css_style_utils::MarginTopResult &m,
     int line_h, int default_lf, int final_lf) {
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BLOCK_MARGIN_TRACE
   using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
   const char *unit_str = (m.unit == Unit::None) ? "none" :
                          (m.unit == Unit::Px) ? "px" :
@@ -356,7 +363,7 @@ bool HandleBlockElementStart(
                              p->last_p_class, mtr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "p", "paragraph-top", mtr, line_h, default_lf);
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BLOCK_MARGIN_TRACE
       DBG_LOGF(p->book->GetStatusReporter(),
         "P-START cls=%s pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d buflen=%d",
         p->last_p_class.empty() ? "-" : p->last_p_class.c_str(),
@@ -608,7 +615,7 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
           p, "p", "paragraph-bottom", mbr, line_h, default_lf);
       if (!p->pending_block_spacing_from_css && p->pending_block_spacing_lf < 1)
         p->pending_block_spacing_lf = 1;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && BLOCK_MARGIN_TRACE
       DBG_LOGF(p->book->GetStatusReporter(),
         "P-END cls=%s pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d",
         p->last_p_class.empty() ? "-" : p->last_p_class.c_str(),

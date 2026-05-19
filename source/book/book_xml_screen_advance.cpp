@@ -215,7 +215,7 @@ void QueueBlockSpacingFromMarginResult(
     const book_xml_css_style_utils::MarginTopResult &mtr,
     int line_h, int default_lf) {
   using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && FLUSHPENDING_TRACE
   {
     const char *unit_str = (mtr.unit == Unit::None) ? "none" :
                            (mtr.unit == Unit::Px) ? "px" :
@@ -252,11 +252,19 @@ void QueueBlockSpacingFromMarginResult(
     p->pending_block_spacing_lf = 1;
 }
 
+// FLUSHPENDING_TRACE: per-call FlushPending ENTER/METRICS/EXIT logs.
+// OFF by default — fires once per block-element start, drowning the log on
+// large EPUBs (542k entries observed on a 7706-page book) and seriously
+// slowing parse via SD-card fflush. Set to 1 to re-enable for diagnosis.
+#ifndef FLUSHPENDING_TRACE
+#define FLUSHPENDING_TRACE 0
+#endif
+
 void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
                                            const char *next_tag) {
   if (!p || !p->ts || !p->book)
     return;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && FLUSHPENDING_TRACE
   DBG_LOGF(p->book->GetStatusReporter(),
     "FlushPending ENTER[->%s] pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d vis=%d",
     next_tag ? next_tag : "?",
@@ -288,7 +296,7 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
   {
     const int usable = metrics.max_height - metrics.bottom_margin - p->pen.y;
     available = (usable > 0) ? (usable / line_step) : 0;
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && FLUSHPENDING_TRACE
     DBG_LOGF(p->book->GetStatusReporter(),
       "FlushPending METRICS lh=%d ls=%d step=%d maxH=%d botM=%d usable=%d avail=%d lb=%d",
       lh, ls, line_step,
@@ -347,7 +355,7 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
     for (int i = 0; i < emit_opt; i++)
       LinefeedRLocal(p, next_tag ? next_tag : "?", "pending-spacing", 0);
   }
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && FLUSHPENDING_TRACE
   DBG_LOGF(p->book->GetStatusReporter(),
     "FlushPending EXIT[->%s] opt=%d avail=%d emit_opt=%d pen_y=%d scr=%d lb=%d",
     next_tag ? next_tag : "?",
