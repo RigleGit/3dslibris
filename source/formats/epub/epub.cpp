@@ -221,6 +221,15 @@ static int ParseEpubSpineDocuments(
 
   int chapter_num = 1;
   size_t spine_doc_index = 0;
+#ifdef DSLIBRIS_DEBUG
+  // Snapshot global layout perf counters so we can emit one aggregate
+  // breakdown at the end (shape / measure / line-break ms). One line per
+  // book open is cheap and tells us where the parse time actually goes,
+  // without the per-document spam that EPUB_LAYOUT_PROFILE produces.
+  const u64 t_spine_begin = osGetTime();
+  const text_layout_utils::PerfStats spine_layout_before =
+      text_layout_utils::GetPerfStats();
+#endif
   unzFile inline_probe_uf = unzOpen(archive_path.c_str());
   book->SetInlineImageProbeZip(inline_probe_uf);
   // Open a shared handle for CSS stylesheet scanning so LoadCssClassMapForDoc
@@ -369,6 +378,36 @@ static int ParseEpubSpineDocuments(
 #ifdef DSLIBRIS_DEBUG
   if (t_after_content)
     *t_after_content = osGetTime();
+  if (app) {
+    const text_layout_utils::PerfStats after =
+        text_layout_utils::GetPerfStats();
+    const u64 spine_ms = osGetTime() - t_spine_begin;
+    const u64 shape_ms = after.shape_ms - spine_layout_before.shape_ms;
+    const u64 measure_ms = after.measure_ms - spine_layout_before.measure_ms;
+    const u64 break_ms = after.line_break_ms - spine_layout_before.line_break_ms;
+    const u64 pre_break_ms =
+        after.pre_line_break_ms - spine_layout_before.pre_line_break_ms;
+    const u64 layout_ms = shape_ms + measure_ms + break_ms + pre_break_ms;
+    const unsigned shape_pct =
+        spine_ms ? (unsigned)((shape_ms * 100ULL) / spine_ms) : 0;
+    const unsigned measure_pct =
+        spine_ms ? (unsigned)((measure_ms * 100ULL) / spine_ms) : 0;
+    const unsigned break_pct =
+        spine_ms ? (unsigned)(((break_ms + pre_break_ms) * 100ULL) / spine_ms)
+                 : 0;
+    const unsigned layout_pct =
+        spine_ms ? (unsigned)((layout_ms * 100ULL) / spine_ms) : 0;
+    DBG_LOGF(app,
+             "EPUB: spine breakdown total=%llums layout=%llums(%u%%) "
+             "shape=%llums(%u%%) measure=%llums(%u%%) linebreak=%llums(%u%%) "
+             "glyphs=%u",
+             (unsigned long long)spine_ms, (unsigned long long)layout_ms,
+             layout_pct, (unsigned long long)shape_ms, shape_pct,
+             (unsigned long long)measure_ms, measure_pct,
+             (unsigned long long)(break_ms + pre_break_ms), break_pct,
+             (unsigned)(after.shaped_glyphs -
+                        spine_layout_before.shaped_glyphs));
+  }
 #endif
   return rc;
 }
