@@ -67,6 +67,7 @@ FindLineBreakAndMeasure(const std::vector<ShapedGlyph> &run, size_t start,
                         int max_width);
 LineBreakMeasureResult FindPreformattedLineBreakAndMeasure(
     const std::vector<ShapedGlyph> &run, size_t start, int max_width);
+bool PreformattedSegmentNeedsNewLine(int pen_x, int advance, int right_edge);
 
 // Apply Arabic contextual shaping and BIDI reordering to a UTF-8 string,
 // producing a display-ready UTF-8 string.  Returns true if any RTL content

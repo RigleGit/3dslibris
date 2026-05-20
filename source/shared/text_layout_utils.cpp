@@ -277,6 +277,10 @@ LineBreakMeasureResult FindPreformattedLineBreakAndMeasure(
   return result;
 }
 
+bool PreformattedSegmentNeedsNewLine(int pen_x, int advance, int right_edge) {
+  return pen_x + advance > right_edge;
+}
+
 bool ShapeTextRunBidi(const char *s, size_t len, const char *lang,
                        MeasureCodepointFn measure_codepoint, void *measure_ctx,
                        std::vector<ShapedGlyph> *out, bool *has_rtl,

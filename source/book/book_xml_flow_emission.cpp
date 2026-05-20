@@ -332,7 +332,8 @@ static void EmitPreformattedUtf8Segment(
         pre_run[segment_end_index - 1].text.byte_length;
     const int advance = segment.width;
 
-    if ((p->pen.x + advance) >= (ts->display.width - ts->margin.right)) {
+    if (text_layout_utils::PreformattedSegmentNeedsNewLine(
+            p->pen.x, advance, ts->display.width - ts->margin.right)) {
       parse_append_page_byte(p, '\n');
       p->pen.x = ts->margin.left;
       p->pen.y += (lineheight + linespacing);

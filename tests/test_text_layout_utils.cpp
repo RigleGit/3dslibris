@@ -127,6 +127,13 @@ void TestMeasureCombinedBreaks() {
   ExpectEq("combined preformatted width", pre.width, 4);
 }
 
+void TestPreformattedSegmentEdgeFit() {
+  ExpectFalse("preformatted exact right edge fits",
+              text_layout_utils::PreformattedSegmentNeedsNewLine(12, 216, 228));
+  ExpectTrue("preformatted past right edge wraps",
+             text_layout_utils::PreformattedSegmentNeedsNewLine(12, 217, 228));
+}
+
 void TestKeepsOpeningPunctuationWithFollowingWord() {
   std::vector<text_layout_utils::ShapedGlyph> run;
   const std::string text = "\xC2\xA1Hola!";
@@ -183,6 +190,7 @@ int main() {
   TestFindLineBreaks();
   TestFindPreformattedBreaks();
   TestMeasureCombinedBreaks();
+  TestPreformattedSegmentEdgeFit();
   TestKeepsOpeningPunctuationWithFollowingWord();
   TestKeepsClosingPunctuationWithPreviousWord();
   TestKeepsQuestionMarkWithPreviousWord();
