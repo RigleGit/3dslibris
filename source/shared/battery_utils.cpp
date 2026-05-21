@@ -11,7 +11,7 @@ const char *GetApproxPercentLabel(u8 level)
 {
   switch (level)
   {
-  case 0: return "~0%";
+  case 0: return "~1%";
   case 1: return "~20%";
   case 2: return "~40%";
   case 3: return "~60%";
