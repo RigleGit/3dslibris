@@ -19,3 +19,4 @@ typedef struct {
 } FT_Vector;
 
 static inline long long osGetTime(void) { return 0; }
+static inline void aptSetHomeAllowed(bool) {}
