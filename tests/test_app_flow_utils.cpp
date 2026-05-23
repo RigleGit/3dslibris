@@ -43,6 +43,10 @@ void TestDetectBookFormat() {
            FORMAT_EPUB);
   ExpectEq("txt", app_flow_utils::DetectBookFormat("book.txt"),
            FORMAT_XHTML);
+  ExpectEq("markdown md", app_flow_utils::DetectBookFormat("notes.md"),
+           FORMAT_XHTML);
+  ExpectEq("markdown long", app_flow_utils::DetectBookFormat("notes.markdown"),
+           FORMAT_XHTML);
   ExpectEq("mobi", app_flow_utils::DetectBookFormat("book.mobi"),
            FORMAT_XHTML);
   ExpectEq("pdf", app_flow_utils::DetectBookFormat("book.pdf"),

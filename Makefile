@@ -51,6 +51,7 @@ SOURCES		:=	source \
 			source/formats/pdf \
 			source/formats/cbz \
 			source/formats/txt \
+			source/formats/markdown \
 			source/formats/rtf \
 			source/formats/odt \
 			source/formats/mupdf \

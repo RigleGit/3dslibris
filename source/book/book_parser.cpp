@@ -8,6 +8,7 @@
 #include "formats/common/xml_book_parser.h"
 #include "formats/epub/epub_parser.h"
 #include "formats/fb2/fb2_parser.h"
+#include "formats/markdown/markdown_parser.h"
 #include "formats/mobi/mobi_parser.h"
 #include "formats/odt/odt_parser.h"
 #include "formats/pdf/pdf_parser.h"
@@ -50,6 +51,14 @@ bool CanParseRtf(Book *book, bool fulltext) {
 
 uint8_t ParseRtf(Book *book, const char *path, bool) {
   return rtf_parser::Parse(book, path);
+}
+
+bool CanParseMarkdown(Book *book, bool fulltext) {
+  return fulltext && (IsExt(book, ".md") || IsExt(book, ".markdown"));
+}
+
+uint8_t ParseMarkdown(Book *book, const char *path, bool) {
+  return markdown_parser::Parse(book, path);
 }
 
 bool CanParseOdt(Book *book, bool fulltext) {
@@ -98,6 +107,7 @@ uint8_t ParseFb2(Book *book, const char *path, bool fulltext) {
 static const BookParserEntry kBookParsers[] = {
     {"txt", CanParseTxt, ParseTxt},
     {"rtf", CanParseRtf, ParseRtf},
+    {"markdown", CanParseMarkdown, ParseMarkdown},
     {"odt", CanParseOdt, ParseOdt},
     {"mobi", CanParseMobi, ParseMobi},
     {"pdf", CanParsePdf, ParsePdf},

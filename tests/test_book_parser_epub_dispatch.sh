@@ -131,6 +131,7 @@ fi
   "$TEST_ROOT/source/formats/epub/epub_cache.cpp" \
   "$TEST_ROOT/source/formats/txt/txt_parser.cpp" \
   "$TEST_ROOT/source/formats/txt/txt_loader.cpp" \
+  "$TEST_ROOT/source/formats/markdown/markdown_parser.cpp" \
   "$TEST_ROOT/source/formats/fb2/fb2_parser.cpp" \
   "$TEST_ROOT/source/formats/fb2/fb2.cpp" \
   "$TEST_ROOT/source/formats/rtf/rtf_parser.cpp" \

@@ -31,6 +31,8 @@ format_t DetectBookFormat(const char *filename) {
     return CbzSupportEnabled() ? FORMAT_CBZ
                                : FORMAT_UNDEF;
   if (EndsWithNoCase(filename, ".fb2") || EndsWithNoCase(filename, ".txt") ||
+      EndsWithNoCase(filename, ".md") ||
+      EndsWithNoCase(filename, ".markdown") ||
       EndsWithNoCase(filename, ".rtf") || EndsWithNoCase(filename, ".odt") ||
       EndsWithNoCase(filename, ".mobi")) {
     return FORMAT_XHTML;

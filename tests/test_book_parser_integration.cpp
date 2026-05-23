@@ -154,6 +154,25 @@ void TestRtfOpen() {
   delete book;
 }
 
+void TestMarkdownOpen() {
+  const char *fixture = TEST_FIXTURES_DIR "/books/basic.md";
+  FILE *fp = fopen(fixture, "r");
+  if (!fp) {
+    fprintf(stderr, "SKIP test_book_parser_integration Markdown: fixture not found: %s\n",
+            fixture);
+    return;
+  }
+  fclose(fp);
+
+  Book *book = MakeBook(TEST_FIXTURES_DIR "/books", "basic.md", FORMAT_UNDEF);
+  uint8_t err = book_parser::Open(book);
+  ExpectFalse("markdown open: no error", err != 0);
+  ExpectGt("markdown open: pages > 0", (int)book->GetPageCount(), 0);
+  book->Close();
+  g_pass++;
+  delete book;
+}
+
 void TestCorruptFile() {
   Book *book = MakeBook("/tmp", "nonexistent_3dslibris_fixture.txt", FORMAT_UNDEF);
   uint8_t err = book_parser::Open(book);
@@ -169,6 +188,7 @@ int main() {
   TestTxtReopen();
   TestFb2Open();
   TestRtfOpen();
+  TestMarkdownOpen();
   TestCorruptFile();
 
   fprintf(stderr, "Results: %d/%d passed, %d failed\n", g_pass, g_pass + g_fail,
