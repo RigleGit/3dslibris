@@ -5,7 +5,7 @@ CC_BIN="${CC:-cc}"
 CXX_BIN="${CXX:-c++}"
 
 if [ -f "$TEST_ROOT/third_party/expat/xmlparse.c" ]; then
-  expat_flags="-DXML_CONTEXT_BYTES=1024 -DHAVE_ARC4RANDOM_BUF"
+  expat_flags="-DXML_CONTEXT_BYTES=1024 -DXML_DTD=1 -DXML_GE=1 -DHAVE_GETRANDOM -DHAVE_SYS_RANDOM_H"
   expat_inc="-I$TEST_ROOT/third_party/expat"
   for f in xmlparse xmlrole xmltok; do
     src="$TEST_ROOT/third_party/expat/${f}.c"
