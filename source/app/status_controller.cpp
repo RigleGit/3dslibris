@@ -171,13 +171,16 @@ void StatusController::UpdateStatus()
     app_.ts->PrintString(tmsg);
     int clockWidth = app_.ts->GetStringWidth(tmsg, TEXT_STYLE_BROWSER);
 
-    u8 batt_level = 0;
+    u8 batt_percent = 0;
     bool batt_charging = false;
+    bool batt_approx = false;
     char bmsg[12] = {};
     int battWidth = 0;
-    if (battery_utils::ReadBatteryState(&batt_level, &batt_charging))
+    if (battery_utils::ReadBatteryState(&batt_percent, &batt_charging,
+                                        &batt_approx))
     {
-      battery_utils::FormatBatteryString(bmsg, sizeof(bmsg), batt_level, batt_charging);
+      battery_utils::FormatBatteryString(bmsg, sizeof(bmsg), batt_percent,
+                                         batt_charging, batt_approx);
       battWidth = app_.ts->GetStringWidth(bmsg, TEXT_STYLE_BROWSER);
       app_.ts->SetPen(8 + clockWidth + 8, textY);
       app_.ts->PrintString(bmsg);

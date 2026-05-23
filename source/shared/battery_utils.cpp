@@ -1,29 +1,36 @@
 #include "shared/battery_utils.h"
 
 #include <3ds.h>
+#include <3ds/services/mcuhwc.h>
 #include <stdio.h>
 #include <string.h>
 
 namespace battery_utils
 {
 
-const char *GetApproxPercentLabel(u8 level)
+static bool ReadChargingState(bool *out_charging)
 {
-  switch (level)
-  {
-  case 0: return "~0%";
-  case 1: return "~20%";
-  case 2: return "~40%";
-  case 3: return "~60%";
-  case 4: return "~80%";
-  case 5: return "~100%";
-  default: return "?";
-  }
+  if (!out_charging)
+    return false;
+
+  Result init_result = ptmuInit();
+  if (R_FAILED(init_result))
+    return false;
+
+  u8 charge_state = 0;
+  Result charge_result = PTMU_GetBatteryChargeState(&charge_state);
+  ptmuExit();
+
+  if (R_FAILED(charge_result))
+    return false;
+
+  *out_charging = (charge_state != 0);
+  return true;
 }
 
-bool ReadBatteryState(u8 *out_level, bool *out_charging)
+static bool ReadPtmApproxPercent(u8 *out_percent)
 {
-  if (!out_level || !out_charging)
+  if (!out_percent)
     return false;
 
   Result init_result = ptmuInit();
@@ -31,31 +38,73 @@ bool ReadBatteryState(u8 *out_level, bool *out_charging)
     return false;
 
   u8 level = 0;
-  u8 charge_state = 0;
   Result level_result = PTMU_GetBatteryLevel(&level);
-  Result charge_result = 0;
-  if (R_SUCCEEDED(level_result))
-    charge_result = PTMU_GetBatteryChargeState(&charge_state);
-
   ptmuExit();
 
   if (R_FAILED(level_result))
     return false;
-  if (R_FAILED(charge_result))
-    return false;
 
-  *out_level = level;
-  *out_charging = (charge_state != 0);
+  switch (level)
+  {
+  case 0: *out_percent = 0; break;
+  case 1: *out_percent = 3; break;
+  case 2: *out_percent = 8; break;
+  case 3: *out_percent = 20; break;
+  case 4: *out_percent = 45; break;
+  case 5: *out_percent = 80; break;
+  default: return false;
+  }
   return true;
 }
 
-void FormatBatteryString(char *buf, size_t bufsz, u8 level, bool charging)
+bool ReadBatteryState(u8 *out_percent, bool *out_charging, bool *out_approx)
 {
-  const char *pct = GetApproxPercentLabel(level);
-  if (charging)
-    snprintf(buf, bufsz, "+%s", pct);
+  if (!out_percent || !out_charging || !out_approx)
+    return false;
+
+  bool charging = false;
+  if (!ReadChargingState(&charging))
+    return false;
+
+  u8 percent = 0;
+  bool approx = false;
+  Result mcu_result = mcuHwcInit();
+  if (R_SUCCEEDED(mcu_result))
+  {
+    Result level_result = MCUHWC_GetBatteryLevel(&percent);
+    mcuHwcExit();
+    if (R_FAILED(level_result))
+    {
+      if (!ReadPtmApproxPercent(&percent))
+        return false;
+      approx = true;
+    }
+  }
   else
-    snprintf(buf, bufsz, "%s", pct);
+  {
+    if (!ReadPtmApproxPercent(&percent))
+      return false;
+    approx = true;
+  }
+
+  if (percent > 100)
+    percent = 100;
+
+  *out_percent = percent;
+  *out_charging = charging;
+  *out_approx = approx;
+  return true;
+}
+
+void FormatBatteryString(char *buf, size_t bufsz, u8 percent, bool charging,
+                         bool approx)
+{
+  const char *prefix = charging ? "+" : "";
+  const char *approx_prefix = approx ? "~" : "";
+  if (charging)
+    snprintf(buf, bufsz, "%s%s%u%%", prefix, approx_prefix, percent);
+  else
+    snprintf(buf, bufsz, "%s%u%%", approx_prefix, percent);
 }
 
 }

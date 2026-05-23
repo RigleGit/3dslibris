@@ -149,6 +149,7 @@ AccessControlInfo:
    - gsp::Gpu
    - gsp::Lcd
    - hid:USER
+   - mcu::HWC
    - ndm:u
    - ptm:u
    # - soc:U # sockets
