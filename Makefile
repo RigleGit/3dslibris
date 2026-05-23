@@ -283,7 +283,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean clean-build package-sdmc zip-sdmc source-release debug-3dsx debug-cia debug-safe-cia cia cia-safe stage-romfs mupdf-minimal test-host coverage-host
+.PHONY: all clean clean-build package-sdmc zip-sdmc source-release debug-3dsx debug-cia debug-safe-cia cia stage-romfs mupdf-minimal test-host coverage-host
 
 #---------------------------------------------------------------------------------
 all: stage-romfs mupdf-minimal $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -409,7 +409,7 @@ endif
 		APP_DESCRIPTION_OVERRIDE="Diagnostic CIA" \
 		APP_AUTHOR_OVERRIDE="Rigle" \
 		DEBUG_LOGGING=1 \
-		cia-safe
+		diagnostic-safe-cia
 
 #---------------------------------------------------------------------------------
 package-sdmc: all
@@ -458,15 +458,6 @@ endif
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile cia
 
 #---------------------------------------------------------------------------------
-cia-safe:
-#---------------------------------------------------------------------------------
-ifdef UPDATE_DATE
-	@touch $(TOPDIR)/source/app/startup_controller.cpp
-endif
-	@$(MAKE) --no-print-directory all
-	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile cia-safe
-
-#---------------------------------------------------------------------------------
 $(GFXBUILD)/%.t3x	$(BUILD)/%.h	:	%.t3s
 #---------------------------------------------------------------------------------
 	@echo $(notdir $<)
@@ -491,7 +482,7 @@ $(OUTPUT).elf	:	$(OFILES)
 #---------------------------------------------------------------------------------
 cia: $(OUTPUT).cia
 
-cia-safe: $(OUTPUT)-safe.cia
+diagnostic-safe-cia: $(OUTPUT)-safe.cia
 
 $(OUTPUT).cia	:	$(OUTPUT).elf $(OUTPUT).smdh $(TOPDIR)/$(CIA_RSF) $(TOPDIR)/$(CIA_BANNER_IMG) $(TOPDIR)/$(CIA_BANNER_WAV) $(TOPDIR)/$(CIA_LOGO) $(TOPDIR)/$(ICON)
 	@echo building CIA ...
