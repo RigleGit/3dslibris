@@ -1,7 +1,7 @@
 FROM devkitpro/devkitarm:20260221
 
 ARG TARGETPLATFORM
-ARG BANNERTOOL_REF=1.2.2
+ARG BANNERTOOL_REF=v1.2.2
 ARG MAKEROM_VERSION=makerom-v0.18.4
 
 RUN set -eux; \
@@ -20,7 +20,7 @@ RUN set -eux; \
     tmpdir="$(mktemp -d)"; \
     \
     git clone --depth 1 --branch "${BANNERTOOL_REF}" \
-        https://github.com/diasurgical/bannertool.git \
+        https://github.com/Epicpkmn11/bannertool.git \
         "${tmpdir}/bannertool"; \
     cd "${tmpdir}/bannertool"; \
     g++ -std=c++11 -O2 \
