@@ -38,6 +38,7 @@ void App::PrepareForShutdown()
   skip_next_browser_present_ = false;
   lifecycle_state_.SetResumePending(false);
   lifecycle_state_.SetSuspendHandled(false);
+  lifecycle_state_.SetExitRequested(false);
   nav_.browser.wait_input_release = true;
   nav_.browser.last_interaction_ms = osGetTime();
   ResetPageRepeat();
@@ -109,7 +110,7 @@ void App::HandleAppletHook(APT_HookType hook)
     // from receiving the acknowledgment within its expected timing window,
     // which can cause the HOME Menu process to crash. Prefs are saved in
     // PrepareForShutdown() after aptMainLoop() returns.
-    nav_.mode = AppMode::Quit;
+    lifecycle_state_.SetExitRequested(true);
     break;
   default:
     break;

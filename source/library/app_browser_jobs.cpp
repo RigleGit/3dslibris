@@ -39,6 +39,7 @@
 #include "shared/app_flow_utils.h"
 #include "shared/debug_log.h"
 #include "shared/debug_runtime_mode.h"
+#include "shared/home_button_guard.h"
 #include "shared/string_utils.h"
 #include "ui/text.h"
 
@@ -371,6 +372,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
       if (!book->metadataIndexTried &&
           app_flow_utils::SupportsMetadataIndexing(
               app_flow_utils::DetectBookFormat(book->GetFileName()))) {
+        HomeButtonGuard home_guard;
         rc = book_parser::Index(book);
         if (rc == 0) {
           book->ClearBrowserDisplayNameCache();
@@ -421,6 +423,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
             EnqueueJob(APP_JOB_EXTRACT_COVER, book);
           } else {
             if (!book->coverImagePath.empty()) {
+              HomeButtonGuard home_guard;
               rc = epub_parser::ExtractCover(book, path);
               if (rc == 0 && book->coverPixels) {
                 cover_cache::Save(book, path);
@@ -438,6 +441,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           }
         } else if (book->format == FORMAT_XHTML &&
                    HasExtCI(book->GetFileName(), ".fb2")) {
+          HomeButtonGuard home_guard;
           rc = fb2_parser::ExtractCover(book, path);
           if (rc == 0 && book->coverPixels) {
             cover_cache::Save(book, path);
@@ -451,6 +455,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           }
         } else if (book->format == FORMAT_XHTML &&
                    HasExtCI(book->GetFileName(), ".mobi")) {
+          HomeButtonGuard home_guard;
           rc = mobi_parser::ExtractCover(book, path);
           if (rc == 0 && book->coverPixels) {
             cover_cache::Save(book, path);
@@ -463,6 +468,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
             book->coverAttempts = kCoverMaxAttempts;
           }
         } else if (book->format == FORMAT_PDF) {
+          HomeButtonGuard home_guard;
           rc = pdf_parser::ExtractCover(book, path);
           if (rc == 0 && book->coverPixels) {
             cover_cache::Save(book, path);
@@ -478,6 +484,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
             book->coverAttempts = kCoverMaxAttempts;
           }
         } else if (book->format == FORMAT_CBZ) {
+          HomeButtonGuard home_guard;
           rc = cbz_parser::ExtractCover(book, path);
           if (rc == 0 && book->coverPixels) {
             cover_cache::Save(book, path);
@@ -545,6 +552,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         std::string path = BuildBookPath(book);
         if (path.empty())
           continue;
+        HomeButtonGuard home_guard;
         rc = epub_parser::ResolveToc(book, path);
         book->tocResolveTried = true;
         book->tocResolved = (rc == 0);

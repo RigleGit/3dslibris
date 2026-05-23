@@ -281,6 +281,7 @@ public:
   bool IsNew3dsDevice() const;
   bool IsHomebrewEnvironment() const;
   bool IsAppletSuspended() const;
+  bool IsAppletExitRequested() const;
   bool ShouldAbortWork() const override;
   void ResetPageRepeat();
   bool ShouldFirePageRepeat(reader::PageRepeatAction action, bool down_now,

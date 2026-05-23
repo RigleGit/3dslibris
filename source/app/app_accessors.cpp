@@ -369,6 +369,11 @@ bool App::IsHomebrewEnvironment() const { return lifecycle_state_.IsHomebrew(); 
 
 bool App::IsAppletSuspended() const { return lifecycle_state_.IsSuspended(); }
 
+bool App::IsAppletExitRequested() const
+{
+  return lifecycle_state_.IsExitRequested();
+}
+
 bool App::ShouldAbortWork() const
 {
   return lifecycle_state_.ShouldAbortWork(static_cast<u8>(nav_.mode));

@@ -12,6 +12,7 @@ private:
     std::atomic<bool> applet_suspended_{false};
     std::atomic<bool> applet_resume_pending_{false};
     std::atomic<bool> applet_suspend_handled_{false};
+    std::atomic<bool> applet_exit_requested_{false};
     aptHookCookie apt_hook_cookie_; // initialized via InstallHook
     bool apt_hook_installed_ = false;
     bool shutdown_prepared_ = false;
@@ -36,6 +37,9 @@ public:
     bool IsSuspendHandled() const {
         return applet_suspend_handled_.load(std::memory_order_relaxed);
     }
+    bool IsExitRequested() const {
+        return applet_exit_requested_.load(std::memory_order_relaxed);
+    }
     bool IsShutdownPrepared() const { return shutdown_prepared_; }
     bool IsNew3DS() const { return is_new_3ds_; }
     bool IsHomebrew() const { return is_homebrew_; }
@@ -43,7 +47,9 @@ public:
     // Abort work if suspended or quitting (mode passed as AppMode enum).
     bool ShouldAbortWork(u8 mode) const {
         // Quit mode value is 7 (AppMode::Quit).
-        return applet_suspended_.load(std::memory_order_relaxed) || (mode == 7u);
+        return applet_suspended_.load(std::memory_order_relaxed) ||
+               applet_exit_requested_.load(std::memory_order_relaxed) ||
+               (mode == 7u);
     }
 
     // Mutators (cross-thread writes use relaxed ordering)
@@ -55,6 +61,9 @@ public:
     }
     void SetSuspendHandled(bool v) {
         applet_suspend_handled_.store(v, std::memory_order_relaxed);
+    }
+    void SetExitRequested(bool v) {
+        applet_exit_requested_.store(v, std::memory_order_relaxed);
     }
     void MarkShutdownPrepared() { shutdown_prepared_ = true; }
     void SetNew3DS(bool v) { is_new_3ds_ = v; }

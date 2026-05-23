@@ -38,6 +38,7 @@
 #include "app/status_controller.h"
 #include "app/startup_controller.h"
 #include "app/main_loop_controller.h"
+#include "shared/boot_trace.h"
 #include "shared/debug_log.h"
 #include "shared/path_constants.h"
 #include "parse.h"
@@ -283,11 +284,18 @@ bool App::PresentIfDirty()
 // Main app run loop: execute startup sequence and then enter the main loop controller.
 int App::Run(void)
 {
+  boot_trace::Boot("app run begin");
   const int startup = startup_controller_->RunBootSequence();
-  if (startup == 1)
+  if (startup == 1) {
+    boot_trace::Boot("app startup failed");
     return 1;
-  if (startup == 2)
+  }
+  if (startup == 2) {
+    boot_trace::Boot("app startup halted");
     return 0;
+  }
+  boot_trace::Boot("app startup complete");
+  boot_trace::Boot("app main loop begin");
   return main_loop_controller_->RunMainLoop();
 }
 

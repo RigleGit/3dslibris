@@ -44,6 +44,7 @@
 #include "book/layout_reflow.h"
 #include "parse.h"
 #include "settings/prefs.h"
+#include "shared/boot_trace.h"
 #include "ui/text.h"
 
 #include "reader/app_book_internal.h"
@@ -267,6 +268,7 @@ void ReaderController::HandleEventInOpening()
   if (!opening_book->PumpAsyncReflowOpen())
     return;
 
+  boot_trace::Boot("async open complete begin");
   const u8 err = opening_book->ConsumeAsyncReflowOpenResult();
 #ifdef DSLIBRIS_DEBUG
   {
@@ -288,6 +290,7 @@ void ReaderController::HandleEventInOpening()
 
   if (err)
   {
+    boot_trace::Boot("async open failed");
     CloseFailedOpenBook(&app_, opening_book, opening_session_id,
                         err == BOOK_ERR_CANCELLED ? "cancelled"
                                                   : "async-open-failed");
@@ -322,6 +325,7 @@ void ReaderController::HandleEventInOpening()
                                  opening_book->IsOpenAbortRequested(),
                                  pageCount))
   {
+    boot_trace::Boot("async open attach denied");
     const char *cause = DescribeOpeningFailureCause(
         opening_session_id, opening_book->GetOpenSessionId(),
         opening_book->IsOpenAbortRequested(), pageCount);
@@ -373,22 +377,26 @@ void ReaderController::HandleEventInOpening()
   if (bookcurrent_->HasPendingEpubPageCacheSave() ||
       bookcurrent_->HasPendingMobiPageCacheSave())
   {
+    boot_trace::Boot("async open cache save begin");
     DrawOpeningSplashImpl(&app_, 0, 0, "saving cache...");
 #ifdef DSLIBRIS_DEBUG
     u64 t0_flush = osGetTime();
 #endif
     bookcurrent_->FlushPendingCacheSaves();
+    boot_trace::Boot("async open cache save done");
 #ifdef DSLIBRIS_DEBUG
     DBG_LOGF(&app_, "FlushPendingCacheSaves (open): ms=%u", (unsigned)(osGetTime() - t0_flush));
 #endif
   }
 
   app_.ShowCurrentBookView();
+  boot_trace::Boot("async open show book view");
   DBG_LOG(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
 
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   book_nav::DrawPage(bookcurrent_, ts);
+  boot_trace::Boot("async open first page drawn");
   if (bookcurrent_ && bookcurrent_->IsFixedLayout())
     app_.SetPdfDeferredReadyAtMs(
         book_renderer::HasPendingFixedLayoutDeferredWork(bookcurrent_)
@@ -397,6 +405,7 @@ void ReaderController::HandleEventInOpening()
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
+  boot_trace::Boot("async open done");
 }
 
 void ReaderController::HandleEventInBook()

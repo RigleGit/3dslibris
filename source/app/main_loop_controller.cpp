@@ -18,6 +18,7 @@
 #include <string>
 
 #include "app/app.h"
+#include "shared/boot_trace.h"
 #include "shared/debug_log.h"
 #include "library/browser_warmup_utils.h"
 #include "shared/debug_runtime_mode.h"
@@ -33,10 +34,18 @@ int MainLoopController::RunMainLoop()
   int lifecycle_log_budget = 32;
 #endif
   auto handle_lifecycle_pause = [&]() -> bool {
+    boot_trace::FlushAptHooks();
+    if (app_.IsAppletExitRequested())
+    {
+      boot_trace::Boot("main loop exit requested");
+      app_.SetMode(AppMode::Quit);
+      return false;
+    }
     if (app_.GetMode() == AppMode::Quit)
       return false;
-    if (app_.IsAppletSuspended())
+    if (app_.IsAppletSuspended() || !aptIsActive())
     {
+      boot_trace::Boot("main loop suspend begin");
 #ifdef DSLIBRIS_DEBUG
       if (lifecycle_log_budget > 0)
       {
@@ -46,10 +55,12 @@ int MainLoopController::RunMainLoop()
       }
 #endif
       app_.HandleAppletSuspend();
+      boot_trace::Boot("main loop suspend handled");
       svcSleepThread(1000000LL); // 1ms yield: aptMainLoop() may return briefly while HOME transitions
       return true;
     }
     app_.HandleAppletResume();
+    boot_trace::FlushAptHooks();
     return false;
   };
 
@@ -107,8 +118,10 @@ int MainLoopController::RunMainLoop()
 
     if (app_.HasPendingBootReopen())
     {
+      boot_trace::Boot("main pending boot reopen begin");
       app_.SetPendingBootReopen(false);
       app_.OpenBook();
+      boot_trace::Boot("main pending boot reopen done");
     }
 
     // Allow browser warmup jobs to run during idle periods in the browser, based on timing and input state.

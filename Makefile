@@ -127,6 +127,7 @@ endif
 
 CIA_RSF		:=	assets/cia/build-cia.rsf
 CIA_DEBUG_RSF	:=	assets/cia/build-cia-debug.rsf
+CIA_SAFE_DEBUG_RSF	:=	assets/cia/build-cia-safe-debug.rsf
 CIA_BANNER_IMG	:=	assets/release/banner.png
 CIA_BANNER_WAV	:=	assets/cia/BannerAudio.wav
 CIA_LOGO	:=	assets/cia/logo.bcma.lz
@@ -281,7 +282,7 @@ ifneq ($(ROMFS),)
 	export _3DSXFLAGS += --romfs=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: all clean clean-build package-sdmc zip-sdmc source-release debug-3dsx debug-cia cia stage-romfs mupdf-minimal test-host coverage-host
+.PHONY: all clean clean-build package-sdmc zip-sdmc source-release debug-3dsx debug-cia debug-safe-cia cia cia-safe stage-romfs mupdf-minimal test-host coverage-host
 
 #---------------------------------------------------------------------------------
 all: stage-romfs mupdf-minimal $(BUILD) $(GFXBUILD) $(DEPSDIR) $(ROMFS_T3XFILES) $(T3XHFILES)
@@ -335,7 +336,7 @@ clean:
 	@rm -fr $(BUILD) $(DEBUG_BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
 		$(GFXBUILD) $(DISTDIR) $(MUPDF_OUT) build-tests/mupdf \
 		$(BASE_TARGET).3dsx $(BASE_TARGET).smdh $(BASE_TARGET).elf \
-		$(BASE_TARGET).cia $(BASE_TARGET)-debug.cia \
+		$(BASE_TARGET).cia $(BASE_TARGET)-debug.cia $(BASE_TARGET)-debug-safe.cia \
 		$(DEBUG_TARGET).3dsx $(DEBUG_TARGET).smdh $(DEBUG_TARGET).elf
 
 #---------------------------------------------------------------------------------
@@ -346,7 +347,7 @@ clean-build:
 	@rm -fr $(BUILD) $(DEBUG_BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
 		$(GFXBUILD) $(DISTDIR) build-tests/mupdf \
 		$(BASE_TARGET).3dsx $(BASE_TARGET).smdh $(BASE_TARGET).elf \
-		$(BASE_TARGET).cia $(BASE_TARGET)-debug.cia \
+		$(BASE_TARGET).cia $(BASE_TARGET)-debug.cia $(BASE_TARGET)-debug-safe.cia \
 		$(DEBUG_TARGET).3dsx $(DEBUG_TARGET).smdh $(DEBUG_TARGET).elf
 
 #---------------------------------------------------------------------------------
@@ -383,6 +384,31 @@ endif
 		APP_DESCRIPTION_OVERRIDE="Manga and eBook reader for Nintendo 3DS (debug)" \
 		DEBUG_LOGGING=1 \
 		cia
+
+#---------------------------------------------------------------------------------
+debug-safe-cia:
+#---------------------------------------------------------------------------------
+ifdef UPDATE_DATE
+	@touch $(TOPDIR)/source/app/startup_controller.cpp
+endif
+	@$(MAKE) --no-print-directory \
+		TARGET=$(DEBUG_TARGET) \
+		BUILD=$(DEBUG_BUILD) \
+		CIA_RSF=$(CIA_SAFE_DEBUG_RSF) \
+		APP_TITLE_OVERRIDE="3dslibris SAFE" \
+		APP_DESCRIPTION_OVERRIDE="Diagnostic CIA" \
+		APP_AUTHOR_OVERRIDE="Rigle" \
+		DEBUG_LOGGING=1 \
+		all
+	@$(MAKE) --no-print-directory \
+		TARGET=$(DEBUG_TARGET) \
+		BUILD=$(DEBUG_BUILD) \
+		CIA_RSF=$(CIA_SAFE_DEBUG_RSF) \
+		APP_TITLE_OVERRIDE="3dslibris SAFE" \
+		APP_DESCRIPTION_OVERRIDE="Diagnostic CIA" \
+		APP_AUTHOR_OVERRIDE="Rigle" \
+		DEBUG_LOGGING=1 \
+		cia-safe
 
 #---------------------------------------------------------------------------------
 package-sdmc: all
@@ -431,6 +457,15 @@ endif
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile cia
 
 #---------------------------------------------------------------------------------
+cia-safe:
+#---------------------------------------------------------------------------------
+ifdef UPDATE_DATE
+	@touch $(TOPDIR)/source/app/startup_controller.cpp
+endif
+	@$(MAKE) --no-print-directory all
+	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile cia-safe
+
+#---------------------------------------------------------------------------------
 $(GFXBUILD)/%.t3x	$(BUILD)/%.h	:	%.t3s
 #---------------------------------------------------------------------------------
 	@echo $(notdir $<)
@@ -455,6 +490,8 @@ $(OUTPUT).elf	:	$(OFILES)
 #---------------------------------------------------------------------------------
 cia: $(OUTPUT).cia
 
+cia-safe: $(OUTPUT)-safe.cia
+
 $(OUTPUT).cia	:	$(OUTPUT).elf $(OUTPUT).smdh $(TOPDIR)/$(CIA_RSF) $(TOPDIR)/$(CIA_BANNER_IMG) $(TOPDIR)/$(CIA_BANNER_WAV) $(TOPDIR)/$(CIA_LOGO) $(TOPDIR)/$(ICON)
 	@echo building CIA ...
 	@mkdir -p "$(TOPDIR)/$(CIA_TMPDIR)"
@@ -475,6 +512,22 @@ $(OUTPUT).cia	:	$(OUTPUT).elf $(OUTPUT).smdh $(TOPDIR)/$(CIA_RSF) $(TOPDIR)/$(CI
 		$(CIA_MAKEROM_EXTRA) -major $(VERSION_MAJOR) -minor $(VERSION_MINOR) \
 		-micro $(VERSION_MICRO) -DAPP_VERSION_MAJOR="$(VERSION_MAJOR)"
 	@echo built ... $(OUTPUT).cia
+
+$(OUTPUT)-safe.cia	:	$(OUTPUT).elf $(TOPDIR)/$(CIA_RSF) $(TOPDIR)/$(ICON)
+	@echo building safe diagnostic CIA ...
+	@mkdir -p "$(TOPDIR)/$(CIA_TMPDIR)"
+	@[ -f "$(TOPDIR)/$(ICON)" ] || (echo "Missing $(ICON)"; exit 1)
+	@[ -f "$(TOPDIR)/$(CIA_RSF)" ] || (echo "Missing $(CIA_RSF)"; exit 1)
+	@command -v $(BANNERTOOL) >/dev/null 2>&1 || (echo "Missing bannertool in PATH"; exit 1)
+	@command -v $(MAKEROM) >/dev/null 2>&1 || (echo "Missing makerom in PATH"; exit 1)
+	@$(BANNERTOOL) makesmdh -i "$(TOPDIR)/$(ICON)" \
+		-s "$(APP_TITLE)" -l "$(APP_DESCRIPTION)" -p "$(APP_AUTHOR)" \
+		-o "$(TOPDIR)/$(CIA_ICON_BIN)"
+	@$(MAKEROM) -f cia -target t -o "$(OUTPUT)-safe.cia" -elf "$(OUTPUT).elf" \
+		-rsf "$(TOPDIR)/$(CIA_RSF)" -icon "$(TOPDIR)/$(CIA_ICON_BIN)" \
+		$(CIA_MAKEROM_EXTRA) -major $(VERSION_MAJOR) -minor $(VERSION_MINOR) \
+		-micro $(VERSION_MICRO) -DAPP_VERSION_MAJOR="$(VERSION_MAJOR)"
+	@echo built ... $(OUTPUT)-safe.cia
 
 #---------------------------------------------------------------------------------
 # you need a rule like this for each extension you use as binary data

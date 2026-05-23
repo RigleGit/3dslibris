@@ -23,7 +23,9 @@
 #include "app/app.h"
 #include "app/library_controller.h"
 #include "book/book.h"
+#include "shared/boot_trace.h"
 #include "shared/debug_log.h"
+#include "shared/home_button_guard.h"
 #include "shared/main.h"
 #include "shared/path_constants.h"
 #include "settings/prefs.h"
@@ -226,19 +228,25 @@ int StartupController::RunBootSequence()
 {
   const int ok = 0;
 
+  boot_trace::Boot("startup begin");
   printf("Loading fonts...\n");
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(&app_, "DBG BUILD SIG: %s %s", __DATE__, __TIME__);
 #endif
+  boot_trace::Boot("startup fonts begin");
   if (app_.ts->Init() != ok)
   {
+    boot_trace::Boot("startup fonts failed");
     std::vector<std::string> missing;
     CollectMissingRuntimeFiles(&missing);
     PrintInstallHelpToConsole(missing);
     return 1;
   }
+  boot_trace::Boot("startup fonts done");
 
+  boot_trace::Boot("startup screens begin");
   app_.StartupInitScreens();
+  boot_trace::Boot("startup screens done");
   app_.ts->SetStyle(TEXT_STYLE_BROWSER);
   DrawBootStatus("Booting", {"Searching for books..."}, false);
 
@@ -262,6 +270,7 @@ int StartupController::RunBootSequence()
       lines.push_back(extra);
     }
     DrawBootStatus("Incomplete installation", lines, true);
+    boot_trace::Boot("startup missing runtime files");
     return HaltOnFatalBootStatus();
   }
 
@@ -269,17 +278,23 @@ int StartupController::RunBootSequence()
 #ifdef DSLIBRIS_DEBUG
   u64 t_scan_ms = osGetTime();
 #endif
-  if (app_.StartupFindBooks() != ok)
   {
-    app_.PrintStatus("error: no book directory");
-    DrawBootStatus("Incomplete installation",
-                   {"Download 3dslibris-sdmc.zip",
-                    "and extract it to sdmc:/",
-                    "Expected folder: sdmc:/3ds/3dslibris/book",
-                    "or sdmc:/config/3dslibris/book",
-                    "or include books in romfs:/3ds/3dslibris/book"},
-                   true);
-    return HaltOnFatalBootStatus();
+    boot_trace::Boot("startup find books begin");
+    HomeButtonGuard home_guard;
+    if (app_.StartupFindBooks() != ok)
+    {
+      app_.PrintStatus("error: no book directory");
+      DrawBootStatus("Incomplete installation",
+                     {"Download 3dslibris-sdmc.zip",
+                      "and extract it to sdmc:/",
+                      "Expected folder: sdmc:/3ds/3dslibris/book",
+                      "or sdmc:/config/3dslibris/book",
+                     "or include books in romfs:/3ds/3dslibris/book"},
+                     true);
+      boot_trace::Boot("startup find books failed");
+      return HaltOnFatalBootStatus();
+    }
+    boot_trace::Boot("startup find books done");
   }
   if (app_.BookCount() == 0)
   {
@@ -291,6 +306,7 @@ int StartupController::RunBootSequence()
                     "to sdmc:/3ds/3dslibris/book",
                     "or sdmc:/config/3dslibris/book"},
                    true);
+    boot_trace::Boot("startup no books");
     return HaltOnFatalBootStatus();
   }
 #ifdef DSLIBRIS_DEBUG
@@ -299,7 +315,9 @@ int StartupController::RunBootSequence()
            (unsigned)app_.BookCount());
 #endif
 
+  boot_trace::Boot("startup prefs read begin");
   const int prefs_read_err = app_.prefs->Read();
+  boot_trace::Boot("startup prefs read done");
   if (prefs_read_err != 0)
   {
     char msg[96];
@@ -315,14 +333,21 @@ int StartupController::RunBootSequence()
 #ifdef DSLIBRIS_DEBUG
   u64 t_prepare_ms = osGetTime();
 #endif
-  app_.StartupPrepareLibrary();
+  {
+    boot_trace::Boot("startup prepare library begin");
+    HomeButtonGuard home_guard;
+    app_.StartupPrepareLibrary();
+    boot_trace::Boot("startup prepare library done");
+  }
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(&app_, "TIMING: prepare_library=%llums",
            (unsigned long long)(osGetTime() - t_prepare_ms));
 #endif
   DBG_LOG(&app_, "Library ready.");
 
+  boot_trace::Boot("startup init browser begin");
   app_.StartupInitUiAndBrowser();
+  boot_trace::Boot("startup init browser done");
 
   DBG_LOG(&app_, VERSION);
 
@@ -336,6 +361,8 @@ int StartupController::RunBootSequence()
                     (title && *title) ? title : "(untitled)"},
                    false);
     app_.SetPendingBootReopen(true);
+    boot_trace::Boot("startup pending boot reopen set");
   }
+  boot_trace::Boot("startup done");
   return 0;
 }

@@ -25,6 +25,7 @@
 #include "book/page_buffer_utils.h"
 #include "parse.h"
 #include "book/reflow_cache_save_utils.h"
+#include "shared/home_button_guard.h"
 #include "ui/screen_constants.h"
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
@@ -615,12 +616,14 @@ void Book::FlushPendingCacheSaves() {
   if (flush_epub) {
     DBG_LOGF(r, "BOOK flush-cache: save-epub begin pages=%d book=%s",
              (int)pages.size(), filename.c_str());
+    HomeButtonGuard home_guard;
     epub_page_cache::SavePending(this, true);
     DBG_LOGF(r, "BOOK flush-cache: save-epub done book=%s", filename.c_str());
   }
   if (flush_mobi) {
     DBG_LOGF(r, "BOOK flush-cache: save-mobi begin pages=%d book=%s",
              (int)pages.size(), filename.c_str());
+    HomeButtonGuard home_guard;
     mobi_page_cache::SavePending(this);
     DBG_LOGF(r, "BOOK flush-cache: save-mobi done book=%s", filename.c_str());
   }
@@ -642,12 +645,14 @@ void Book::Close() {
   if (flush_pending_epub_cache) {
     DBG_LOGF(r, "BOOK close: save-epub-cache begin pages=%d book=%s",
              (int)pages.size(), filename.c_str());
+    HomeButtonGuard home_guard;
     epub_page_cache::SavePending(this, true);
     DBG_LOGF(r, "BOOK close: save-epub-cache done book=%s", filename.c_str());
   }
   if (flush_pending_mobi_cache) {
     DBG_LOGF(r, "BOOK close: save-mobi-cache begin pages=%d book=%s",
              (int)pages.size(), filename.c_str());
+    HomeButtonGuard home_guard;
     mobi_page_cache::SavePending(this);
     DBG_LOGF(r, "BOOK close: save-mobi-cache done book=%s", filename.c_str());
   }

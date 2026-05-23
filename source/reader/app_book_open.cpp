@@ -28,6 +28,7 @@
 #include "reader/book_page_nav.h"
 #include "reader/deferred_relayout_utils.h"
 #include "settings/prefs.h"
+#include "shared/boot_trace.h"
 #include "shared/debug_log.h"
 #include "ui/text.h"
 
@@ -35,18 +36,23 @@ using namespace reader_internal;
 
 u8 ReaderController::OpenBook()
 {
+  boot_trace::Boot("open book begin");
   Prefs *prefs = app_.prefs.get();
   Text *ts = app_.ts.get();
   Book *selected_book = app_.GetSelectedBook();
   Book *bookcurrent_ = app_.GetCurrentBook();
 
-  if (app_.ShouldAbortWork())
+  if (app_.ShouldAbortWork()) {
+    boot_trace::Boot("open book aborted before start");
     return BOOK_ERR_CANCELLED;
+  }
 
   //! Attempt to open book indicated by bookselected.
 
-  if (!selected_book || selected_book->IsBrowserFolder())
+  if (!selected_book || selected_book->IsBrowserFolder()) {
+    boot_trace::Boot("open book invalid selection");
     return 254;
+  }
 
   const bool needs_relayout = app_.BookNeedsRelayout(selected_book);
   const bool switching_books =
@@ -66,6 +72,7 @@ u8 ReaderController::OpenBook()
   if (selected_book->GetPageCount() > 0 && !needs_relayout &&
       !selected_book->IsOpenAbortRequested())
   {
+    boot_trace::Boot("open book reuse begin");
     ReuseParsedBook(&app_);
     app_.SetCurrentBookSessionId(session_id);
     if (app_.GetDeferredRelayoutBook() != app_.GetCurrentBook())
@@ -73,6 +80,7 @@ u8 ReaderController::OpenBook()
     app_.RequestStatusRedraw();
     app_.SetPrefsLayoutNoticePending(false);
     prefs->Write();
+    boot_trace::Boot("open book reuse done");
     return 0;
   }
 
@@ -100,6 +108,7 @@ u8 ReaderController::OpenBook()
 
   if (selected_book->SupportsAsyncReflowOpen())
   {
+    boot_trace::Boot("open book async path begin");
     if (switching_books)
     {
       app_.PauseBrowserJobs();
@@ -116,6 +125,7 @@ u8 ReaderController::OpenBook()
     app_.SetMode(AppMode::Opening);
     if (selected_book->StartAsyncReflowOpen(session_id))
     {
+      boot_trace::Boot("open book async submitted");
       DBG_LOGF(&app_, "REFLOW: async open submitted session=%u book=%s",
                session_id,
                selected_book->GetFileName()
@@ -123,6 +133,7 @@ u8 ReaderController::OpenBook()
                    : "");
       return 0;
     }
+    boot_trace::Boot("open book async fallback");
     ResetOpeningState(&app_);
     app_.SetMode(AppMode::Browser);
     DBG_LOGF(&app_, "REFLOW: async open fallback book=%s",
@@ -130,8 +141,10 @@ u8 ReaderController::OpenBook()
                  ? selected_book->GetFileName()
                  : "");
   }
+  boot_trace::Boot("open book sync parse begin");
   if (u8 err = OpenSelectedBook(&app_, session_id))
   {
+    boot_trace::Boot("open book sync parse failed");
     CloseFailedOpenBook(&app_, selected_book, session_id,
                         err == BOOK_ERR_CANCELLED ? "cancelled"
                                                   : "sync-open-failed");
@@ -141,8 +154,10 @@ u8 ReaderController::OpenBook()
     app_.SetBrowserDirty(true);
     return err;
   }
+  boot_trace::Boot("open book sync parse done");
   if (app_.ShouldAbortWork() || selected_book->IsOpenAbortRequested())
   {
+    boot_trace::Boot("open book post parse abort");
     CloseFailedOpenBook(&app_, selected_book, session_id, "post-open-abort");
     app_.SetCurrentBook(nullptr);
     app_.SetCurrentBookSessionId(0);
@@ -163,6 +178,7 @@ u8 ReaderController::OpenBook()
 
   if (pageCount <= 0)
   {
+    boot_trace::Boot("open book pages zero");
     app_.PrintStatus("error: book has no parsed pages");
     CloseFailedOpenBook(&app_, bookcurrent_, session_id, "pages-zero");
     app_.SetCurrentBook(nullptr);
@@ -211,11 +227,13 @@ u8 ReaderController::OpenBook()
   if (bookcurrent_->HasPendingEpubPageCacheSave() ||
       bookcurrent_->HasPendingMobiPageCacheSave())
   {
+    boot_trace::Boot("open book cache save begin");
     DrawOpeningSplashImpl(&app_, 0, 0, "saving cache...");
 #ifdef DSLIBRIS_DEBUG
     u64 t0_flush2 = osGetTime();
 #endif
     bookcurrent_->FlushPendingCacheSaves();
+    boot_trace::Boot("open book cache save done");
 #ifdef DSLIBRIS_DEBUG
     DBG_LOGF(&app_, "FlushPendingCacheSaves (reopen): ms=%u", (unsigned)(osGetTime() - t0_flush2));
 #endif
@@ -224,6 +242,7 @@ u8 ReaderController::OpenBook()
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   book_nav::DrawPage(bookcurrent_, ts);
+  boot_trace::Boot("open book first page drawn");
   if (bookcurrent_ && bookcurrent_->IsFixedLayout())
     app_.SetPdfDeferredReadyAtMs(
         book_renderer::HasPendingFixedLayoutDeferredWork(bookcurrent_)
@@ -232,5 +251,6 @@ u8 ReaderController::OpenBook()
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
+  boot_trace::Boot("open book done");
   return 0;
 }

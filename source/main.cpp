@@ -29,6 +29,7 @@
 #include <time.h>
 
 #include "app/app.h"
+#include "shared/boot_trace.h"
 #include "shared/debug_log.h"
 #include "shared/path_constants.h"
 #include "app/version.h"
@@ -67,6 +68,30 @@ void ShutdownTrace(const char *fmt, ...) {
   (void)fmt;
 }
 #endif
+
+volatile bool g_early_apt_suspended = false;
+volatile bool g_early_apt_exiting = false;
+aptHookCookie g_early_apt_hook_cookie;
+bool g_early_apt_hook_installed = false;
+
+void EarlyAptHook(APT_HookType hook, void *) {
+  boot_trace::RecordAptHook(hook);
+  switch (hook) {
+  case APTHOOK_ONSUSPEND:
+  case APTHOOK_ONSLEEP:
+    g_early_apt_suspended = true;
+    break;
+  case APTHOOK_ONRESTORE:
+  case APTHOOK_ONWAKEUP:
+    g_early_apt_suspended = false;
+    break;
+  case APTHOOK_ONEXIT:
+    g_early_apt_exiting = true;
+    break;
+  default:
+    break;
+  }
+}
 
 } // namespace
 
@@ -121,8 +146,14 @@ int halt(Text *presenter, const char *msg, int vblanks) {
 }
 
 int main(int argc, char **argv) {
+  boot_trace::Boot("main entry");
   // Initialize 3DS services
+  boot_trace::Boot("before gfxInitDefault");
   gfxInitDefault();
+  boot_trace::Boot("after gfxInitDefault");
+  aptHook(&g_early_apt_hook_cookie, EarlyAptHook, NULL);
+  g_early_apt_hook_installed = true;
+  boot_trace::Boot("early aptHook installed");
   // Use console on bottom screen for init messages.
   // Once App::Run() starts, BlitToFramebuffer() takes over both screens.
   consoleInit(GFX_BOTTOM, NULL);
@@ -145,10 +176,12 @@ int main(int argc, char **argv) {
   gfxSwapBuffers();
   gspWaitForVBlank();
 
+  boot_trace::Boot("before romfsInit");
   bool romfs_ready =
       (romfsInit() ==
        0); // RomFS is optional; if it fails, built-in assets won't be available
            // but the app can still run with SD card assets.
+  boot_trace::Boot(romfs_ready ? "after romfsInit ok" : "after romfsInit failed");
   if (!romfs_ready)
     printf("[WARN] romfsInit failed; built-in CIA assets are unavailable.\n");
 
@@ -163,11 +196,16 @@ int main(int argc, char **argv) {
   mkdir(paths::GetCoverCacheDir().c_str(), 0777);
 
   // Run the app, which takes over the main loop until exit.
+  boot_trace::Boot("before app initialization");
   App *app = new App();
+  boot_trace::Boot(app ? "after app initialization" : "after app initialization failed");
   App::SetInstance(
       app); // Set the global instance pointer for access in other modules.
+  boot_trace::Boot("before entering main loop");
   int result = app->Run();
+  boot_trace::Boot("after main loop");
 
+  boot_trace::Boot("before shutdown");
   DBG_LOGF(app, "SHUTDOWN begin env=%s result=%d",
            app->IsHomebrewEnvironment() ? "3dsx/homebrew" : "cia/title",
            result);
@@ -179,11 +217,14 @@ int main(int argc, char **argv) {
   delete app;
   app = nullptr;
   ShutdownTrace("SHUTDOWN App destructor done");
+  boot_trace::Boot("after app shutdown");
 
   if (romfs_ready) {
+    boot_trace::Boot("before romfsExit");
     ShutdownTrace("SHUTDOWN romfsExit begin");
     romfsExit();
     ShutdownTrace("SHUTDOWN romfsExit done");
+    boot_trace::Boot("after romfsExit");
   }
 
   // If Run() returned early (error), wait for user
@@ -200,10 +241,20 @@ int main(int argc, char **argv) {
     }
   }
 
+  if (g_early_apt_hook_installed) {
+    boot_trace::Boot("before early aptUnhook");
+    aptUnhook(&g_early_apt_hook_cookie);
+    g_early_apt_hook_installed = false;
+    boot_trace::Boot("after early aptUnhook");
+  }
+
   ShutdownTrace("SHUTDOWN gfxExit begin");
+  boot_trace::Boot("before gfxExit");
   gfxExit(); // Cleanly exit the graphics system and return to the 3DS home
              // menu.
   ShutdownTrace("SHUTDOWN gfxExit done");
+  boot_trace::Boot("after gfxExit");
   ShutdownTrace("SHUTDOWN returning normally");
+  boot_trace::Boot("returning normally");
   return 0;
 }
