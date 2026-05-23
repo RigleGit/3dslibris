@@ -46,7 +46,7 @@ static bool ReadPtmApproxPercent(u8 *out_percent)
 
   switch (level)
   {
-  case 0: *out_percent = 0; break;
+  case 0: *out_percent = 1; break;
   case 1: *out_percent = 3; break;
   case 2: *out_percent = 8; break;
   case 3: *out_percent = 20; break;
