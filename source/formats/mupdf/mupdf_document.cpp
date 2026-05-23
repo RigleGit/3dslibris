@@ -14,6 +14,7 @@
 #include "shared/debug_log.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <string.h>
 
 // Scan the app font directory once for a CJK-compatible font and cache the
@@ -128,6 +129,7 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
 
   // Step 1: open the document.
   fz_var(doc);
+  errno = 0;
   fz_try(ctx) {
     fz_register_document_handlers(ctx);
     doc = fz_open_document(ctx, path);
@@ -138,8 +140,16 @@ uint8_t ParseMuPdfFile(Book *book, const char *path) {
   }
   fz_catch(ctx) {
     IStatusReporter *reporter = book->GetStatusReporter();
+#ifdef DSLIBRIS_DEBUG
+    int open_errno = errno;
+#endif
+    const char *mupdf_msg = fz_caught_message(ctx);
     if (reporter)
-      reporter->PrintStatus(fz_caught_message(ctx));
+      reporter->PrintStatus(mupdf_msg);
+    DBG_LOGF(reporter,
+             "MUPDF open failed path=%s errno=%d strerror=%s msg=%s", path,
+             open_errno, open_errno ? strerror(open_errno) : "none",
+             mupdf_msg ? mupdf_msg : "(null)");
     if (rc == 0)
       rc = BOOK_ERR_CORRUPT;
   }
@@ -221,6 +231,7 @@ uint8_t IndexMuPdfMetadata(Book *book, const char *path) {
   fz_set_aa_level(ctx, kMuPdfAaLevel);
 
   fz_var(doc);
+  errno = 0;
   fz_try(ctx) {
     fz_register_document_handlers(ctx);
     doc = fz_open_document(ctx, path);
@@ -233,6 +244,13 @@ uint8_t IndexMuPdfMetadata(Book *book, const char *path) {
     }
   }
   fz_catch(ctx) {
+#ifdef DSLIBRIS_DEBUG
+    int open_errno = errno;
+    DBG_LOGF(book->GetStatusReporter(),
+             "MUPDF metadata open failed path=%s errno=%d strerror=%s msg=%s",
+             path, open_errno, open_errno ? strerror(open_errno) : "none",
+             fz_caught_message(ctx));
+#endif
     if (rc == 0)
       rc = BOOK_ERR_CORRUPT;
   }

@@ -20,4 +20,8 @@ bool ReadPathToStringLimited(const char *path, std::string *out,
 bool ReadPathToStringLimited(const std::string &path, std::string *out,
                              size_t max_bytes);
 
+int LastErrorNumber();
+const char *LastErrorOperation();
+const char *LastErrorPath();
+
 } // namespace file_read_utils

@@ -1,5 +1,7 @@
 #include "formats/common/file_read_utils.h"
 
+#include <errno.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <vector>
 
@@ -9,6 +11,22 @@ namespace {
 struct FileReadContext {
   FILE *fp;
 };
+
+static int g_last_error_number = 0;
+static char g_last_error_operation[16] = "";
+static char g_last_error_path[256] = "";
+
+void SetLastError(const char *operation, const char *path, int err) {
+  g_last_error_number = err;
+  snprintf(g_last_error_operation, sizeof(g_last_error_operation), "%s",
+           operation ? operation : "");
+  snprintf(g_last_error_path, sizeof(g_last_error_path), "%s",
+           path ? path : "");
+}
+
+void ClearLastError() {
+  SetLastError("", "", 0);
+}
 
 // Prefer an exact-size read when stat() is trustworthy so large books do not
 // depend on short-read behavior from the underlying SD/filesystem driver.
@@ -22,6 +40,8 @@ bool ReadExactSize(FILE *fp, std::string *out, size_t expected) {
     size_t n = fread(&(*out)[total], 1, expected - total, fp);
     if (n == 0) {
       out->clear();
+      if (ferror(fp))
+        SetLastError("fread", "", errno);
       return false;
     }
     total += n;
@@ -29,6 +49,7 @@ bool ReadExactSize(FILE *fp, std::string *out, size_t expected) {
 
   if (ferror(fp)) {
     out->clear();
+    SetLastError("fread", "", errno);
     return false;
   }
   return true;
@@ -86,8 +107,11 @@ bool ReadFileToStringLimited(FILE *fp, std::string *out, size_t max_bytes) {
     return false;
 
   FileReadContext ctx = {fp};
-  return ReadAllToString(&ReadFileChunk, &IsFileEof, &HasFileError, &ctx, out,
-                         max_bytes, 4096);
+  bool ok = ReadAllToString(&ReadFileChunk, &IsFileEof, &HasFileError, &ctx,
+                            out, max_bytes, 4096);
+  if (!ok && ferror(fp))
+    SetLastError("fread", "", errno);
+  return ok;
 }
 
 bool ReadPathToStringLimited(const char *path, std::string *out,
@@ -95,9 +119,12 @@ bool ReadPathToStringLimited(const char *path, std::string *out,
   if (!path || !out)
     return false;
 
+  ClearLastError();
   FILE *fp = fopen(path, "rb");
-  if (!fp)
+  if (!fp) {
+    SetLastError("fopen", path, errno);
     return false;
+  }
 
   bool ok = false;
   struct stat st;
@@ -124,6 +151,18 @@ bool ReadPathToStringLimited(const std::string &path, std::string *out,
   if (path.empty())
     return false;
   return ReadPathToStringLimited(path.c_str(), out, max_bytes);
+}
+
+int LastErrorNumber() {
+  return g_last_error_number;
+}
+
+const char *LastErrorOperation() {
+  return g_last_error_operation;
+}
+
+const char *LastErrorPath() {
+  return g_last_error_path;
 }
 
 } // namespace file_read_utils
