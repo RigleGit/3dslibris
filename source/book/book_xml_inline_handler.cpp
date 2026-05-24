@@ -191,7 +191,8 @@ void HandleCssInlineStylingStart(
     const bool is_heading_el =
         (el[0] == 'h' && el[1] >= '1' && el[1] <= '6' && !el[2]);
     u8 new_font_px = 0;
-    if (!is_heading_el) {
+    if (!is_heading_el &&
+        book_xml_parser_style_utils::ShouldApplyPublisherFontSizeToElement(el)) {
       book_xml_css_style_utils::FontSizeSpec spec;
       bool has_spec = false;
       // Always honor publisher CSS font-size. Absolute px values are scaled

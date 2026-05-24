@@ -349,6 +349,12 @@ inline int DefaultHeadingFontSize(int base_px, int heading_level) {
   return (int)floor((double)base_px * multiplier + 0.5);
 }
 
+inline bool ShouldApplyPublisherFontSizeToElement(const char *el) {
+  if (!el || !el[0])
+    return false;
+  return strcmp(el, "body") != 0 && strcmp(el, "html") != 0;
+}
+
 inline int ComputeHeadingFontSize(
     int base_px, int heading_level, const std::string &style_attr,
     const std::string &class_attr,

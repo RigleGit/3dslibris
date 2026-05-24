@@ -362,6 +362,21 @@ void TestClampInlineFontSizeKeepsNestedSmallReadable() {
                  20);
 }
 
+void TestPublisherFontSizeSkipsRootElements() {
+  test::ExpectFalse("body font-size establishes baseline only",
+                    book_xml_parser_style_utils::
+                        ShouldApplyPublisherFontSizeToElement("body"));
+  test::ExpectFalse("html font-size establishes baseline only",
+                    book_xml_parser_style_utils::
+                        ShouldApplyPublisherFontSizeToElement("html"));
+  test::ExpectTrue("paragraph font-size still applies",
+                   book_xml_parser_style_utils::
+                       ShouldApplyPublisherFontSizeToElement("p"));
+  test::ExpectTrue("classed div font-size still applies",
+                   book_xml_parser_style_utils::
+                       ShouldApplyPublisherFontSizeToElement("div"));
+}
+
 } // namespace
 
 int main() {
@@ -380,5 +395,6 @@ int main() {
   TestComputeHeadingFontSizeSupportsRelativeCssUnits();
   TestComputeHeadingFontSizeForContextUsesDocBase();
   TestClampInlineFontSizeKeepsNestedSmallReadable();
+  TestPublisherFontSizeSkipsRootElements();
   return 0;
 }
