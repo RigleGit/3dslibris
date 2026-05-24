@@ -529,7 +529,6 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     return false;
 
   const FlowEmissionFns fns = MakeLocalFlowEmissionFns();
-
   if (!strcmp(el, "br")) {
     book_xml_flow_emission::FlushInlineTailAndDeferredStyle(p, ts, fns);
     book_xml_screen_advance::FlushPendingBlockSpacingBeforeContent(p, "br");

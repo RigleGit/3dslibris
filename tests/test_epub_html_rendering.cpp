@@ -128,11 +128,44 @@ void TestTableImgSuppressed() {
   ExpectFalse("table-img: no '[' in residual buf", BufContains(p.buf, p.buflen, '['));
 }
 
+void TestHiddenElementsDoNotEmitLayoutTokens() {
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
+
+  const std::string html =
+      "<html><body>"
+      "<div style=\"display:block\">"
+      "<h1 class=\"visually-hidden\">QZX</h1>"
+      "<p style=\"display:none\">QZX</p>"
+      "<div style=\"position:absolute;width:1px;height:1px;"
+      "clip-path:inset(100%);overflow:hidden\">QZX</div>"
+      "</div>"
+      "<p>Visible description</p>"
+      "</body></html>";
+  xml_parse_utils::XmlParseResult r = xml_parse_utils::ParseXmlString(html, opts);
+  ExpectTrue("hidden-elements: parse ok", r.ok);
+  ExpectTrue("hidden-elements: page produced", book.GetPageCount() > 0);
+
+  const u32 *buf = book.GetPage(0)->GetBuffer();
+  const int len = book.GetPage(0)->GetLength();
+  ExpectFalse("hidden-elements: no hidden Q emitted", BufContains(buf, len, 'Q'));
+  ExpectFalse("hidden-elements: no hidden Z emitted", BufContains(buf, len, 'Z'));
+  ExpectFalse("hidden-elements: no hidden X emitted", BufContains(buf, len, 'X'));
+  ExpectFalse("hidden-elements: no heading bold emitted",
+              BufContains(buf, len, TEXT_BOLD_ON));
+  ExpectFalse("hidden-elements: no heading font-size emitted",
+              BufContains(buf, len, TEXT_FONT_SIZE));
+  ExpectTrue("hidden-elements: visible text remains", BufContains(buf, len, 'V'));
+}
+
 } // namespace
 
 int main() {
   TestRubyAnnotationEmitsBrackets();
   TestTableImgSuppressed();
+  TestHiddenElementsDoNotEmitLayoutTokens();
   printf("PASS: %d tests\n", g_pass);
   return 0;
 }

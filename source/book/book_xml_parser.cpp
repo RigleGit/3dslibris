@@ -226,6 +226,75 @@ static InlineHandlerFns MakeInlineHandlerFns() {
   return f;
 }
 
+static bool ElementIsHidden(const char **attr,
+                            const epub_css_class_map::CssClassMargins &elem_css) {
+  bool hidden = false;
+  book_xml_css_resolver::ParseElementHiddenFlags(attr, &hidden);
+  return hidden || elem_css.is_display_none;
+}
+
+static bool IsParserStructuralElement(const char *el) {
+  return el && (!strcmp(el, "html") || !strcmp(el, "body") ||
+                !strcmp(el, "head") || !strcmp(el, "title") ||
+                !strcmp(el, "script") || !strcmp(el, "style"));
+}
+
+static context_t HiddenContextForElement(const char *el) {
+  if (!el)
+    return TAG_UNKNOWN;
+  if (!strcmp(el, "h1"))
+    return TAG_H1;
+  if (!strcmp(el, "h2"))
+    return TAG_H2;
+  if (!strcmp(el, "h3"))
+    return TAG_H3;
+  if (!strcmp(el, "h4"))
+    return TAG_H4;
+  if (!strcmp(el, "h5"))
+    return TAG_H5;
+  if (!strcmp(el, "h6"))
+    return TAG_H6;
+  if (!strcmp(el, "p"))
+    return TAG_P;
+  if (!strcmp(el, "div"))
+    return TAG_DIV;
+  if (!strcmp(el, "aside"))
+    return TAG_ASIDE;
+  if (!strcmp(el, "blockquote"))
+    return TAG_BLOCKQUOTE;
+  if (!strcmp(el, "figure"))
+    return TAG_FIGURE;
+  if (!strcmp(el, "ol"))
+    return TAG_OL;
+  if (!strcmp(el, "ul"))
+    return TAG_UL;
+  if (!strcmp(el, "li"))
+    return TAG_LI;
+  if (!strcmp(el, "pre"))
+    return TAG_PRE;
+  if (!strcmp(el, "a"))
+    return TAG_ANCHOR;
+  if (!strcmp(el, "br"))
+    return TAG_BR;
+  if (!strcmp(el, "table"))
+    return TAG_TABLE;
+  if (!strcmp(el, "tr"))
+    return TAG_TR;
+  if (!strcmp(el, "td"))
+    return TAG_TD;
+  if (!strcmp(el, "th"))
+    return TAG_TH;
+  return TAG_UNKNOWN;
+}
+
+static bool PushHiddenElement(parsedata_t *p, const char *el) {
+  if (!p || !el || IsParserStructuralElement(el))
+    return false;
+  parse_push(p, HiddenContextForElement(el));
+  SetCurrentStackHidden(p, true);
+  return true;
+}
+
 void start(void *data, const char *el, const char **attr) {
   //! Expat callback, when starting an element.
 
@@ -254,9 +323,6 @@ void start(void *data, const char *el, const char **attr) {
     }
   }
 
-  if (HandleTableStart(p, ts, el, attr, MakeTableHandlerFns()))
-    return;
-
   // One-shot CSS class resolution for this element — avoids 18+ separate
   // map lookups by resolving all CSS properties in a single pass.
   const char *el_class_raw = nullptr;
@@ -272,6 +338,14 @@ void start(void *data, const char *el, const char **attr) {
   epub_css_class_map::MergeClassRulesToStyle(
       el_class_raw ? std::string(el_class_raw) : std::string(),
       p->css_class_map, &elem_css);
+
+  if (HasActiveStackHiddenStyle(p) || ElementIsHidden(attr, elem_css)) {
+    if (PushHiddenElement(p, el))
+      return;
+  }
+
+  if (HandleTableStart(p, ts, el, attr, MakeTableHandlerFns()))
+    return;
 
   if (BehavesAsBlock(el, elem_css)) {
     if (ParseElementClear(attr, elem_css) !=
@@ -392,9 +466,6 @@ void end(void *data, const char *el) {
 
   book_xml_fb2_handler::HandleFb2TitleSectionEnd(p, el);
 
-  if (HandleTableEnd(p, ts, el, MakeTableHandlerFns()))
-    return;
-
   if (!strcmp(el, "body")) {
     FlushInlineTailAndDeferredStyle(p, ts);
     // Save off our last page.
@@ -407,6 +478,16 @@ void end(void *data, const char *el) {
     parse_pop(p);
     return;
   }
+
+  const bool current_element_hidden =
+      p->stacksize > 0 && p->style_hidden_stack[p->stacksize - 1];
+  if (current_element_hidden) {
+    parse_pop(p);
+    return;
+  }
+
+  if (HandleTableEnd(p, ts, el, MakeTableHandlerFns()))
+    return;
 
   if (!strcmp(el, "a")) {
     HandleAnchorEnd(p, MakeAnchorHandlerFns());

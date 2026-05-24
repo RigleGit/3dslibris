@@ -99,6 +99,21 @@ void TestParseInlineHiddenFlags() {
   book_xml_css_resolver::ParseInlineHiddenFlags(
       "width:1px;height:1px;position:absolute;overflow:hidden", &h);
   test::ExpectTrue("1x1 offscreen hidden", h);
+
+  h = false;
+  book_xml_css_resolver::ParseInlineHiddenFlags(
+      "position: absolute; width: 1 px; height: 1 px; margin: -1 px; "
+      "border: 0; padding: 0; white-space: nowrap; "
+      "clip-path: inset(100%); clip: rect(0 0 0 0); overflow: hidden",
+      &h);
+  test::ExpectTrue("gist visually hidden pattern", h);
+
+  h = false;
+  book_xml_css_resolver::ParseInlineHiddenFlags(
+      "position:absolute!important;width:1px;height:1px;"
+      "clip:rect(1px,1px,1px,1px);overflow:hidden",
+      &h);
+  test::ExpectTrue("1px clip rect hidden", h);
 }
 
 void TestParseClassHiddenFlags() {
