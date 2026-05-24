@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <dirent.h>
+#include <errno.h>
 #include <set>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -369,6 +370,111 @@ static void ClearBrowserBooksAndButtons(App *app) {
   app->SetBrowserPageStart(0);
 }
 
+static int AppendBooksFromNativeDirectory(App *app,
+                                          LibraryGradientContext *gradient_ctx,
+                                          const std::string &dir,
+                                          std::set<std::string> *seen_keys) {
+  if (!app)
+    return 1;
+#ifdef DSLIBRIS_DEBUG
+  const int count_before = app->BookCount();
+  DBG_LOGF(app, "BROWSER folder native scan begin dir=%s", dir.c_str());
+#endif
+  FS_Archive sdmc_archive;
+  Result rc = FSUSER_OpenArchive(&sdmc_archive, ARCHIVE_SDMC,
+                                 fsMakePath(PATH_EMPTY, ""));
+  if (R_FAILED(rc)) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(app, "BROWSER folder native scan open-archive failed rc=0x%08lx dir=%s",
+             (unsigned long)rc, dir.c_str());
+#endif
+    return 1;
+  }
+
+  std::string rel_path = SdmcToArchiveRelPath(dir);
+  Handle dir_handle = 0;
+  rc = FSUSER_OpenDirectory(&dir_handle, sdmc_archive,
+                            fsMakePath(PATH_ASCII, rel_path.c_str()));
+  if (R_FAILED(rc)) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(app, "BROWSER folder native scan open-dir failed rc=0x%08lx rel=%s dir=%s",
+             (unsigned long)rc, rel_path.c_str(), dir.c_str());
+#endif
+    FSUSER_CloseArchive(sdmc_archive);
+    return 1;
+  }
+
+  while (true) {
+    FS_DirectoryEntry entries[16];
+    u32 read_count = 0;
+    rc = FSDIR_Read(dir_handle, &read_count, 16, entries);
+    if (R_FAILED(rc) || read_count == 0)
+      break;
+
+    for (u32 i = 0; i < read_count; i++) {
+      if (entries[i].attributes & FS_ATTRIBUTE_DIRECTORY)
+        continue;
+      std::string filename;
+      if (!Utf16NameToUtf8(entries[i].name, &filename))
+        continue;
+      if (filename.empty())
+        continue;
+#ifdef DSLIBRIS_DEBUG
+      DBG_LOGF(app, "BROWSER folder native entry file=%s", filename.c_str());
+#endif
+      AppendBookFromFilename(app, gradient_ctx, dir, filename.c_str(),
+                             seen_keys);
+    }
+  }
+
+  FSDIR_Close(dir_handle);
+  FSUSER_CloseArchive(sdmc_archive);
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(app, "BROWSER folder native scan end rc=0x%08lx added=%d total=%d dir=%s",
+           (unsigned long)rc, app->BookCount() - count_before,
+           app->BookCount(), dir.c_str());
+#endif
+  return R_FAILED(rc) ? 1 : 0;
+}
+
+static int AppendBooksFromPosixDirectory(App *app,
+                                         LibraryGradientContext *gradient_ctx,
+                                         const std::string &dir,
+                                         std::set<std::string> *seen_keys) {
+  if (!app)
+    return 1;
+#ifdef DSLIBRIS_DEBUG
+  const int count_before = app->BookCount();
+  DBG_LOGF(app, "BROWSER folder posix scan begin dir=%s", dir.c_str());
+#endif
+  DIR *dp = opendir(dir.c_str());
+  if (!dp) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(app, "BROWSER folder posix scan opendir failed errno=%d dir=%s",
+             errno, dir.c_str());
+#endif
+    return 1;
+  }
+  struct dirent *ent;
+  while ((ent = readdir(dp))) {
+    if (ent->d_name[0] == '.')
+      continue;
+    std::string child = dir + "/" + ent->d_name;
+    if (PathIsDirectory(child))
+      continue;
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(app, "BROWSER folder posix entry file=%s", ent->d_name);
+#endif
+    AppendBookFromFilename(app, gradient_ctx, dir, ent->d_name, seen_keys);
+  }
+  closedir(dp);
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(app, "BROWSER folder posix scan end added=%d total=%d dir=%s",
+           app->BookCount() - count_before, app->BookCount(), dir.c_str());
+#endif
+  return 0;
+}
+
 } // namespace
 
 LibraryController::LibraryController(App &app)
@@ -479,6 +585,7 @@ void LibraryController::PrepareLibrary() {
 
 void LibraryController::RebuildRoot() {
   PauseBrowserJobs();
+  ResetBrowserMarquee();
   ClearBrowserBooksAndButtons(&app_);
   inside_folder_ = false;
   current_folder_name_.clear();
@@ -494,39 +601,60 @@ void LibraryController::RebuildRoot() {
 void LibraryController::EnterFolder(Book *folder) {
   if (!folder || !folder->IsBrowserFolder())
     return;
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(&app_, "BROWSER enter folder name=%s path=%s",
+           folder->GetBrowserFolderDisplayName().c_str(),
+           folder->GetBrowserFolderPath().c_str());
+#endif
   LoadFolderPath(folder->GetBrowserFolderPath(),
                  folder->GetBrowserFolderDisplayName());
 }
 
 void LibraryController::LoadFolderPath(const std::string &folder_path,
                                        const std::string &folder_name) {
-  if (folder_path.empty() || !PathIsDirectory(folder_path))
+  const std::string path_copy = folder_path;
+  const std::string name_copy = folder_name;
+
+  if (path_copy.empty() || !PathIsDirectory(path_copy)) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(&app_, "BROWSER load folder rejected name=%s path=%s empty=%u isdir=%u",
+             name_copy.c_str(), path_copy.c_str(),
+             path_copy.empty() ? 1u : 0u,
+             (!path_copy.empty() && PathIsDirectory(path_copy)) ? 1u : 0u);
+#endif
     return;
+  }
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(&app_, "BROWSER load folder begin name=%s path=%s",
+           name_copy.c_str(), path_copy.c_str());
+#endif
   PauseBrowserJobs();
+  ResetBrowserMarquee();
   ClearBrowserBooksAndButtons(&app_);
   inside_folder_ = true;
-  current_folder_path_ = folder_path;
-  current_folder_name_ = folder_name;
+  current_folder_path_ = path_copy;
+  current_folder_name_ = name_copy;
 
   std::set<std::string> seen_keys;
-  DIR *dp = opendir(folder_path.c_str());
-  if (dp) {
-    struct dirent *ent;
-    while ((ent = readdir(dp))) {
-      if (ent->d_name[0] == '.')
-        continue;
-      std::string child = folder_path + "/" + ent->d_name;
-      if (PathIsDirectory(child))
-        continue;
-      AppendBookFromFilename(&app_, &gradient_ctx_, folder_path, ent->d_name, &seen_keys);
-    }
-    closedir(dp);
-  }
+  bool scanned = false;
+  if (path_copy.find("sdmc:/") == 0)
+    scanned = (AppendBooksFromNativeDirectory(&app_, &gradient_ctx_,
+                                              path_copy, &seen_keys) == 0);
+  if (!scanned)
+    AppendBooksFromPosixDirectory(&app_, &gradient_ctx_, path_copy,
+                                  &seen_keys);
   PrepareLibrary();
   browser_init();
   ResetBrowserMarquee();
   app_.ts->MarkAllScreensDirty();
   app_.SetBrowserDirty(true);
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(&app_, "BROWSER load folder end name=%s path=%s count=%d selected=%s scanned_native=%u",
+           name_copy.c_str(), path_copy.c_str(), app_.BookCount(),
+           app_.GetSelectedBook() ? app_.GetSelectedBook()->GetFileName()
+                                  : "(null)",
+           scanned ? 1u : 0u);
+#endif
 }
 
 Book *LibraryController::RestoreSavedBookSelection(const char *folder,
@@ -594,8 +722,22 @@ void LibraryController::LeaveFolder() {
 
 void LibraryController::OpenSelectedBrowserEntry() {
   Book *selected = app_.GetSelectedBook();
-  if (!selected)
+  if (!selected) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOG(&app_, "BROWSER open selected ignored: no selection");
+#endif
     return;
+  }
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(&app_, "BROWSER open selected folder=%u title=%s file=%s path=%s",
+           selected->IsBrowserFolder() ? 1u : 0u,
+           selected->GetTitle() ? selected->GetTitle() : "(null)",
+           selected->GetFileName() ? selected->GetFileName() : "(null)",
+           selected->IsBrowserFolder()
+               ? selected->GetBrowserFolderPath().c_str()
+               : (selected->GetFolderName() ? selected->GetFolderName()
+                                            : "(null)"));
+#endif
   if (selected->IsBrowserFolder()) {
     EnterFolder(selected);
     return;
