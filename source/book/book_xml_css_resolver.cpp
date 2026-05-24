@@ -220,8 +220,14 @@ int ParseCssLengthPx(const char *v, int text_width, int font_px) {
 
 int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
                     int font_px) {
+  return ParseImgWidthPx(width_attr, style, text_width, font_px, font_px);
+}
+
+int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
+                    int font_px, int root_font_px) {
+  const int image_font_px = root_font_px > 0 ? root_font_px : font_px;
   if (width_attr && *width_attr) {
-    int px = ParseCssLengthPx(width_attr, text_width, font_px);
+    int px = ParseCssLengthPx(width_attr, text_width, image_font_px);
     if (px > 0)
       return px;
   }
@@ -232,7 +238,7 @@ int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
       pos += 6;
       while (pos < lc.size() && lc[pos] == ' ')
         pos++;
-      int px = ParseCssLengthPx(lc.c_str() + pos, text_width, font_px);
+      int px = ParseCssLengthPx(lc.c_str() + pos, text_width, image_font_px);
       if (px > 0)
         return px;
     }

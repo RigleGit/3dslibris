@@ -212,9 +212,13 @@ void HandleInlineImageStart(parsedata_t *p, Text *ts, const char **attr,
   if (!resolved.empty() && p->book) {
     u16 image_id = p->book->RegisterInlineImage(resolved);
     const int text_w = ts->display.width - ts->margin.left - ts->margin.right;
+    const int root_font_px =
+        (p->base_font_size_px != 0) ? (int)p->base_font_size_px
+                                    : ts->GetPixelSize();
     const int author_max_w =
         book_xml_css_resolver::ParseImgWidthPx(img_width_attr, img_style,
-                                               text_w, ts->GetHeight());
+                                               text_w, ts->GetHeight(),
+                                               root_font_px);
     if (author_max_w > 0)
       p->book->SetInlineImageAuthorMaxWidth(image_id, author_max_w);
     InlineImageLayoutPlan image_plan{};

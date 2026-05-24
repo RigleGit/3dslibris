@@ -67,6 +67,17 @@ void TestParseImgWidthPx() {
                  book_xml_css_resolver::ParseImgWidthPx(nullptr, nullptr, 240, 14), 0);
 }
 
+void TestParseImgWidthPxUsesRootFontForRelativeUnits() {
+  test::ExpectEq("image em width uses root font",
+                 book_xml_css_resolver::ParseImgWidthPx("10em", nullptr, 240,
+                                                        28, 14),
+                 140);
+  test::ExpectEq("image rem width uses root font",
+                 book_xml_css_resolver::ParseImgWidthPx(nullptr, "width: 8rem",
+                                                        240, 28, 14),
+                 112);
+}
+
 void TestParseInlineHiddenFlags() {
   bool h = false;
   book_xml_css_resolver::ParseInlineHiddenFlags("display:none", &h);
@@ -266,6 +277,7 @@ int main() {
   TestParseCssLengthPxUnits();
   TestParseCssLengthPxFractional();
   TestParseImgWidthPx();
+  TestParseImgWidthPxUsesRootFontForRelativeUnits();
   TestParseInlineHiddenFlags();
   TestParseClassHiddenFlags();
   TestParseElementHiddenFlags();
