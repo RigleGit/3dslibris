@@ -197,10 +197,13 @@ void App::ShowChaptersView()
 #endif
   DBG_LOG(this, "INDEX show init menu begin");
   chaptermenu->Init();
+  chaptermenu->SelectChapterForPage((u16)book->GetPosition());
   chaptermenu->DisableInitialReleaseWait();
   DBG_LOG(this, "INDEX show init menu end");
-  DBG_LOGF(this, "INDEX open chapters=%u page_count=%u",
-           (unsigned)book->GetChapters().size(), (unsigned)book->GetPageCount());
+  DBG_LOGF(this,
+           "INDEX open chapters=%u page_count=%u reader_page=%u menu_page=%u",
+           (unsigned)book->GetChapters().size(), (unsigned)book->GetPageCount(),
+           (unsigned)book->GetPosition(), (unsigned)chaptermenu->GetCurrentPage());
 }
 
 void App::ShowCurrentBookView()

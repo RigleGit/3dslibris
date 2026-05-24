@@ -18,8 +18,9 @@
 
 #include "app/app.h"
 #include "book/book.h"
-#include "shared/debug_log.h"
 #include "book/page.h"
+#include "menus/chapter_menu_utils.h"
+#include "shared/debug_log.h"
 #include "shared/string_utils.h"
 #include "shared/text_unicode_utils.h"
 #include "ui/text.h"
@@ -500,6 +501,11 @@ static bool FindApproxTitlePage(Book *book, const std::string &title,
 ChapterMenu::ChapterMenu(App *_app) : PagedListMenu(_app, "index") {}
 
 ChapterMenu::~ChapterMenu() {}
+
+void ChapterMenu::SelectChapterForPage(u16 current_page) {
+  SelectItem((u16)chapter_menu_utils::FindChapterIndexForPage(entry_pages,
+                                                              current_page));
+}
 
 void ChapterMenu::BuildEntries(Book *book, Text *text,
                                std::vector<std::string> &labels,
