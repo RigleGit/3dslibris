@@ -175,6 +175,18 @@ void TestVisualLineWidthMultipleWordBoundaries() {
                  5);
 }
 
+void TestBandImageAlignUsesExplicitModeFirst() {
+  test::ExpectEq("explicit right align kept",
+                 page_alignment_utils::ResolveBandImageAlignMode(2, 0), 2);
+  test::ExpectEq("explicit left align kept",
+                 page_alignment_utils::ResolveBandImageAlignMode(1, 2), 1);
+}
+
+void TestBandImageAlignUsesParagraphRight() {
+  test::ExpectEq("paragraph right aligns band image",
+                 page_alignment_utils::ResolveBandImageAlignMode(0, 2), 2);
+}
+
 } // namespace
 
 int main() {
@@ -191,5 +203,7 @@ int main() {
   TestVisualLineWidthTracksStyleChanges();
   TestVisualLineWidthSkipsControlTokens();
   TestVisualLineWidthMultipleWordBoundaries();
+  TestBandImageAlignUsesExplicitModeFirst();
+  TestBandImageAlignUsesParagraphRight();
   return 0;
 }

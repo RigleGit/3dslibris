@@ -613,9 +613,14 @@ void Page::Draw(Text *ts) {
 
         const int image_pen_x = (int)ts->GetPenX();
         const int image_line_top = (int)ts->GetPenY() - ts->GetHeight();
+        const u8 draw_image_align =
+            image_plan.mode == INLINE_IMAGE_LAYOUT_BAND
+                ? page_alignment_utils::ResolveBandImageAlignMode(
+                      next_image_align, (int)paragraph_align)
+                : next_image_align;
         const bool image_drawn =
             book->DrawInlineImage(ts, image_id, &image_plan, current_screen,
-                                  next_image_align);
+                                  draw_image_align);
         if (image_drawn && link_active && active_link_render_index >= 0 &&
             active_link_render_index < (int)rendered_inline_links_.size()) {
           InlineLinkRenderEntry &entry =

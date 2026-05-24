@@ -118,6 +118,19 @@ int main() {
   }
 
   {
+    InlineImageLayoutRequest req = BaseRequest();
+    req.image_context = INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH;
+    req.author_max_width_px = 81;
+    req.line_began = false;
+    InlineImageLayoutPlan plan =
+        PlanInlineImageLayout(req, Metadata(1920, 760));
+    ExpectMode("author-sized leading image remains block band", plan,
+               INLINE_IMAGE_LAYOUT_BAND);
+    ExpectEq("author-sized image keeps requested width", plan.draw_width, 81);
+    ExpectEq("author-sized image keeps proportional height", plan.draw_height, 32);
+  }
+
+  {
     InlineImageLayoutPlan plan =
         PlanInlineImageLayout(BaseRequest(), Metadata(573, 438));
     ExpectMode("medium map becomes band", plan,

@@ -17,4 +17,7 @@ int MeasureFirstVisualLineWidth(const uint32_t *buf, size_t length, size_t start
                                 int available_width,
                                 MeasureGlyphFn measure, void *ctx);
 
+uint8_t ResolveBandImageAlignMode(uint8_t explicit_align_mode,
+                                  int paragraph_align);
+
 } // namespace page_alignment_utils
