@@ -38,6 +38,7 @@
 #include "shared/path_constants.h"
 #include "settings/prefs.h"
 #include "settings/prefs_button_context_utils.h"
+#include "settings/prefs_input_utils.h"
 #include "ui/text.h"
 #include "ui/screen_layout_constants.h"
 #include "ui/text_limits.h"
@@ -447,7 +448,8 @@ void SettingsController::PrefsHandleEvent() {
   } else if (book_ctx && (keys & KEY_START)) {
     app_.ShowLibraryView();
     app_.prefs->Write();
-  } else if (keys & (KEY_SELECT | KEY_B | KEY_Y)) {
+  } else if (prefs_input_utils::ShouldReturnFromPrefs(
+                 keys, book_ctx, KEY_B, KEY_SELECT, KEY_Y, KEY_START)) {
     app_.ReturnFromPrefs();
   } else if (keys & (app_.key.left | app_.key.l)) {
     if (app_.GetPrefsSelectedIndex() > 0) {
