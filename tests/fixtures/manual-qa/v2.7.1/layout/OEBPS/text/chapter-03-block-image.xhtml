@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>#128 Wide block image placement</title>
+  <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+</head>
+<body>
+  <h1 id="block-image">#128 Wide block image placement</h1>
+  <p>Expected: with block display enabled, the top screen should not be blank just because this wide image is inside a display:block div.</p>
+  <div style="display: block;">
+    <p class="centerImage"><img alt="wide image" src="../images/wide-photo.png" style="width:100%;"/></p>
+  </div>
+  <p>After the image, normal text should continue without an extra blank screen caused by the wrapper div.</p>
+</body>
+</html>

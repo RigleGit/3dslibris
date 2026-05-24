@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>#84 Nested block margins</title>
+  <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+</head>
+<body>
+  <h1 id="nested-margins">#84 Nested block margins</h1>
+  <p>Expected: each extract block below should have visible spacing above and below it.</p>
+  <div class="extract">
+    <p class="extractSource">First extract paragraph. The paragraph has zero top and bottom margins, but the wrapper div has 4% margins.</p>
+  </div>
+  <div class="extract">
+    <p class="extractSource">Second extract paragraph. There should be visible space before this block.</p>
+  </div>
+  <div class="extract">
+    <p class="extractSource">Third extract paragraph. The parent block spacing should not disappear because the child paragraph margin is zero.</p>
+  </div>
+  <p>After the extracts, normal text should resume with clear separation from the final extract.</p>
+</body>
+</html>

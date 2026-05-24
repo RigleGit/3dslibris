@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Image flow fit diagnostic</title>
+  <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+</head>
+<body>
+  <h1 id="image-flow-fit">Image flow fit diagnostic</h1>
+  <p class="tight-flow-text">This chapter removes paragraph margins around the image rows. It checks whether a small band image causes text to jump early.</p>
+  <div class="tight-flow">
+    <img src="../images/narrow-banner.png" alt="tight reference banner" style="width:10em;"/>
+  </div>
+  <p class="tight-flow-text">This sentence should follow the first image without a large gap. If it has room on this screen, it should stay here.</p>
+  <div class="larger-container">
+    <p class="tight-flow-text">Large label:</p>
+    <div class="tight-flow">
+      <img src="../images/narrow-banner.png" alt="tight scaled-context banner" style="width:10em;"/>
+    </div>
+  </div>
+  <p class="tight-flow-text">This final sentence checks whether normal text after the second image moves to the next screen only when the current screen is actually full.</p>
+</body>
+</html>
