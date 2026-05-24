@@ -661,9 +661,9 @@ void Page::Draw(Text *ts) {
                 text_render_layout_utils::ResolveReadingScreenMetrics(
                     on_first_screen, first_is_left, leftBottomMargin,
                     rightBottomMargin);
-            if (text_render_layout_utils::WouldOverflowReadingScreen(
-                    ts->GetPenY(), ts->GetHeight(), ts->linespacing,
-                    metrics.max_height, metrics.bottom_margin)) {
+            if (text_render_layout_utils::ShouldAdvanceAfterBandImage(
+                    ts->GetPenY(), metrics.max_height,
+                    metrics.bottom_margin)) {
               if (!advance_to_next_screen()) {
                 stop_page_draw = true;
               }
