@@ -238,7 +238,12 @@ void QueueBlockSpacingFromMarginResult(
     return;
   }
   if (mtr.negative || mtr.value == 0) {
-    SuppressPendingBlockSpacingFromCss(p, tag, reason);
+    if (book_xml_parser_style_utils::ShouldZeroMarginSuppressPendingSpacing(
+            reason, p->pending_block_spacing_from_css,
+            p->pending_block_spacing_suppress_only,
+            p->pending_block_spacing_lf)) {
+      SuppressPendingBlockSpacingFromCss(p, tag, reason);
+    }
     return;
   }
   // Snapshot suppress_only before the queue clears it: if the preceding element

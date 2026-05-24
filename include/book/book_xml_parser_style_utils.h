@@ -7,6 +7,7 @@
 #include "ui/text_limits.h"
 
 #include <algorithm>
+#include <string.h>
 #include <math.h>
 
 namespace book_xml_parser_style_utils {
@@ -302,6 +303,20 @@ inline int ResolveBlockBottomLinefeeds(
     return 0;
   const int css_lf = ResolveCssMarginLinefeeds(m, line_h);
   return ClampResolvedBlockLinefeeds(std::max(css_lf, default_lf + 1));
+}
+
+inline bool ShouldZeroMarginSuppressPendingSpacing(
+    const char *reason, bool pending_from_css, bool pending_suppress_only,
+    int pending_spacing_lf) {
+  if (!reason)
+    return true;
+  const size_t len = strlen(reason);
+  const bool is_top_margin =
+      len >= 4 && strcmp(reason + len - 4, "-top") == 0;
+  if (is_top_margin && pending_from_css && !pending_suppress_only &&
+      pending_spacing_lf > 0)
+    return false;
+  return true;
 }
 
 inline int ClampHeadingFontSize(int base_px, int px) {

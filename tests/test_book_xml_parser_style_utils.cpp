@@ -208,6 +208,21 @@ void TestResolveBlockSpacingLinefeedsKeepsSmallExplicitMarginsVisible() {
                  4);
 }
 
+void TestZeroTopMarginDoesNotErasePendingParentCssSpacing() {
+  test::ExpectFalse(
+      "zero child top margin keeps pending parent css spacing",
+      book_xml_parser_style_utils::ShouldZeroMarginSuppressPendingSpacing(
+          "paragraph-top", true, false, 1));
+  test::ExpectTrue(
+      "zero top margin still suppresses non-css default spacing",
+      book_xml_parser_style_utils::ShouldZeroMarginSuppressPendingSpacing(
+          "paragraph-top", false, false, 1));
+  test::ExpectTrue(
+      "zero bottom margin still suppresses previous spacing",
+      book_xml_parser_style_utils::ShouldZeroMarginSuppressPendingSpacing(
+          "paragraph-bottom", true, false, 1));
+}
+
 void TestComputeHeadingFontSizeUsesDefaultMultipliers() {
   epub_css_class_map::CssClassMap classes;
   test::ExpectEq("h1 multiplier",
@@ -359,6 +374,7 @@ int main() {
   TestResolveCssMarginLinefeedsUsesCeilQuantization();
   TestResolveBlockSpacingLinefeedsHonorsDefaultsAndZero();
   TestResolveBlockSpacingLinefeedsKeepsSmallExplicitMarginsVisible();
+  TestZeroTopMarginDoesNotErasePendingParentCssSpacing();
   TestComputeHeadingFontSizeUsesDefaultMultipliers();
   TestComputeHeadingFontSizeUsesCssAndClamps();
   TestComputeHeadingFontSizeSupportsRelativeCssUnits();
