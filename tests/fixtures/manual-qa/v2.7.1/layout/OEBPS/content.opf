@@ -18,6 +18,8 @@
     <item id="ch4" href="text/chapter-04-right-image.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch5" href="text/chapter-05-nested-margins.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch6" href="text/chapter-06-image-flow-fit.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch7" href="text/chapter-07-block-indent-overflow.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch8" href="text/chapter-08-epub-style-settings.xhtml" media-type="application/xhtml+xml"/>
   </manifest>
   <spine toc="ncx">
     <itemref idref="nav"/>
@@ -27,6 +29,8 @@
     <itemref idref="ch4"/>
     <itemref idref="ch5"/>
     <itemref idref="ch6"/>
+    <itemref idref="ch7"/>
+    <itemref idref="ch8"/>
   </spine>
   <guide>
     <reference type="toc" title="Contents" href="nav.xhtml"/>

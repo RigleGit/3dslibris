@@ -14,5 +14,7 @@
     <navPoint id="nav4" playOrder="4"><navLabel><text>#128 Right-aligned author-width image</text></navLabel><content src="text/chapter-04-right-image.xhtml#right-image"/></navPoint>
     <navPoint id="nav5" playOrder="5"><navLabel><text>#84 Nested block margins</text></navLabel><content src="text/chapter-05-nested-margins.xhtml#nested-margins"/></navPoint>
     <navPoint id="nav6" playOrder="6"><navLabel><text>Image flow fit diagnostic</text></navLabel><content src="text/chapter-06-image-flow-fit.xhtml#image-flow-fit"/></navPoint>
+    <navPoint id="nav7" playOrder="7"><navLabel><text>#77 Block indent across pages</text></navLabel><content src="text/chapter-07-block-indent-overflow.xhtml#block-indent-overflow"/></navPoint>
+    <navPoint id="nav8" playOrder="8"><navLabel><text>#108 EPUB style settings</text></navLabel><content src="text/chapter-08-epub-style-settings.xhtml#epub-style-settings"/></navPoint>
   </navMap>
 </ncx>
