@@ -226,6 +226,7 @@ static void TogglePublisherTextIndentSetting(App *app, Book *book, bool is_book_
     app->MarkBookLayoutDirty();
   } else {
     app->publisher_text_indent = !app->publisher_text_indent;
+    app->MarkBookLayoutDirty();
   }
   if (app->prefs)
     app->prefs->Write();
@@ -240,6 +241,7 @@ static void TogglePublisherBlockMarginsSetting(App *app, Book *book, bool is_boo
     app->MarkBookLayoutDirty();
   } else {
     app->publisher_block_margins = !app->publisher_block_margins;
+    app->MarkBookLayoutDirty();
   }
   if (app->prefs)
     app->prefs->Write();
