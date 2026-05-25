@@ -104,6 +104,8 @@ App::App()
   orientation = false; // Turned Left by default.
   paraspacing = 1;
   paraindent = 0;
+  publisher_text_indent = true;
+  publisher_block_margins = true;
   colorMode = 0;
 
   // Default key mappings

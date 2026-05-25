@@ -73,6 +73,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         app->paraspacing = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "indent"))
         app->paraindent = atoi(attr[i + 1]);
+      if (!strcmp(attr[i], "publisherTextIndent"))
+        app->publisher_text_indent = atoi(attr[i + 1]) != 0;
+      if (!strcmp(attr[i], "publisherBlockMargins"))
+        app->publisher_block_margins = atoi(attr[i + 1]) != 0;
     }
   } else if (!strcmp(name, "font")) {
     bool has_fallback_attrs = false;
@@ -128,6 +132,9 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     current = false;
     position = 0;
     bool mobi_line_wrap_fix = false;
+    int style_paragraph_spacing = -1;
+    int style_publisher_text_indent = -1;
+    int style_publisher_block_margins = -1;
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "file"))
         snprintf(filename, sizeof(filename), "%s", attr[i + 1]);
@@ -137,6 +144,12 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         position = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "mobiLineWrapFix"))
         mobi_line_wrap_fix = atoi(attr[i + 1]) != 0;
+      if (!strcmp(attr[i], "paragraphSpacing"))
+        style_paragraph_spacing = atoi(attr[i + 1]);
+      if (!strcmp(attr[i], "publisherTextIndent"))
+        style_publisher_text_indent = atoi(attr[i + 1]) != 0 ? 1 : 0;
+      if (!strcmp(attr[i], "publisherBlockMargins"))
+        style_publisher_block_margins = atoi(attr[i + 1]) != 0 ? 1 : 0;
       if (!strcmp(attr[i], "current")) {
         // Should warn if multiple books are current...
         // the last current book will win.
@@ -167,6 +180,9 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       p->book = matched;
       // Per-book render fixes live alongside progress/bookmarks in prefs.
       matched->SetMobiLineWrapFix(mobi_line_wrap_fix);
+      matched->SetStyleParagraphSpacingOverride(style_paragraph_spacing);
+      matched->SetStylePublisherTextIndentOverride(style_publisher_text_indent);
+      matched->SetStylePublisherBlockMarginsOverride(style_publisher_block_margins);
 
       if (current) {
         // Set this book as current.
@@ -391,8 +407,11 @@ int Prefs::Write() {
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_MONO_BOLDITALIC),
           font_mono_bolditalic.c_str(), fallback1.c_str(), fallback2.c_str(),
           fallback3.c_str(), fallback4.c_str());
-  fprintf(fp, "\t<paragraph indent=\"%d\" spacing=\"%d\" />\n", app->paraindent,
-          app->paraspacing);
+  fprintf(fp,
+          "\t<paragraph indent=\"%d\" spacing=\"%d\" publisherTextIndent=\"%d\" publisherBlockMargins=\"%d\" />\n",
+          app->paraindent, app->paraspacing,
+          app->publisher_text_indent ? 1 : 0,
+          app->publisher_block_margins ? 1 : 0);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);
 
   // Persist all known books so last page and bookmarks survive restarts.
@@ -408,6 +427,15 @@ int Prefs::Write() {
     // Only persist the override when enabled so old prefs stay readable.
     if (book->GetMobiLineWrapFix())
       fprintf(fp, " mobiLineWrapFix=\"1\"");
+    if (book->GetStyleParagraphSpacingOverride() >= 0)
+      fprintf(fp, " paragraphSpacing=\"%d\"",
+              book->GetStyleParagraphSpacingOverride());
+    if (book->GetStylePublisherTextIndentOverride() >= 0)
+      fprintf(fp, " publisherTextIndent=\"%d\"",
+              book->GetStylePublisherTextIndentOverride());
+    if (book->GetStylePublisherBlockMarginsOverride() >= 0)
+      fprintf(fp, " publisherBlockMargins=\"%d\"",
+              book->GetStylePublisherBlockMarginsOverride());
     if (app->GetCurrentBook() == app->books[i])
       fprintf(fp, " current=\"1\"");
     fprintf(fp, ">\n");

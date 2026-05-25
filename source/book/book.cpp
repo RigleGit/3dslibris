@@ -85,6 +85,9 @@ Book::Book(const BookContext &c) : ctx(c) {
   mobi_page_cache_save_pending = false;
   mobi_line_wrap_fix = false;
   parsed_with_mobi_line_wrap_fix = false;
+  style_paragraph_spacing_override = -1;
+  style_publisher_text_indent_override = -1;
+  style_publisher_block_margins_override = -1;
   browser_display_name_cached = false;
   browser_folder_entry = false;
   inline_image_zip_index_built = false;
@@ -131,11 +134,49 @@ Prefs *Book::GetPrefs() {
 }
 
 int Book::GetParagraphSpacing() {
+  if (style_paragraph_spacing_override >= 0)
+    return style_paragraph_spacing_override;
   return ctx.paragraph_spacing ? *ctx.paragraph_spacing : 0;
 }
 
 int Book::GetParagraphIndent() {
   return ctx.paragraph_indent ? *ctx.paragraph_indent : 0;
+}
+
+bool Book::GetPublisherTextIndentEnabled() const {
+  if (style_publisher_text_indent_override >= 0)
+    return style_publisher_text_indent_override != 0;
+  return ctx.publisher_text_indent ? *ctx.publisher_text_indent : true;
+}
+
+bool Book::GetPublisherBlockMarginsEnabled() const {
+  if (style_publisher_block_margins_override >= 0)
+    return style_publisher_block_margins_override != 0;
+  return ctx.publisher_block_margins ? *ctx.publisher_block_margins : true;
+}
+
+int Book::GetStyleParagraphSpacingOverride() const {
+  return style_paragraph_spacing_override;
+}
+
+void Book::SetStyleParagraphSpacingOverride(int value) {
+  style_paragraph_spacing_override = value;
+}
+
+int Book::GetStylePublisherTextIndentOverride() const {
+  return style_publisher_text_indent_override;
+}
+
+void Book::SetStylePublisherTextIndentOverride(int value) {
+  style_publisher_text_indent_override = value;
+}
+
+int Book::GetStylePublisherBlockMarginsOverride() const {
+  return style_publisher_block_margins_override;
+}
+
+void Book::SetStylePublisherBlockMarginsOverride(int value) {
+  style_publisher_block_margins_override = value;
 }
 
 int Book::GetOrientation() {

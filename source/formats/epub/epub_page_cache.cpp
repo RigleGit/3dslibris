@@ -95,7 +95,7 @@ BuildLayoutParams(const char *book_path, int pixel_size, int line_spacing,
   return params;
 }
 
-static std::string BuildCachePath(const char *book_path,
+static std::string BuildCachePath(Book *book, const char *book_path,
                                   const EpubCacheLayoutParams &params) {
   if (!book_path)
     return std::string();
@@ -112,7 +112,11 @@ static std::string BuildCachePath(const char *book_path,
   layout_params.margin_top = params.margin_top;
   layout_params.margin_bottom = params.margin_bottom;
   layout_params.regular_font = params.regular_font;
-  layout_params.variant_token = "pub2";
+  layout_params.variant_token = "pub3:";
+  layout_params.variant_token +=
+      book && book->GetPublisherTextIndentEnabled() ? "i1" : "i0";
+  layout_params.variant_token +=
+      book && book->GetPublisherBlockMarginsEnabled() ? ":m1" : ":m0";
   return page_cache_utils::BuildPageCachePath(
       GetEffectiveCacheDir(), ".epc", book_path, layout_params);
 }
@@ -185,7 +189,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
       orientation, margin_left, margin_right, margin_top, margin_bottom,
       regular_font);
 
-  std::string cache_path = BuildCachePath(book_path, params);
+  std::string cache_path = BuildCachePath(book, book_path, params);
   if (cache_path.empty())
     return false;
 
@@ -402,7 +406,7 @@ void Save(Book *book, const char *book_path, int pixel_size,
       orientation, margin_left, margin_right, margin_top, margin_bottom,
       regular_font);
 
-  std::string cache_path = BuildCachePath(book_path, params);
+  std::string cache_path = BuildCachePath(book, book_path, params);
   if (cache_path.empty())
     return;
 
@@ -601,7 +605,7 @@ bool StreamWriter::Begin(Book *book, const char *book_path, int pixel_size,
       orientation, margin_left, margin_right, margin_top, margin_bottom,
       regular_font);
 
-  cache_path_ = BuildCachePath(book_path, params);
+  cache_path_ = BuildCachePath(book, book_path, params);
   if (cache_path_.empty())
     return false;
 

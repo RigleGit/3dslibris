@@ -153,6 +153,8 @@ public:
   u8 orientation;
   u8 colorMode;
   u8 paraspacing, paraindent;
+  bool publisher_text_indent;
+  bool publisher_block_margins;
 
   Button prefsButtons[PREFS_BUTTON_COUNT];
 

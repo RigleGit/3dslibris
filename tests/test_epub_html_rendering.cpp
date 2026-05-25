@@ -40,16 +40,34 @@ bool BufContains(const u32 *buf, int len, u32 value) {
   return false;
 }
 
+int CountBufValue(const u32 *buf, int len, u32 value) {
+  int count = 0;
+  for (int i = 0; i < len; i++)
+    if (buf[i] == value)
+      count++;
+  return count;
+}
+
 struct TestCtx {
   Text text;
   BookContext ctx;
+  unsigned char paragraph_spacing;
+  unsigned char paragraph_indent;
+  bool publisher_text_indent;
+  bool publisher_block_margins;
 
   TestCtx() {
     ctx.text = &text;
     ctx.prefs = nullptr;
     ctx.status_reporter = nullptr;
-    ctx.paragraph_spacing = nullptr;
-    ctx.paragraph_indent = nullptr;
+    paragraph_spacing = 1;
+    paragraph_indent = 0;
+    publisher_text_indent = true;
+    publisher_block_margins = true;
+    ctx.paragraph_spacing = &paragraph_spacing;
+    ctx.paragraph_indent = &paragraph_indent;
+    ctx.publisher_text_indent = &publisher_text_indent;
+    ctx.publisher_block_margins = &publisher_block_margins;
     ctx.orientation = nullptr;
     ctx.draw_background = nullptr;
     ctx.draw_background_user_data = nullptr;
@@ -160,12 +178,32 @@ void TestHiddenElementsDoNotEmitLayoutTokens() {
   ExpectTrue("hidden-elements: visible text remains", BufContains(buf, len, 'V'));
 }
 
+void TestUserParagraphSpacingAddsExtraBlankLines() {
+  TestCtx tc;
+  tc.paragraph_spacing = 2;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
+
+  const std::string html =
+      "<html><body><p>First paragraph.</p><p>Second paragraph.</p></body></html>";
+  xml_parse_utils::XmlParseResult r = xml_parse_utils::ParseXmlString(html, opts);
+  ExpectTrue("paragraph-spacing: parse ok", r.ok);
+  ExpectTrue("paragraph-spacing: page produced", book.GetPageCount() > 0);
+
+  const u32 *buf = book.GetPage(0)->GetBuffer();
+  const int len = book.GetPage(0)->GetLength();
+  ExpectTrue("paragraph-spacing: extra blank lines emitted",
+             CountBufValue(buf, len, '\n') >= 3);
+}
+
 } // namespace
 
 int main() {
   TestRubyAnnotationEmitsBrackets();
   TestTableImgSuppressed();
   TestHiddenElementsDoNotEmitLayoutTokens();
+  TestUserParagraphSpacingAddsExtraBlankLines();
   printf("PASS: %d tests\n", g_pass);
   return 0;
 }

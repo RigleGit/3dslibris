@@ -492,7 +492,8 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
   emit_metrics.spaceadvance = spaceadvance;
   emit_metrics.text_already_transformed = text_already_transformed;
 
-  if (p->in_paragraph && !p->paragraph_has_content) {
+  if (p->in_paragraph && !p->paragraph_has_content &&
+      p->book->GetPublisherTextIndentEnabled()) {
     using book_xml_css_style_utils::MarginTopResult;
     MarginTopResult ti = book_xml_css_style_utils::ParseTextIndent(
         p->last_p_style.c_str());

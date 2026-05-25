@@ -50,11 +50,19 @@ static const int PREFS_LIBRARY_BTN_H = 26;
 
 
 static const int kPage2Buttons[] = {
+    PREFS_BUTTON_PUBLISHER_TEXT_INDENT,
+    PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS,
     PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN,
     PREFS_BUTTON_RESET_DEFAULTS,
     PREFS_BUTTON_CLEAR_CACHE,
 };
-static const int kPage2ButtonCount = 3;
+static const int kPage2ButtonCount = 5;
+
+static const int kBookStylePage2Buttons[] = {
+    PREFS_BUTTON_PUBLISHER_TEXT_INDENT,
+    PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS,
+};
+static const int kBookStylePage2ButtonCount = 2;
 static const int PREFS_ROW_X = 5;
 static const int PREFS_ROW_W = 230;
 static const u32 kGoToPageCoarseStep = 10;
@@ -167,7 +175,24 @@ static bool CurrentBookCanGoToPage(Book *book, bool is_book_ctx) {
 }
 
 static bool CurrentBookHasExtraPrefsPage(Book *book, bool is_book_ctx) {
-  return CurrentBookShowsLineWrapFix(book, is_book_ctx);
+  return CurrentBookShowsLineWrapFix(book, is_book_ctx) ||
+         CurrentBookUsesTextLayoutSettings(book, is_book_ctx);
+}
+
+static int BookPage2ButtonCount(Book *book, bool is_book_ctx) {
+  if (CurrentBookShowsLineWrapFix(book, is_book_ctx))
+    return 1;
+  if (CurrentBookUsesTextLayoutSettings(book, is_book_ctx))
+    return kBookStylePage2ButtonCount;
+  return 0;
+}
+
+static int BookPage2ButtonForSlot(Book *book, bool is_book_ctx, int slot) {
+  if (CurrentBookShowsLineWrapFix(book, is_book_ctx))
+    return PREFS_BUTTON_LIBRARY_VIEW;
+  if (slot >= 0 && slot < kBookStylePage2ButtonCount)
+    return kBookStylePage2Buttons[slot];
+  return kBookStylePage2Buttons[0];
 }
 
 static void ToggleFixedLayoutReadingDirection(Prefs *prefs) {
@@ -184,6 +209,42 @@ static void ToggleCirclePadPageTurnSetting(Prefs *prefs) {
   prefs->Write();
 }
 
+static int CycleBookOverride(int current) {
+  if (current < 0)
+    return 0;
+  if (current == 0)
+    return 1;
+  return -1;
+}
+
+static void TogglePublisherTextIndentSetting(App *app, Book *book, bool is_book_ctx) {
+  if (!app)
+    return;
+  if (is_book_ctx && book && book->UsesTextLayoutSettings()) {
+    book->SetStylePublisherTextIndentOverride(
+        CycleBookOverride(book->GetStylePublisherTextIndentOverride()));
+    app->MarkBookLayoutDirty();
+  } else {
+    app->publisher_text_indent = !app->publisher_text_indent;
+  }
+  if (app->prefs)
+    app->prefs->Write();
+}
+
+static void TogglePublisherBlockMarginsSetting(App *app, Book *book, bool is_book_ctx) {
+  if (!app)
+    return;
+  if (is_book_ctx && book && book->UsesTextLayoutSettings()) {
+    book->SetStylePublisherBlockMarginsOverride(
+        CycleBookOverride(book->GetStylePublisherBlockMarginsOverride()));
+    app->MarkBookLayoutDirty();
+  } else {
+    app->publisher_block_margins = !app->publisher_block_margins;
+  }
+  if (app->prefs)
+    app->prefs->Write();
+}
+
 SettingsController::SettingsController(App &app)
     : app_(app), go_to_page_dialog_(app), prefs_general_page_(0) {}
 
@@ -192,7 +253,7 @@ int SettingsController::EffectiveVisibleCount() const {
   if (!is_book_ctx && prefs_general_page_ == 1)
     return kPage2ButtonCount;
   if (is_book_ctx && prefs_general_page_ == 1)
-    return CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), is_book_ctx) ? 1 : 0;
+    return BookPage2ButtonCount(app_.GetCurrentBook(), is_book_ctx);
   return (int)settings::VisiblePrefsButtonCount(
       is_book_ctx, CurrentBookShowsLineWrapFix(app_.GetCurrentBook(), is_book_ctx));
 }
@@ -202,7 +263,7 @@ int SettingsController::EffectiveButtonForSlot(int slot) const {
   if (!is_book_ctx && prefs_general_page_ == 1)
     return (slot >= 0 && slot < kPage2ButtonCount) ? kPage2Buttons[slot] : kPage2Buttons[0];
   if (is_book_ctx && prefs_general_page_ == 1)
-    return PREFS_BUTTON_LIBRARY_VIEW;
+    return BookPage2ButtonForSlot(app_.GetCurrentBook(), is_book_ctx, slot);
   return settings::PrefsButtonForVisibleSlot(
       is_book_ctx, CurrentBookShowsLineWrapFix(app_.GetCurrentBook(), is_book_ctx), (u8)slot);
 }
@@ -260,7 +321,7 @@ void SettingsController::PrefsInit() {
       "font configuration", "font size",    "paragraph spacing",
       "screen orientation", "clock format", "color mode", "library view",
       "circle pad pages",   "index",        "bookmarks", "reset settings",
-      "clear cache"};
+      "clear cache",        "publisher indent", "publisher margins"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -600,7 +661,18 @@ void SettingsController::PrefsIncreaseParaspacing() {
   if (app_.IsBookSettingsContext() &&
       !CurrentBookUsesTextLayoutSettings(app_.GetCurrentBook(), true))
     return;
-  if (app_.paraspacing < 2) {
+  Book *book = app_.GetCurrentBook();
+  if (app_.IsBookSettingsContext() && book) {
+    int value = book->GetStyleParagraphSpacingOverride();
+    if (value < 0)
+      value = book->GetParagraphSpacing();
+    if (value < 4) {
+      book->SetStyleParagraphSpacingOverride(value + 1);
+      app_.MarkBookLayoutDirty();
+      PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
+      app_.prefs->Write();
+    }
+  } else if (app_.paraspacing < 4) {
     app_.paraspacing++;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
@@ -612,7 +684,18 @@ void SettingsController::PrefsDecreaseParaspacing() {
   if (app_.IsBookSettingsContext() &&
       !CurrentBookUsesTextLayoutSettings(app_.GetCurrentBook(), true))
     return;
-  if (app_.paraspacing > 0) {
+  Book *book = app_.GetCurrentBook();
+  if (app_.IsBookSettingsContext() && book) {
+    int value = book->GetStyleParagraphSpacingOverride();
+    if (value < 0)
+      value = book->GetParagraphSpacing();
+    if (value > 0) {
+      book->SetStyleParagraphSpacingOverride(value - 1);
+      app_.MarkBookLayoutDirty();
+      PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
+      app_.prefs->Write();
+    }
+  } else if (app_.paraspacing > 0) {
     app_.paraspacing--;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
@@ -651,6 +734,11 @@ void SettingsController::PrefsRefreshButton(int index) {
     if (is_book_ctx && book && !book->UsesTextLayoutSettings()) {
       app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(
           std::string("(PDF fixed)"));
+    } else if (is_book_ctx && book &&
+               book->GetStyleParagraphSpacingOverride() >= 0) {
+      snprintf(msg, sizeof(msg), "                         < %d >  ",
+               book->GetStyleParagraphSpacingOverride());
+      app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
     } else {
       snprintf(msg, sizeof(msg), "                         < %d >  ", app_.paraspacing);
       app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
@@ -755,6 +843,38 @@ void SettingsController::PrefsRefreshButton(int index) {
   case PREFS_BUTTON_CLEAR_CACHE:
     app_.prefsButtons[PREFS_BUTTON_CLEAR_CACHE].SetLabel2(std::string("delete all caches >"));
     break;
+  case PREFS_BUTTON_PUBLISHER_TEXT_INDENT:
+    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_TEXT_INDENT].SetLabel1(
+        std::string("publisher indent"));
+    if (is_book_ctx && book && book->UsesTextLayoutSettings() &&
+        book->GetStylePublisherTextIndentOverride() < 0) {
+      app_.prefsButtons[PREFS_BUTTON_PUBLISHER_TEXT_INDENT].SetLabel2(
+          app_.publisher_text_indent ? std::string("inherit on")
+                                     : std::string("inherit off"));
+    } else {
+      const bool enabled =
+          is_book_ctx && book ? book->GetPublisherTextIndentEnabled()
+                              : app_.publisher_text_indent;
+      app_.prefsButtons[PREFS_BUTTON_PUBLISHER_TEXT_INDENT].SetLabel2(
+          enabled ? std::string("on") : std::string("off"));
+    }
+    break;
+  case PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS:
+    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS].SetLabel1(
+        std::string("publisher margins"));
+    if (is_book_ctx && book && book->UsesTextLayoutSettings() &&
+        book->GetStylePublisherBlockMarginsOverride() < 0) {
+      app_.prefsButtons[PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS].SetLabel2(
+          app_.publisher_block_margins ? std::string("inherit on")
+                                       : std::string("inherit off"));
+    } else {
+      const bool enabled =
+          is_book_ctx && book ? book->GetPublisherBlockMarginsEnabled()
+                              : app_.publisher_block_margins;
+      app_.prefsButtons[PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS].SetLabel2(
+          enabled ? std::string("on") : std::string("off"));
+    }
+    break;
   }
   app_.MarkPrefsDirty();
 }
@@ -846,6 +966,8 @@ void SettingsController::ResetToDefaults() {
   app_.ts->SetPixelSize(12);
   app_.paraspacing = 1;
   app_.paraindent = 0;
+  app_.publisher_text_indent = true;
+  app_.publisher_block_margins = true;
   if (app_.orientation)
     app_.SetOrientation(false);
   app_.ts->SetColorMode(0);
@@ -919,6 +1041,20 @@ void SettingsController::PrefsHandlePress() {
   if (selected_button == PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN) {
     ToggleCirclePadPageTurnSetting(app_.prefs.get());
     PrefsRefreshButton(PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN);
+    app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_PUBLISHER_TEXT_INDENT) {
+    TogglePublisherTextIndentSetting(&app_, book, is_book_ctx);
+    PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_TEXT_INDENT);
+    app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS) {
+    TogglePublisherBlockMarginsSetting(&app_, book, is_book_ctx);
+    PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS);
     app_.MarkPrefsDirty();
     return;
   }

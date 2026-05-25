@@ -17,6 +17,8 @@ struct BookContext {
   Prefs *prefs;                       //! Non-owning.
   const unsigned char *paragraph_spacing; //! Non-owning.
   const unsigned char *paragraph_indent;  //! Non-owning.
+  const bool *publisher_text_indent;      //! Non-owning.
+  const bool *publisher_block_margins;    //! Non-owning.
   const unsigned char *orientation;       //! Non-owning.
   IStatusReporter *status_reporter;   //! Non-owning.
   void (*draw_background)(void *);    //! Non-owning callback (bottom screen).
@@ -31,6 +33,8 @@ struct BookContext {
         prefs(nullptr),
         paragraph_spacing(nullptr),
         paragraph_indent(nullptr),
+        publisher_text_indent(nullptr),
+        publisher_block_margins(nullptr),
         orientation(nullptr),
         status_reporter(nullptr),
         draw_background(nullptr),
