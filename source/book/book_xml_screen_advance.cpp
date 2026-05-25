@@ -115,6 +115,7 @@ void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
 
   p->pen.x = ts->margin.left;
   p->pen.y = ts->margin.top + lineheight;
+  p->linebegan = false;
   p->current_screen_has_drawable_content = false;
   // Pending spacing accumulated before the overflow is no longer relevant;
   // we are at the top of a fresh screen/page.

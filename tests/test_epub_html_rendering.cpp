@@ -1,6 +1,8 @@
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/book_xml.h"
+#include "book/book_xml_flow_emission.h"
+#include "book/book_xml_screen_advance.h"
 #include "book/page.h"
 #include "formats/common/xml_parse_utils.h"
 #include "parse.h"
@@ -197,6 +199,39 @@ void TestUserParagraphSpacingAddsExtraBlankLines() {
              CountBufValue(buf, len, '\n') >= 3);
 }
 
+void TestBlockIndentSurvivesPageOverflow() {
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  p.screen = 1;
+  p.pen.y = 390;
+  p.pen.x = tc.text.margin.left + 80;
+  p.current_screen_has_drawable_content = true;
+  parse_set_current_block_margins(&p, 36, 0);
+  parse_append_page_byte(&p, 'x');
+  p.linebegan = true;
+
+  FlowEmissionFns fns{};
+  fns.advance_screen = [](parsedata_t *pd) {
+    book_xml_screen_advance::AdvanceParsedScreen(pd);
+  };
+  fns.advance_page_overflow = [](parsedata_t *pd, int lh) {
+    book_xml_screen_advance::AdvanceParsedPageOnOverflow(pd, lh);
+  };
+  fns.flush_pending_block = [](parsedata_t *pd, const char *tag) {
+    book_xml_screen_advance::FlushPendingBlockSpacingBeforeContent(pd, tag);
+  };
+
+  book_xml_flow_emission::EmitFlowedFragmentRaw(
+      &p, "Indented continuation line", 26, fns);
+
+  ExpectTrue("block-overflow: previous page produced", book.GetPageCount() > 0);
+  ExpectTrue("block-overflow: residual buffer contains line-start marker",
+             p.buflen >= 2 && p.buf[0] == TEXT_LINE_START_X);
+  ExpectTrue("block-overflow: new page starts at block margin",
+             p.buflen >= 2 && p.buf[1] > (u32)tc.text.margin.left);
+}
+
 } // namespace
 
 int main() {
@@ -204,6 +239,7 @@ int main() {
   TestTableImgSuppressed();
   TestHiddenElementsDoNotEmitLayoutTokens();
   TestUserParagraphSpacingAddsExtraBlankLines();
+  TestBlockIndentSurvivesPageOverflow();
   printf("PASS: %d tests\n", g_pass);
   return 0;
 }
