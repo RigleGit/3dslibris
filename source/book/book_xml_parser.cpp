@@ -523,9 +523,32 @@ void end(void *data, const char *el) {
   if (had_page_break_after)
     ForcePageBreak(p);
   if (restore_font_size_px) {
+    const int old_lh = (int)ts->GetHeight();
     ts->SetPixelSize(restore_font_size_px);
+    const int new_lh = (int)ts->GetHeight();
+    // If pen.y was placed at the start of a fresh screen using the inflated
+    // font's lineheight (e.g. by advance_page_overflow during a BAND image),
+    // and the element is not mid-line, correct pen.y to the restored font's
+    // lineheight so subsequent spacing decisions use the right baseline.
+    if (!p->linebegan && new_lh < old_lh &&
+        p->pen.y == (int)ts->margin.top + old_lh) {
+      p->pen.y = (int)ts->margin.top + new_lh;
+    }
     AppendParsedByte(p, TEXT_FONT_SIZE);
     AppendParsedByte(p, restore_font_size_px);
+    // Block-spacing suppress state from inside a font-size scope (e.g. a
+    // zero-margin image container inside a 200%-font div) must not propagate
+    // past the scope boundary.  The next block element after this restore
+    // should not inherit the suppress signal and add an unintended blank line.
+#if defined(DSLIBRIS_DEBUG)
+    DBG_LOGF(p->book->GetStatusReporter(),
+      "FontScope EXIT[%s] restore_px=%d old_lh=%d new_lh=%d suppress_only=%d->0 pbl=%d pbb=%d",
+      el, (int)restore_font_size_px, old_lh, new_lh,
+      p->pending_block_spacing_suppress_only ? 1 : 0,
+      p->pending_block_spacing_lf,
+      p->pending_block_break ? 1 : 0);
+#endif
+    p->pending_block_spacing_suppress_only = false;
   }
 
   book_xml_inline_handler::SyncInlineStyleAfterPop(p, ts);

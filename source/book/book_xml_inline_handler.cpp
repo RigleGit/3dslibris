@@ -15,10 +15,12 @@
 #include "book/book_xml_inline_state.h"
 #include "book/book_xml_list_utils.h"
 #include "book/book_xml_parser_style_utils.h"
+#include "book/book_xml_parser_support.h"
 #include "book/book_xml_screen_advance.h"
 #include "book/epub_css_class_map.h"
 #include "parse.h"
 #include "settings/prefs.h"
+#include "shared/debug_log.h"
 #include "shared/text_render_layout_utils.h"
 #include "ui/text.h"
 
@@ -226,6 +228,23 @@ void HandleCssInlineStylingStart(
             p->base_font_size_px, px);
         if (new_font_px == ts->GetPixelSize())
           new_font_px = 0;
+        // Entering a block-level font-size scope: clear suppress_only so that
+        // pending suppress state from outer content does not propagate into
+        // the first block element inside this scope.
+        // Clear here (not inside `if (new_font_px)`) so that the scope
+        // boundary is respected even when the resolved size is clamped to
+        // the current value (e.g. user is already at kTextPixelSizeMax).
+        if (book_xml_parser_support::IsBlockLevelElement(el)) {
+#if defined(DSLIBRIS_DEBUG)
+          DBG_LOGF(p->book->GetStatusReporter(),
+            "FontScope ENTER[%s] clamp=%d->%d cur_px=%d suppress_only=%d->0 pbl=%d",
+            el, (int)ts->GetPixelSize(), new_font_px ? (int)new_font_px : (int)ts->GetPixelSize(),
+            (int)ts->GetPixelSize(),
+            p->pending_block_spacing_suppress_only ? 1 : 0,
+            p->pending_block_spacing_lf);
+#endif
+          p->pending_block_spacing_suppress_only = false;
+        }
       }
     }
     if (new_font_px) {
