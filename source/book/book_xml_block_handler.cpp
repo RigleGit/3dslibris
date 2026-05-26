@@ -96,7 +96,11 @@ static bool IsBlockLevelElement(const char *el) {
 // dominant log volume on large EPUBs (~700k entries observed). Flip to 1
 // only when debugging CSS margin resolution.
 #ifndef BLOCK_MARGIN_TRACE
+#ifdef DSLIBRIS_DEBUG
+#define BLOCK_MARGIN_TRACE 1
+#else
 #define BLOCK_MARGIN_TRACE 0
+#endif
 #endif
 static void LogResolvedBlockMargin(
     parsedata_t *p, const char *tag, const char *phase,
@@ -640,6 +644,11 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
                              p->last_p_class, mbr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "p", "paragraph-bottom", mbr, line_h, default_lf);
+      if (p->book->GetParagraphSpacing() > 0) {
+        book_xml_screen_advance::QueueBlockSpacingLines(
+            p, 1 + p->book->GetParagraphSpacing(), "p",
+            "paragraph-user-spacing", false);
+      }
       if (!p->pending_block_spacing_from_css && p->pending_block_spacing_lf < 1)
         p->pending_block_spacing_lf = 1;
 #if defined(DSLIBRIS_DEBUG) && BLOCK_MARGIN_TRACE

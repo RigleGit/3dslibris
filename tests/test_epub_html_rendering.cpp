@@ -199,6 +199,27 @@ void TestUserParagraphSpacingAddsExtraBlankLines() {
              CountBufValue(buf, len, '\n') >= 3);
 }
 
+void TestUserParagraphSpacingSurvivesZeroPublisherMargin() {
+  TestCtx tc;
+  tc.paragraph_spacing = 2;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
+
+  const std::string html =
+      "<html><head><style>p{margin-bottom:0}</style></head><body>"
+      "<p>First paragraph.</p><p>Second paragraph.</p></body></html>";
+  xml_parse_utils::XmlParseResult r = xml_parse_utils::ParseXmlString(html, opts);
+  ExpectTrue("paragraph-spacing-zero-margin: parse ok", r.ok);
+  ExpectTrue("paragraph-spacing-zero-margin: page produced",
+             book.GetPageCount() > 0);
+
+  const u32 *buf = book.GetPage(0)->GetBuffer();
+  const int len = book.GetPage(0)->GetLength();
+  ExpectTrue("paragraph-spacing-zero-margin: user spacing survives CSS zero",
+             CountBufValue(buf, len, '\n') >= 3);
+}
+
 void TestBlockIndentSurvivesPageOverflow() {
   TestCtx tc;
   Book book(tc.ctx);
@@ -232,6 +253,119 @@ void TestBlockIndentSurvivesPageOverflow() {
              p.buflen >= 2 && p.buf[1] > (u32)tc.text.margin.left);
 }
 
+void TestFontSizeRestoreClearsSuppressOnlyFlag() {
+  // Rule: pending_block_spacing_suppress_only set inside a font-size scope
+  // (e.g. from a zero-margin image container inside a 200%-font <div>) must
+  // NOT propagate past the scope boundary.  After restore_font_size_px fires
+  // the flag should be false so the following block element does not
+  // incorrectly inherit the suppress signal and emit an extra blank line.
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+
+  const u8 base_px = 14;
+  const u8 inflated_px = 28;
+
+  // Set font to 200% (inside the large-container div).
+  tc.text.SetPixelSize(inflated_px);
+
+  // Simulate the suppress_only flag being set by a zero-margin image paragraph
+  // that closed while inside the font-size scope.
+  p.pending_block_spacing_suppress_only = true;
+  p.pending_block_spacing_from_css = true;
+  p.pending_block_spacing_lf = 0;
+
+  // Push stack entry for the open <div style="font-size:200%">.
+  parse_push(&p, TAG_DIV);
+  p.style_font_size_restore_stack[(u8)(p.stacksize - 1)] = base_px;
+
+  // Close the div — font restore fires and must clear suppress_only.
+  xml::book::end(&p, "div");
+
+  ExpectTrue("font-restore-clears-suppress: font restored",
+             (int)tc.text.GetPixelSize() == (int)base_px);
+  ExpectFalse("font-restore-clears-suppress: suppress_only cleared",
+              p.pending_block_spacing_suppress_only);
+}
+
+void TestFontSizeRestoreAdjustsPenYAfterBlockImageOverflow() {
+  // Rule: when a font-size element is closed (e.g. </div> with font-size:200%)
+  // while pen.y sits at the top of a freshly advanced screen — meaning
+  // advance_page_overflow fired during a block image inside the element — the
+  // parser must correct pen.y from (margin.top + inflated_lh) down to
+  // (margin.top + restored_lh).  Without the fix pen.y stays too high,
+  // causing subsequent spacing decisions to underestimate available space.
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+
+  const u8 base_px = 14;
+  const u8 inflated_px = 28; // 200% of 14
+  const int top = tc.text.margin.top; // 10 (from Text stub)
+
+  // Simulate the state left by advance_page_overflow during a BAND image
+  // inside a font-size:200% container: font is inflated, pen.y lands at
+  // margin.top + inflated lineheight, and the line has not started yet.
+  tc.text.SetPixelSize(inflated_px);
+  p.pen.y = top + (int)tc.text.GetHeight(); // 10 + 28 = 38
+  p.linebegan = false;
+  p.current_screen_has_drawable_content = false;
+
+  // Push a stack entry representing the open <div style="font-size:200%">.
+  // Record the pre-change pixel size so endElement knows what to restore.
+  parse_push(&p, TAG_DIV);
+  p.style_font_size_restore_stack[(u8)(p.stacksize - 1)] = base_px;
+
+  // Fire the end element for </div>.  This triggers font-size restore and,
+  // with the fix, the pen.y correction.
+  xml::book::end(&p, "div");
+
+  const int expected_pen_y = top + (int)tc.text.GetHeight(); // 10 + 14 = 24
+  ExpectTrue("font-restore-pen-y: font restored to base_px",
+             (int)tc.text.GetPixelSize() == (int)base_px);
+  ExpectTrue("font-restore-pen-y: pen.y corrected to restored lineheight",
+             p.pen.y == expected_pen_y);
+}
+
+void TestSuppressOnlyDoesNotCrossBlockFontScopeStart() {
+  // Rule: pending_block_spacing_suppress_only set by a zero-margin block
+  // must NOT propagate through a block-level font-size scope boundary into
+  // the first paragraph inside, even when the declared font-size is clamped
+  // to the same pixel value as the current font (kTextPixelSizeMax reached).
+  TestCtx tc;
+  tc.paragraph_spacing = 0;  // isolate publisher CSS margin behavior
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  // Set font to max so 200% is clamped to the same value, exercising the
+  // has_spec path that fires even when new_font_px resolves to 0.
+  p.ts->SetPixelSize(20);  // kTextPixelSizeMax
+  p.base_font_size_px = 20;
+  xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
+
+  // <p> with margin:0 followed by a font-size:200% div whose first <p> has
+  // margin-top:0.5em. Without the fix the inner paragraph receives an extra
+  // blank line from was_suppressed injection; with the fix there is none.
+  // Using inline styles because the test does not populate a CSS class map.
+  const std::string html =
+      "<html><body>"
+      "<p style=\"margin-top:0;margin-bottom:0\">placeholder</p>"
+      "<div style=\"font-size:200%\">"
+      "<p style=\"margin-top:0.5em\">Inner text</p>"
+      "</div>"
+      "</body></html>";
+  xml_parse_utils::XmlParseResult r = xml_parse_utils::ParseXmlString(html, opts);
+  ExpectTrue("suppress-font-scope: parse ok", r.ok);
+  ExpectTrue("suppress-font-scope: page produced", book.GetPageCount() > 0);
+
+  const u32 *buf = book.GetPage(0)->GetBuffer();
+  const int len = book.GetPage(0)->GetLength();
+  // Exactly one block boundary newline before "Inner text" (from
+  // EnsureBlockBoundaryBeforeBlockStart). A second newline would indicate
+  // the spurious blank line from was_suppressed injection.
+  ExpectTrue("suppress-font-scope: no extra blank line before inner paragraph",
+             CountBufValue(buf, len, '\n') == 1);
+}
+
 } // namespace
 
 int main() {
@@ -239,7 +373,11 @@ int main() {
   TestTableImgSuppressed();
   TestHiddenElementsDoNotEmitLayoutTokens();
   TestUserParagraphSpacingAddsExtraBlankLines();
+  TestUserParagraphSpacingSurvivesZeroPublisherMargin();
   TestBlockIndentSurvivesPageOverflow();
+  TestFontSizeRestoreClearsSuppressOnlyFlag();
+  TestFontSizeRestoreAdjustsPenYAfterBlockImageOverflow();
+  TestSuppressOnlyDoesNotCrossBlockFontScopeStart();
   printf("PASS: %d tests\n", g_pass);
   return 0;
 }
