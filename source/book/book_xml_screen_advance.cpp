@@ -17,11 +17,7 @@
 #include "ui/text.h"
 
 #ifndef BLOCK_SPACING_TRACE
-#ifdef DSLIBRIS_DEBUG
-#define BLOCK_SPACING_TRACE 1
-#else
 #define BLOCK_SPACING_TRACE 0
-#endif
 #endif
 
 namespace {
@@ -277,14 +273,11 @@ void QueueBlockSpacingFromMarginResult(
 }
 
 // FLUSHPENDING_TRACE: per-call FlushPending ENTER/METRICS/EXIT logs.
-// Enabled automatically in debug builds (DSLIBRIS_DEBUG). Noisy on large
-// books — disable manually if needed.
+// OFF by default — fires once per block-element start, drowning the log on
+// large EPUBs (542k entries observed on a 7706-page book) and seriously
+// slowing parse via SD-card fflush. Set to 1 to re-enable for diagnosis.
 #ifndef FLUSHPENDING_TRACE
-#ifdef DSLIBRIS_DEBUG
-#define FLUSHPENDING_TRACE 1
-#else
 #define FLUSHPENDING_TRACE 0
-#endif
 #endif
 
 void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,

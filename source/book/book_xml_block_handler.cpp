@@ -96,11 +96,7 @@ static bool IsBlockLevelElement(const char *el) {
 // dominant log volume on large EPUBs (~700k entries observed). Flip to 1
 // only when debugging CSS margin resolution.
 #ifndef BLOCK_MARGIN_TRACE
-#ifdef DSLIBRIS_DEBUG
-#define BLOCK_MARGIN_TRACE 1
-#else
 #define BLOCK_MARGIN_TRACE 0
-#endif
 #endif
 static void LogResolvedBlockMargin(
     parsedata_t *p, const char *tag, const char *phase,
