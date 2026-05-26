@@ -16,6 +16,12 @@ namespace book_xml_text_emit {
 
 namespace {
 
+static const int kTextWrapRightGuardPx = 2;
+
+int TextWrapRightGuardPx(const FlowEmitMetrics &metrics) {
+  return metrics.display_width > 32 ? kTextWrapRightGuardPx : 0;
+}
+
 bool IsClosingAttachedPunctuation(uint32_t cp) {
   switch (cp) {
     case '.': case ',': case ';': case ':': case '!': case '?':
@@ -246,12 +252,15 @@ void EmitFlowedShapedText(
   }
 
   const int maxLineWidth =
-      metrics.display_width - metrics.margin_right - metrics.margin_left;
+      std::max(1, metrics.display_width - metrics.margin_right -
+                      metrics.margin_left - TextWrapRightGuardPx(metrics));
+  const int right_edge =
+      metrics.display_width - metrics.margin_right -
+      TextWrapRightGuardPx(metrics);
   size_t unit_index = 0;
   AlignFreshLineToEffectiveLeftMargin(p, metrics);
   if (metrics.text_indent_px > 0 && !p->linebegan) {
-    const int indent_limit =
-        metrics.display_width - metrics.margin_right - p->pen.x - 1;
+    const int indent_limit = right_edge - p->pen.x - 1;
     p->pen.x += std::min(metrics.text_indent_px, std::max(0, indent_limit));
   }
 
@@ -369,8 +378,7 @@ void EmitFlowedShapedText(
         u16 unit_advance = (u16)unit.advance;
         const int pen_y_before_nbsp = p->pen.y;
         bool nbsp_did_wrap = false;
-        if ((p->pen.x + unit_advance) >=
-            (metrics.display_width - metrics.margin_right)) {
+        if ((p->pen.x + unit_advance) >= right_edge) {
           parse_append_page_byte(p, '\n');
           p->pen.x = metrics.margin_left;
           p->linebegan = false;
@@ -425,7 +433,7 @@ void EmitFlowedShapedText(
                      : metrics.margin_left;
     }
     const bool need_wrap =
-        ((p->pen.x + advance) >= (metrics.display_width - metrics.margin_right) &&
+        ((p->pen.x + advance) >= right_edge &&
          !(p->linebegan && attached_closing_punctuation));
     if (need_wrap) {
       parse_append_page_byte(p, '\n');

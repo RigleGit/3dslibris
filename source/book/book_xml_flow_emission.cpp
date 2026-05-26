@@ -222,8 +222,11 @@ static bool FlowedTextFitsCurrentVisualLine(
   if (start >= run.size())
     return true;
 
+  const int text_wrap_right_guard_px =
+      emit_metrics.display_width > 32 ? 2 : 0;
   const int content_right =
-      emit_metrics.display_width - emit_metrics.margin_right;
+      emit_metrics.display_width - emit_metrics.margin_right -
+      text_wrap_right_guard_px;
   int start_x = p->linebegan ? p->pen.x : emit_metrics.margin_left;
   const int available = content_right - start_x;
   if (available <= 0)
