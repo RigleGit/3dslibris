@@ -364,11 +364,13 @@ static void ClearBrowserBooksAndButtons(App *app) {
       }
     }
   }
-  for (size_t i = 0; i < app->books.size(); i++)
+  for (size_t i = 0; i < app->books.size(); i++) {
     delete app->books[i];
+  }
   app->books.clear();
-  for (size_t i = 0; i < app->buttons.size(); i++)
+  for (size_t i = 0; i < app->buttons.size(); i++) {
     delete app->buttons[i];
+  }
   app->buttons.clear();
   app->SetSelectedBook(NULL);
   app->SetBrowserPageStart(0);
@@ -423,9 +425,6 @@ static int AppendBooksFromNativeDirectory(App *app,
         continue;
       if (filename.empty())
         continue;
-#ifdef DSLIBRIS_DEBUG
-      DBG_LOGF(app, "BROWSER folder native entry file=%s", filename.c_str());
-#endif
       AppendBookFromFilename(app, gradient_ctx, dir, filename.c_str(),
                              seen_keys);
     }
@@ -466,9 +465,6 @@ static int AppendBooksFromPosixDirectory(App *app,
     std::string child = dir + "/" + ent->d_name;
     if (PathIsDirectory(child))
       continue;
-#ifdef DSLIBRIS_DEBUG
-    DBG_LOGF(app, "BROWSER folder posix entry file=%s", ent->d_name);
-#endif
     AppendBookFromFilename(app, gradient_ctx, dir, ent->d_name, seen_keys);
   }
   closedir(dp);
