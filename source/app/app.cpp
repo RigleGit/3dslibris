@@ -102,7 +102,9 @@ App::App()
   nav_.mode = AppMode::Browser;
   cache = false;
   orientation = false; // Turned Left by default.
-  paraspacing = 1;
+  reader_font_size = 12;
+  reader_line_spacing = 0;
+  paraspacing = 0;
   paraindent = 0;
   publisher_text_indent = true;
   publisher_block_margins = true;

@@ -50,22 +50,27 @@ static const int PREFS_LIBRARY_BTN_H = 26;
 
 
 static const int kPage2Buttons[] = {
+    PREFS_BUTTON_FONT_CONFIG,
+    PREFS_BUTTON_FONTSIZE,
+    PREFS_BUTTON_LINE_SPACING,
+    PREFS_BUTTON_PARASPACING,
     PREFS_BUTTON_PUBLISHER_TEXT_INDENT,
     PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS,
-    PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN,
-    PREFS_BUTTON_RESET_DEFAULTS,
-    PREFS_BUTTON_CLEAR_CACHE,
 };
-static const int kPage2ButtonCount = 5;
+static const int kPage2ButtonCount = 6;
 
 static const int kBookStylePage2Buttons[] = {
+    PREFS_BUTTON_FONTSIZE,
+    PREFS_BUTTON_LINE_SPACING,
+    PREFS_BUTTON_PARASPACING,
     PREFS_BUTTON_PUBLISHER_TEXT_INDENT,
     PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS,
 };
-static const int kBookStylePage2ButtonCount = 2;
+static const int kBookStylePage2ButtonCount = 5;
 static const int PREFS_ROW_X = 5;
 static const int PREFS_ROW_W = 230;
 static const u32 kGoToPageCoarseStep = 10;
+static const int kLineSpacingMaxPx = 16;
 
 static bool CurrentBookShowsLineWrapFix(Book *book, bool is_book_ctx);
 
@@ -175,21 +180,16 @@ static bool CurrentBookCanGoToPage(Book *book, bool is_book_ctx) {
 }
 
 static bool CurrentBookHasExtraPrefsPage(Book *book, bool is_book_ctx) {
-  return CurrentBookShowsLineWrapFix(book, is_book_ctx) ||
-         CurrentBookUsesTextLayoutSettings(book, is_book_ctx);
+  return CurrentBookUsesTextLayoutSettings(book, is_book_ctx);
 }
 
 static int BookPage2ButtonCount(Book *book, bool is_book_ctx) {
-  if (CurrentBookShowsLineWrapFix(book, is_book_ctx))
-    return 1;
   if (CurrentBookUsesTextLayoutSettings(book, is_book_ctx))
     return kBookStylePage2ButtonCount;
   return 0;
 }
 
 static int BookPage2ButtonForSlot(Book *book, bool is_book_ctx, int slot) {
-  if (CurrentBookShowsLineWrapFix(book, is_book_ctx))
-    return PREFS_BUTTON_LIBRARY_VIEW;
   if (slot >= 0 && slot < kBookStylePage2ButtonCount)
     return kBookStylePage2Buttons[slot];
   return kBookStylePage2Buttons[0];
@@ -215,6 +215,18 @@ static int CycleBookOverride(int current) {
   if (current == 0)
     return 1;
   return -1;
+}
+
+static int EffectiveBookFontSize(App *app, Book *book) {
+  if (book && book->GetStyleFontSizeOverride() >= 0)
+    return book->GetStyleFontSizeOverride();
+  return app ? app->reader_font_size : 12;
+}
+
+static int EffectiveBookLineSpacing(App *app, Book *book) {
+  if (book && book->GetStyleLineSpacingOverride() >= 0)
+    return book->GetStyleLineSpacingOverride();
+  return app ? app->reader_line_spacing : 0;
 }
 
 static void TogglePublisherTextIndentSetting(App *app, Book *book, bool is_book_ctx) {
@@ -272,9 +284,7 @@ int SettingsController::EffectiveButtonForSlot(int slot) const {
 
 void SettingsController::GoToPrefsPage(int page) {
   prefs_general_page_ = page;
-  const int new_count = EffectiveVisibleCount();
-  int new_sel = page == 1 ? 0 : (new_count > 0 ? new_count - 1 : 0);
-  app_.SetPrefsSelectedIndex(new_sel);
+  app_.SetPrefsSelectedIndex(0);
   app_.MarkPrefsDirty();
 }
 
@@ -320,7 +330,9 @@ u8 SettingsController::PrefsVisibleButtonCount() const {
 
 void SettingsController::PrefsInit() {
   const std::vector<std::string> labels{
-      "font configuration", "font size",    "paragraph spacing",
+      "style customization",
+      "font configuration", "font size",    "extra line spacing",
+      "extra paragraph spacing",
       "screen orientation", "clock format", "color mode", "library view",
       "circle pad pages",   "index",        "bookmarks", "reset settings",
       "clear cache",        "publisher indent", "publisher margins"};
@@ -365,11 +377,18 @@ void SettingsController::PrefsDraw() {
   ClampSelectedIndex(&selected_index, visibleCount);
   app_.SetPrefsSelectedIndex(selected_index);
 
+  PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
+  PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
+  PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
+  PrefsRefreshButton(PREFS_BUTTON_STYLE_CUSTOMIZATION);
+  PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
   PrefsRefreshButton(PREFS_BUTTON_TIME24H);
   PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
+  PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_TEXT_INDENT);
+  PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS);
 
   for (int slot = 0; slot < visibleCount; slot++) {
     const int button_id = EffectiveButtonForSlot(slot);
@@ -382,8 +401,8 @@ void SettingsController::PrefsDraw() {
     go_to_page_dialog_.Draw();
 
   const bool book_ctx = app_.IsBookSettingsContext();
-  const bool book_extra_page =
-      CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), book_ctx);
+  const bool has_submenu =
+      !book_ctx || CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), book_ctx);
   const bool general_paged = !book_ctx;
   if (book_ctx) {
     SyncLibraryButtonLayout(&app_.buttonprefs, false, true);
@@ -391,8 +410,8 @@ void SettingsController::PrefsDraw() {
     button_prefs_library_.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
     button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
     button_prefs_library_.Draw(ts->screenright);
-    if (book_extra_page) {
-      button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "next" : "prev");
+    if (has_submenu) {
+      button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "style" : "back");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
       button_prefs_page_nav_.Draw(ts->screenright);
     }
@@ -400,10 +419,10 @@ void SettingsController::PrefsDraw() {
     SyncLibraryButtonLayout(&app_.buttonprefs, true, false);
     app_.buttonprefs.Draw(ts->screenright);
     if (prefs_general_page_ == 0) {
-      button_prefs_page_nav_.Label("next");
+      button_prefs_page_nav_.Label("style");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
     } else {
-      button_prefs_page_nav_.Label("prev");
+      button_prefs_page_nav_.Label("back");
       button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
     }
     button_prefs_page_nav_.Draw(ts->screenright);
@@ -474,8 +493,8 @@ void SettingsController::PrefsHandleEvent() {
   app_.SetPrefsSelectedIndex(selected_index);
   const int selected_button = EffectiveButtonForSlot(app_.GetPrefsSelectedIndex());
   const bool book_ctx = app_.IsBookSettingsContext();
-  const bool book_extra_page =
-      CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), book_ctx);
+  const bool has_submenu =
+      !book_ctx || CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), book_ctx);
 
   if (go_to_page_dialog_.IsOpen()) {
     if (keys & KEY_A) {
@@ -518,16 +537,14 @@ void SettingsController::PrefsHandleEvent() {
     if (app_.GetPrefsSelectedIndex() > 0) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() - 1);
       app_.MarkPrefsDirty();
-    } else if (prefs_general_page_ == 1 &&
-               (!book_ctx || book_extra_page)) {
+    } else if (prefs_general_page_ == 1 && has_submenu) {
       GoToPrefsPage(0);
     }
   } else if (keys & (app_.key.right | app_.key.r)) {
     if (app_.GetPrefsSelectedIndex() < visibleCount - 1) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() + 1);
       app_.MarkPrefsDirty();
-    } else if (prefs_general_page_ == 0 &&
-               (!book_ctx || book_extra_page)) {
+    } else if (prefs_general_page_ == 0 && has_submenu) {
       GoToPrefsPage(1);
     }
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
@@ -536,6 +553,12 @@ void SettingsController::PrefsHandleEvent() {
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
              (keys & app_.key.down)) {
     PrefsIncreasePixelSize();
+  } else if (selected_button == PREFS_BUTTON_LINE_SPACING &&
+             (keys & app_.key.up)) {
+    PrefsDecreaseLineSpacing();
+  } else if (selected_button == PREFS_BUTTON_LINE_SPACING &&
+             (keys & app_.key.down)) {
+    PrefsIncreaseLineSpacing();
   } else if (selected_button == PREFS_BUTTON_PARASPACING &&
              (keys & app_.key.up)) {
     PrefsDecreaseParaspacing();
@@ -554,13 +577,14 @@ void SettingsController::PrefsHandleTouch() {
   const int footerY = (int)coord.py;
 
   const bool book_ctx_touch = app_.IsBookSettingsContext();
-  const bool book_extra_page =
+  const bool has_submenu =
+      !book_ctx_touch ||
       CurrentBookHasExtraPrefsPage(app_.GetCurrentBook(), book_ctx_touch);
   SyncLibraryButtonLayout(&app_.buttonprefs, !book_ctx_touch, book_ctx_touch);
   if (book_ctx_touch) {
     button_prefs_library_.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
     button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
-    if (book_extra_page)
+    if (has_submenu)
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
   }
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
@@ -589,7 +613,7 @@ void SettingsController::PrefsHandleTouch() {
     return;
   }
 
-  if ((book_ctx_touch && book_extra_page &&
+  if ((book_ctx_touch && has_submenu &&
        enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) ||
       (!book_ctx_touch &&
        enclosesWithSlack(button_prefs_page_nav_, footerX, footerY))) {
@@ -613,6 +637,13 @@ void SettingsController::PrefsHandleTouch() {
           PrefsIncreasePixelSize();
         } else {
           PrefsDecreasePixelSize();
+        }
+      } else if (button_id == PREFS_BUTTON_LINE_SPACING) {
+        int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
+        if (coord.px >= centerX) {
+          PrefsIncreaseLineSpacing();
+        } else {
+          PrefsDecreaseLineSpacing();
         }
       } else if (button_id == PREFS_BUTTON_PARASPACING) {
         int centerX = PREFS_ROW_X + PREFS_ROW_W / 2;
@@ -639,8 +670,19 @@ void SettingsController::PrefsIncreasePixelSize() {
   if (app_.IsBookSettingsContext() &&
       !CurrentBookUsesTextLayoutSettings(app_.GetCurrentBook(), true))
     return;
-  if (app_.ts->pixelsize < kTextPixelSizeMax) {
-    app_.ts->SetPixelSize(app_.ts->pixelsize + 1);
+  Book *book = app_.GetCurrentBook();
+  if (app_.IsBookSettingsContext() && book) {
+    int value = EffectiveBookFontSize(&app_, book);
+    if (value < kTextPixelSizeMax) {
+      book->SetStyleFontSizeOverride(value + 1);
+      app_.ts->SetPixelSize((u8)(value + 1));
+      app_.MarkBookLayoutDirty();
+      PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
+      app_.prefs->Write();
+    }
+  } else if (app_.reader_font_size < kTextPixelSizeMax) {
+    app_.reader_font_size++;
+    app_.ts->SetPixelSize((u8)app_.reader_font_size);
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
     app_.prefs->Write();
@@ -651,10 +693,67 @@ void SettingsController::PrefsDecreasePixelSize() {
   if (app_.IsBookSettingsContext() &&
       !CurrentBookUsesTextLayoutSettings(app_.GetCurrentBook(), true))
     return;
-  if (app_.ts->pixelsize > kTextPixelSizeMin) {
-    app_.ts->SetPixelSize(app_.ts->pixelsize - 1);
+  Book *book = app_.GetCurrentBook();
+  if (app_.IsBookSettingsContext() && book) {
+    int value = EffectiveBookFontSize(&app_, book);
+    if (value > kTextPixelSizeMin) {
+      book->SetStyleFontSizeOverride(value - 1);
+      app_.ts->SetPixelSize((u8)(value - 1));
+      app_.MarkBookLayoutDirty();
+      PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
+      app_.prefs->Write();
+    }
+  } else if (app_.reader_font_size > kTextPixelSizeMin) {
+    app_.reader_font_size--;
+    app_.ts->SetPixelSize((u8)app_.reader_font_size);
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
+    app_.prefs->Write();
+  }
+}
+
+void SettingsController::PrefsIncreaseLineSpacing() {
+  if (app_.IsBookSettingsContext() &&
+      !CurrentBookUsesTextLayoutSettings(app_.GetCurrentBook(), true))
+    return;
+  Book *book = app_.GetCurrentBook();
+  if (app_.IsBookSettingsContext() && book) {
+    int value = EffectiveBookLineSpacing(&app_, book);
+    if (value < kLineSpacingMaxPx) {
+      book->SetStyleLineSpacingOverride(value + 1);
+      app_.ts->linespacing = value + 1;
+      app_.MarkBookLayoutDirty();
+      PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
+      app_.prefs->Write();
+    }
+  } else if (app_.reader_line_spacing < kLineSpacingMaxPx) {
+    app_.reader_line_spacing++;
+    app_.ts->linespacing = app_.reader_line_spacing;
+    app_.MarkBookLayoutDirty();
+    PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
+    app_.prefs->Write();
+  }
+}
+
+void SettingsController::PrefsDecreaseLineSpacing() {
+  if (app_.IsBookSettingsContext() &&
+      !CurrentBookUsesTextLayoutSettings(app_.GetCurrentBook(), true))
+    return;
+  Book *book = app_.GetCurrentBook();
+  if (app_.IsBookSettingsContext() && book) {
+    int value = EffectiveBookLineSpacing(&app_, book);
+    if (value > 0) {
+      book->SetStyleLineSpacingOverride(value - 1);
+      app_.ts->linespacing = value - 1;
+      app_.MarkBookLayoutDirty();
+      PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
+      app_.prefs->Write();
+    }
+  } else if (app_.reader_line_spacing > 0) {
+    app_.reader_line_spacing--;
+    app_.ts->linespacing = app_.reader_line_spacing;
+    app_.MarkBookLayoutDirty();
+    PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
     app_.prefs->Write();
   }
 }
@@ -723,26 +822,70 @@ void SettingsController::PrefsRefreshButton(int index) {
     app_.prefsButtons[PREFS_BUTTON_FONT_CONFIG].SetLabel2(
         std::string("open menu >"));
     break;
+  case PREFS_BUTTON_STYLE_CUSTOMIZATION:
+    app_.prefsButtons[PREFS_BUTTON_STYLE_CUSTOMIZATION].SetLabel1(
+        is_book_ctx ? std::string("book style customization")
+                    : std::string("global style customization"));
+    if (is_book_ctx && book && !book->UsesTextLayoutSettings()) {
+      app_.prefsButtons[PREFS_BUTTON_STYLE_CUSTOMIZATION].SetLabel2(
+          std::string("(PDF fixed)"));
+    } else {
+      app_.prefsButtons[PREFS_BUTTON_STYLE_CUSTOMIZATION].SetLabel2(
+          std::string(">"));
+    }
+    break;
   case PREFS_BUTTON_FONTSIZE:
     if (is_book_ctx && book && !book->UsesTextLayoutSettings()) {
       app_.prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string("(PDF fixed)"));
+    } else if (is_book_ctx && book &&
+               book->GetStyleFontSizeOverride() < 0) {
+      snprintf(msg, sizeof(msg), "                  inherit < %d >",
+               app_.reader_font_size);
+      app_.prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string(msg));
     } else {
       snprintf(msg, sizeof(msg), "                        < %d >  ",
-               app_.ts->GetPixelSize());
+               is_book_ctx && book ? EffectiveBookFontSize(&app_, book)
+                                   : app_.reader_font_size);
       app_.prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(std::string(msg));
     }
     break;
+  case PREFS_BUTTON_LINE_SPACING:
+    app_.prefsButtons[PREFS_BUTTON_LINE_SPACING].SetLabel1(
+        std::string("extra line spacing"));
+    if (is_book_ctx && book && !book->UsesTextLayoutSettings()) {
+      app_.prefsButtons[PREFS_BUTTON_LINE_SPACING].SetLabel2(
+          std::string("(PDF fixed)"));
+    } else if (is_book_ctx && book &&
+               book->GetStyleLineSpacingOverride() < 0) {
+      snprintf(msg, sizeof(msg), "        inherit < %d pixels >",
+               app_.reader_line_spacing);
+      app_.prefsButtons[PREFS_BUTTON_LINE_SPACING].SetLabel2(
+          std::string(msg));
+    } else {
+      snprintf(msg, sizeof(msg), "               < %d pixels >  ",
+               is_book_ctx && book ? EffectiveBookLineSpacing(&app_, book)
+                                   : app_.reader_line_spacing);
+      app_.prefsButtons[PREFS_BUTTON_LINE_SPACING].SetLabel2(
+          std::string(msg));
+    }
+    break;
   case PREFS_BUTTON_PARASPACING:
+    app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel1(
+        std::string("extra paragraph spacing"));
     if (is_book_ctx && book && !book->UsesTextLayoutSettings()) {
       app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(
           std::string("(PDF fixed)"));
     } else if (is_book_ctx && book &&
-               book->GetStyleParagraphSpacingOverride() >= 0) {
-      snprintf(msg, sizeof(msg), "                         < %d >  ",
+               book->GetStyleParagraphSpacingOverride() < 0) {
+      snprintf(msg, sizeof(msg), "          inherit < %d lines >",
+               app_.paraspacing);
+      app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
+    } else if (is_book_ctx && book) {
+      snprintf(msg, sizeof(msg), "                 < %d lines >  ",
                book->GetStyleParagraphSpacingOverride());
       app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
     } else {
-      snprintf(msg, sizeof(msg), "                         < %d >  ", app_.paraspacing);
+      snprintf(msg, sizeof(msg), "                 < %d lines >  ", app_.paraspacing);
       app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(std::string(msg));
     }
     break;
@@ -965,8 +1108,11 @@ void SettingsController::ClearAllCaches() {
 void SettingsController::ResetToDefaults() {
   if (!app_.prefs)
     return;
+  app_.reader_font_size = 12;
+  app_.reader_line_spacing = 0;
   app_.ts->SetPixelSize(12);
-  app_.paraspacing = 1;
+  app_.ts->linespacing = app_.reader_line_spacing;
+  app_.paraspacing = 0;
   app_.paraindent = 0;
   app_.publisher_text_indent = true;
   app_.publisher_block_margins = true;
@@ -995,6 +1141,17 @@ void SettingsController::PrefsHandlePress() {
   if (selected_button == PREFS_BUTTON_ORIENTATION) {
     PrefsFlipOrientation();
     app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_STYLE_CUSTOMIZATION) {
+    if (is_book_ctx && (!book || !book->UsesTextLayoutSettings())) {
+      app_.PrintStatus("Style settings unavailable for fixed-layout books");
+      PrefsRefreshButton(PREFS_BUTTON_STYLE_CUSTOMIZATION);
+      app_.MarkPrefsDirty();
+    } else {
+      GoToPrefsPage(1);
+    }
     return;
   }
 
@@ -1063,33 +1220,17 @@ void SettingsController::PrefsHandlePress() {
 
   if (selected_button == PREFS_BUTTON_INDEX) {
     Book *selected = app_.GetSelectedBook();
-    DBG_LOGF(
-        (&app_),
-        "PREFS index press from_book=%d cur=%p sel=%p cur_fmt=%d sel_fmt=%d cur_ch=%u sel_ch=%u",
-        is_book_ctx ? 1 : 0, (void *)book, (void *)selected,
-        book ? (int)book->format : -1, selected ? (int)selected->format : -1,
-        book ? (unsigned)book->GetChapters().size() : 0u,
-        selected ? (unsigned)selected->GetChapters().size() : 0u);
-    DBG_LOG((&app_), "PREFS index eval begin");
     const bool can_open_current = CanOpenBookIndexInCurrentContext(book, is_book_ctx);
     const bool can_open_selected = CanOpenSelectedBookIndex(selected);
-    DBG_LOGF((&app_), "PREFS index eval current=%d selected=%d",
-             can_open_current ? 1 : 0, can_open_selected ? 1 : 0);
     if (can_open_current) {
-      DBG_LOG((&app_), "PREFS index action=open current");
       app_.ShowChaptersView();
-      DBG_LOG((&app_), "PREFS index action=open current done");
     } else if (can_open_selected) {
-      DBG_LOG((&app_), "PREFS index action=open selected");
       app_.OpenBook();
-      DBG_LOG((&app_), "PREFS index action=open selected done");
     } else {
-      DBG_LOG((&app_), "PREFS index action=unavailable");
       app_.PrintStatus("Index unavailable for this book");
       PrefsRefreshButton(PREFS_BUTTON_INDEX);
       app_.MarkPrefsDirty();
     }
-    DBG_LOG((&app_), "PREFS index eval end");
     return;
   }
 

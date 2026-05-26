@@ -85,6 +85,8 @@ Book::Book(const BookContext &c) : ctx(c) {
   mobi_page_cache_save_pending = false;
   mobi_line_wrap_fix = false;
   parsed_with_mobi_line_wrap_fix = false;
+  style_font_size_override = -1;
+  style_line_spacing_override = -1;
   style_paragraph_spacing_override = -1;
   style_publisher_text_indent_override = -1;
   style_publisher_block_margins_override = -1;
@@ -135,6 +137,22 @@ int Book::GetParagraphSpacing() {
 
 int Book::GetParagraphIndent() {
   return ctx.paragraph_indent ? *ctx.paragraph_indent : 0;
+}
+
+int Book::GetStyleFontSizeOverride() const {
+  return style_font_size_override;
+}
+
+void Book::SetStyleFontSizeOverride(int value) {
+  style_font_size_override = value;
+}
+
+int Book::GetStyleLineSpacingOverride() const {
+  return style_line_spacing_override;
+}
+
+void Book::SetStyleLineSpacingOverride(int value) {
+  style_line_spacing_override = value;
 }
 
 bool Book::GetPublisherTextIndentEnabled() const {

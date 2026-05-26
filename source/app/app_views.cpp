@@ -72,6 +72,8 @@ void App::ShowLibraryView()
     book_renderer::CancelFixedLayoutDeferredWork(bookcurrent_);
   }
 
+  ts->SetPixelSize((u8)reader_font_size);
+  ts->linespacing = reader_line_spacing;
   ResetBrowserMarquee();
   ResetPageRepeat();
   nav_.mode = AppMode::Browser;

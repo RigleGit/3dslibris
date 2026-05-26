@@ -32,6 +32,18 @@
 
 #define PARSEBUFSIZE 1024 * 64
 
+namespace {
+
+static int ClampLineSpacingSetting(int value) {
+  if (value < 0)
+    return 0;
+  if (value > 16)
+    return 16;
+  return value;
+}
+
+}
+
 namespace xml::prefs {
 
 void start(void *data, const XML_Char *name, const XML_Char **attr) {
@@ -71,6 +83,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "spacing"))
         app->paraspacing = atoi(attr[i + 1]);
+      if (!strcmp(attr[i], "lineSpacing")) {
+        app->reader_line_spacing = ClampLineSpacingSetting(atoi(attr[i + 1]));
+        ts->linespacing = app->reader_line_spacing;
+      }
       if (!strcmp(attr[i], "indent"))
         app->paraindent = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "publisherTextIndent"))
@@ -91,8 +107,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       ts->ClearFallbackFonts();
 
     for (i = 0; attr[i]; i += 2) {
-      if (!strcmp(attr[i], "size"))
-        ts->SetPixelSize((u8)ClampTextPixelSize(atoi(attr[i + 1])));
+      if (!strcmp(attr[i], "size")) {
+        app->reader_font_size = ClampTextPixelSize(atoi(attr[i + 1]));
+        ts->SetPixelSize((u8)app->reader_font_size);
+      }
       else if (!strcmp(attr[i], "fallback1") && strlen(attr[i + 1]))
         ts->SetFallbackFontFile(0, attr[i + 1]);
       else if (!strcmp(attr[i], "fallback2") && strlen(attr[i + 1]))
@@ -132,6 +150,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     current = false;
     position = 0;
     bool mobi_line_wrap_fix = false;
+    int style_font_size = -1;
+    int style_line_spacing = -1;
     int style_paragraph_spacing = -1;
     int style_publisher_text_indent = -1;
     int style_publisher_block_margins = -1;
@@ -144,6 +164,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         position = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "mobiLineWrapFix"))
         mobi_line_wrap_fix = atoi(attr[i + 1]) != 0;
+      if (!strcmp(attr[i], "fontSize"))
+        style_font_size = ClampTextPixelSize(atoi(attr[i + 1]));
+      if (!strcmp(attr[i], "lineSpacing"))
+        style_line_spacing = ClampLineSpacingSetting(atoi(attr[i + 1]));
       if (!strcmp(attr[i], "paragraphSpacing"))
         style_paragraph_spacing = atoi(attr[i + 1]);
       if (!strcmp(attr[i], "publisherTextIndent"))
@@ -162,7 +186,11 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     // Subsequent <bookmark> tags attach to p->book until </book>.
     Book *matched = NULL;
     if (current) {
-      matched = app->RestoreSavedBookSelection(folder, filename);
+      p->prefs->SetPendingCurrentBookRestore(
+          folder, filename, position, mobi_line_wrap_fix,
+          style_font_size, style_line_spacing,
+          style_paragraph_spacing, style_publisher_text_indent,
+          style_publisher_block_margins);
     } else {
       std::vector<Book *>::iterator it;
       for (it = app->books.begin(); it < app->books.end(); it++) {
@@ -180,6 +208,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       p->book = matched;
       // Per-book render fixes live alongside progress/bookmarks in prefs.
       matched->SetMobiLineWrapFix(mobi_line_wrap_fix);
+      matched->SetStyleFontSizeOverride(style_font_size);
+      matched->SetStyleLineSpacingOverride(style_line_spacing);
       matched->SetStyleParagraphSpacingOverride(style_paragraph_spacing);
       matched->SetStylePublisherTextIndentOverride(style_publisher_text_indent);
       matched->SetStylePublisherBlockMarginsOverride(style_publisher_block_margins);
@@ -201,6 +231,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
 
     if (p->book) {
       p->book->GetBookmarks().push_back(position - 1);
+    } else if (p->prefs) {
+      p->prefs->AddPendingCurrentBookBookmark(position - 1);
     }
   } else if (!strcmp(name, "margin")) {
     for (i = 0; attr[i]; i += 2) {
@@ -240,8 +272,11 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
 void end(void *data, const char *name) {
   //! Exit element callback for the prefs file.
   parsedata_t *p = (parsedata_t *)data;
-  if (!strcmp(name, "book"))
+  if (!strcmp(name, "book")) {
     p->book = NULL;
+    if (p->prefs)
+      p->prefs->EndPendingCurrentBookRestoreEntry();
+  }
 }
 
 } // namespace xml::prefs
@@ -297,6 +332,7 @@ Prefs::~Prefs() {}
 //! failure.
 int Prefs::Read() {
   int err = 0;
+  ClearPendingCurrentBookRestore();
 
   FILE *fp = fopen(paths::GetPrefsFile().c_str(), "r");
   if (!fp) {
@@ -329,6 +365,81 @@ void Prefs::Apply() {
     std::swap(app->key.l, app->key.r);
     std::swap(app->key.zl, app->key.zr);
   }
+}
+
+void Prefs::ClearPendingCurrentBookRestore() {
+  pending_current_book_restore = false;
+  collecting_pending_current_book = false;
+  pending_current_folder.clear();
+  pending_current_filename.clear();
+  pending_current_position = 0;
+  pending_current_mobi_line_wrap_fix = false;
+  pending_current_style_font_size = -1;
+  pending_current_style_line_spacing = -1;
+  pending_current_style_paragraph_spacing = -1;
+  pending_current_style_publisher_text_indent = -1;
+  pending_current_style_publisher_block_margins = -1;
+  pending_current_bookmarks.clear();
+}
+
+void Prefs::SetPendingCurrentBookRestore(
+    const char *folder, const char *filename, int position,
+    bool mobi_line_wrap_fix, int style_font_size, int style_line_spacing,
+    int style_paragraph_spacing,
+    int style_publisher_text_indent, int style_publisher_block_margins) {
+  pending_current_book_restore = filename && filename[0];
+  collecting_pending_current_book = pending_current_book_restore;
+  pending_current_folder = folder ? folder : "";
+  pending_current_filename = filename ? filename : "";
+  pending_current_position = position;
+  pending_current_mobi_line_wrap_fix = mobi_line_wrap_fix;
+  pending_current_style_font_size = style_font_size;
+  pending_current_style_line_spacing = style_line_spacing;
+  pending_current_style_paragraph_spacing = style_paragraph_spacing;
+  pending_current_style_publisher_text_indent = style_publisher_text_indent;
+  pending_current_style_publisher_block_margins =
+      style_publisher_block_margins;
+  pending_current_bookmarks.clear();
+}
+
+void Prefs::AddPendingCurrentBookBookmark(uint16_t page) {
+  if (collecting_pending_current_book)
+    pending_current_bookmarks.push_back(page);
+}
+
+void Prefs::EndPendingCurrentBookRestoreEntry() {
+  collecting_pending_current_book = false;
+}
+
+bool Prefs::ApplyPendingCurrentBookRestore() {
+  if (!pending_current_book_restore || !app)
+    return false;
+
+  Book *matched = app->RestoreSavedBookSelection(
+      pending_current_folder.c_str(), pending_current_filename.c_str());
+  if (!matched) {
+    ClearPendingCurrentBookRestore();
+    return false;
+  }
+
+  matched->SetMobiLineWrapFix(pending_current_mobi_line_wrap_fix);
+  matched->SetStyleFontSizeOverride(pending_current_style_font_size);
+  matched->SetStyleLineSpacingOverride(pending_current_style_line_spacing);
+  matched->SetStyleParagraphSpacingOverride(
+      pending_current_style_paragraph_spacing);
+  matched->SetStylePublisherTextIndentOverride(
+      pending_current_style_publisher_text_indent);
+  matched->SetStylePublisherBlockMarginsOverride(
+      pending_current_style_publisher_block_margins);
+  if (pending_current_position)
+    matched->SetPosition(pending_current_position - 1);
+  for (size_t i = 0; i < pending_current_bookmarks.size(); i++)
+    matched->GetBookmarks().push_back(pending_current_bookmarks[i]);
+
+  app->SetCurrentBook(matched);
+  app->SetSelectedBook(matched);
+  ClearPendingCurrentBookRestore();
+  return true;
 }
 
 //! Write settings to prefs file.
@@ -387,7 +498,7 @@ int Prefs::Write() {
           "%s=\"%s\" %s=\"%s\" %s=\"%s\" %s=\"%s\" %s=\"%s\" "
           "%s=\"%s\" fallback1=\"%s\" "
           "fallback2=\"%s\" fallback3=\"%s\" fallback4=\"%s\" />\n",
-          ts ? ts->GetPixelSize() : 12,
+          app ? app->reader_font_size : (ts ? ts->GetPixelSize() : 12),
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_REGULAR),
           font_regular.c_str(),
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_BOLD),
@@ -408,8 +519,8 @@ int Prefs::Write() {
           font_mono_bolditalic.c_str(), fallback1.c_str(), fallback2.c_str(),
           fallback3.c_str(), fallback4.c_str());
   fprintf(fp,
-          "\t<paragraph indent=\"%d\" spacing=\"%d\" publisherTextIndent=\"%d\" publisherBlockMargins=\"%d\" />\n",
-          app->paraindent, app->paraspacing,
+          "\t<paragraph indent=\"%d\" spacing=\"%d\" lineSpacing=\"%d\" publisherTextIndent=\"%d\" publisherBlockMargins=\"%d\" />\n",
+          app->paraindent, app->paraspacing, app->reader_line_spacing,
           app->publisher_text_indent ? 1 : 0,
           app->publisher_block_margins ? 1 : 0);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);
@@ -427,6 +538,12 @@ int Prefs::Write() {
     // Only persist the override when enabled so old prefs stay readable.
     if (book->GetMobiLineWrapFix())
       fprintf(fp, " mobiLineWrapFix=\"1\"");
+    if (book->GetStyleFontSizeOverride() >= 0)
+      fprintf(fp, " fontSize=\"%d\"",
+              book->GetStyleFontSizeOverride());
+    if (book->GetStyleLineSpacingOverride() >= 0)
+      fprintf(fp, " lineSpacing=\"%d\"",
+              book->GetStyleLineSpacingOverride());
     if (book->GetStyleParagraphSpacingOverride() >= 0)
       fprintf(fp, " paragraphSpacing=\"%d\"",
               book->GetStyleParagraphSpacingOverride());
@@ -464,4 +581,5 @@ void Prefs::Init() {
   browser_view_mode = BROWSER_VIEW_GALLERY;
   fixed_layout_rtl = false;
   circle_pad_page_turn = true;
+  ClearPendingCurrentBookRestore();
 }

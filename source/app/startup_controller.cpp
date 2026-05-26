@@ -349,6 +349,9 @@ int StartupController::RunBootSequence()
   app_.StartupInitUiAndBrowser();
   boot_trace::Boot("startup init browser done");
 
+  if (app_.prefs)
+    app_.prefs->ApplyPendingCurrentBookRestore();
+
   DBG_LOG(&app_, VERSION);
 
   Book *current_book = app_.GetCurrentBook();
