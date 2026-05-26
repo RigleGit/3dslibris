@@ -85,6 +85,11 @@ Book::Book(const BookContext &c) : ctx(c) {
   mobi_page_cache_save_pending = false;
   mobi_line_wrap_fix = false;
   parsed_with_mobi_line_wrap_fix = false;
+  style_font_size_override = -1;
+  style_line_spacing_override = -1;
+  style_paragraph_spacing_override = -1;
+  style_publisher_text_indent_override = -1;
+  style_publisher_block_margins_override = -1;
   browser_display_name_cached = false;
   browser_folder_entry = false;
   inline_image_zip_index_built = false;
@@ -105,12 +110,6 @@ Book::Book(const BookContext &c) : ctx(c) {
 // closing the book if it's still open. Also logs the book closure if a status
 // reporter is available.
 Book::~Book() {
-#ifdef DSLIBRIS_DEBUG
-  if (GetStatusReporter()) {
-    DBG_LOGF(GetStatusReporter(), "BOOK ~Book: path=%s/%s", foldername.c_str(),
-             filename.c_str());
-  }
-#endif
   Close();
   if (coverPixels) {
     delete[] coverPixels;
@@ -131,11 +130,65 @@ Prefs *Book::GetPrefs() {
 }
 
 int Book::GetParagraphSpacing() {
+  if (style_paragraph_spacing_override >= 0)
+    return style_paragraph_spacing_override;
   return ctx.paragraph_spacing ? *ctx.paragraph_spacing : 0;
 }
 
 int Book::GetParagraphIndent() {
   return ctx.paragraph_indent ? *ctx.paragraph_indent : 0;
+}
+
+int Book::GetStyleFontSizeOverride() const {
+  return style_font_size_override;
+}
+
+void Book::SetStyleFontSizeOverride(int value) {
+  style_font_size_override = value;
+}
+
+int Book::GetStyleLineSpacingOverride() const {
+  return style_line_spacing_override;
+}
+
+void Book::SetStyleLineSpacingOverride(int value) {
+  style_line_spacing_override = value;
+}
+
+bool Book::GetPublisherTextIndentEnabled() const {
+  if (style_publisher_text_indent_override >= 0)
+    return style_publisher_text_indent_override != 0;
+  return ctx.publisher_text_indent ? *ctx.publisher_text_indent : true;
+}
+
+bool Book::GetPublisherBlockMarginsEnabled() const {
+  if (style_publisher_block_margins_override >= 0)
+    return style_publisher_block_margins_override != 0;
+  return ctx.publisher_block_margins ? *ctx.publisher_block_margins : true;
+}
+
+int Book::GetStyleParagraphSpacingOverride() const {
+  return style_paragraph_spacing_override;
+}
+
+void Book::SetStyleParagraphSpacingOverride(int value) {
+  style_paragraph_spacing_override = value;
+}
+
+int Book::GetStylePublisherTextIndentOverride() const {
+  return style_publisher_text_indent_override;
+}
+
+void Book::SetStylePublisherTextIndentOverride(int value) {
+  style_publisher_text_indent_override = value;
+}
+
+int Book::GetStylePublisherBlockMarginsOverride() const {
+  return style_publisher_block_margins_override;
+}
+
+void Book::SetStylePublisherBlockMarginsOverride(int value) {
+  style_publisher_block_margins_override = value;
 }
 
 int Book::GetOrientation() {
@@ -630,8 +683,6 @@ void Book::FlushPendingCacheSaves() {
 }
 
 void Book::Close() {
-  IStatusReporter *r = GetStatusReporter();
-  DBG_LOGF(r, "BOOK close: begin book=%s", filename.c_str());
   const bool flush_pending_epub_cache =
       reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
           epub_page_cache_save_pending, IsAsyncReflowOpenPending(),
@@ -640,26 +691,17 @@ void Book::Close() {
       reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
           mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
           (unsigned int)GetPageCount());
-  DBG_LOGF(r, "BOOK close: cancel-async-reflow book=%s", filename.c_str());
   CancelAsyncReflowOpen();
   if (flush_pending_epub_cache) {
-    DBG_LOGF(r, "BOOK close: save-epub-cache begin pages=%d book=%s",
-             (int)pages.size(), filename.c_str());
     HomeButtonGuard home_guard;
     epub_page_cache::SavePending(this, true);
-    DBG_LOGF(r, "BOOK close: save-epub-cache done book=%s", filename.c_str());
   }
   if (flush_pending_mobi_cache) {
-    DBG_LOGF(r, "BOOK close: save-mobi-cache begin pages=%d book=%s",
-             (int)pages.size(), filename.c_str());
     HomeButtonGuard home_guard;
     mobi_page_cache::SavePending(this);
-    DBG_LOGF(r, "BOOK close: save-mobi-cache done book=%s", filename.c_str());
   }
   epub_page_cache_save_pending = false;
   mobi_page_cache_save_pending = false;
-  DBG_LOGF(r, "BOOK close: clear-pages count=%d book=%s", (int)pages.size(),
-           filename.c_str());
   std::vector<Page *>::iterator it = pages.begin();
   while (it != pages.end()) {
     delete *it;
@@ -669,11 +711,8 @@ void Book::Close() {
   {
     std::vector<Page *>().swap(pages);
   }
-  DBG_LOGF(r, "BOOK close: reset-reflow book=%s", filename.c_str());
   ResetReflowWorkerState();
-  DBG_LOGF(r, "BOOK close: reset-cbz book=%s", filename.c_str());
   ResetCbzState();
-  DBG_LOGF(r, "BOOK close: reset-mupdf book=%s", filename.c_str());
   ResetMuPdfState();
   {
     std::vector<ChapterEntry>().swap(chapters);
@@ -685,7 +724,6 @@ void Book::Close() {
   ClearTocConfidence();
   open_session_id_ = 0;
   open_abort_requested_ = false;
-  DBG_LOGF(r, "BOOK close: done book=%s", filename.c_str());
 }
 
 void Book::ResetCbzFailureState() {

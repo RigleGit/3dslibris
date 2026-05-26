@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>v2.7.1 Layout Regression Checks</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="pub-id">urn:uuid:3dslibris-v271-layout-checks</dc:identifier>
+    <dc:creator>Rigle Test</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"/>
+    <item id="css" href="styles/style.css" media-type="text/css"/>
+    <item id="wide" href="images/wide-photo.png" media-type="image/png"/>
+    <item id="banner" href="images/narrow-banner.png" media-type="image/png"/>
+    <item id="ch1" href="text/chapter-01-body-font.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/chapter-02-image-width.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch3" href="text/chapter-03-block-image.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch4" href="text/chapter-04-right-image.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch5" href="text/chapter-05-nested-margins.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch6" href="text/chapter-06-image-flow-fit.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch7" href="text/chapter-07-block-indent-overflow.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch8" href="text/chapter-08-epub-style-settings.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="nav"/>
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+    <itemref idref="ch3"/>
+    <itemref idref="ch4"/>
+    <itemref idref="ch5"/>
+    <itemref idref="ch6"/>
+    <itemref idref="ch7"/>
+    <itemref idref="ch8"/>
+  </spine>
+  <guide>
+    <reference type="toc" title="Contents" href="nav.xhtml"/>
+  </guide>
+</package>

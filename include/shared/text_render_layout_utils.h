@@ -100,6 +100,11 @@ inline bool CurrentLineBeyondReadingScreen(int pen_y, int max_height,
   return pen_y > (max_height - bottom_margin);
 }
 
+inline bool ShouldAdvanceAfterBandImage(int pen_y, int max_height,
+                                        int bottom_margin) {
+  return CurrentLineBeyondReadingScreen(pen_y, max_height, bottom_margin);
+}
+
 inline bool ShouldAdvanceParagraphStartGuard(bool current_line_fits,
                                              bool has_room_for_following_line,
                                              bool upcoming_fits_one_line) {

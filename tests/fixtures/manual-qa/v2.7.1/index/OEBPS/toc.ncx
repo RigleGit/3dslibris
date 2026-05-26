@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="urn:uuid:3dslibris-v271-index-check"/>
+    <meta name="dtb:depth" content="1"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+  </head>
+  <docTitle><text>v2.7.1 Index Position Check</text></docTitle>
+  <navMap>
+    <navPoint id="nav1" playOrder="1"><navLabel><text>Chapter 1: Start Here</text></navLabel><content src="text/chapter-01.xhtml#chapter-1"/></navPoint>
+    <navPoint id="nav2" playOrder="2"><navLabel><text>Chapter 2: Middle Entry</text></navLabel><content src="text/chapter-02.xhtml#chapter-2"/></navPoint>
+    <navPoint id="nav3" playOrder="3"><navLabel><text>Chapter 3: Another Entry</text></navLabel><content src="text/chapter-03.xhtml#chapter-3"/></navPoint>
+    <navPoint id="nav4" playOrder="4"><navLabel><text>Chapter 4: Open Index Here</text></navLabel><content src="text/chapter-04.xhtml#chapter-4"/></navPoint>
+    <navPoint id="nav5" playOrder="5"><navLabel><text>Chapter 5: Later Entry</text></navLabel><content src="text/chapter-05.xhtml#chapter-5"/></navPoint>
+    <navPoint id="nav6" playOrder="6"><navLabel><text>Chapter 6: Final Entry</text></navLabel><content src="text/chapter-06.xhtml#chapter-6"/></navPoint>
+  </navMap>
+</ncx>

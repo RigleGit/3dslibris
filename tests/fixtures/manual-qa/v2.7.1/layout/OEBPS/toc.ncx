@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="urn:uuid:3dslibris-v271-layout-checks"/>
+    <meta name="dtb:depth" content="1"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+  </head>
+  <docTitle><text>v2.7.1 Layout Regression Checks</text></docTitle>
+  <navMap>
+    <navPoint id="nav1" playOrder="1"><navLabel><text>#108 Body font-size baseline</text></navLabel><content src="text/chapter-01-body-font.xhtml#body-font"/></navPoint>
+    <navPoint id="nav2" playOrder="2"><navLabel><text>#106 Image width unaffected by text size</text></navLabel><content src="text/chapter-02-image-width.xhtml#image-width"/></navPoint>
+    <navPoint id="nav3" playOrder="3"><navLabel><text>#128 Wide block image placement</text></navLabel><content src="text/chapter-03-block-image.xhtml#block-image"/></navPoint>
+    <navPoint id="nav4" playOrder="4"><navLabel><text>#128 Right-aligned author-width image</text></navLabel><content src="text/chapter-04-right-image.xhtml#right-image"/></navPoint>
+    <navPoint id="nav5" playOrder="5"><navLabel><text>#84 Nested block margins</text></navLabel><content src="text/chapter-05-nested-margins.xhtml#nested-margins"/></navPoint>
+    <navPoint id="nav6" playOrder="6"><navLabel><text>Image flow fit diagnostic</text></navLabel><content src="text/chapter-06-image-flow-fit.xhtml#image-flow-fit"/></navPoint>
+    <navPoint id="nav7" playOrder="7"><navLabel><text>#77 Block indent across pages</text></navLabel><content src="text/chapter-07-block-indent-overflow.xhtml#block-indent-overflow"/></navPoint>
+    <navPoint id="nav8" playOrder="8"><navLabel><text>#108 EPUB style settings</text></navLabel><content src="text/chapter-08-epub-style-settings.xhtml#epub-style-settings"/></navPoint>
+  </navMap>
+</ncx>

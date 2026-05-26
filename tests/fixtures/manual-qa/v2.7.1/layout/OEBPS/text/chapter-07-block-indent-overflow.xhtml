@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>#77 Block indent across pages</title>
+  <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+</head>
+<body>
+  <h1 id="block-indent-overflow">#77 Block indent across pages</h1>
+  <p>Use EPUB block display, left orientation, and font size 12. Page until the indented lines cross a screen boundary.</p>
+  <div class="overflow-filler">
+    <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed euismod pellentesque orci mollis rhoncus. Fusce tristique pretium massa ut hendrerit.</p>
+    <p>Donec at sollicitudin augue. Nam auctor leo eget justo ultricies dictum. Quisque elit dui, fermentum ut laoreet at, pellentesque non libero.</p>
+    <p>Phasellus condimentum dui vitae nunc pretium porttitor. Etiam bibendum tincidunt efficitur. Ut sit amet fringilla urna.</p>
+    <p>Phasellus et arcu at eros rutrum auctor nec eget urna. Maecenas placerat mi facilisis est ultrices, nec interdum nulla molestie.</p>
+    <p>Vestibulum id erat scelerisque, tincidunt ipsum vel, sollicitudin enim. Nam in nisi libero. Aliquam erat volutpat.</p>
+    <p>Mauris ut nibh tempor, tincidunt dolor sed, sagittis ligula. Donec velit erat, pulvinar et nunc nec, gravida tincidunt arcu.</p>
+  </div>
+  <div class="indent-wrapper">
+    <p class="indent-line">Indent here</p>
+    <p class="indent-line">Indent there</p>
+    <p class="indent-line">Indent everywhere</p>
+    <p class="indent-line">All of these lines have indents including this one.</p>
+  </div>
+  <p>Expected: if an indented line starts at the top of a screen, it still keeps its indent and stays on its own line.</p>
+  <p>Regression: the first top-screen line was not indented and the next indented text was attached to it.</p>
+</body>
+</html>

@@ -7,6 +7,7 @@
 #include "ui/text_limits.h"
 
 #include <algorithm>
+#include <string.h>
 #include <math.h>
 
 namespace book_xml_parser_style_utils {
@@ -304,6 +305,20 @@ inline int ResolveBlockBottomLinefeeds(
   return ClampResolvedBlockLinefeeds(std::max(css_lf, default_lf + 1));
 }
 
+inline bool ShouldZeroMarginSuppressPendingSpacing(
+    const char *reason, bool pending_from_css, bool pending_suppress_only,
+    int pending_spacing_lf) {
+  if (!reason)
+    return true;
+  const size_t len = strlen(reason);
+  const bool is_top_margin =
+      len >= 4 && strcmp(reason + len - 4, "-top") == 0;
+  if (is_top_margin && pending_from_css && !pending_suppress_only &&
+      pending_spacing_lf > 0)
+    return false;
+  return true;
+}
+
 inline int ClampHeadingFontSize(int base_px, int px) {
   if (base_px <= 0)
     return px;
@@ -332,6 +347,12 @@ inline int DefaultHeadingFontSize(int base_px, int heading_level) {
   else if (heading_level == 3)
     multiplier = 1.15;
   return (int)floor((double)base_px * multiplier + 0.5);
+}
+
+inline bool ShouldApplyPublisherFontSizeToElement(const char *el) {
+  if (!el || !el[0])
+    return false;
+  return strcmp(el, "body") != 0 && strcmp(el, "html") != 0;
 }
 
 inline int ComputeHeadingFontSize(

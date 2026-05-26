@@ -42,6 +42,17 @@ static bool HasClassToken(const char *class_name, const char *token) {
   return ContainsToken(class_lc, token_lc);
 }
 
+static std::string RemoveAsciiWhitespace(const std::string &value) {
+  std::string out;
+  out.reserve(value.size());
+  for (size_t i = 0; i < value.size(); i++) {
+    const char c = value[i];
+    if (c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != '\f')
+      out.push_back(c);
+  }
+  return out;
+}
+
 static void ParseClassStyleFlagsInternal(
     const char *class_name, bool *bold_out, bool *italic_out,
     bool *underline_out, uint8_t *underline_style_out, bool *overline_out,
@@ -220,8 +231,14 @@ int ParseCssLengthPx(const char *v, int text_width, int font_px) {
 
 int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
                     int font_px) {
+  return ParseImgWidthPx(width_attr, style, text_width, font_px, font_px);
+}
+
+int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
+                    int font_px, int root_font_px) {
+  const int image_font_px = root_font_px > 0 ? root_font_px : font_px;
   if (width_attr && *width_attr) {
-    int px = ParseCssLengthPx(width_attr, text_width, font_px);
+    int px = ParseCssLengthPx(width_attr, text_width, image_font_px);
     if (px > 0)
       return px;
   }
@@ -232,7 +249,7 @@ int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
       pos += 6;
       while (pos < lc.size() && lc[pos] == ' ')
         pos++;
-      int px = ParseCssLengthPx(lc.c_str() + pos, text_width, font_px);
+      int px = ParseCssLengthPx(lc.c_str() + pos, text_width, image_font_px);
       if (px > 0)
         return px;
     }
@@ -291,28 +308,27 @@ void ParseInlineHiddenFlags(const char *style, bool *hidden_out) {
   if (!style || !hidden_out)
     return;
   const std::string style_lc = ToLowerAscii(std::string(style));
+  const std::string compact = RemoveAsciiWhitespace(style_lc);
 
-  if (ContainsNoCase(style_lc, "display:none") ||
-      ContainsNoCase(style_lc, "display: none") ||
-      ContainsNoCase(style_lc, "visibility:hidden") ||
-      ContainsNoCase(style_lc, "visibility: hidden") ||
-      ContainsNoCase(style_lc, "clip:rect(0,0,0,0)") ||
-      ContainsNoCase(style_lc, "clip: rect(0, 0, 0, 0)") ||
-      ContainsNoCase(style_lc, "clip-path:inset(50%)") ||
-      ContainsNoCase(style_lc, "clip-path: inset(50%)")) {
+  if (ContainsNoCase(compact, "display:none") ||
+      ContainsNoCase(compact, "visibility:hidden") ||
+      ContainsNoCase(compact, "clip:rect(0,0,0,0)") ||
+      ContainsNoCase(compact, "clip:rect(1px,1px,1px,1px)") ||
+      ContainsNoCase(compact, "clip:rect(0000)") ||
+      ContainsNoCase(compact, "clip-path:inset(50%)") ||
+      ContainsNoCase(compact, "clip-path:inset(100%)")) {
     *hidden_out = true;
     return;
   }
 
-  const bool tiny = (ContainsNoCase(style_lc, "width:1px") ||
-                     ContainsNoCase(style_lc, "width: 1px")) &&
-                    (ContainsNoCase(style_lc, "height:1px") ||
-                     ContainsNoCase(style_lc, "height: 1px"));
-  const bool offscreen = ContainsNoCase(style_lc, "position:absolute") ||
-                         ContainsNoCase(style_lc, "position: absolute");
-  const bool hidden_overflow = ContainsNoCase(style_lc, "overflow:hidden") ||
-                               ContainsNoCase(style_lc, "overflow: hidden");
-  if (tiny && offscreen && hidden_overflow)
+  const bool tiny =
+      ContainsNoCase(compact, "width:1px") &&
+      ContainsNoCase(compact, "height:1px");
+  const bool offscreen = ContainsNoCase(compact, "position:absolute");
+  const bool hidden_overflow = ContainsNoCase(compact, "overflow:hidden");
+  const bool clipped = ContainsNoCase(compact, "clip:rect(") ||
+                       ContainsNoCase(compact, "clip-path:inset(");
+  if (tiny && offscreen && (hidden_overflow || clipped))
     *hidden_out = true;
 }
 

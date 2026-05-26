@@ -35,6 +35,8 @@ int ParseCssLengthPx(const char *v, int text_width, int font_px);
 // Returns 0 if no usable constraint found.
 int ParseImgWidthPx(const char *width_attr, const char *style,
                     int text_width, int font_px);
+int ParseImgWidthPx(const char *width_attr, const char *style,
+                    int text_width, int font_px, int root_font_px);
 
 // ---------------------------------------------------------------------------
 // Inline style flags (bold, italic, underline, …)

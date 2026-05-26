@@ -127,6 +127,33 @@ static void LogResolvedBlockMargin(
 #endif
 }
 
+static void ApplyPublisherBlockMargins(
+    parsedata_t *p, Text *ts, const char **attr,
+    const epub_css_class_map::CssClassMargins &elem_css) {
+  if (!p || !p->book || !p->book->GetPublisherBlockMarginsEnabled())
+    return;
+  book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+}
+
+static book_xml_css_style_utils::MarginTopResult ParsePublisherElementMarginTop(
+    parsedata_t *p, const char **attr,
+    const epub_css_class_map::CssClassMargins &elem_css) {
+  if (!p || !p->book || !p->book->GetPublisherBlockMarginsEnabled())
+    return book_xml_css_style_utils::MarginTopResult();
+  return book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
+}
+
+static book_xml_css_style_utils::MarginTopResult
+ParsePublisherElementMarginBottom(
+    parsedata_t *p, const std::string &style, const std::string &klass,
+    const epub_css_class_map::CssClassMap &css_class_map,
+    const char *element_name) {
+  if (!p || !p->book || !p->book->GetPublisherBlockMarginsEnabled())
+    return book_xml_css_style_utils::MarginTopResult();
+  return book_xml_css_resolver::ParseElementMarginBottomWithClass(
+      style, klass, css_class_map, element_name);
+}
+
 static FlowEmissionFns MakeLocalFlowEmissionFns() {
   FlowEmissionFns f;
   f.advance_screen = [](parsedata_t *p) {
@@ -158,10 +185,10 @@ bool HandleBlockElementStart(
     parse_push(p, TAG_ASIDE);
     p->last_aside_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_aside_class = book_xml_css_resolver::ExtractClassAttr(attr);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+    ApplyPublisherBlockMargins(p, ts, attr, elem_css);
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "aside", "aside-top", mtr, line_h, 1);
@@ -170,10 +197,10 @@ bool HandleBlockElementStart(
     parse_push(p, TAG_BLOCKQUOTE);
     p->last_blockquote_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_blockquote_class = book_xml_css_resolver::ExtractClassAttr(attr);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+    ApplyPublisherBlockMargins(p, ts, attr, elem_css);
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "blockquote", "blockquote-top", mtr, line_h, 1);
@@ -182,10 +209,10 @@ bool HandleBlockElementStart(
     parse_push(p, TAG_CAPTION);
     p->last_caption_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_caption_class = book_xml_css_resolver::ExtractClassAttr(attr);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+    ApplyPublisherBlockMargins(p, ts, attr, elem_css);
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "caption", "caption-top", mtr, line_h, 1);
@@ -194,7 +221,7 @@ bool HandleBlockElementStart(
     parse_push(p, TAG_DD);
     p->last_dd_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_dd_class = book_xml_css_resolver::ExtractClassAttr(attr);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+    ApplyPublisherBlockMargins(p, ts, attr, elem_css);
     if (elem_css.margin_left.unit ==
         book_xml_css_style_utils::MarginTopResult::Unit::None) {
       const int space_advance = ts->GetAdvance(' ');
@@ -207,7 +234,7 @@ bool HandleBlockElementStart(
     }
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "dd", "dd-top", mtr, line_h, 1);
@@ -218,25 +245,25 @@ bool HandleBlockElementStart(
     parse_push(p, TAG_DIV);
     p->last_div_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_div_class = book_xml_css_resolver::ExtractClassAttr(attr);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+    ApplyPublisherBlockMargins(p, ts, attr, elem_css);
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "div", "div-top", mtr, line_h, 0);
     }
   } else if (!strcmp(el, "dt")) {
     parse_push(p, TAG_DT);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+    ApplyPublisherBlockMargins(p, ts, attr, elem_css);
   } else if (!strcmp(el, "figure")) {
     parse_push(p, TAG_FIGURE);
     p->last_figure_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_figure_class = book_xml_css_resolver::ExtractClassAttr(attr);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+    ApplyPublisherBlockMargins(p, ts, attr, elem_css);
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "figure", "figure-top", mtr, line_h, 1);
@@ -256,8 +283,8 @@ bool HandleBlockElementStart(
     p->bold = true;
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
-      book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
+      ApplyPublisherBlockMargins(p, ts, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !book_xml_screen_advance::Blankline(p) ? 2 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -284,8 +311,8 @@ bool HandleBlockElementStart(
     p->bold = true;
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
-      book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
+      ApplyPublisherBlockMargins(p, ts, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !book_xml_screen_advance::Blankline(p) ? 2 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -312,8 +339,8 @@ bool HandleBlockElementStart(
     p->bold = true;
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
-          book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
-      book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+          ParsePublisherElementMarginTop(p, attr, elem_css);
+      ApplyPublisherBlockMargins(p, ts, attr, elem_css);
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !book_xml_screen_advance::Blankline(p) ? 2 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
@@ -351,12 +378,14 @@ bool HandleBlockElementStart(
     const bool tight_block_paragraph = ParseInAnyEasyParagraphTightBlock(p);
     const bool can_apply_top_margin =
         !tight_list_paragraph && !tight_block_paragraph;
-    const book_xml_css_style_utils::MarginTopResult mtr =
-        book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+    book_xml_css_style_utils::MarginTopResult mtr;
+    if (p->book->GetPublisherBlockMarginsEnabled()) {
+      mtr = ParsePublisherElementMarginTop(p, attr, elem_css);
+      ApplyPublisherBlockMargins(p, ts, attr, elem_css);
+    }
     const int line_h = ts->GetHeight() + ts->linespacing;
     if (can_apply_top_margin) {
-      const int default_lf = p->book->GetParagraphSpacing();
+      const int default_lf = 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
           default_lf, mtr, line_h);
       LogResolvedBlockMargin(p, "p", "top", p->last_p_style,
@@ -386,8 +415,8 @@ bool HandleBlockElementStart(
     p->last_hr_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_hr_class = book_xml_css_resolver::ExtractClassAttr(attr);
     const book_xml_css_style_utils::MarginTopResult mtr =
-        book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
-    book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+        ParsePublisherElementMarginTop(p, attr, elem_css);
+    ApplyPublisherBlockMargins(p, ts, attr, elem_css);
     const int line_h = ts->GetHeight() + ts->linespacing;
     const int default_lf =
         !book_xml_screen_advance::Blankline(p) ? 1 : 0;
@@ -529,7 +558,6 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     return false;
 
   const FlowEmissionFns fns = MakeLocalFlowEmissionFns();
-
   if (!strcmp(el, "br")) {
     book_xml_flow_emission::FlushInlineTailAndDeferredStyle(p, ts, fns);
     book_xml_screen_advance::FlushPendingBlockSpacingBeforeContent(p, "br");
@@ -539,8 +567,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_aside_style, p->last_aside_class, p->css_class_map, "aside");
+          ParsePublisherElementMarginBottom(
+              p, p->last_aside_style, p->last_aside_class, p->css_class_map, "aside");
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "aside", "aside-bottom", mbr, line_h, 2);
     }
@@ -551,9 +579,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_blockquote_style, p->last_blockquote_class,
-              p->css_class_map, "blockquote");
+          ParsePublisherElementMarginBottom(
+              p, p->last_blockquote_style, p->last_blockquote_class, p->css_class_map, "blockquote");
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "blockquote", "blockquote-bottom", mbr, line_h, 1);
     }
@@ -564,9 +591,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_caption_style, p->last_caption_class,
-              p->css_class_map, "caption");
+          ParsePublisherElementMarginBottom(
+              p, p->last_caption_style, p->last_caption_class, p->css_class_map, "caption");
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "caption", "caption-bottom", mbr, line_h, 1);
     }
@@ -577,8 +603,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_dd_style, p->last_dd_class, p->css_class_map, "dd");
+          ParsePublisherElementMarginBottom(
+              p, p->last_dd_style, p->last_dd_class, p->css_class_map, "dd");
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "dd", "dd-bottom", mbr, line_h, 1);
     }
@@ -589,9 +615,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_figure_style, p->last_figure_class,
-              p->css_class_map, "figure");
+          ParsePublisherElementMarginBottom(
+              p, p->last_figure_style, p->last_figure_class, p->css_class_map, "figure");
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "figure", "figure-bottom", mbr, line_h, 1);
     }
@@ -603,16 +628,23 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
         !book_xml_list_utils::IsInsideListItem(p) &&
         !ParseInAnyEasyParagraphTightBlock(p)) {
       const int line_h = ts->GetHeight() + ts->linespacing;
-      const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_p_style, p->last_p_class, p->css_class_map, "p");
-      const int default_lf = 2;
+      book_xml_css_style_utils::MarginTopResult mbr;
+      if (p->book->GetPublisherBlockMarginsEnabled()) {
+        mbr = ParsePublisherElementMarginBottom(
+              p, p->last_p_style, p->last_p_class, p->css_class_map, "p");
+      }
+      const int default_lf = 1 + p->book->GetParagraphSpacing();
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);
       LogResolvedBlockMargin(p, "p", "bottom", p->last_p_style,
                              p->last_p_class, mbr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "p", "paragraph-bottom", mbr, line_h, default_lf);
+      if (p->book->GetParagraphSpacing() > 0) {
+        book_xml_screen_advance::QueueBlockSpacingLines(
+            p, 1 + p->book->GetParagraphSpacing(), "p",
+            "paragraph-user-spacing", false);
+      }
       if (!p->pending_block_spacing_from_css && p->pending_block_spacing_lf < 1)
         p->pending_block_spacing_lf = 1;
 #if defined(DSLIBRIS_DEBUG) && BLOCK_MARGIN_TRACE
@@ -635,8 +667,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_div_style, p->last_div_class, p->css_class_map, "div");
+          ParsePublisherElementMarginBottom(
+              p, p->last_div_style, p->last_div_class, p->css_class_map, "div");
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
           p, "div", "div-bottom", mbr, line_h, 0);
     }
@@ -649,8 +681,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_h1_style, p->last_h1_class, p->css_class_map, "h1");
+          ParsePublisherElementMarginBottom(
+              p, p->last_h1_style, p->last_h1_class, p->css_class_map, "h1");
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);
@@ -670,8 +702,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_h2_style, p->last_h2_class, p->css_class_map, "h2");
+          ParsePublisherElementMarginBottom(
+              p, p->last_h2_style, p->last_h2_class, p->css_class_map, "h2");
       const int default_lf = 1;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);
@@ -692,8 +724,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     if (!strcmp(el, "hr")) {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_hr_style, p->last_hr_class, p->css_class_map, "hr");
+          ParsePublisherElementMarginBottom(
+              p, p->last_hr_style, p->last_hr_class, p->css_class_map, "hr");
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);
@@ -711,8 +743,8 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     } else {
       const int line_h = ts->GetHeight() + ts->linespacing;
       const book_xml_css_style_utils::MarginTopResult mbr =
-          book_xml_css_resolver::ParseElementMarginBottomWithClass(
-              p->last_h_style, p->last_h_class, p->css_class_map, el);
+          ParsePublisherElementMarginBottom(
+              p, p->last_h_style, p->last_h_class, p->css_class_map, el);
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
           default_lf, mbr, line_h);
@@ -765,8 +797,8 @@ void ApplyDisplayBlockPromotion(
   if (!book_xml_screen_advance::Blankline(p))
     book_xml_screen_advance::Linefeed(p);
   const book_xml_css_style_utils::MarginTopResult mtr =
-      book_xml_element_style::ParseElementMarginTopWithClass(attr, elem_css);
-  book_xml_element_style::ApplyElementBlockMargins(p, ts, attr, elem_css);
+      ParsePublisherElementMarginTop(p, attr, elem_css);
+  ApplyPublisherBlockMargins(p, ts, attr, elem_css);
   const int line_h = ts->GetHeight() + ts->linespacing;
   const int default_lf = 1;
   book_xml_screen_advance::QueueBlockSpacingFromMarginResult(

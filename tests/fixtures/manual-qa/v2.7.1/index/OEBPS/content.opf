@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>v2.7.1 Index Position Check</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="pub-id">urn:uuid:3dslibris-v271-index-check</dc:identifier>
+    <dc:creator>Rigle Test</dc:creator>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch1" href="text/chapter-01.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch2" href="text/chapter-02.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch3" href="text/chapter-03.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch4" href="text/chapter-04.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch5" href="text/chapter-05.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch6" href="text/chapter-06.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="nav"/>
+    <itemref idref="ch1"/>
+    <itemref idref="ch2"/>
+    <itemref idref="ch3"/>
+    <itemref idref="ch4"/>
+    <itemref idref="ch5"/>
+    <itemref idref="ch6"/>
+  </spine>
+  <guide>
+    <reference type="toc" title="Contents" href="nav.xhtml"/>
+  </guide>
+</package>

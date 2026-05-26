@@ -201,6 +201,19 @@ void TestCurrentLineFitAllowsVisualLastLineWithoutFollowingRoom() {
                  365, line_h, line_ls, 400, 36));
 }
 
+void TestBandImageAdvanceKeepsLastVisibleBaseline() {
+  const int max_height = 320;
+  const int bottom_margin = 16;
+  const int threshold = max_height - bottom_margin;
+
+  ExpectFalse("band image may end on the last visible baseline",
+              text_render_layout_utils::ShouldAdvanceAfterBandImage(
+                  threshold, max_height, bottom_margin));
+  ExpectTrue("band image advances once the baseline is below the screen",
+             text_render_layout_utils::ShouldAdvanceAfterBandImage(
+                 threshold + 1, max_height, bottom_margin));
+}
+
 // Regression test for Bug 1 (descender clipping near HUD).
 //
 // The renderer keeps ts->margin.bottom at the unguarded value so the pixel clip
@@ -267,6 +280,7 @@ int main() {
   TestCurrentLineVisibilityIgnoresFollowingLine();
   TestParagraphStartGuardAllowsOneLineParagraphInLastSlot();
   TestCurrentLineFitAllowsVisualLastLineWithoutFollowingRoom();
+  TestBandImageAdvanceKeepsLastVisibleBaseline();
   TestBottomSafeAreaRendererClipAboveOverflowThreshold();
   return 0;
 }

@@ -44,6 +44,7 @@
 #include "shared/app_flow_utils.h"
 #include "shared/color_utils.h"
 #include "library/browser_cover_cache_utils.h"
+#include "library/browser_folder_input_utils.h"
 #include "library/cover_cache.h"
 #include "library/browser_grid_view.h"
 #include "library/browser_job_queue_utils.h"
@@ -269,7 +270,8 @@ void LibraryController::browser_handleevent() {
   BrowserNavMove nav_move = BROWSER_NAV_LEFT;
   const bool has_grid_nav = map_grid_nav(keys, &nav_move);
 
-  if (keys & app_.key.b) {
+  if (browser_folder_input_utils::ShouldLeaveFolder(keys, app_.key.b,
+                                                    app_.key.start)) {
     if (IsInsideFolder())
       LeaveFolder();
   } else if (keys & app_.key.a) {

@@ -199,6 +199,11 @@ public:
   bool mobi_line_wrap_fix;
   //! Remembers which wrap-fix state produced the currently cached pages.
   bool parsed_with_mobi_line_wrap_fix;
+  int style_font_size_override;
+  int style_line_spacing_override;
+  int style_paragraph_spacing_override;
+  int style_publisher_text_indent_override;
+  int style_publisher_block_margins_override;
 
   Book(const BookContext &ctx);
   ~Book();
@@ -208,6 +213,18 @@ public:
   Prefs *GetPrefs();
   int GetParagraphSpacing();
   int GetParagraphIndent();
+  int GetStyleFontSizeOverride() const;
+  void SetStyleFontSizeOverride(int value);
+  int GetStyleLineSpacingOverride() const;
+  void SetStyleLineSpacingOverride(int value);
+  bool GetPublisherTextIndentEnabled() const;
+  bool GetPublisherBlockMarginsEnabled() const;
+  int GetStyleParagraphSpacingOverride() const;
+  void SetStyleParagraphSpacingOverride(int value);
+  int GetStylePublisherTextIndentOverride() const;
+  void SetStylePublisherTextIndentOverride(int value);
+  int GetStylePublisherBlockMarginsOverride() const;
+  void SetStylePublisherBlockMarginsOverride(int value);
   int GetOrientation();
   void DrawBottomGradientBackground();
   void DrawTopGradientBackground();

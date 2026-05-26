@@ -36,6 +36,10 @@ cd "$MUPDF_DIR"
   tofu_cjk=yes \
   clean >/dev/null 2>&1 || true
 
+# Unset MAKEFLAGS so the outer make's -jN does not propagate into the mupdf
+# sub-make and cause directory creation race conditions (e.g. libjpeg).
+unset MAKEFLAGS
+
 "$MAKE_BIN" \
   build=release \
   OUT=build/3ds-minimal \

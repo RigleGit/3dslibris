@@ -208,6 +208,21 @@ void TestResolveBlockSpacingLinefeedsKeepsSmallExplicitMarginsVisible() {
                  4);
 }
 
+void TestZeroTopMarginDoesNotErasePendingParentCssSpacing() {
+  test::ExpectFalse(
+      "zero child top margin keeps pending parent css spacing",
+      book_xml_parser_style_utils::ShouldZeroMarginSuppressPendingSpacing(
+          "paragraph-top", true, false, 1));
+  test::ExpectTrue(
+      "zero top margin still suppresses non-css default spacing",
+      book_xml_parser_style_utils::ShouldZeroMarginSuppressPendingSpacing(
+          "paragraph-top", false, false, 1));
+  test::ExpectTrue(
+      "zero bottom margin still suppresses previous spacing",
+      book_xml_parser_style_utils::ShouldZeroMarginSuppressPendingSpacing(
+          "paragraph-bottom", true, false, 1));
+}
+
 void TestComputeHeadingFontSizeUsesDefaultMultipliers() {
   epub_css_class_map::CssClassMap classes;
   test::ExpectEq("h1 multiplier",
@@ -347,6 +362,21 @@ void TestClampInlineFontSizeKeepsNestedSmallReadable() {
                  20);
 }
 
+void TestPublisherFontSizeSkipsRootElements() {
+  test::ExpectFalse("body font-size establishes baseline only",
+                    book_xml_parser_style_utils::
+                        ShouldApplyPublisherFontSizeToElement("body"));
+  test::ExpectFalse("html font-size establishes baseline only",
+                    book_xml_parser_style_utils::
+                        ShouldApplyPublisherFontSizeToElement("html"));
+  test::ExpectTrue("paragraph font-size still applies",
+                   book_xml_parser_style_utils::
+                       ShouldApplyPublisherFontSizeToElement("p"));
+  test::ExpectTrue("classed div font-size still applies",
+                   book_xml_parser_style_utils::
+                       ShouldApplyPublisherFontSizeToElement("div"));
+}
+
 } // namespace
 
 int main() {
@@ -359,10 +389,12 @@ int main() {
   TestResolveCssMarginLinefeedsUsesCeilQuantization();
   TestResolveBlockSpacingLinefeedsHonorsDefaultsAndZero();
   TestResolveBlockSpacingLinefeedsKeepsSmallExplicitMarginsVisible();
+  TestZeroTopMarginDoesNotErasePendingParentCssSpacing();
   TestComputeHeadingFontSizeUsesDefaultMultipliers();
   TestComputeHeadingFontSizeUsesCssAndClamps();
   TestComputeHeadingFontSizeSupportsRelativeCssUnits();
   TestComputeHeadingFontSizeForContextUsesDocBase();
   TestClampInlineFontSizeKeepsNestedSmallReadable();
+  TestPublisherFontSizeSkipsRootElements();
   return 0;
 }

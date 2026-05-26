@@ -232,4 +232,13 @@ int MeasureFirstVisualLineWidth(const uint32_t *buf, size_t length, size_t start
   return line_width;
 }
 
+uint8_t ResolveBandImageAlignMode(uint8_t explicit_align_mode,
+                                  int paragraph_align) {
+  if (explicit_align_mode != 0)
+    return explicit_align_mode;
+  if (paragraph_align == 2)
+    return 2;
+  return 0;
+}
+
 } // namespace page_alignment_utils

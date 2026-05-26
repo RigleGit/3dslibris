@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>#108 Body font-size baseline</title>
+  <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+</head>
+<body>
+  <h1 id="body-font">#108 Body font-size baseline</h1>
+  <p class="normal-sample">Expected: this body text should look like the user-selected reader size, not like tiny 80% text.</p>
+  <p>The stylesheet sets body font-size to 80%. That value should establish the publisher CSS baseline only. It should not shrink every normal paragraph.</p>
+  <p>Change the user font size in settings. Expected: this chapter scales with the user font size.</p>
+  <p>This paragraph is plain body text. It should match the surrounding plain body paragraphs.</p>
+  <p>This paragraph is plain body text. It should match the surrounding plain body paragraphs.</p>
+</body>
+</html>

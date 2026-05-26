@@ -74,6 +74,7 @@ void ClearPendingBlockSpacing(parsedata_t *p) {
   p->pending_block_spacing_lf = 0;
   p->pending_block_spacing_reason = NULL;
   p->pending_block_spacing_from_css = false;
+  p->pending_block_spacing_advance_ok = false;
   p->pending_block_spacing_suppress_only = false;
 }
 
@@ -115,6 +116,7 @@ void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
 
   p->pen.x = ts->margin.left;
   p->pen.y = ts->margin.top + lineheight;
+  p->linebegan = false;
   p->current_screen_has_drawable_content = false;
   // Pending spacing accumulated before the overflow is no longer relevant;
   // we are at the top of a fresh screen/page.
@@ -182,6 +184,15 @@ void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
     p->pending_block_spacing_reason = reason;
   if (from_css)
     p->pending_block_spacing_from_css = true;
+  // advance_ok tracks whether CSS itself contributed new_opt > 0 without a
+  // subsequent user-spacing override.  Phase 2 only calls AdvanceParsedScreen
+  // when both css_sourced and advance_ok are true, preventing spurious screen
+  // advances when a tiny CSS bottom margin (new_opt==0) sets from_css and the
+  // user spacing later raises opt to 1.
+  if (from_css && new_opt > 0)
+    p->pending_block_spacing_advance_ok = true;
+  else if (!from_css)
+    p->pending_block_spacing_advance_ok = false;
 #if defined(DSLIBRIS_DEBUG) && BLOCK_SPACING_TRACE
   DBG_LOGF(p->book->GetStatusReporter(),
     "Queue[%s/%s] lines=%d opt=%d->%d from_css=%d pen_y=%d lb=%d",
@@ -238,7 +249,12 @@ void QueueBlockSpacingFromMarginResult(
     return;
   }
   if (mtr.negative || mtr.value == 0) {
-    SuppressPendingBlockSpacingFromCss(p, tag, reason);
+    if (book_xml_parser_style_utils::ShouldZeroMarginSuppressPendingSpacing(
+            reason, p->pending_block_spacing_from_css,
+            p->pending_block_spacing_suppress_only,
+            p->pending_block_spacing_lf)) {
+      SuppressPendingBlockSpacingFromCss(p, tag, reason);
+    }
     return;
   }
   // Snapshot suppress_only before the queue clears it: if the preceding element
@@ -270,11 +286,12 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
     return;
 #if defined(DSLIBRIS_DEBUG) && FLUSHPENDING_TRACE
   DBG_LOGF(p->book->GetStatusReporter(),
-    "FlushPending ENTER[->%s] pbb=%d pbl=%d from_css=%d pen_y=%d lb=%d scr=%d vis=%d",
+    "FlushPending ENTER[->%s] pbb=%d pbl=%d from_css=%d adv_ok=%d pen_y=%d lb=%d scr=%d vis=%d",
     next_tag ? next_tag : "?",
     p->pending_block_break ? 1 : 0,
     p->pending_block_spacing_lf,
     p->pending_block_spacing_from_css ? 1 : 0,
+    p->pending_block_spacing_advance_ok ? 1 : 0,
     p->pen.y, p->linebegan ? 1 : 0, p->screen,
     p->current_screen_has_drawable_content ? 1 : 0);
 #endif
@@ -334,14 +351,20 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
   // ---- Phase 2: optional spacing ----------------------------------------
   const int opt = p->pending_block_spacing_lf;
   const bool css_sourced = p->pending_block_spacing_from_css;
+  const bool advance_ok = p->pending_block_spacing_advance_ok;
   int emit_opt = 0;
   if (opt > 0 && !IsCurrentReadingScreenVisuallyEmpty(p)) {
-    const int required = 1;
+    const int required = 2;
     if (opt + required <= available) {
       emit_opt = opt;
-    } else if (css_sourced) {
+    } else if (css_sourced && advance_ok) {
       // CSS-mandated spacing can't coexist with a content line on this screen.
       // Advance to the next screen; the screen break already separates blocks.
+#if defined(DSLIBRIS_DEBUG)
+      DBG_LOGF(p->book->GetStatusReporter(),
+        "FlushPending ADVANCE[->%s] css_sourced=1 opt=%d avail=%d pen_y=%d scr=%d",
+        next_tag ? next_tag : "?", opt, available, p->pen.y, p->screen);
+#endif
       AdvanceParsedScreen(p);
       const text_render_layout_utils::ReadingScreenMetrics after_metrics =
           text_render_layout_utils::ResolveReadingScreenMetricsForReadingScreen(

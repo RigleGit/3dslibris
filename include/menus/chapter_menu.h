@@ -18,6 +18,7 @@ class ChapterMenu : public PagedListMenu {
 public:
   ChapterMenu(class App *app);
   ~ChapterMenu();
+  void SelectChapterForPage(u16 current_page);
 
 private:
   void BuildEntries(class Book *book, class Text *text,

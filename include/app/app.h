@@ -152,7 +152,11 @@ public:
   parsedata_t parsedata;
   u8 orientation;
   u8 colorMode;
+  int reader_font_size;
+  int reader_line_spacing;
   u8 paraspacing, paraindent;
+  bool publisher_text_indent;
+  bool publisher_block_margins;
 
   Button prefsButtons[PREFS_BUTTON_COUNT];
 

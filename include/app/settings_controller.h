@@ -19,6 +19,8 @@ public:
   void PrefsHandleTouch();
   void PrefsIncreasePixelSize();
   void PrefsDecreasePixelSize();
+  void PrefsIncreaseLineSpacing();
+  void PrefsDecreaseLineSpacing();
   void PrefsIncreaseParaspacing();
   void PrefsDecreaseParaspacing();
   void PrefsFlipOrientation();

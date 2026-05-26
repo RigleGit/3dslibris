@@ -233,10 +233,10 @@ bool IndexCbzArchiveEntries(const std::string &archive_path,
     return false;
   });
 
-  std::stable_sort(entries->begin(), entries->end(),
-                   [](const CbzPageEntry &a, const CbzPageEntry &b) {
-                     return a.normalized_path < b.normalized_path;
-                   });
+  std::sort(entries->begin(), entries->end(),
+            [](const CbzPageEntry &a, const CbzPageEntry &b) {
+              return a.normalized_path < b.normalized_path;
+            });
 
   if (entries->empty()) {
     SetLastCbzArchiveError("no supported image entries found in CBZ");
@@ -323,11 +323,10 @@ bool ReadComicInfoBookmarks(const std::string &archive_path,
   if (!found || out->empty())
     return false;
 
-  std::stable_sort(
-      out->begin(), out->end(),
-      [](const CbzComicInfoBookmark &a, const CbzComicInfoBookmark &b) {
-        return a.image_index < b.image_index;
-      });
+  std::sort(out->begin(), out->end(),
+            [](const CbzComicInfoBookmark &a, const CbzComicInfoBookmark &b) {
+              return a.image_index < b.image_index;
+            });
 
   return true;
 }

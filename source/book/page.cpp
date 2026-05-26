@@ -432,14 +432,30 @@ void Page::Draw(Text *ts) {
       }
     } else if (c == TEXT_SCREEN_BREAK) {
       i++;
-      // Forced screen break emitted by ForcePageBreak (CSS page-break-before).
+      // Forced screen break emitted by ForcePageBreak (CSS page-break-before)
+      // or by advance_page_overflow during block image layout.
       // On the first screen: advance to second screen so break-before content
       // starts at the top of screen=1 rather than continuing mid-screen=0.
       // On the second screen: if content already exists on the current line,
       // separate the following content instead of letting block text run on.
-      if (on_first_screen)
+      if (on_first_screen) {
         advance_to_next_screen();
-      else if (ts->linebegan)
+        // Lookahead: if a TEXT_FONT_SIZE token immediately follows this break,
+        // the enclosing font-size element is about to restore a smaller font.
+        // InitPen() used the inflated lineheight; correct pen.y to the restore
+        // font's proportional lineheight to avoid an artificial top gap.
+        if (i + 1 < length && buf[i] == TEXT_FONT_SIZE) {
+          const u8 restore_px = (u8)buf[i + 1];
+          const int cur_lh = (int)ts->GetHeight();
+          const int cur_px = (int)ts->GetPixelSize();
+          if (cur_px > 0 && restore_px > 0 && (int)restore_px < cur_px) {
+            const int restore_lh =
+                ((int)restore_px * cur_lh + cur_px / 2) / cur_px;
+            ts->SetPen(ts->margin.left,
+                       (u16)(ts->margin.top + restore_lh));
+          }
+        }
+      } else if (ts->linebegan)
         ts->PrintNewLine();
     } else if (c == TEXT_LINE_START_X) {
       if (i + 1 < length) {
@@ -613,9 +629,14 @@ void Page::Draw(Text *ts) {
 
         const int image_pen_x = (int)ts->GetPenX();
         const int image_line_top = (int)ts->GetPenY() - ts->GetHeight();
+        const u8 draw_image_align =
+            image_plan.mode == INLINE_IMAGE_LAYOUT_BAND
+                ? page_alignment_utils::ResolveBandImageAlignMode(
+                      next_image_align, (int)paragraph_align)
+                : next_image_align;
         const bool image_drawn =
             book->DrawInlineImage(ts, image_id, &image_plan, current_screen,
-                                  next_image_align);
+                                  draw_image_align);
         if (image_drawn && link_active && active_link_render_index >= 0 &&
             active_link_render_index < (int)rendered_inline_links_.size()) {
           InlineLinkRenderEntry &entry =
@@ -656,9 +677,9 @@ void Page::Draw(Text *ts) {
                 text_render_layout_utils::ResolveReadingScreenMetrics(
                     on_first_screen, first_is_left, leftBottomMargin,
                     rightBottomMargin);
-            if (text_render_layout_utils::WouldOverflowReadingScreen(
-                    ts->GetPenY(), ts->GetHeight(), ts->linespacing,
-                    metrics.max_height, metrics.bottom_margin)) {
+            if (text_render_layout_utils::ShouldAdvanceAfterBandImage(
+                    ts->GetPenY(), metrics.max_height,
+                    metrics.bottom_margin)) {
               if (!advance_to_next_screen()) {
                 stop_page_draw = true;
               }

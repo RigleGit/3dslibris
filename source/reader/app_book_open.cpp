@@ -31,8 +31,36 @@
 #include "shared/boot_trace.h"
 #include "shared/debug_log.h"
 #include "ui/text.h"
+#include "ui/text_limits.h"
 
 using namespace reader_internal;
+
+namespace {
+
+static int ClampLineSpacingSetting(int value) {
+  if (value < 0)
+    return 0;
+  if (value > 16)
+    return 16;
+  return value;
+}
+
+static void ApplyEffectiveTextLayoutSettings(App *app, Book *book) {
+  if (!app || !app->ts)
+    return;
+  int font_size = app->reader_font_size;
+  int line_spacing = app->reader_line_spacing;
+  if (book && book->UsesTextLayoutSettings()) {
+    if (book->GetStyleFontSizeOverride() >= 0)
+      font_size = book->GetStyleFontSizeOverride();
+    if (book->GetStyleLineSpacingOverride() >= 0)
+      line_spacing = book->GetStyleLineSpacingOverride();
+  }
+  app->ts->SetPixelSize((u8)ClampTextPixelSize(font_size));
+  app->ts->linespacing = ClampLineSpacingSetting(line_spacing);
+}
+
+} // namespace
 
 u8 ReaderController::OpenBook()
 {
@@ -53,6 +81,8 @@ u8 ReaderController::OpenBook()
     boot_trace::Boot("open book invalid selection");
     return 254;
   }
+
+  ApplyEffectiveTextLayoutSettings(&app_, selected_book);
 
   const bool needs_relayout = app_.BookNeedsRelayout(selected_book);
   const bool switching_books =

@@ -250,6 +250,7 @@ struct parsedata_t {
 	int         pending_block_spacing_lf;       // optional spacing lines (>= 0)
 	const char *pending_block_spacing_reason;   // last queue label (static string)
 	bool        pending_block_spacing_from_css;    // set by explicit CSS margin
+	bool        pending_block_spacing_advance_ok;  // CSS contributed new_opt > 0; cleared by user spacing
 	bool        pending_block_spacing_suppress_only; // set only by Suppress, not by queue
 	bool        current_screen_has_drawable_content; // false until text/img/hr drawn
 };

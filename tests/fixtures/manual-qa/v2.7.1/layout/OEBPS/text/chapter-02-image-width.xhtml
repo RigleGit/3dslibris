@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>#106 Image width unaffected by text size</title>
+  <link rel="stylesheet" type="text/css" href="../styles/style.css"/>
+</head>
+<body>
+  <h1 id="image-width">#106 Image width unaffected by text size</h1>
+  <p>Expected: both banners below should have the same width. The second one should not become huge just because it is inside a 200% text container.</p>
+  <p>Reference banner at root text size:</p>
+  <p class="image-width-row"><img src="../images/narrow-banner.png" alt="10em reference banner" style="width:10em;"/></p>
+  <div class="larger-container">
+    <p>Large text container:</p>
+    <p class="image-width-row"><img src="../images/narrow-banner.png" alt="10em test banner" style="width:10em;"/></p>
+  </div>
+  <p>The banner width is 10em. It should be based on the reader root font size, not the enlarged current text size.</p>
+</body>
+</html>

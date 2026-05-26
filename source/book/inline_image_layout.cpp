@@ -145,6 +145,7 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
       std::max(1, DivRoundNearest(eff_meta.width * inline_height, eff_meta.height));
   // Inline is reserved for genuinely small ornament-like images.
   const bool inline_candidate =
+      !(leading_paragraph_image && req.author_max_width_px > 0) &&
       eff_meta.height <= (3 * line_height) && inline_width <= (3 * line_height);
 
   const bool wide_band_candidate =
