@@ -9,6 +9,9 @@
 #include <strings.h>
 #include <vector>
 
+#include "library/library_sort_mode.h"
+#include "settings/prefs.h"
+
 // Forward declared from app_book.cpp
 void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
                                    void *user_data);
@@ -34,6 +37,68 @@ namespace {
 static bool BookTitleLessThan(Book *a, Book *b) {
   if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
     return a->IsBrowserFolder();
+  return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
+}
+
+static bool BookFilenameLessThan(Book *a, Book *b) {
+  if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
+    return a->IsBrowserFolder();
+  const char *fa = (a && a->GetFileName()) ? a->GetFileName() : "";
+  const char *fb = (b && b->GetFileName()) ? b->GetFileName() : "";
+  return strcasecmp(fa, fb) < 0;
+}
+
+static bool BookAuthorLessThan(Book *a, Book *b) {
+  if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
+    return a->IsBrowserFolder();
+  const char *ea = a->GetAuthor().c_str();
+  const char *eb = b->GetAuthor().c_str();
+  const bool a_empty = !ea || *ea == '\0';
+  const bool b_empty = !eb || *eb == '\0';
+  if (a_empty != b_empty)
+    return b_empty; // empty author sorts to end
+  const int c = strcasecmp(ea, eb);
+  return c != 0 ? c < 0 : strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
+}
+
+static const char *BookFileExtension(Book *b) {
+  if (!b || !b->GetFileName()) return "";
+  const char *dot = strrchr(b->GetFileName(), '.');
+  return dot ? dot : "";
+}
+
+static bool BookFiletypeLessThan(Book *a, Book *b) {
+  if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
+    return a->IsBrowserFolder();
+  int ext_cmp = strcasecmp(BookFileExtension(a), BookFileExtension(b));
+  if (ext_cmp != 0)
+    return ext_cmp < 0;
+  return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
+}
+
+static time_t BookFileMtime(Book *b) {
+  if (!b || b->IsBrowserFolder() || !b->GetFolderName() || !b->GetFileName())
+    return 0;
+  std::string path = b->GetFolderName();
+  path.push_back('/');
+  path.append(b->GetFileName());
+  struct stat st;
+  return stat(path.c_str(), &st) == 0 ? st.st_mtime : 0;
+}
+
+static bool BookDateModifiedLessThan(Book *a, Book *b) {
+  if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
+    return a->IsBrowserFolder();
+  return BookFileMtime(a) > BookFileMtime(b); // newer first
+}
+
+static bool BookRecentLessThan(Book *a, Book *b) {
+  if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
+    return a->IsBrowserFolder();
+  uint32_t ta = a->GetLastOpenedTime();
+  uint32_t tb = b->GetLastOpenedTime();
+  if (ta != tb)
+    return ta > tb; // more recent first
   return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
 }
 
@@ -218,6 +283,8 @@ static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ct
   book->SetFolderName(source_dir.c_str());
   book->SetFileName(io_name.c_str());
   book->SetTitle(io_name.c_str());
+  if (app->prefs)
+    app->prefs->ApplySavedBookState(book);
   LogFilenameStage(app, "book.filename", book->GetFileName());
   LogFilenameStage(app, "book.title", book->GetTitle());
   book->format = format;
@@ -578,9 +645,40 @@ void LibraryController::PrepareLibrary() {
     book->TryLoadMetadataFromCache();
   }
 
-  std::sort(app_.books.begin(), app_.books.end(), &BookTitleLessThan);
+  SortBooks();
   for (auto &book : app_.books)
     book->GetBookmarks().sort();
+}
+
+void LibraryController::SortBooks() {
+  const LibrarySortMode mode = app_.prefs
+      ? app_.prefs->library_sort_mode
+      : LIBRARY_SORT_TITLE;
+  switch (mode) {
+  case LIBRARY_SORT_FILENAME:
+    std::sort(app_.books.begin(), app_.books.end(), &BookFilenameLessThan);
+    break;
+  case LIBRARY_SORT_AUTHOR:
+    std::sort(app_.books.begin(), app_.books.end(), &BookAuthorLessThan);
+    break;
+  case LIBRARY_SORT_FILETYPE:
+    std::sort(app_.books.begin(), app_.books.end(), &BookFiletypeLessThan);
+    break;
+  case LIBRARY_SORT_DATE_MODIFIED:
+    std::sort(app_.books.begin(), app_.books.end(), &BookDateModifiedLessThan);
+    break;
+  case LIBRARY_SORT_RECENT:
+    for (auto &book : app_.books) {
+      DBG_LOGF(&app_, "recently-opened: pre-sort t=%lu \"%s\"",
+               (unsigned long)book->GetLastOpenedTime(),
+               book->GetFileName() ? book->GetFileName() : "?");
+    }
+    std::sort(app_.books.begin(), app_.books.end(), &BookRecentLessThan);
+    break;
+  default:
+    std::sort(app_.books.begin(), app_.books.end(), &BookTitleLessThan);
+    break;
+  }
 }
 
 void LibraryController::RebuildRoot() {

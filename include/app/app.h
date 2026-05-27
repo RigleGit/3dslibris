@@ -215,6 +215,7 @@ public:
   bool PresentIfDirty();
   int StartupFindBooks();
   void StartupPrepareLibrary();
+  void ReSortLibraryBooks();
   void StartupInitUiAndBrowser();
   void StartupInitScreens();
   bool HasPendingBootReopen() const;

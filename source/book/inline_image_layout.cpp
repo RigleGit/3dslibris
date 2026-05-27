@@ -132,8 +132,15 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
     }
   }
 
+  // A large portrait image near the top of the screen is treated as a full-page
+  // cover. We allow up to 3 line heights of vertical slack so that CSS top-margin
+  // on a container element (introduced in v2.7.0 publisher parity) does not
+  // prevent the image from reaching page mode.
+  const bool near_screen_start =
+      !req.line_began && req.pen_x == req.margin_left &&
+      req.pen_y <= (req.margin_top + 3 * line_height);
   const bool page_like_image_at_screen_start =
-      IsAtScreenStart(req) && eff_meta.height >= (eff_meta.width * 4) / 3 &&
+      near_screen_start && eff_meta.height >= (eff_meta.width * 4) / 3 &&
       eff_meta.height >= (8 * line_height);
   if (page_like_image_at_screen_start) {
     FillPageMode(req, &plan);
@@ -322,10 +329,16 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
     // pushed to the next screen when the block itself could move forward.
     // Important: only do this from screen 0. From screen 1 it would push the
     // image to the next spread's left screen.
+    //
+    // Wide landscape bands (e.g. chapter art) should prefer continuity over
+    // forced pre-advance: moving them forward often separates image and
+    // immediate follow-up prose/caption across screens.
+    const bool wide_landscape_band =
+      plan.draw_width >= (plan.draw_height * 5) / 4;
     if (req.current_screen == 0 &&
         (leading_paragraph_image || figure_with_caption ||
         flow_text_band_candidate) &&
-        !wide_band_candidate && !IsAtScreenStart(req)) {
+      !wide_band_candidate && !wide_landscape_band && !IsAtScreenStart(req)) {
       int remaining_after_band = limit_y - (baseline + band_height);
       const int min_remaining_after_band =
           figure_with_caption ? min_caption_text_height : min_follow_text_height;

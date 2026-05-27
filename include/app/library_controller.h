@@ -18,6 +18,7 @@ public:
 
   int FindBooks();
   void PrepareLibrary();
+  void SortBooks();
   void browser_draw();
   void browser_handleevent();
   void browser_init();

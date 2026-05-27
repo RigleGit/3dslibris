@@ -68,6 +68,7 @@ Book::Book(const BookContext &c) : ctx(c) {
 
   // Position state / basic rendering
   position = 0;
+  last_opened_time = 0;
   coverPixels = nullptr;
   coverWidth = 0;
   coverHeight = 0;

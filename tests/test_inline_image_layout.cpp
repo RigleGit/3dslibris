@@ -247,6 +247,20 @@ int main() {
   {
     InlineImageLayoutRequest req = BaseRequest();
     req.line_began = false;
+    req.image_context = INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH;
+    req.pen_x = req.margin_left;
+    req.pen_y = 220;
+    InlineImageLayoutPlan plan =
+        PlanInlineImageLayout(req, Metadata(1920, 1231));
+    ExpectMode("wide leading paragraph image remains band", plan,
+               INLINE_IMAGE_LAYOUT_BAND);
+    ExpectFalse("wide landscape band should not force pre-advance",
+                plan.advance_before);
+  }
+
+  {
+    InlineImageLayoutRequest req = BaseRequest();
+    req.line_began = false;
     req.image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
     req.pen_x = req.margin_left;
     req.pen_y = req.margin_top + req.line_height;

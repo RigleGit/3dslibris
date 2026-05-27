@@ -44,6 +44,11 @@ static int ClampLineSpacingSetting(int value) {
 
 }
 
+std::string Prefs::MakeBookKey(const char *folder, const char *filename) {
+  return std::string(folder ? folder : "") + "\n" +
+         std::string(filename ? filename : "");
+}
+
 namespace xml::prefs {
 
 void start(void *data, const XML_Char *name, const XML_Char **attr) {
@@ -155,6 +160,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     int style_paragraph_spacing = -1;
     int style_publisher_text_indent = -1;
     int style_publisher_block_margins = -1;
+    uint32_t last_opened = 0;
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "file"))
         snprintf(filename, sizeof(filename), "%s", attr[i + 1]);
@@ -174,6 +180,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         style_publisher_text_indent = atoi(attr[i + 1]) != 0 ? 1 : 0;
       if (!strcmp(attr[i], "publisherBlockMargins"))
         style_publisher_block_margins = atoi(attr[i + 1]) != 0 ? 1 : 0;
+      if (!strcmp(attr[i], "lastOpened"))
+        last_opened = (uint32_t)atol(attr[i + 1]);
       if (!strcmp(attr[i], "current")) {
         // Should warn if multiple books are current...
         // the last current book will win.
@@ -181,6 +189,9 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
           current = true;
       }
     }
+
+    if (filename[0] && last_opened > 0)
+      p->prefs->RememberSavedLastOpened(folder, filename, last_opened);
 
     // Find the book index for this library entry and set parsing context.
     // Subsequent <bookmark> tags attach to p->book until </book>.
@@ -213,6 +224,12 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       matched->SetStyleParagraphSpacingOverride(style_paragraph_spacing);
       matched->SetStylePublisherTextIndentOverride(style_publisher_text_indent);
       matched->SetStylePublisherBlockMarginsOverride(style_publisher_block_margins);
+      if (last_opened > 0)
+        matched->SetLastOpenedTime(last_opened);
+      DBG_LOGF(app, "recently-opened: read lastOpened=%lu matched=%s file=\"%s\"",
+               (unsigned long)last_opened,
+               matched ? "yes" : "no",
+               filename);
 
       if (current) {
         // Set this book as current.
@@ -264,6 +281,11 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       }
       if (!strcmp(attr[i], "circlePadPageTurn")) {
         p->prefs->circle_pad_page_turn = atoi(attr[i + 1]) != 0;
+      }
+      if (!strcmp(attr[i], "librarySortMode")) {
+        int m = atoi(attr[i + 1]);
+        if (m >= 0 && m < LIBRARY_SORT_COUNT)
+          p->prefs->library_sort_mode = static_cast<LibrarySortMode>(m);
       }
     }
   }
@@ -333,6 +355,7 @@ Prefs::~Prefs() {}
 int Prefs::Read() {
   int err = 0;
   ClearPendingCurrentBookRestore();
+  last_opened_by_book_key.clear();
 
   FILE *fp = fopen(paths::GetPrefsFile().c_str(), "r");
   if (!fp) {
@@ -442,6 +465,23 @@ bool Prefs::ApplyPendingCurrentBookRestore() {
   return true;
 }
 
+void Prefs::RememberSavedLastOpened(const char *folder, const char *filename,
+                                    uint32_t last_opened) {
+  if (!filename || !filename[0] || last_opened == 0)
+    return;
+  last_opened_by_book_key[MakeBookKey(folder, filename)] = last_opened;
+}
+
+void Prefs::ApplySavedBookState(Book *book) const {
+  if (!book)
+    return;
+  const auto it =
+      last_opened_by_book_key.find(MakeBookKey(book->GetFolderName(),
+                                               book->GetFileName()));
+  if (it != last_opened_by_book_key.end())
+    book->SetLastOpenedTime(it->second);
+}
+
 //! Write settings to prefs file.
 //! \return Error code.
 int Prefs::Write() {
@@ -454,11 +494,12 @@ int Prefs::Write() {
 
   fprintf(fp, "<dslibris format=\"2\">\n");
   fprintf(fp,
-          "<option swapshoulder=\"%d\" time24h=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" circlePadPageTurn=\"%d\" />\n",
+          "<option swapshoulder=\"%d\" time24h=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" />\n",
           swapshoulder, time24h,
           browser_view_utils::ToPrefValue(browser_view_mode),
           fixed_layout_rtl ? 1 : 0,
-          circle_pad_page_turn ? 1 : 0);
+          circle_pad_page_turn ? 1 : 0,
+          static_cast<int>(library_sort_mode));
   fprintf(fp, "\t<screen colorMode=\"%d\" flip=\"%d\" />\n",
           ts ? ts->GetColorMode() : 0,
           app ? app->orientation : 0);
@@ -553,6 +594,12 @@ int Prefs::Write() {
     if (book->GetStylePublisherBlockMarginsOverride() >= 0)
       fprintf(fp, " publisherBlockMargins=\"%d\"",
               book->GetStylePublisherBlockMarginsOverride());
+    if (book->GetLastOpenedTime() > 0) {
+      fprintf(fp, " lastOpened=\"%lu\"", (unsigned long)book->GetLastOpenedTime());
+      DBG_LOGF(app, "recently-opened: write lastOpened=%lu for \"%s\"",
+               (unsigned long)book->GetLastOpenedTime(),
+               book->GetFileName() ? book->GetFileName() : "?");
+    }
     if (app->GetCurrentBook() == app->books[i])
       fprintf(fp, " current=\"1\"");
     fprintf(fp, ">\n");
@@ -571,6 +618,16 @@ int Prefs::Write() {
   fprintf(fp, "\n");
   fclose(fp);
 
+  last_opened_by_book_key.clear();
+  for (int i = 0; i < app->BookCount(); i++) {
+    Book *book = app->books[i];
+    if (!book || book->IsBrowserFolder() || book->GetLastOpenedTime() == 0)
+      continue;
+    last_opened_by_book_key[MakeBookKey(book->GetFolderName(),
+                                        book->GetFileName())] =
+        book->GetLastOpenedTime();
+  }
+
   return err;
 }
 
@@ -581,5 +638,7 @@ void Prefs::Init() {
   browser_view_mode = BROWSER_VIEW_GALLERY;
   fixed_layout_rtl = false;
   circle_pad_page_turn = true;
+  library_sort_mode = LIBRARY_SORT_TITLE;
+  last_opened_by_book_key.clear();
   ClearPendingCurrentBookRestore();
 }
