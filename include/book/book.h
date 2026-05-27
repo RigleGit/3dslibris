@@ -98,6 +98,7 @@ private:
   bool browser_display_name_cached;
   bool browser_folder_entry;
   int position;             //! as page index.
+  uint32_t last_opened_time; //! Unix timestamp of last open; 0 if never opened.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
   std::vector<InlineImageEntry> inline_images;
@@ -230,6 +231,8 @@ public:
   void DrawTopGradientBackground();
   void NotifySpineProgress(unsigned done, unsigned total);
   inline const std::string &GetAuthor() const { return author; }
+  inline uint32_t GetLastOpenedTime() const { return last_opened_time; }
+  inline void SetLastOpenedTime(uint32_t t) { last_opened_time = t; }
   inline bool HasBrowserDisplayNameCache() const
   {
     return browser_display_name_cached;

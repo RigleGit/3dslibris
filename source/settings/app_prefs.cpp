@@ -209,6 +209,19 @@ static void ToggleCirclePadPageTurnSetting(Prefs *prefs) {
   prefs->Write();
 }
 
+static void CycleLibrarySortSetting(App *app) {
+  if (!app || !app->prefs)
+    return;
+  int next = static_cast<int>(app->prefs->library_sort_mode) + 1;
+  if (next >= LIBRARY_SORT_COUNT)
+    next = 0;
+  app->prefs->library_sort_mode = static_cast<LibrarySortMode>(next);
+  app->prefs->Write();
+  app->ReSortLibraryBooks();
+  app->ResetBrowserMarquee();
+  app->MarkBrowserDirty();
+}
+
 static int CycleBookOverride(int current) {
   if (current < 0)
     return 0;
@@ -334,7 +347,8 @@ void SettingsController::PrefsInit() {
       "font configuration", "font size",    "extra line spacing",
       "extra paragraph spacing",
       "screen orientation", "clock format", "color mode", "library view",
-      "circle pad pages",   "index",        "bookmarks", "reset settings",
+      "circle pad pages",   "library sort", "index",      "bookmarks",
+      "reset settings",
       "clear cache",        "publisher indent", "publisher margins"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
@@ -387,6 +401,7 @@ void SettingsController::PrefsDraw() {
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
+  PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_TEXT_INDENT);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS);
 
@@ -962,6 +977,19 @@ void SettingsController::PrefsRefreshButton(int index) {
         app_.prefs->circle_pad_page_turn ? std::string("on")
                                          : std::string("off"));
     break;
+  case PREFS_BUTTON_LIBRARY_SORT: {
+    static const char *const kSortModeLabels[LIBRARY_SORT_COUNT] = {
+        "by title", "by filename", "by author",
+        "by file type", "by date modified", "by recently opened"};
+    const int mode = static_cast<int>(app_.prefs->library_sort_mode);
+    app_.prefsButtons[PREFS_BUTTON_LIBRARY_SORT].SetLabel1(
+        std::string("library sort"));
+    app_.prefsButtons[PREFS_BUTTON_LIBRARY_SORT].SetLabel2(
+        std::string(kSortModeLabels[mode >= 0 && mode < LIBRARY_SORT_COUNT
+                                        ? mode
+                                        : 0]));
+    break;
+  }
   case PREFS_BUTTON_INDEX:
     if (CanOpenBookIndexInCurrentContext(book, is_book_ctx)) {
       app_.prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
@@ -1200,6 +1228,13 @@ void SettingsController::PrefsHandlePress() {
   if (selected_button == PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN) {
     ToggleCirclePadPageTurnSetting(app_.prefs.get());
     PrefsRefreshButton(PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN);
+    app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_LIBRARY_SORT) {
+    CycleLibrarySortSetting(&app_);
+    PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
     app_.MarkPrefsDirty();
     return;
   }

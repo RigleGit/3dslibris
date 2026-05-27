@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #include <expat.h>
 
@@ -392,6 +393,10 @@ void ReaderController::HandleEventInOpening()
   app_.ShowCurrentBookView();
   boot_trace::Boot("async open show book view");
   DBG_LOG(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
+
+  bookcurrent_->SetLastOpenedTime((uint32_t)time(NULL));
+  if (app_.prefs)
+    app_.prefs->Write();
 
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);

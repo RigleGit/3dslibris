@@ -13,6 +13,7 @@
 #pragma once
 
 #include "library/browser_view_mode.h"
+#include "library/library_sort_mode.h"
 
 #include <stdint.h>
 #include <string>
@@ -46,6 +47,7 @@ public:
   BrowserViewMode browser_view_mode;
   bool fixed_layout_rtl;
   bool circle_pad_page_turn;
+  LibrarySortMode library_sort_mode;
 
 private:
   App *app;
