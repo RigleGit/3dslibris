@@ -51,15 +51,28 @@ static bool BookFilenameLessThan(Book *a, Book *b) {
 static bool BookAuthorLessThan(Book *a, Book *b) {
   if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
     return a->IsBrowserFolder();
-  const int c = strcasecmp(a->GetAuthor().c_str(), b->GetAuthor().c_str());
+  const char *ea = a->GetAuthor().c_str();
+  const char *eb = b->GetAuthor().c_str();
+  const bool a_empty = !ea || *ea == '\0';
+  const bool b_empty = !eb || *eb == '\0';
+  if (a_empty != b_empty)
+    return b_empty; // empty author sorts to end
+  const int c = strcasecmp(ea, eb);
   return c != 0 ? c < 0 : strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
+}
+
+static const char *BookFileExtension(Book *b) {
+  if (!b || !b->GetFileName()) return "";
+  const char *dot = strrchr(b->GetFileName(), '.');
+  return dot ? dot : "";
 }
 
 static bool BookFiletypeLessThan(Book *a, Book *b) {
   if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
     return a->IsBrowserFolder();
-  if (a->format != b->format)
-    return a->format < b->format;
+  int ext_cmp = strcasecmp(BookFileExtension(a), BookFileExtension(b));
+  if (ext_cmp != 0)
+    return ext_cmp < 0;
   return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
 }
 
@@ -82,7 +95,11 @@ static bool BookDateModifiedLessThan(Book *a, Book *b) {
 static bool BookRecentLessThan(Book *a, Book *b) {
   if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
     return a->IsBrowserFolder();
-  return a->GetLastOpenedTime() > b->GetLastOpenedTime(); // most recent first
+  uint32_t ta = a->GetLastOpenedTime();
+  uint32_t tb = b->GetLastOpenedTime();
+  if (ta != tb)
+    return ta > tb; // more recent first
+  return strcasecmp(a->GetTitle(), b->GetTitle()) < 0;
 }
 
 static std::string ToLowerAscii(const std::string &s) {
