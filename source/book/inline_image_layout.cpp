@@ -132,8 +132,15 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
     }
   }
 
+  // A large portrait image near the top of the screen is treated as a full-page
+  // cover. We allow up to 3 line heights of vertical slack so that CSS top-margin
+  // on a container element (introduced in v2.7.0 publisher parity) does not
+  // prevent the image from reaching page mode.
+  const bool near_screen_start =
+      !req.line_began && req.pen_x == req.margin_left &&
+      req.pen_y <= (req.margin_top + 3 * line_height);
   const bool page_like_image_at_screen_start =
-      IsAtScreenStart(req) && eff_meta.height >= (eff_meta.width * 4) / 3 &&
+      near_screen_start && eff_meta.height >= (eff_meta.width * 4) / 3 &&
       eff_meta.height >= (8 * line_height);
   if (page_like_image_at_screen_start) {
     FillPageMode(req, &plan);
