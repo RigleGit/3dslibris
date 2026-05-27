@@ -281,6 +281,8 @@ int SettingsController::EffectiveVisibleCount() const {
     return kPage2ButtonCount;
   if (is_book_ctx && prefs_general_page_ == 1)
     return BookPage2ButtonCount(app_.GetCurrentBook(), is_book_ctx);
+  if (!is_book_ctx && prefs_general_page_ == 2)
+    return (int)settings::ExtraPrefsButtonCount();
   return (int)settings::VisiblePrefsButtonCount(
       is_book_ctx, CurrentBookShowsLineWrapFix(app_.GetCurrentBook(), is_book_ctx));
 }
@@ -291,6 +293,8 @@ int SettingsController::EffectiveButtonForSlot(int slot) const {
     return (slot >= 0 && slot < kPage2ButtonCount) ? kPage2Buttons[slot] : kPage2Buttons[0];
   if (is_book_ctx && prefs_general_page_ == 1)
     return BookPage2ButtonForSlot(app_.GetCurrentBook(), is_book_ctx, slot);
+  if (!is_book_ctx && prefs_general_page_ == 2)
+    return settings::ExtraPrefsButtonForSlot((u8)slot);
   return settings::PrefsButtonForVisibleSlot(
       is_book_ctx, CurrentBookShowsLineWrapFix(app_.GetCurrentBook(), is_book_ctx), (u8)slot);
 }
@@ -434,13 +438,22 @@ void SettingsController::PrefsDraw() {
     SyncLibraryButtonLayout(&app_.buttonprefs, true, false);
     app_.buttonprefs.Draw(ts->screenright);
     if (prefs_general_page_ == 0) {
-      button_prefs_page_nav_.Label("style");
+      button_prefs_page_nav_.Label("more");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
+      button_prefs_page_nav_.Draw(ts->screenright);
+    } else if (prefs_general_page_ == 2) {
+      button_prefs_page_nav_.Label("back");
+      button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
+      button_prefs_page_nav_.Draw(ts->screenright);
+      button_prefs_library_.Label("style");
+      button_prefs_library_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
+      button_prefs_library_.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+      button_prefs_library_.Draw(ts->screenright);
     } else {
       button_prefs_page_nav_.Label("back");
       button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
+      button_prefs_page_nav_.Draw(ts->screenright);
     }
-    button_prefs_page_nav_.Draw(ts->screenright);
   }
 
   ts->PrintSplash(ts->screenleft);
@@ -552,6 +565,8 @@ void SettingsController::PrefsHandleEvent() {
     if (app_.GetPrefsSelectedIndex() > 0) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() - 1);
       app_.MarkPrefsDirty();
+    } else if (!book_ctx && prefs_general_page_ == 2) {
+      GoToPrefsPage(0);
     } else if (prefs_general_page_ == 1 && has_submenu) {
       GoToPrefsPage(0);
     }
@@ -559,7 +574,11 @@ void SettingsController::PrefsHandleEvent() {
     if (app_.GetPrefsSelectedIndex() < visibleCount - 1) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() + 1);
       app_.MarkPrefsDirty();
-    } else if (prefs_general_page_ == 0 && has_submenu) {
+    } else if (!book_ctx && prefs_general_page_ == 0) {
+      GoToPrefsPage(2);
+    } else if (!book_ctx && prefs_general_page_ == 2) {
+      GoToPrefsPage(1);
+    } else if (book_ctx && prefs_general_page_ == 0 && has_submenu) {
       GoToPrefsPage(1);
     }
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
@@ -602,6 +621,11 @@ void SettingsController::PrefsHandleTouch() {
     if (has_submenu)
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
   }
+  if (!book_ctx_touch && prefs_general_page_ == 2) {
+    button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
+    button_prefs_library_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
+    button_prefs_library_.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  }
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
     for (int dy = -8; dy <= 8; dy += 4) {
       for (int dx = -8; dx <= 8; dx += 4) {
@@ -628,11 +652,19 @@ void SettingsController::PrefsHandleTouch() {
     return;
   }
 
-  if ((book_ctx_touch && has_submenu &&
-       enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) ||
-      (!book_ctx_touch &&
-       enclosesWithSlack(button_prefs_page_nav_, footerX, footerY))) {
+  if (book_ctx_touch && has_submenu &&
+      enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) {
     GoToPrefsPage(prefs_general_page_ == 0 ? 1 : 0);
+    return;
+  }
+  if (!book_ctx_touch &&
+      enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) {
+    GoToPrefsPage(prefs_general_page_ == 0 ? 2 : 0);
+    return;
+  }
+  if (!book_ctx_touch && prefs_general_page_ == 2 &&
+      enclosesWithSlack(button_prefs_library_, footerX, footerY)) {
+    GoToPrefsPage(1); // "style" button on general extra page
     return;
   }
 
