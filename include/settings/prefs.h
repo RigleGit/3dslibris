@@ -16,10 +16,12 @@
 #include "library/library_sort_mode.h"
 
 #include <stdint.h>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
 class App;
+class Book;
 
 class Prefs {
 public:
@@ -40,6 +42,9 @@ public:
   void AddPendingCurrentBookBookmark(uint16_t page);
   void EndPendingCurrentBookRestoreEntry();
   bool ApplyPendingCurrentBookRestore();
+  void RememberSavedLastOpened(const char *folder, const char *filename,
+                               uint32_t last_opened);
+  void ApplySavedBookState(Book *book) const;
   App *GetApp() const { return app; }
   long modtime;
   bool swapshoulder;
@@ -63,5 +68,7 @@ private:
   int pending_current_style_publisher_text_indent;
   int pending_current_style_publisher_block_margins;
   std::vector<uint16_t> pending_current_bookmarks;
+  std::unordered_map<std::string, uint32_t> last_opened_by_book_key;
+  static std::string MakeBookKey(const char *folder, const char *filename);
   void Init();
 };

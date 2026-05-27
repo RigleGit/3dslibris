@@ -18,6 +18,7 @@
 #include "app/reader_controller.h"
 
 #include <stdio.h>
+#include <time.h>
 
 #include <3ds.h>
 
@@ -105,6 +106,10 @@ u8 ReaderController::OpenBook()
     boot_trace::Boot("open book reuse begin");
     ReuseParsedBook(&app_);
     app_.SetCurrentBookSessionId(session_id);
+    selected_book->SetLastOpenedTime((uint32_t)time(NULL));
+    DBG_LOGF(&app_, "recently-opened: recording t=%lu for \"%s\"",
+             (unsigned long)selected_book->GetLastOpenedTime(),
+             selected_book->GetFileName() ? selected_book->GetFileName() : "?");
     if (app_.GetDeferredRelayoutBook() != app_.GetCurrentBook())
       ClearDeferredRelayoutState();
     app_.RequestStatusRedraw();
@@ -253,6 +258,11 @@ u8 ReaderController::OpenBook()
     app_.SetBrowserDirty(true);
     return BOOK_ERR_CANCELLED;
   }
+
+  bookcurrent_->SetLastOpenedTime((uint32_t)time(NULL));
+  DBG_LOGF(&app_, "recently-opened: recording t=%lu for \"%s\"",
+           (unsigned long)bookcurrent_->GetLastOpenedTime(),
+           bookcurrent_->GetFileName() ? bookcurrent_->GetFileName() : "?");
 
   if (bookcurrent_->HasPendingEpubPageCacheSave() ||
       bookcurrent_->HasPendingMobiPageCacheSave())

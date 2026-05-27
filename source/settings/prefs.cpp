@@ -44,6 +44,11 @@ static int ClampLineSpacingSetting(int value) {
 
 }
 
+std::string Prefs::MakeBookKey(const char *folder, const char *filename) {
+  return std::string(folder ? folder : "") + "\n" +
+         std::string(filename ? filename : "");
+}
+
 namespace xml::prefs {
 
 void start(void *data, const XML_Char *name, const XML_Char **attr) {
@@ -184,6 +189,9 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
           current = true;
       }
     }
+
+    if (filename[0] && last_opened > 0)
+      p->prefs->RememberSavedLastOpened(folder, filename, last_opened);
 
     // Find the book index for this library entry and set parsing context.
     // Subsequent <bookmark> tags attach to p->book until </book>.
@@ -347,6 +355,7 @@ Prefs::~Prefs() {}
 int Prefs::Read() {
   int err = 0;
   ClearPendingCurrentBookRestore();
+  last_opened_by_book_key.clear();
 
   FILE *fp = fopen(paths::GetPrefsFile().c_str(), "r");
   if (!fp) {
@@ -454,6 +463,23 @@ bool Prefs::ApplyPendingCurrentBookRestore() {
   app->SetSelectedBook(matched);
   ClearPendingCurrentBookRestore();
   return true;
+}
+
+void Prefs::RememberSavedLastOpened(const char *folder, const char *filename,
+                                    uint32_t last_opened) {
+  if (!filename || !filename[0] || last_opened == 0)
+    return;
+  last_opened_by_book_key[MakeBookKey(folder, filename)] = last_opened;
+}
+
+void Prefs::ApplySavedBookState(Book *book) const {
+  if (!book)
+    return;
+  const auto it =
+      last_opened_by_book_key.find(MakeBookKey(book->GetFolderName(),
+                                               book->GetFileName()));
+  if (it != last_opened_by_book_key.end())
+    book->SetLastOpenedTime(it->second);
 }
 
 //! Write settings to prefs file.
@@ -592,6 +618,16 @@ int Prefs::Write() {
   fprintf(fp, "\n");
   fclose(fp);
 
+  last_opened_by_book_key.clear();
+  for (int i = 0; i < app->BookCount(); i++) {
+    Book *book = app->books[i];
+    if (!book || book->IsBrowserFolder() || book->GetLastOpenedTime() == 0)
+      continue;
+    last_opened_by_book_key[MakeBookKey(book->GetFolderName(),
+                                        book->GetFileName())] =
+        book->GetLastOpenedTime();
+  }
+
   return err;
 }
 
@@ -603,5 +639,6 @@ void Prefs::Init() {
   fixed_layout_rtl = false;
   circle_pad_page_turn = true;
   library_sort_mode = LIBRARY_SORT_TITLE;
+  last_opened_by_book_key.clear();
   ClearPendingCurrentBookRestore();
 }

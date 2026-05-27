@@ -14,10 +14,12 @@
 
 #include "book/book.h"
 #include "book/book_renderer.h"
+#include "library/library_sort_mode.h"
 #include "menus/bookmark_menu.h"
 #include "menus/chapter_menu.h"
 #include "app/settings_controller.h"
 #include "settings/font.h"
+#include "settings/prefs.h"
 #include "shared/app_flow_utils.h"
 #include "shared/debug_log.h"
 #include "ui/text.h"
@@ -67,6 +69,9 @@ void App::ShowLibraryView()
   Book *bookcurrent_ = GetCurrentBook();
   if (bookcurrent_) {
     bookcurrent_->FlushPendingCacheSaves();
+    // Keep recently-opened ordering in sync when returning from reader mode.
+    if (prefs && prefs->library_sort_mode == LIBRARY_SORT_RECENT)
+      ReSortLibraryBooks();
     // Cancel any in-progress PDF/CBZ strip render so the worker thread is
     // idle before browser warmup jobs can start touching MuPDF lock state.
     book_renderer::CancelFixedLayoutDeferredWork(bookcurrent_);

@@ -283,6 +283,8 @@ static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ct
   book->SetFolderName(source_dir.c_str());
   book->SetFileName(io_name.c_str());
   book->SetTitle(io_name.c_str());
+  if (app->prefs)
+    app->prefs->ApplySavedBookState(book);
   LogFilenameStage(app, "book.filename", book->GetFileName());
   LogFilenameStage(app, "book.title", book->GetTitle());
   book->format = format;
