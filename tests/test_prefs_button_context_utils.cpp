@@ -4,19 +4,21 @@
 
 int main() {
   test::ExpectEq("general visible count",
-                 settings::VisiblePrefsButtonCount(false, false), 6);
+                 settings::VisiblePrefsButtonCount(false, false), 7);
   test::ExpectEq("book visible count without line wrap",
-                 settings::VisiblePrefsButtonCount(true, false), 5);
+                 settings::VisiblePrefsButtonCount(true, false), 6);
   test::ExpectEq("book visible count with line wrap",
-                 settings::VisiblePrefsButtonCount(true, true), 6);
+                 settings::VisiblePrefsButtonCount(true, true), 7);
 
   test::ExpectEq("general slot 0", settings::PrefsButtonForVisibleSlot(false, false, 0),
                  PREFS_BUTTON_STYLE_CUSTOMIZATION);
   test::ExpectEq("general slot 2", settings::PrefsButtonForVisibleSlot(false, false, 2),
                  PREFS_BUTTON_TIME24H);
   test::ExpectEq("general slot 3", settings::PrefsButtonForVisibleSlot(false, false, 3),
+                 PREFS_BUTTON_TIME_REMAINING);
+  test::ExpectEq("general slot 4", settings::PrefsButtonForVisibleSlot(false, false, 4),
                  PREFS_BUTTON_COLORMODE);
-  test::ExpectEq("general slot 5", settings::PrefsButtonForVisibleSlot(false, false, 5),
+  test::ExpectEq("general slot 6", settings::PrefsButtonForVisibleSlot(false, false, 6),
                  PREFS_BUTTON_LIBRARY_SORT);
 
   test::ExpectEq("extra button count", settings::ExtraPrefsButtonCount(), 3);
@@ -34,8 +36,10 @@ int main() {
   test::ExpectEq("book slot 2", settings::PrefsButtonForVisibleSlot(true, false, 2),
                  PREFS_BUTTON_TIME24H);
   test::ExpectEq("book slot 3", settings::PrefsButtonForVisibleSlot(true, false, 3),
-                 PREFS_BUTTON_INDEX);
+                 PREFS_BUTTON_TIME_REMAINING);
   test::ExpectEq("book slot 4", settings::PrefsButtonForVisibleSlot(true, false, 4),
+                 PREFS_BUTTON_INDEX);
+  test::ExpectEq("book slot 5", settings::PrefsButtonForVisibleSlot(true, false, 5),
                  PREFS_BUTTON_BOOKMARKS);
 
   test::ExpectEq("book slot 0 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 0),
@@ -47,8 +51,10 @@ int main() {
   test::ExpectEq("book slot 3 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 3),
                  PREFS_BUTTON_TIME24H);
   test::ExpectEq("book slot 4 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 4),
-                 PREFS_BUTTON_INDEX);
+                 PREFS_BUTTON_TIME_REMAINING);
   test::ExpectEq("book slot 5 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 5),
+                 PREFS_BUTTON_INDEX);
+  test::ExpectEq("book slot 6 line wrap", settings::PrefsButtonForVisibleSlot(true, true, 6),
                  PREFS_BUTTON_BOOKMARKS);
 
   for (unsigned char slot = 0; slot < settings::VisiblePrefsButtonCount(true, false);

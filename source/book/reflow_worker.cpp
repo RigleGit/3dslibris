@@ -107,6 +107,7 @@ void Book::PrepareForOpen() {
   Text *text = GetText();
   if (text)
     text->SetStyle(TEXT_STYLE_REGULAR);
+  ResetReadingPaceEstimate();
   ClearOpenAbortRequest();
   open_cancel_poll::Reset();
   tocResolveTried = false;

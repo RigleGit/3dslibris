@@ -60,6 +60,21 @@ namespace
                t->tm_hour >= 12 ? "PM" : "AM");
     }
   }
+
+  static bool FormatEtaString(char *buf, size_t bufsz, const Book *book)
+  {
+    if (!buf || bufsz == 0 || !book || !book->HasReadingPaceEstimate())
+      return false;
+    const int book_min = book->EstimateRemainingBookMinutes();
+    if (book_min < 0)
+      return false;
+    const int chapter_min = book->EstimateRemainingChapterMinutes();
+    if (chapter_min >= 0)
+      snprintf(buf, bufsz, "ch %dm bk %dm", chapter_min, book_min);
+    else
+      snprintf(buf, bufsz, "bk %dm", book_min);
+    return true;
+  }
 } // namespace
 
 StatusController::StatusController(App &app)
@@ -108,10 +123,17 @@ void StatusController::UpdateStatus()
     snapshot.next_locked_pagecount = 0;
   }
 
+  const bool use_eta_token =
+      mode == AppMode::Book && app_.prefs->show_time_remaining &&
+      !UsesFixedLayoutMinimalHud(current_book);
+  const int display_token =
+      (mode == AppMode::Book && UsesFixedLayoutMinimalHud(current_book))
+          ? (current_book ? (int)current_book->GetPosition() : -1)
+          : (use_eta_token ? (current_book ? (int)current_book->GetPosition() : -1)
+                           : snapshot.percent_tenths);
+
   if (!force_redraw_ && minute_of_day == last_minute_ &&
-      ((mode == AppMode::Book && UsesFixedLayoutMinimalHud(current_book))
-           ? (current_book ? (int)current_book->GetPosition() : -1)
-           : snapshot.percent_tenths) == last_display_token_)
+      display_token == last_display_token_)
   {
     return;
   }
@@ -227,8 +249,23 @@ void StatusController::UpdateStatus()
       app_.ts->SetPen(pX, textY);
       app_.ts->PrintString(pmsg);
 
+      int barRight = pX - 12;
+      if (app_.prefs->show_time_remaining && current_book) {
+        char eta_msg[40];
+        if (FormatEtaString(eta_msg, sizeof(eta_msg), current_book)) {
+          int eta_w = app_.ts->GetStringWidth(eta_msg, TEXT_STYLE_BROWSER);
+          int eta_x = barRight - 8 - eta_w;
+          int eta_min_x = 8 + clockWidth + (battWidth > 0 ? 8 + battWidth + 8 : 12);
+          if (eta_x >= eta_min_x) {
+            app_.ts->SetPen(eta_x, textY);
+            app_.ts->PrintString(eta_msg);
+            barRight = eta_x - 8;
+          }
+        }
+      }
+
       int barStart = 8 + clockWidth + (battWidth > 0 ? 8 + battWidth + 8 : 12);
-      int barEnd = pX - 12;
+      int barEnd = barRight;
       if (barEnd > barStart + 10)
       {
         int barY = hud_layout.progress_bar_y;
@@ -254,9 +291,6 @@ void StatusController::UpdateStatus()
   app_.ts->SetStyle(style);
   app_.ts->SetScreen(screen);
   last_minute_ = minute_of_day;
-  last_display_token_ =
-      (mode == AppMode::Book && UsesFixedLayoutMinimalHud(current_book))
-          ? (current_book ? (int)current_book->GetPosition() : -1)
-          : snapshot.percent_tenths;
+  last_display_token_ = display_token;
   force_redraw_ = false;
 }

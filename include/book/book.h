@@ -98,6 +98,9 @@ private:
   bool browser_display_name_cached;
   bool browser_folder_entry;
   int position;             //! as page index.
+  float eta_ms_per_page_;
+  u32 eta_last_adjacent_turn_ms_;
+  u16 eta_samples_;
   uint32_t last_opened_time; //! Unix timestamp of last open; 0 if never opened.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
@@ -352,6 +355,10 @@ public:
   void SetFolderName(std::string &foldername);
   void SetPage(u16 index);
   void SetPosition(int pos);
+  void ResetReadingPaceEstimate();
+  bool HasReadingPaceEstimate() const;
+  int EstimateRemainingBookMinutes() const;
+  int EstimateRemainingChapterMinutes() const;
   void SetTitle(const char *title);
   Page *AppendPage();
   void ReservePageCapacity(size_t incoming_pages);

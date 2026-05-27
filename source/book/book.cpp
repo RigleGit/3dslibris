@@ -56,6 +56,33 @@ static bool HasExtCaseInsensitive(const std::string &name, const char *ext) {
   return true;
 }
 
+static const u32 kEtaSampleMinMs = 600;
+static const u32 kEtaSampleMaxMs = 240000;
+static const float kEtaEmaAlpha = 0.20f;
+
+static int ClampPositionToPageCount(int pos, u16 page_count) {
+  if (page_count == 0)
+    return 0;
+  if (pos < 0)
+    return 0;
+  if (pos >= (int)page_count)
+    return (int)page_count - 1;
+  return pos;
+}
+
+static int RemainingMinutesFromMsPerPage(int remaining_pages,
+                                         float ms_per_page) {
+  if (remaining_pages <= 0)
+    return 0;
+  if (ms_per_page <= 0.0f)
+    return -1;
+  const float total_ms = (float)remaining_pages * ms_per_page;
+  int minutes = (int)((total_ms + 59999.0f) / 60000.0f);
+  if (minutes < 1)
+    minutes = 1;
+  return minutes;
+}
+
 } // namespace
 
 Book::Book(const BookContext &c) : ctx(c) {
@@ -68,6 +95,9 @@ Book::Book(const BookContext &c) : ctx(c) {
 
   // Position state / basic rendering
   position = 0;
+  eta_ms_per_page_ = 0.0f;
+  eta_last_adjacent_turn_ms_ = 0;
+  eta_samples_ = 0;
   last_opened_time = 0;
   coverPixels = nullptr;
   coverWidth = 0;
@@ -636,11 +666,96 @@ int Book::GetPosition() {
 }
 
 void Book::SetPage(u16 index) {
-  position = index;
+  SetPosition((int)index);
 }
 
 void Book::SetPosition(int pos) {
-  position = pos;
+  const int prev = position;
+  const int next = ClampPositionToPageCount(pos, GetPageCount());
+  position = next;
+
+  const int delta = next - prev;
+  const int abs_delta = delta >= 0 ? delta : -delta;
+  if (abs_delta > 1) {
+    eta_last_adjacent_turn_ms_ = 0;
+    return;
+  }
+  if (abs_delta != 1)
+    return;
+
+  const u32 now_ms = (u32)osGetTime();
+  if (eta_last_adjacent_turn_ms_ != 0 && now_ms > eta_last_adjacent_turn_ms_) {
+    const u32 elapsed_ms = now_ms - eta_last_adjacent_turn_ms_;
+    if (elapsed_ms >= kEtaSampleMinMs && elapsed_ms <= kEtaSampleMaxMs) {
+      const float sample = (float)elapsed_ms;
+      if (eta_samples_ == 0)
+        eta_ms_per_page_ = sample;
+      else
+        eta_ms_per_page_ = eta_ms_per_page_ * (1.0f - kEtaEmaAlpha) +
+                           sample * kEtaEmaAlpha;
+      if (eta_samples_ < 0xFFFF)
+        eta_samples_++;
+    }
+  }
+  eta_last_adjacent_turn_ms_ = now_ms;
+}
+
+void Book::ResetReadingPaceEstimate() {
+  eta_ms_per_page_ = 0.0f;
+  eta_last_adjacent_turn_ms_ = 0;
+  eta_samples_ = 0;
+}
+
+bool Book::HasReadingPaceEstimate() const {
+  return eta_samples_ >= 3 && eta_ms_per_page_ > 0.0f;
+}
+
+int Book::EstimateRemainingBookMinutes() const {
+  const int page_count =
+      (IsPdf() && mupdf_state) ? (int)mupdf_state->page_count
+                               : ((IsCbz() && cbz_state) ? (int)cbz_state->page_count
+                                                         : (int)pages.size());
+  if (page_count <= 0)
+    return -1;
+  if (!HasReadingPaceEstimate())
+    return -1;
+  int pos = position;
+  if (pos < 0)
+    pos = 0;
+  if (pos >= page_count)
+    pos = page_count - 1;
+  return RemainingMinutesFromMsPerPage(page_count - 1 - pos, eta_ms_per_page_);
+}
+
+int Book::EstimateRemainingChapterMinutes() const {
+  const int page_count =
+      (IsPdf() && mupdf_state) ? (int)mupdf_state->page_count
+                               : ((IsCbz() && cbz_state) ? (int)cbz_state->page_count
+                                                         : (int)pages.size());
+  if (page_count <= 0)
+    return -1;
+  if (!HasReadingPaceEstimate())
+    return -1;
+  int pos = position;
+  if (pos < 0)
+    pos = 0;
+  if (pos >= page_count)
+    pos = page_count - 1;
+
+  if (chapters.empty())
+    return EstimateRemainingBookMinutes();
+
+  int chapter_end = page_count - 1;
+  for (size_t i = 0; i < chapters.size(); i++) {
+    if ((int)chapters[i].page > pos) {
+      chapter_end = (int)chapters[i].page - 1;
+      break;
+    }
+  }
+  if (chapter_end < pos)
+    chapter_end = pos;
+
+  return RemainingMinutesFromMsPerPage(chapter_end - pos, eta_ms_per_page_);
 }
 
 Page *Book::AppendPage() {
@@ -723,6 +838,7 @@ void Book::Close() {
   ClearInlineLinks();
   ClearInlineImages();
   ClearTocConfidence();
+  ResetReadingPaceEstimate();
   open_session_id_ = 0;
   open_abort_requested_ = false;
 }

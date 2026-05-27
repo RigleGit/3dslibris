@@ -350,7 +350,7 @@ void SettingsController::PrefsInit() {
       "style customization",
       "font configuration", "font size",    "extra line spacing",
       "extra paragraph spacing",
-      "screen orientation", "clock format", "color mode", "library view",
+      "screen orientation", "clock format", "time remaining", "color mode", "library view",
       "circle pad pages",   "library sort", "index",      "bookmarks",
       "reset settings",
       "clear cache",        "publisher indent", "publisher margins"};
@@ -401,6 +401,7 @@ void SettingsController::PrefsDraw() {
   PrefsRefreshButton(PREFS_BUTTON_STYLE_CUSTOMIZATION);
   PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
   PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+  PrefsRefreshButton(PREFS_BUTTON_TIME_REMAINING);
   PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
@@ -945,6 +946,13 @@ void SettingsController::PrefsRefreshButton(int index) {
                               : std::string("12h Format"));
     }
     break;
+  case PREFS_BUTTON_TIME_REMAINING:
+    app_.prefsButtons[PREFS_BUTTON_TIME_REMAINING].SetLabel1(
+        std::string("time remaining"));
+    app_.prefsButtons[PREFS_BUTTON_TIME_REMAINING].SetLabel2(
+        app_.prefs->show_time_remaining ? std::string("on")
+                                        : std::string("off"));
+    break;
   case PREFS_BUTTON_COLORMODE: {
     int mode = app_.ts->GetColorMode();
     app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel1(std::string("color mode"));
@@ -1172,6 +1180,7 @@ void SettingsController::ResetToDefaults() {
   app_.prefs->browser_view_mode = BROWSER_VIEW_GALLERY;
   app_.prefs->fixed_layout_rtl = false;
   app_.prefs->circle_pad_page_turn = true;
+  app_.prefs->show_time_remaining = false;
   app_.MarkBookLayoutDirty();
   app_.prefs->Write();
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++)
@@ -1221,6 +1230,15 @@ void SettingsController::PrefsHandlePress() {
     CycleColorMode(app_.ts.get(), &app_);
     PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
     app_.prefs->Write();
+    app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_TIME_REMAINING) {
+    app_.prefs->show_time_remaining = !app_.prefs->show_time_remaining;
+    PrefsRefreshButton(PREFS_BUTTON_TIME_REMAINING);
+    app_.prefs->Write();
+    app_.RequestStatusRedraw();
     app_.MarkPrefsDirty();
     return;
   }
