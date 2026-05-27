@@ -351,7 +351,7 @@ void SettingsController::PrefsInit() {
       "font configuration", "font size",    "extra line spacing",
       "extra paragraph spacing",
       "screen orientation", "clock format", "time remaining", "color mode", "library view",
-      "circle pad pages",   "library sort", "index",      "bookmarks",
+      "circle pad pages",   "library sort", "book information", "index",      "bookmarks",
       "reset settings",
       "clear cache",        "publisher indent", "publisher margins"};
 
@@ -404,6 +404,7 @@ void SettingsController::PrefsDraw() {
   PrefsRefreshButton(PREFS_BUTTON_TIME_REMAINING);
   PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
+  PrefsRefreshButton(PREFS_BUTTON_BOOK_INFO);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
@@ -431,7 +432,7 @@ void SettingsController::PrefsDraw() {
     button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
     button_prefs_library_.Draw(ts->screenright);
     if (has_submenu) {
-      button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "style" : "back");
+      button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "next" : "prev");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
       button_prefs_page_nav_.Draw(ts->screenright);
     }
@@ -1017,6 +1018,16 @@ void SettingsController::PrefsRefreshButton(int index) {
                                         : 0]));
     break;
   }
+  case PREFS_BUTTON_BOOK_INFO:
+    app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel1(
+        std::string("book information"));
+    if (is_book_ctx && book) {
+      app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel2(std::string("open >"));
+    } else {
+      app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel2(
+          std::string("(book only)"));
+    }
+    break;
   case PREFS_BUTTON_INDEX:
     if (CanOpenBookIndexInCurrentContext(book, is_book_ctx)) {
       app_.prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
@@ -1273,6 +1284,17 @@ void SettingsController::PrefsHandlePress() {
     CycleLibrarySortSetting(&app_);
     PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
     app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_BOOK_INFO) {
+    if (is_book_ctx && book) {
+      app_.ShowBookInfoView();
+    } else {
+      app_.PrintStatus("Book information is available while reading");
+      PrefsRefreshButton(PREFS_BUTTON_BOOK_INFO);
+      app_.MarkPrefsDirty();
+    }
     return;
   }
 

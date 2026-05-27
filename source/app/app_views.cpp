@@ -213,6 +213,19 @@ void App::ShowChaptersView()
            (unsigned)book->GetPosition(), (unsigned)chaptermenu->GetCurrentPage());
 }
 
+void App::ShowBookInfoView()
+{
+  if (!reader_state_.bookcurrent)
+  {
+    PrintStatus("Book info unavailable: no current book");
+    ShowSettingsView(true);
+    return;
+  }
+  nav_.mode = AppMode::BookInfo;
+  ts->SetScreen(ts->screenright);
+  ts->MarkScreenDirty(ts->screenright);
+}
+
 void App::ShowCurrentBookView()
 {
   if (!reader_state_.bookcurrent)
