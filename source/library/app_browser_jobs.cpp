@@ -78,7 +78,10 @@ static bool SupportsBrowserCoverWarmup(const App &app, format_t format,
         app.IsNew3dsDevice());
   if (format != FORMAT_XHTML || !filename)
     return false;
-  return HasExtCI(filename, ".fb2") || HasExtCI(filename, ".mobi");
+  return HasExtCI(filename, ".fb2") || HasExtCI(filename, ".mobi") ||
+         HasExtCI(filename, ".txt") || HasExtCI(filename, ".md") ||
+         HasExtCI(filename, ".markdown") || HasExtCI(filename, ".rtf") ||
+         HasExtCI(filename, ".odt");
 }
 
 static size_t CountQueuedHeavyJobs(const std::deque<app_job_t> &jobs) {
@@ -213,11 +216,8 @@ void LibraryController::QueueBookWarmup(Book *book) {
     if (should_load_covers && should_queue_cover)
       EnqueueJob(APP_JOB_EXTRACT_COVER, book);
   } else if (book->format == FORMAT_XHTML) {
-    if (HasExtCI(book->GetFileName(), ".fb2") ||
-        HasExtCI(book->GetFileName(), ".mobi")) {
-      if (should_load_covers && should_queue_cover)
-        EnqueueJob(APP_JOB_EXTRACT_COVER, book);
-    }
+    if (supports_cover && should_load_covers && should_queue_cover)
+      EnqueueJob(APP_JOB_EXTRACT_COVER, book);
   }
 #ifdef DSLIBRIS_DEBUG
   if (job_queue_.size() != queue_before) {
@@ -416,6 +416,13 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
 #endif
           continue;
         }
+
+        if (cover_cache::TryLoadAdjacentOverride(book, path)) {
+          cover_cache::Save(book, path);
+          book->coverAttempts = kCoverMaxAttempts;
+          book->coverRetryAfterMs = 0;
+          rc = 0;
+        } else
         if (book->format == FORMAT_EPUB) {
           if (!book->metadataIndexTried) {
             // Metadata not yet attempted; queue it first and retry cover after.
@@ -496,6 +503,10 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           } else {
             book->coverAttempts = kCoverMaxAttempts;
           }
+        } else {
+          // Formats like TXT/MD/RTF/ODT have no embedded-cover extractor.
+          // If no adjacent override was found, stop retrying.
+          book->coverAttempts = kCoverMaxAttempts;
         }
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
         const bool has_cover_pixels = (book->coverPixels != nullptr);

@@ -20,5 +20,6 @@ static const uint8_t kMaxAttempts = 3;
 
 bool TryLoad(Book *book, const std::string &book_path);
 bool Save(Book *book, const std::string &book_path);
+bool TryLoadAdjacentOverride(Book *book, const std::string &book_path);
 
 } // namespace cover_cache
