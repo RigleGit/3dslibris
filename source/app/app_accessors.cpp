@@ -122,6 +122,8 @@ int App::StartupFindBooks() { return library_controller_->FindBooks(); }
 
 void App::StartupPrepareLibrary() { library_controller_->PrepareLibrary(); }
 
+void App::ReSortLibraryBooks() { library_controller_->SortBooks(); }
+
 void App::StartupInitUiAndBrowser()
 {
   PrefsInit();
