@@ -61,18 +61,39 @@ namespace
     }
   }
 
-  static bool FormatEtaString(char *buf, size_t bufsz, const Book *book)
+  static void FormatEtaMinutes(char *buf, size_t bufsz, const char *prefix,
+                               int total_minutes)
   {
-    if (!buf || bufsz == 0 || !book || !book->HasReadingPaceEstimate())
+    if (!buf || bufsz == 0 || !prefix) {
+      return;
+    }
+    if (total_minutes < 0) {
+      snprintf(buf, bufsz, "%s --", prefix);
+      return;
+    }
+    const int hours = total_minutes / 60;
+    const int mins = total_minutes % 60;
+    if (hours > 0)
+      snprintf(buf, bufsz, "%s %dh%02dm", prefix, hours, mins);
+    else
+      snprintf(buf, bufsz, "%s %dm", prefix, mins);
+  }
+
+  static bool FormatEtaPair(char *chapter_buf, size_t chapter_sz,
+                            char *book_buf, size_t book_sz,
+                            const Book *book)
+  {
+    if (!chapter_buf || chapter_sz == 0 || !book_buf || book_sz == 0 ||
+        !book || !book->HasReadingPaceEstimate())
       return false;
+
     const int book_min = book->EstimateRemainingBookMinutes();
     if (book_min < 0)
       return false;
+
     const int chapter_min = book->EstimateRemainingChapterMinutes();
-    if (chapter_min >= 0)
-      snprintf(buf, bufsz, "ch %dm bk %dm", chapter_min, book_min);
-    else
-      snprintf(buf, bufsz, "bk %dm", book_min);
+    FormatEtaMinutes(chapter_buf, chapter_sz, "ch", chapter_min);
+    FormatEtaMinutes(book_buf, book_sz, "bk", book_min);
     return true;
   }
 } // namespace
@@ -213,15 +234,7 @@ void StatusController::UpdateStatus()
     int right_edge = 232;
     if (mode == AppMode::Book)
     {
-      const char *hint = nullptr;
-      if (app_.IsInlineLinkFocusActive())
-        hint = "A:go";
-      else
-      {
-        Page *pg = current_book ? current_book->GetPage() : nullptr;
-        if (pg && pg->GetInlineLinkCount() > 0)
-          hint = "Y:lnk";
-      }
+      const char *hint = app_.IsInlineLinkFocusActive() ? "A:go" : "Y:lnk";
       if (hint)
       {
         int hw = app_.ts->GetStringWidth(hint, TEXT_STYLE_BROWSER);
@@ -249,23 +262,8 @@ void StatusController::UpdateStatus()
       app_.ts->SetPen(pX, textY);
       app_.ts->PrintString(pmsg);
 
-      int barRight = pX - 12;
-      if (app_.prefs->show_time_remaining && current_book) {
-        char eta_msg[40];
-        if (FormatEtaString(eta_msg, sizeof(eta_msg), current_book)) {
-          int eta_w = app_.ts->GetStringWidth(eta_msg, TEXT_STYLE_BROWSER);
-          int eta_x = barRight - 8 - eta_w;
-          int eta_min_x = 8 + clockWidth + (battWidth > 0 ? 8 + battWidth + 8 : 12);
-          if (eta_x >= eta_min_x) {
-            app_.ts->SetPen(eta_x, textY);
-            app_.ts->PrintString(eta_msg);
-            barRight = eta_x - 8;
-          }
-        }
-      }
-
       int barStart = 8 + clockWidth + (battWidth > 0 ? 8 + battWidth + 8 : 12);
-      int barEnd = barRight;
+      int barEnd = pX - 12;
       if (barEnd > barStart + 10)
       {
         int barY = hud_layout.progress_bar_y;
@@ -282,6 +280,21 @@ void StatusController::UpdateStatus()
           {
             app_.ts->FillRect(barStart + 2, barY + 2, barStart + 2 + fillW,
                               barY + barHeight - 2, fgColor);
+          }
+        }
+
+        if (app_.prefs->show_time_remaining && current_book) {
+          char eta_ch[24];
+          char eta_bk[24];
+          if (FormatEtaPair(eta_ch, sizeof(eta_ch), eta_bk, sizeof(eta_bk),
+                            current_book)) {
+            const int etaY = hud_layout.clear_bottom - app_.ts->GetHeight() - 1;
+            const int eta_bk_w =
+                app_.ts->GetStringWidth(eta_bk, TEXT_STYLE_BROWSER);
+            app_.ts->SetPen(8, etaY);
+            app_.ts->PrintString(eta_ch);
+            app_.ts->SetPen(std::max(8, 232 - eta_bk_w), etaY);
+            app_.ts->PrintString(eta_bk);
           }
         }
       }
