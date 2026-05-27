@@ -666,6 +666,11 @@ void LibraryController::SortBooks() {
     std::sort(app_.books.begin(), app_.books.end(), &BookDateModifiedLessThan);
     break;
   case LIBRARY_SORT_RECENT:
+    for (auto &book : app_.books) {
+      DBG_LOGF(&app_, "recently-opened: pre-sort t=%lu \"%s\"",
+               (unsigned long)book->GetLastOpenedTime(),
+               book->GetFileName() ? book->GetFileName() : "?");
+    }
     std::sort(app_.books.begin(), app_.books.end(), &BookRecentLessThan);
     break;
   default:

@@ -395,6 +395,9 @@ void ReaderController::HandleEventInOpening()
   DBG_LOG(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
 
   bookcurrent_->SetLastOpenedTime((uint32_t)time(NULL));
+  DBG_LOGF(&app_, "recently-opened: recording t=%lu for \"%s\"",
+           (unsigned long)bookcurrent_->GetLastOpenedTime(),
+           bookcurrent_->GetFileName() ? bookcurrent_->GetFileName() : "?");
   if (app_.prefs)
     app_.prefs->Write();
 

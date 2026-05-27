@@ -218,6 +218,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       matched->SetStylePublisherBlockMarginsOverride(style_publisher_block_margins);
       if (last_opened > 0)
         matched->SetLastOpenedTime(last_opened);
+      DBG_LOGF(app, "recently-opened: read lastOpened=%lu matched=%s file=\"%s\"",
+               (unsigned long)last_opened,
+               matched ? "yes" : "no",
+               filename);
 
       if (current) {
         // Set this book as current.
@@ -564,8 +568,12 @@ int Prefs::Write() {
     if (book->GetStylePublisherBlockMarginsOverride() >= 0)
       fprintf(fp, " publisherBlockMargins=\"%d\"",
               book->GetStylePublisherBlockMarginsOverride());
-    if (book->GetLastOpenedTime() > 0)
+    if (book->GetLastOpenedTime() > 0) {
       fprintf(fp, " lastOpened=\"%lu\"", (unsigned long)book->GetLastOpenedTime());
+      DBG_LOGF(app, "recently-opened: write lastOpened=%lu for \"%s\"",
+               (unsigned long)book->GetLastOpenedTime(),
+               book->GetFileName() ? book->GetFileName() : "?");
+    }
     if (app->GetCurrentBook() == app->books[i])
       fprintf(fp, " current=\"1\"");
     fprintf(fp, ">\n");
