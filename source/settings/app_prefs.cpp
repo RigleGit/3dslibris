@@ -438,17 +438,13 @@ void SettingsController::PrefsDraw() {
     SyncLibraryButtonLayout(&app_.buttonprefs, true, false);
     app_.buttonprefs.Draw(ts->screenright);
     if (prefs_general_page_ == 0) {
-      button_prefs_page_nav_.Label("more");
+      button_prefs_page_nav_.Label("next");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
       button_prefs_page_nav_.Draw(ts->screenright);
     } else if (prefs_general_page_ == 2) {
-      button_prefs_page_nav_.Label("back");
+      button_prefs_page_nav_.Label("prev");
       button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
       button_prefs_page_nav_.Draw(ts->screenright);
-      button_prefs_library_.Label("style");
-      button_prefs_library_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
-      button_prefs_library_.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
-      button_prefs_library_.Draw(ts->screenright);
     } else {
       button_prefs_page_nav_.Label("back");
       button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
@@ -576,8 +572,6 @@ void SettingsController::PrefsHandleEvent() {
       app_.MarkPrefsDirty();
     } else if (!book_ctx && prefs_general_page_ == 0) {
       GoToPrefsPage(2);
-    } else if (!book_ctx && prefs_general_page_ == 2) {
-      GoToPrefsPage(1);
     } else if (book_ctx && prefs_general_page_ == 0 && has_submenu) {
       GoToPrefsPage(1);
     }
@@ -623,8 +617,6 @@ void SettingsController::PrefsHandleTouch() {
   }
   if (!book_ctx_touch && prefs_general_page_ == 2) {
     button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
-    button_prefs_library_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
-    button_prefs_library_.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
   }
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
     for (int dy = -8; dy <= 8; dy += 4) {
@@ -660,11 +652,6 @@ void SettingsController::PrefsHandleTouch() {
   if (!book_ctx_touch &&
       enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) {
     GoToPrefsPage(prefs_general_page_ == 0 ? 2 : 0);
-    return;
-  }
-  if (!book_ctx_touch && prefs_general_page_ == 2 &&
-      enclosesWithSlack(button_prefs_library_, footerX, footerY)) {
-    GoToPrefsPage(1); // "style" button on general extra page
     return;
   }
 
