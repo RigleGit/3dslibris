@@ -252,6 +252,21 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
         FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height,
                               std::min(req.author_max_width_px, text_width),
                               band_max_height, &band_width, &band_height);
+      } else if (leading_paragraph_image || figure_with_caption) {
+        // Keep some room for follow-up text/caption on start-of-entry bands.
+        // Otherwise certain wide images end up visually isolated on their own
+        // reading screen when full-width scaling consumes most vertical space.
+        const int baseline =
+            req.pen_y + (req.line_began ? (line_height + req.linespacing) : 0);
+        const int reserve_follow =
+            figure_with_caption ? min_caption_text_height
+                                : min_follow_text_height;
+        const int max_height_with_follow =
+            limit_y - baseline - req.linespacing - reserve_follow;
+        const int fit_max_height =
+            std::min(band_max_height, std::max(1, max_height_with_follow));
+        FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height, text_width,
+                              fit_max_height, &band_width, &band_height);
       } else {
         band_width = text_width;
         band_height = std::max(1, DivRoundUp(eff_meta.height * text_width, eff_meta.width));
