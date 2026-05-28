@@ -51,7 +51,9 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
   while (p < lc.size() && lc[p] == ' ')
     p++;
   if (p < lc.size() && lc[p] == '%') {
-    result.value = value;
+    // Keep integer storage for percentages but preserve one decimal digit by
+    // rounding half-up (e.g. 1.5% -> 2%).
+    result.value = value + ((has_decimal && frac_x10 >= 5) ? 1 : 0);
     result.unit = MarginTopResult::Unit::Percent;
     result.negative = negative;
     p++;
