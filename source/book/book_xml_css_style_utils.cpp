@@ -171,6 +171,35 @@ static MarginTopResult ParseMarginValue(const char *style, const char *property,
   return ParseMarginShorthand(lc, pos, shorthand_which);
 }
 
+static MarginTopResult ParsePaddingValue(const char *style,
+                                         const char *property,
+                                         int shorthand_which) {
+  MarginTopResult result;
+  if (!style || !style[0])
+    return result;
+  const std::string lc = ToLowerAscii(std::string(style));
+
+  const std::string prop_colon = std::string(property) + ":";
+  size_t pos = lc.find(prop_colon);
+  if (pos != std::string::npos) {
+    pos += prop_colon.size();
+    MarginTopResult r = ParseOneLengthToken(lc, &pos);
+    if (r.unit != MarginTopResult::Unit::None)
+      return r;
+  }
+
+  const char *shorthand = "padding:";
+  pos = lc.find(shorthand);
+  if (pos == std::string::npos) {
+    shorthand = "padding: ";
+    pos = lc.find(shorthand);
+  }
+  if (pos == std::string::npos)
+    return result;
+  pos += strlen(shorthand);
+  return ParseMarginShorthand(lc, pos, shorthand_which);
+}
+
 MarginTopResult ParseMarginTop(const char *style) {
   return ParseMarginValue(style, "margin-top", 0);
 }
@@ -185,6 +214,10 @@ MarginTopResult ParseMarginLeft(const char *style) {
 
 MarginTopResult ParseMarginRight(const char *style) {
   return ParseMarginValue(style, "margin-right", 1);
+}
+
+MarginTopResult ParsePaddingTop(const char *style) {
+  return ParsePaddingValue(style, "padding-top", 0);
 }
 
 MarginTopResult ParseWidth(const char *style) {

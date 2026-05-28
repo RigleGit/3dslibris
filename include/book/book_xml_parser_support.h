@@ -107,6 +107,7 @@ void ClearPendingBlockSpacing(parsedata_t *p);
 void AdvanceParsedPageOnOverflow(parsedata_t *p, int lh);
 void AdvanceParsedScreen(parsedata_t *p);
 void ForcePageBreak(parsedata_t *p);
+void ForceHardPageBreak(parsedata_t *p);
 void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
                             const char *reason, bool from_css);
 void SuppressPendingBlockSpacingFromCss(parsedata_t *p, const char *tag,

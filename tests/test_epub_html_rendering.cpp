@@ -398,6 +398,24 @@ void TestCssSpacingNearBottomAdvancesScreen() {
   ExpectTrue("css-spacing-bottom: advanced to next screen", p.screen == 1);
 }
 
+void TestPageBreakBeforeAlwaysUsesHardBreak() {
+  TestCtx tc;
+  tc.paragraph_spacing = 0;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
+
+  const std::string html =
+      "<html><body>"
+      "<p>entry one</p>"
+      "<div style=\"page-break-before:always;padding-top:10%\">entry two</div>"
+      "</body></html>";
+
+  xml_parse_utils::XmlParseResult r = xml_parse_utils::ParseXmlString(html, opts);
+  ExpectTrue("hard-break: parse ok", r.ok);
+  ExpectTrue("hard-break: creates second logical page", book.GetPageCount() >= 2);
+}
+
 } // namespace
 
 int main() {
@@ -411,6 +429,7 @@ int main() {
   TestFontSizeRestoreAdjustsPenYAfterBlockImageOverflow();
   TestSuppressOnlyDoesNotCrossBlockFontScopeStart();
   TestCssSpacingNearBottomAdvancesScreen();
+  TestPageBreakBeforeAlwaysUsesHardBreak();
   printf("PASS: %d tests\n", g_pass);
   return 0;
 }

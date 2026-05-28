@@ -165,6 +165,20 @@ void ForcePageBreak(parsedata_t *p) {
   AdvanceParsedScreen(p);
 }
 
+void ForceHardPageBreak(parsedata_t *p) {
+  if (!p || !p->ts || !p->book)
+    return;
+
+  if (p->buflen == 0 && p->screen == 0)
+    return;
+
+  if (p->screen == 0)
+    AdvanceParsedScreen(p);
+
+  if (p->screen == 1)
+    AdvanceParsedScreen(p);
+}
+
 void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
                             const char *reason, bool from_css) {
   if (!p || lines <= 0)

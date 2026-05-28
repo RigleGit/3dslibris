@@ -44,6 +44,10 @@ void AdvanceParsedScreen(parsedata_t *p);
 // Force a page break unconditionally (used for CSS page-break-before/after).
 void ForcePageBreak(parsedata_t *p);
 
+// Force a full logical page break. Ensures the next content starts at the top
+// of screen 0 (new Page), not at the top of screen 1.
+void ForceHardPageBreak(parsedata_t *p);
+
 // Queue layout-only block spacing (mandatory break + optional extra lines).
 // lines >= 1. from_css=true when sourced from an explicit CSS margin property.
 void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
