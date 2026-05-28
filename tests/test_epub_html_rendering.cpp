@@ -7,6 +7,8 @@
 #include "formats/common/xml_parse_utils.h"
 #include "parse.h"
 #include "shared/text_token_constants.h"
+#include "shared/screen_dimensions.h"
+#include "shared/text_render_layout_utils.h"
 #include "ui/text.h"
 
 #include <cstdio>
@@ -366,6 +368,54 @@ void TestSuppressOnlyDoesNotCrossBlockFontScopeStart() {
              CountBufValue(buf, len, '\n') == 1);
 }
 
+void TestCssSpacingNearBottomAdvancesScreen() {
+  // Regression: when a pending block break comes from explicit CSS spacing
+  // and only one line remains, keep paragraph rhythm by advancing to the
+  // next screen instead of consuming the last line with a compressed break.
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+
+  p.buflen = 1;
+  p.buf[0] = 'A';
+  p.linebegan = true;
+  p.current_screen_has_drawable_content = true;
+  p.pending_block_break = true;
+  p.pending_block_spacing_lf = 0;
+  p.pending_block_spacing_from_css = true;
+  p.pending_block_spacing_advance_ok = false;
+  p.screen = 0;
+
+  const int line_step = tc.text.GetHeight() + tc.text.linespacing;
+  const int compact_bottom =
+      text_render_layout_utils::ResolveCompactReadingBottomMargin(tc.text.margin.bottom);
+  const int max_height = screen_dims::kTopScreenHeightPx;
+  const int target_usable = line_step; // exactly one line available
+  p.pen.y = max_height - compact_bottom - target_usable;
+
+  book_xml_screen_advance::FlushPendingBlockSpacingBeforeContent(&p, "p");
+
+  ExpectTrue("css-spacing-bottom: advanced to next screen", p.screen == 1);
+}
+
+void TestPageBreakBeforeAlwaysUsesHardBreak() {
+  TestCtx tc;
+  tc.paragraph_spacing = 0;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  xml_parse_utils::XmlParserOptions opts = MakeXmlOpts(&p);
+
+  const std::string html =
+      "<html><body>"
+      "<p>entry one</p>"
+      "<div style=\"page-break-before:always;padding-top:10%\">entry two</div>"
+      "</body></html>";
+
+  xml_parse_utils::XmlParseResult r = xml_parse_utils::ParseXmlString(html, opts);
+  ExpectTrue("hard-break: parse ok", r.ok);
+  ExpectTrue("hard-break: creates second logical page", book.GetPageCount() >= 2);
+}
+
 } // namespace
 
 int main() {
@@ -378,6 +428,8 @@ int main() {
   TestFontSizeRestoreClearsSuppressOnlyFlag();
   TestFontSizeRestoreAdjustsPenYAfterBlockImageOverflow();
   TestSuppressOnlyDoesNotCrossBlockFontScopeStart();
+  TestCssSpacingNearBottomAdvancesScreen();
+  TestPageBreakBeforeAlwaysUsesHardBreak();
   printf("PASS: %d tests\n", g_pass);
   return 0;
 }

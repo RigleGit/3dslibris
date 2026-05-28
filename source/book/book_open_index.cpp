@@ -35,6 +35,12 @@ bool Book::TryLoadMetadataFromCache() {
     SetTitle(cached.title.c_str());
   if (!cached.author.empty())
     SetAuthor(cached.author);
+  SetSeries(cached.series);
+  SetLanguage(cached.language);
+  SetPublisher(cached.publisher);
+  SetPublished(cached.published);
+  SetSubjects(cached.subjects);
+  SetDescription(cached.description);
   coverImagePath     = cached.cover_image_path;
   metadataIndexTried = true;
   metadataIndexed    = true;

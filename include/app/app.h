@@ -95,6 +95,7 @@ enum class AppMode : u8
   Bookmarks = 8,
   Chapters = 9,
   Opening = 10,
+  BookInfo = 11,
 };
 
 enum app_job_type_t
@@ -212,6 +213,7 @@ public:
   void RunFontMenuFrame(u32 keys);
   void RunBookmarksMenuFrame(u32 keys);
   void RunChaptersMenuFrame(u32 keys);
+  void RunBookInfoFrame(u32 keys);
   bool PresentIfDirty();
   int StartupFindBooks();
   void StartupPrepareLibrary();
@@ -311,6 +313,7 @@ public:
   void ReturnFromPrefs();
   void ShowBookmarksView();
   void ShowChaptersView();
+  void ShowBookInfoView();
   bool BookNeedsRelayout(Book *book) const;
   size_t PauseBrowserJobs();
   void LoadVisibleBrowserCoverCaches();
@@ -379,9 +382,10 @@ private:
     AppMode mode;
     BrowserState browser;
     PrefsViewState prefs;
+    u8 book_info_page;
 
     NavigationState()
-        : mode(AppMode::Browser), browser(), prefs() {}
+      : mode(AppMode::Browser), browser(), prefs(), book_info_page(0) {}
   };
 
   struct ReaderRuntimeState

@@ -91,6 +91,12 @@ private:
   std::string foldername;
   std::string title;
   std::string author;
+  std::string series;
+  std::string language;
+  std::string publisher;
+  std::string published;
+  std::string subjects;
+  std::string description;
   std::string browser_display_name_cache;
   std::string browser_folder_path;
   std::string browser_folder_display_name;
@@ -98,6 +104,9 @@ private:
   bool browser_display_name_cached;
   bool browser_folder_entry;
   int position;             //! as page index.
+  float eta_ms_per_page_;
+  u32 eta_last_adjacent_turn_ms_;
+  u16 eta_samples_;
   uint32_t last_opened_time; //! Unix timestamp of last open; 0 if never opened.
   std::list<u16> bookmarks; //! as page indices.
   std::vector<ChapterEntry> chapters;
@@ -231,6 +240,12 @@ public:
   void DrawTopGradientBackground();
   void NotifySpineProgress(unsigned done, unsigned total);
   inline const std::string &GetAuthor() const { return author; }
+  inline const std::string &GetSeries() const { return series; }
+  inline const std::string &GetLanguage() const { return language; }
+  inline const std::string &GetPublisher() const { return publisher; }
+  inline const std::string &GetPublished() const { return published; }
+  inline const std::string &GetSubjects() const { return subjects; }
+  inline const std::string &GetDescription() const { return description; }
   inline uint32_t GetLastOpenedTime() const { return last_opened_time; }
   inline void SetLastOpenedTime(uint32_t t) { last_opened_time = t; }
   inline bool HasBrowserDisplayNameCache() const
@@ -346,12 +361,22 @@ public:
   int GetPosition(void);
   const char *GetTitle();
   void SetAuthor(const std::string &s);
+  void SetSeries(const std::string &s);
+  void SetLanguage(const std::string &s);
+  void SetPublisher(const std::string &s);
+  void SetPublished(const std::string &s);
+  void SetSubjects(const std::string &s);
+  void SetDescription(const std::string &s);
   void SetFileName(const char *filename);
   void SetFolderName(const std::string &foldername);
   void SetFolderName(const char *foldername);
   void SetFolderName(std::string &foldername);
   void SetPage(u16 index);
   void SetPosition(int pos);
+  void ResetReadingPaceEstimate();
+  bool HasReadingPaceEstimate() const;
+  int EstimateRemainingBookMinutes() const;
+  int EstimateRemainingChapterMinutes() const;
   void SetTitle(const char *title);
   Page *AppendPage();
   void ReservePageCapacity(size_t incoming_pages);

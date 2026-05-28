@@ -296,6 +296,9 @@ void AdvanceParsedScreen(parsedata_t *p) {
 void ForcePageBreak(parsedata_t *p) {
   book_xml_screen_advance::ForcePageBreak(p);
 }
+void ForceHardPageBreak(parsedata_t *p) {
+  book_xml_screen_advance::ForceHardPageBreak(p);
+}
 void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
                             const char *reason, bool from_css) {
   book_xml_screen_advance::QueueBlockSpacingLines(p, lines, tag, reason, from_css);

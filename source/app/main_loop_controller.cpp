@@ -216,6 +216,10 @@ int MainLoopController::RunMainLoop()
     case AppMode::Chapters:
       app_.RunChaptersMenuFrame(hidKeysDown());
       break;
+
+    case AppMode::BookInfo:
+      app_.RunBookInfoFrame(hidKeysDown());
+      break;
     }
 
     if (app_.GetMode() == AppMode::Quit)

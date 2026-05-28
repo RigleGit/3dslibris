@@ -360,7 +360,22 @@ void start(void *data, const char *el, const char **attr) {
     }
     if (book_xml_css_style_utils::HasPageBreakBefore(el_style_raw) ||
         elem_css.page_break_before) {
-      ForcePageBreak(p);
+      ForceHardPageBreak(p);
+    }
+
+    if (el_style_raw && el_style_raw[0]) {
+      const book_xml_css_style_utils::MarginTopResult ptr =
+          book_xml_css_style_utils::ParsePaddingTop(el_style_raw);
+      if (ptr.unit != book_xml_css_style_utils::MarginTopResult::Unit::None &&
+          !ptr.negative && ptr.value > 0) {
+        const book_xml_css_style_utils::MarginTopResult mtr =
+            book_xml_css_style_utils::ParseMarginTop(el_style_raw);
+        if (mtr.unit == book_xml_css_style_utils::MarginTopResult::Unit::None) {
+          const int line_h = ts->GetHeight() + ts->linespacing;
+          QueueBlockSpacingFromMarginResult(
+              p, el, "padding-top-inline", ptr, line_h, 0);
+        }
+      }
     }
   }
 

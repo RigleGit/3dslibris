@@ -20,6 +20,7 @@ MarginTopResult ParseMarginTop(const char *style);
 MarginTopResult ParseMarginBottom(const char *style);
 MarginTopResult ParseMarginLeft(const char *style);
 MarginTopResult ParseMarginRight(const char *style);
+MarginTopResult ParsePaddingTop(const char *style);
 int ResolveHorizontalMarginPx(const MarginTopResult &mtr, int display_width,
                               int font_size_px = 0);
 

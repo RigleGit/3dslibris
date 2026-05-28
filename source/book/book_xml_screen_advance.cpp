@@ -165,6 +165,20 @@ void ForcePageBreak(parsedata_t *p) {
   AdvanceParsedScreen(p);
 }
 
+void ForceHardPageBreak(parsedata_t *p) {
+  if (!p || !p->ts || !p->book)
+    return;
+
+  if (p->buflen == 0 && p->screen == 0)
+    return;
+
+  if (p->screen == 0)
+    AdvanceParsedScreen(p);
+
+  if (p->screen == 1)
+    AdvanceParsedScreen(p);
+}
+
 void QueueBlockSpacingLines(parsedata_t *p, int lines, const char *tag,
                             const char *reason, bool from_css) {
   if (!p || lines <= 0)
@@ -328,7 +342,11 @@ void FlushPendingBlockSpacingBeforeContent(parsedata_t *p,
 
   // ---- Phase 1: mandatory block break -----------------------------------
   if (p->pending_block_break && p->linebegan) {
-    if (available >= 1) {
+    // When spacing originates from explicit CSS margins, avoid squeezing the
+    // visual separation into the last remaining line at the bottom edge.
+    // Advancing keeps paragraph rhythm consistent with paged readers.
+    const int min_available = p->pending_block_spacing_from_css ? 2 : 1;
+    if (available >= min_available) {
       LinefeedRLocal(p, next_tag ? next_tag : "?", "mandatory-break", 0);
       available--;
     } else {

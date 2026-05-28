@@ -29,6 +29,8 @@
 #include "formats/fb2/fb2_parser.h"
 #include "formats/mobi/mobi_parser.h"
 #include "formats/pdf/pdf_parser.h"
+#include "formats/common/file_read_utils.h"
+#include "shared/cover_decode_utils.h"
 #include "shared/debug_log.h"
 #include "shared/debug_runtime_mode.h"
 #include "shared/path_constants.h"
@@ -186,6 +188,48 @@ static void EnsureCoverCacheDirs() {
 
 static std::string BuildCoverCachePath(Book *book,
                                        const std::string &book_path) {
+  auto IsRegularFilePath = [](const std::string &path) -> bool {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+  };
+
+  auto FindAdjacentOverrideCoverPath =
+      [&](const std::string &path, std::string *out_path) -> bool {
+    if (out_path)
+      out_path->clear();
+    if (path.empty())
+      return false;
+    const size_t slash = path.find_last_of('/');
+    if (slash == std::string::npos)
+      return false;
+    std::string dir = path.substr(0, slash);
+    std::string filename = path.substr(slash + 1);
+    if (filename.empty())
+      return false;
+    size_t dot = filename.find_last_of('.');
+    std::string stem = (dot != std::string::npos && dot > 0)
+                           ? filename.substr(0, dot)
+                           : filename;
+    if (stem.empty())
+      return false;
+
+    std::vector<std::string> candidates;
+    candidates.reserve(4);
+    candidates.push_back(dir + "/" + stem + ".jpg");
+    candidates.push_back(dir + "/" + stem + ".png");
+    candidates.push_back(dir + "/" + stem + ".JPG");
+    candidates.push_back(dir + "/" + stem + ".PNG");
+
+    for (size_t i = 0; i < candidates.size(); i++) {
+      if (IsRegularFilePath(candidates[i])) {
+        if (out_path)
+          *out_path = candidates[i];
+        return true;
+      }
+    }
+    return false;
+  };
+
   struct stat st;
   long long fsize = 0;
   long long fmtime = 0;
@@ -199,6 +243,25 @@ static std::string BuildCoverCachePath(Book *book,
   key += std::to_string(fsize);
   key.push_back('|');
   key += std::to_string(fmtime);
+
+  std::string adjacent_cover;
+  if (FindAdjacentOverrideCoverPath(book_path, &adjacent_cover)) {
+    struct stat cover_st;
+    long long cover_size = 0;
+    long long cover_mtime = 0;
+    if (stat(adjacent_cover.c_str(), &cover_st) == 0) {
+      cover_size = (long long)cover_st.st_size;
+      cover_mtime = (long long)cover_st.st_mtime;
+    }
+    key += "|adj:" + adjacent_cover;
+    key.push_back('|');
+    key += std::to_string(cover_size);
+    key.push_back('|');
+    key += std::to_string(cover_mtime);
+  } else {
+    key += "|adj:none";
+  }
+
   uint64_t h = Fnv1a64(key);
 
   // Use the book filename (sans extension) as a human-readable label.
@@ -223,6 +286,59 @@ static std::string BuildCoverCachePath(Book *book,
 } // namespace
 
 namespace cover_cache {
+
+bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
+  if (!book || book_path.empty())
+    return false;
+
+  const size_t slash = book_path.find_last_of('/');
+  if (slash == std::string::npos)
+    return false;
+  const std::string dir = book_path.substr(0, slash);
+  const std::string filename = book_path.substr(slash + 1);
+  if (filename.empty())
+    return false;
+  const size_t dot = filename.find_last_of('.');
+  const std::string stem =
+      (dot != std::string::npos && dot > 0) ? filename.substr(0, dot) : filename;
+  if (stem.empty())
+    return false;
+
+  const std::string candidates[] = {
+      dir + "/" + stem + ".jpg", dir + "/" + stem + ".png",
+      dir + "/" + stem + ".JPG", dir + "/" + stem + ".PNG",
+  };
+
+  std::string chosen_path;
+  for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
+    struct stat st;
+    if (stat(candidates[i].c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+      chosen_path = candidates[i];
+      break;
+    }
+  }
+  if (chosen_path.empty())
+    return false;
+
+  std::string bytes;
+  if (!file_read_utils::ReadPathToStringLimited(chosen_path, &bytes,
+                                                4u * 1024u * 1024u))
+    return false;
+
+  if (!cover_decode_utils::DecodeImageToCoverThumb(
+          book, (const unsigned char *)bytes.data(), bytes.size(), 4096))
+    return false;
+
+#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
+  if (book->GetStatusReporter()) {
+    DBG_LOGF(book->GetStatusReporter(),
+             "COVER: adjacent override loaded book=%s path=%s",
+             book->GetFileName() ? book->GetFileName() : "(null)",
+             chosen_path.c_str());
+  }
+#endif
+  return true;
+}
 
 bool Save(Book *book, const std::string &book_path) {
   if (!book || !book->coverPixels || book->coverWidth <= 0 ||
@@ -285,6 +401,11 @@ bool TryLoad(Book *book, const std::string &book_path) {
   std::string cache_path = BuildCoverCachePath(book, book_path);
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp) {
+    if (!book_path.empty() && !book->coverPixels &&
+        TryLoadAdjacentOverride(book, book_path)) {
+      Save(book, book_path);
+      return true;
+    }
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
     if (book->GetStatusReporter()) {
       DBG_LOGF(book->GetStatusReporter(), "COVER: cache miss book=%s path=%s",
@@ -295,6 +416,10 @@ bool TryLoad(Book *book, const std::string &book_path) {
     if (debug_runtime::BackgroundWorkersDisabled() &&
         debug_runtime::BrowserWarmupDisabled() && !book_path.empty() &&
         !book->coverPixels && book->coverAttempts < kMaxAttempts) {
+      if (TryLoadAdjacentOverride(book, book_path)) {
+        Save(book, book_path);
+        return true;
+      }
       int src_rc = -1;
       if (book->format == FORMAT_EPUB) {
         // Metadata indexing jobs may not have run yet; index synchronously

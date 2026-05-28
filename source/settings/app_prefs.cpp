@@ -350,8 +350,8 @@ void SettingsController::PrefsInit() {
       "style customization",
       "font configuration", "font size",    "extra line spacing",
       "extra paragraph spacing",
-      "screen orientation", "clock format", "color mode", "library view",
-      "circle pad pages",   "library sort", "index",      "bookmarks",
+      "screen orientation", "clock format", "time remaining", "color mode", "library view",
+      "circle pad pages",   "library sort", "book information", "index",      "bookmarks",
       "reset settings",
       "clear cache",        "publisher indent", "publisher margins"};
 
@@ -401,8 +401,10 @@ void SettingsController::PrefsDraw() {
   PrefsRefreshButton(PREFS_BUTTON_STYLE_CUSTOMIZATION);
   PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
   PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+  PrefsRefreshButton(PREFS_BUTTON_TIME_REMAINING);
   PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
+  PrefsRefreshButton(PREFS_BUTTON_BOOK_INFO);
   PrefsRefreshButton(PREFS_BUTTON_INDEX);
   PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
@@ -430,7 +432,7 @@ void SettingsController::PrefsDraw() {
     button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
     button_prefs_library_.Draw(ts->screenright);
     if (has_submenu) {
-      button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "style" : "back");
+      button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "next" : "prev");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
       button_prefs_page_nav_.Draw(ts->screenright);
     }
@@ -661,7 +663,8 @@ void SettingsController::PrefsHandleTouch() {
   app_.SetPrefsSelectedIndex(selected_index);
   for (u8 i = 0; i < visibleCount; i++) {
     const int button_id = EffectiveButtonForSlot(i);
-    if (app_.prefsButtons[button_id].EnclosesPoint(coord.px, coord.py)) {
+    if (enclosesWithSlack(app_.prefsButtons[button_id], (int)coord.px,
+                          (int)coord.py)) {
       if (i != app_.GetPrefsSelectedIndex())
         app_.SetPrefsSelectedIndex(i);
 
@@ -945,6 +948,13 @@ void SettingsController::PrefsRefreshButton(int index) {
                               : std::string("12h Format"));
     }
     break;
+  case PREFS_BUTTON_TIME_REMAINING:
+    app_.prefsButtons[PREFS_BUTTON_TIME_REMAINING].SetLabel1(
+        std::string("time remaining"));
+    app_.prefsButtons[PREFS_BUTTON_TIME_REMAINING].SetLabel2(
+        app_.prefs->show_time_remaining ? std::string("on")
+                                        : std::string("off"));
+    break;
   case PREFS_BUTTON_COLORMODE: {
     int mode = app_.ts->GetColorMode();
     app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel1(std::string("color mode"));
@@ -1009,6 +1019,16 @@ void SettingsController::PrefsRefreshButton(int index) {
                                         : 0]));
     break;
   }
+  case PREFS_BUTTON_BOOK_INFO:
+    app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel1(
+        std::string("book information"));
+    if (is_book_ctx && book) {
+      app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel2(std::string("open >"));
+    } else {
+      app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel2(
+          std::string("(book only)"));
+    }
+    break;
   case PREFS_BUTTON_INDEX:
     if (CanOpenBookIndexInCurrentContext(book, is_book_ctx)) {
       app_.prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
@@ -1172,6 +1192,7 @@ void SettingsController::ResetToDefaults() {
   app_.prefs->browser_view_mode = BROWSER_VIEW_GALLERY;
   app_.prefs->fixed_layout_rtl = false;
   app_.prefs->circle_pad_page_turn = true;
+  app_.prefs->show_time_remaining = false;
   app_.MarkBookLayoutDirty();
   app_.prefs->Write();
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++)
@@ -1225,6 +1246,15 @@ void SettingsController::PrefsHandlePress() {
     return;
   }
 
+  if (selected_button == PREFS_BUTTON_TIME_REMAINING) {
+    app_.prefs->show_time_remaining = !app_.prefs->show_time_remaining;
+    PrefsRefreshButton(PREFS_BUTTON_TIME_REMAINING);
+    app_.prefs->Write();
+    app_.RequestStatusRedraw();
+    app_.MarkPrefsDirty();
+    return;
+  }
+
   if (selected_button == PREFS_BUTTON_LIBRARY_VIEW) {
     if (CurrentBookUsesLineWrapFixSlot(book, is_book_ctx)) {
       ToggleCurrentBookMobiLineWrapFix();
@@ -1255,6 +1285,17 @@ void SettingsController::PrefsHandlePress() {
     CycleLibrarySortSetting(&app_);
     PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
     app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_BOOK_INFO) {
+    if (is_book_ctx && book) {
+      app_.ShowBookInfoView();
+    } else {
+      app_.PrintStatus("Book information is available while reading");
+      PrefsRefreshButton(PREFS_BUTTON_BOOK_INFO);
+      app_.MarkPrefsDirty();
+    }
     return;
   }
 

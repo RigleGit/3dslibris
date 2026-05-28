@@ -14,7 +14,7 @@ namespace book_meta_cache {
 namespace {
 
 static const uint32_t kMagic   = 0x434D3342U; // 'B3MC'
-static const uint16_t kVersion = 1;
+static const uint16_t kVersion = 3;
 
 struct Header {
   uint32_t magic;
@@ -52,6 +52,12 @@ bool Save(const std::string &cache_path, const MetaEntry &entry) {
   bool ok = binary_io_utils::WriteRaw(fp, &hdr, sizeof(hdr));
   ok = ok && binary_io_utils::WriteString32(fp, entry.title, UINT32_MAX);
   ok = ok && binary_io_utils::WriteString32(fp, entry.author, UINT32_MAX);
+  ok = ok && binary_io_utils::WriteString32(fp, entry.series, UINT32_MAX);
+  ok = ok && binary_io_utils::WriteString32(fp, entry.language, UINT32_MAX);
+  ok = ok && binary_io_utils::WriteString32(fp, entry.publisher, UINT32_MAX);
+  ok = ok && binary_io_utils::WriteString32(fp, entry.published, UINT32_MAX);
+  ok = ok && binary_io_utils::WriteString32(fp, entry.subjects, UINT32_MAX);
+  ok = ok && binary_io_utils::WriteString32(fp, entry.description, UINT32_MAX);
   ok = ok && binary_io_utils::WriteString32(fp, entry.cover_image_path,
                                             UINT32_MAX);
   fclose(fp);
@@ -78,12 +84,24 @@ bool Load(const std::string &cache_path, MetaEntry *out) {
   const uint32_t kMaxStrLen = 4096;
   bool ok = binary_io_utils::ReadString32(fp, kMaxStrLen, &out->title) &&
             binary_io_utils::ReadString32(fp, kMaxStrLen, &out->author) &&
+            binary_io_utils::ReadString32(fp, kMaxStrLen, &out->series) &&
+            binary_io_utils::ReadString32(fp, kMaxStrLen, &out->language) &&
+            binary_io_utils::ReadString32(fp, kMaxStrLen, &out->publisher) &&
+            binary_io_utils::ReadString32(fp, kMaxStrLen, &out->published) &&
+            binary_io_utils::ReadString32(fp, kMaxStrLen, &out->subjects) &&
+            binary_io_utils::ReadString32(fp, kMaxStrLen, &out->description) &&
             binary_io_utils::ReadString32(fp, kMaxStrLen,
                                           &out->cover_image_path);
   fclose(fp);
   if (!ok) {
     out->title.clear();
     out->author.clear();
+    out->series.clear();
+    out->language.clear();
+    out->publisher.clear();
+    out->published.clear();
+    out->subjects.clear();
+    out->description.clear();
     out->cover_image_path.clear();
   }
   return ok;

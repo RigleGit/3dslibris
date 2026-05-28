@@ -395,5 +395,24 @@ int main() {
     ExpectEq("late right-screen figure lands on left", plan.next_text_screen, 0);
   }
 
+  {
+    InlineImageLayoutRequest req = BaseRequest();
+    req.current_screen = 1;
+    req.screen_height = 320;
+    req.next_screen_height = 400;
+    req.margin_bottom = 20;
+    req.next_margin_bottom = 36;
+    req.pen_x = req.margin_left;
+    req.pen_y = 286;
+    req.line_began = false;
+    req.image_context = INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH;
+    InlineImageLayoutPlan plan =
+      PlanInlineImageLayout(req, Metadata(1800, 500));
+    ExpectMode("leading wide image stays band on compact screen", plan,
+               INLINE_IMAGE_LAYOUT_BAND);
+    ExpectTrue("leading wide image is shrunk below full text width",
+               plan.draw_width < (req.screen_width - req.margin_left - req.margin_right));
+  }
+
   return 0;
 }

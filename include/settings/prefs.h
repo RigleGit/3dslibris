@@ -49,6 +49,7 @@ public:
   long modtime;
   bool swapshoulder;
   bool time24h;
+  bool show_time_remaining;
   BrowserViewMode browser_view_mode;
   bool fixed_layout_rtl;
   bool circle_pad_page_turn;

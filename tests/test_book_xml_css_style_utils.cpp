@@ -85,6 +85,20 @@ void TestParseMarginTopPercent() {
   test::ExpectFalse("not negative", r.negative);
 }
 
+void TestParseMarginTopPercentDecimalRoundsHalfUp() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParseMarginTop("margin-top: 1.5%;");
+  test::ExpectEq("percent decimal unit", (int)r.unit, (int)R::Unit::Percent);
+  test::ExpectEq("percent decimal rounded value", r.value, 2);
+}
+
+void TestParsePaddingTopPercent() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  R r = book_xml_css_style_utils::ParsePaddingTop("padding-top: 10%;");
+  test::ExpectEq("padding-top percent unit", (int)r.unit, (int)R::Unit::Percent);
+  test::ExpectEq("padding-top percent value", r.value, 10);
+}
+
 void TestParseMarginTopZeroUnitless() {
   using R = book_xml_css_style_utils::MarginTopResult;
   R r = book_xml_css_style_utils::ParseMarginTop("margin-top: 0;");
@@ -581,6 +595,8 @@ int main() {
   TestParseMarginTopPositivePx();
   TestParseMarginTopNegativePx();
   TestParseMarginTopPercent();
+  TestParseMarginTopPercentDecimalRoundsHalfUp();
+  TestParsePaddingTopPercent();
   TestParseMarginTopZeroUnitless();
   TestParseMarginTopZeroPx();
   TestParseMarginTopMissingProperty();
