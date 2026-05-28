@@ -91,6 +91,12 @@ private:
   std::string foldername;
   std::string title;
   std::string author;
+  std::string series;
+  std::string language;
+  std::string publisher;
+  std::string published;
+  std::string subjects;
+  std::string description;
   std::string browser_display_name_cache;
   std::string browser_folder_path;
   std::string browser_folder_display_name;
@@ -234,6 +240,12 @@ public:
   void DrawTopGradientBackground();
   void NotifySpineProgress(unsigned done, unsigned total);
   inline const std::string &GetAuthor() const { return author; }
+  inline const std::string &GetSeries() const { return series; }
+  inline const std::string &GetLanguage() const { return language; }
+  inline const std::string &GetPublisher() const { return publisher; }
+  inline const std::string &GetPublished() const { return published; }
+  inline const std::string &GetSubjects() const { return subjects; }
+  inline const std::string &GetDescription() const { return description; }
   inline uint32_t GetLastOpenedTime() const { return last_opened_time; }
   inline void SetLastOpenedTime(uint32_t t) { last_opened_time = t; }
   inline bool HasBrowserDisplayNameCache() const
@@ -349,6 +361,12 @@ public:
   int GetPosition(void);
   const char *GetTitle();
   void SetAuthor(const std::string &s);
+  void SetSeries(const std::string &s);
+  void SetLanguage(const std::string &s);
+  void SetPublisher(const std::string &s);
+  void SetPublished(const std::string &s);
+  void SetSubjects(const std::string &s);
+  void SetDescription(const std::string &s);
   void SetFileName(const char *filename);
   void SetFolderName(const std::string &foldername);
   void SetFolderName(const char *foldername);

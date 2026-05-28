@@ -382,9 +382,10 @@ private:
     AppMode mode;
     BrowserState browser;
     PrefsViewState prefs;
+    u8 book_info_page;
 
     NavigationState()
-        : mode(AppMode::Browser), browser(), prefs() {}
+      : mode(AppMode::Browser), browser(), prefs(), book_info_page(0) {}
   };
 
   struct ReaderRuntimeState

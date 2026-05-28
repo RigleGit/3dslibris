@@ -663,7 +663,8 @@ void SettingsController::PrefsHandleTouch() {
   app_.SetPrefsSelectedIndex(selected_index);
   for (u8 i = 0; i < visibleCount; i++) {
     const int button_id = EffectiveButtonForSlot(i);
-    if (app_.prefsButtons[button_id].EnclosesPoint(coord.px, coord.py)) {
+    if (enclosesWithSlack(app_.prefsButtons[button_id], (int)coord.px,
+                          (int)coord.py)) {
       if (i != app_.GetPrefsSelectedIndex())
         app_.SetPrefsSelectedIndex(i);
 

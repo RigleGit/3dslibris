@@ -422,8 +422,12 @@ void PopulateMuPdfMetadata(Book *book, fz_context *ctx, fz_document *doc) {
 
   char title_buf[512];
   char author_buf[512];
+  char subject_buf[512];
+  char created_buf[512];
   title_buf[0] = '\0';
   author_buf[0] = '\0';
+  subject_buf[0] = '\0';
+  created_buf[0] = '\0';
 
   fz_try(ctx) {
     if (fz_lookup_metadata(ctx, doc, FZ_META_INFO_TITLE, title_buf,
@@ -436,6 +440,16 @@ void PopulateMuPdfMetadata(Book *book, fz_context *ctx, fz_document *doc) {
         author_buf[0]) {
       std::string author(author_buf);
       book->SetAuthor(author);
+    }
+    if (fz_lookup_metadata(ctx, doc, FZ_META_INFO_SUBJECT, subject_buf,
+                           sizeof(subject_buf)) > 0 &&
+        subject_buf[0]) {
+      book->SetSubjects(subject_buf);
+    }
+    if (fz_lookup_metadata(ctx, doc, FZ_META_INFO_CREATIONDATE, created_buf,
+                           sizeof(created_buf)) > 0 &&
+        created_buf[0]) {
+      book->SetPublished(created_buf);
     }
   }
   fz_catch(ctx) {

@@ -316,6 +316,13 @@ void epub_data_init(epub_data_t *d) {
   d->rootfile = "";
   d->title = "";
   d->creator = "";
+  d->series = "";
+  d->language = "";
+  d->publisher = "";
+  d->published = "";
+  d->subjects = "";
+  d->description = "";
+  d->subject_current = "";
   d->coverid = "";
   d->tocid = "";
   d->navid = "";
@@ -443,17 +450,43 @@ void epub_rootfile_start(void *data, const char *el, const char **attr) {
     d->creator.clear();
   }
 
+  else if (elem == "dc:language") {
+    d->language.clear();
+  }
+
+  else if (elem == "dc:publisher") {
+    d->publisher.clear();
+  }
+
+  else if (elem == "dc:date") {
+    d->published.clear();
+  }
+
+  else if (elem == "dc:subject") {
+    d->subject_current.clear();
+  }
+
+  else if (elem == "dc:description") {
+    d->description.clear();
+  }
+
   // Capture <meta name="cover" content="cover-image-id"/>
   else if (elem == "meta" || elem == "opf:meta") {
-    std::string name_val, content_val;
+    std::string name_val, content_val, property_val;
     for (int i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "name"))
         name_val = attr[i + 1];
       if (!strcmp(attr[i], "content"))
         content_val = attr[i + 1];
+      if (!strcmp(attr[i], "property"))
+        property_val = attr[i + 1];
     }
     if (name_val == "cover" && content_val.length()) {
       d->coverid = content_val;
+    } else if ((name_val == "calibre:series" ||
+                property_val == "calibre:series") &&
+               !content_val.empty()) {
+      d->series = content_val;
     }
   }
   d->ctx.push_back(new std::string(elem));
@@ -465,6 +498,17 @@ void epub_rootfile_end(void *data, const char *el) {
     return;
   if (d->ctx.empty())
     return;
+
+  if (!strcmp(el, "dc:subject")) {
+    const std::string subject = Trim(d->subject_current);
+    if (!subject.empty()) {
+      if (!d->subjects.empty())
+        d->subjects += ", ";
+      d->subjects += subject;
+    }
+    d->subject_current.clear();
+  }
+
   delete d->ctx.back();
   d->ctx.pop_back();
 }
@@ -483,6 +527,16 @@ void epub_rootfile_char(void *data, const XML_Char *txt, int len) {
     d->title.append((char *)txt, len);
   } else if (*ctx == "dc:creator") {
     d->creator.append((char *)txt, len);
+  } else if (*ctx == "dc:language") {
+    d->language.append((char *)txt, len);
+  } else if (*ctx == "dc:publisher") {
+    d->publisher.append((char *)txt, len);
+  } else if (*ctx == "dc:date") {
+    d->published.append((char *)txt, len);
+  } else if (*ctx == "dc:subject") {
+    d->subject_current.append((char *)txt, len);
+  } else if (*ctx == "dc:description") {
+    d->description.append((char *)txt, len);
   }
 }
 
@@ -788,11 +842,16 @@ void ApplyEpubMetadataOnlyResult(Book *book, epub_data_t &parsedata,
                                  const std::string &folder) {
   if (!book)
     return;
-  if (parsedata.title.length()) {
+  if (parsedata.title.length())
     book->SetTitle(parsedata.title.c_str());
-    if (parsedata.creator.length())
-      book->SetAuthor(parsedata.creator);
-  }
+  if (parsedata.creator.length())
+    book->SetAuthor(parsedata.creator);
+  book->SetPublisher(Trim(parsedata.publisher));
+  book->SetSeries(Trim(parsedata.series));
+  book->SetLanguage(Trim(parsedata.language));
+  book->SetPublished(Trim(parsedata.published));
+  book->SetSubjects(Trim(parsedata.subjects));
+  book->SetDescription(Trim(parsedata.description));
   std::string coverpath;
   if (epub_cover::FindLikelyImagePath(parsedata, folder, coverpath)) {
     book->coverImagePath = coverpath;

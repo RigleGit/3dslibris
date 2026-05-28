@@ -20,6 +20,7 @@
 #include "shared/text_unicode_utils.h"
 #include "settings/font.h"
 #include "shared/debug_log.h"
+#include "ui/screen_layout_constants.h"
 #include "ui/text.h"
 
 namespace {
@@ -115,6 +116,10 @@ static std::string FormatTimestampLabel(uint32_t unix_time) {
            local->tm_year + 1900, local->tm_mon + 1, local->tm_mday,
            local->tm_hour, local->tm_min);
   return std::string(out);
+}
+
+static const char *DisplayOrDash(const std::string &value) {
+  return value.empty() ? "-" : value.c_str();
 }
 
 } // namespace
@@ -248,10 +253,39 @@ void App::RunChaptersMenuFrame(u32 keys)
 
 void App::RunBookInfoFrame(u32 keys)
 {
-  if (keys & (KEY_B | KEY_SELECT | KEY_START | KEY_Y | KEY_A))
-  {
+  const int kBookInfoPageCount = 2;
+  if (keys & (KEY_B | KEY_SELECT | KEY_START | KEY_Y | KEY_A)) {
     ShowSettingsView(true);
     return;
+  }
+
+  if ((keys & (key.left | key.l)) && nav_.book_info_page > 0) {
+    nav_.book_info_page--;
+    ts->MarkScreenDirty(ts->screenright);
+  }
+  if ((keys & (key.right | key.r)) &&
+      nav_.book_info_page + 1 < kBookInfoPageCount) {
+    nav_.book_info_page++;
+    ts->MarkScreenDirty(ts->screenright);
+  }
+
+  if (keys & KEY_TOUCH) {
+    touchPosition touch = TouchRead();
+    const int x = (int)touch.px;
+    const int y = (int)touch.py;
+    if (buttonback.EnclosesPoint((u16)x, (u16)y)) {
+      ShowSettingsView(true);
+      return;
+    }
+    if (nav_.book_info_page > 0 &&
+        buttonprev.EnclosesPoint((u16)x, (u16)y)) {
+      nav_.book_info_page--;
+      ts->MarkScreenDirty(ts->screenright);
+    } else if (nav_.book_info_page + 1 < kBookInfoPageCount &&
+               buttonnext.EnclosesPoint((u16)x, (u16)y)) {
+      nav_.book_info_page++;
+      ts->MarkScreenDirty(ts->screenright);
+    }
   }
 
   if (keys == 0 && !ts->HasDirtyScreens())
@@ -265,14 +299,14 @@ void App::RunBookInfoFrame(u32 keys)
   ts->SetStyle(TEXT_STYLE_BROWSER);
 
   int y = 14;
-  const int row_h = ts->GetHeight() + 4;
+  const int row_h = ts->GetHeight() + 2;
   const int label_x = 8;
   const int value_x = 110;
-  const int value_w = 238 - value_x;
+  const int value_w = 236 - value_x;
 
   ts->SetPen(8, y);
   ts->PrintString("book information");
-  y += row_h + 4;
+  y += row_h + 2;
 
   Book *book = reader_state_.bookcurrent;
   if (!book)
@@ -288,6 +322,8 @@ void App::RunBookInfoFrame(u32 keys)
     const std::string author =
         (!book->GetAuthor().empty()) ? book->GetAuthor() : "(unknown)";
     const std::string format = FormatLabel(book->format);
+    const std::string series = book->GetSeries();
+    const std::string language = book->GetLanguage();
 
     char pages[32];
     snprintf(pages, sizeof(pages), "%u", (unsigned)book->GetPageCount());
@@ -300,30 +336,51 @@ void App::RunBookInfoFrame(u32 keys)
     const std::string last_read =
         FormatTimestampLabel(book->GetLastOpenedTime());
 
+    const std::string publisher = book->GetPublisher();
+    const std::string published = book->GetPublished();
+    const std::string subjects = book->GetSubjects();
+    const std::string description = book->GetDescription();
+
     struct InfoLine {
       const char *label;
       std::string value;
       int max_lines;
     };
 
-    const InfoLine lines[] = {
-        {"title", title, 3},
-        {"author", author, 3},
-        {"format", format, 2},
+    const InfoLine page0_lines[] = {
+      {"title", title, 2},
+      {"author", author, 2},
+      {"series", series, 2},
+      {"language", language, 1},
+      {"format", format, 1},
         {"page", pos, 1},
         {"pages", pages, 1},
         {"chapters", chapters, 1},
-        {"last read", last_read, 2},
+      {"last read", last_read, 1},
     };
 
-    const int footer_y = 224 - row_h;
+    const InfoLine page1_lines[] = {
+        {"publisher", publisher, 3},
+        {"published", published, 2},
+        {"subjects", subjects, 3},
+      {"description", description, 24},
+    };
 
-    for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++)
+    const InfoLine *lines = nav_.book_info_page == 0 ? page0_lines : page1_lines;
+    const size_t line_count =
+        nav_.book_info_page == 0 ? sizeof(page0_lines) / sizeof(page0_lines[0])
+                                 : sizeof(page1_lines) / sizeof(page1_lines[0]);
+
+    const int footer_text_y = screen_layout::kFooterY - row_h - 8;
+    const int footer_y = footer_text_y - row_h - 4;
+
+    for (size_t i = 0; i < line_count; i++)
     {
       if (y >= footer_y)
         break;
       std::vector<std::string> wrapped =
-          WrapToWidth(ts.get(), lines[i].value, value_w, lines[i].max_lines);
+          WrapToWidth(ts.get(), DisplayOrDash(lines[i].value), value_w,
+                      lines[i].max_lines);
       for (size_t j = 0; j < wrapped.size(); j++) {
         if (y >= footer_y)
           break;
@@ -338,9 +395,18 @@ void App::RunBookInfoFrame(u32 keys)
     }
   }
 
-  y = 224 - row_h;
-  ts->SetPen(8, y);
-  ts->PrintString("B/A/Start: back");
+  const int footer_text_y = screen_layout::kFooterY - row_h - 8;
+  ts->SetPen(8, footer_text_y);
+  char pager[24];
+  snprintf(pager, sizeof(pager), "page %d/%d", (int)nav_.book_info_page + 1,
+           kBookInfoPageCount);
+  ts->PrintString(pager);
+
+  buttonback.Draw(false);
+  if (nav_.book_info_page > 0)
+    buttonprev.Draw(false);
+  if (nav_.book_info_page + 1 < kBookInfoPageCount)
+    buttonnext.Draw(false);
 
   ts->SetStyle(saved_style);
 }

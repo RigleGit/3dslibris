@@ -259,6 +259,30 @@ void Book::SetAuthor(const std::string &name) {
   author = name;
 }
 
+void Book::SetSeries(const std::string &name) {
+  series = name;
+}
+
+void Book::SetLanguage(const std::string &value) {
+  language = value;
+}
+
+void Book::SetPublisher(const std::string &name) {
+  publisher = name;
+}
+
+void Book::SetPublished(const std::string &value) {
+  published = value;
+}
+
+void Book::SetSubjects(const std::string &value) {
+  subjects = value;
+}
+
+void Book::SetDescription(const std::string &value) {
+  description = value;
+}
+
 void Book::SetFolderName(const std::string &name) {
   foldername = name;
 }
@@ -275,6 +299,12 @@ void Book::SetBrowserFolderEntry(const std::string &path,
   filename.clear();
   title = display_name;
   author.clear();
+  series.clear();
+  language.clear();
+  publisher.clear();
+  published.clear();
+  subjects.clear();
+  description.clear();
   format = FORMAT_UNDEF;
   ClearBrowserDisplayNameCache();
 }

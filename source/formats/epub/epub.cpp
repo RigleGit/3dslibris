@@ -493,8 +493,10 @@ int epub(Book *book, std::string name, bool metadataonly) {
     return FinalizeEpubParse(uf, &parsedata, book, name, deps,
                              BOOK_ERR_CANCELLED, false);
 
-  if (metadataonly) {
+  if (rc == 0)
     ApplyEpubMetadataOnlyResult(book, parsedata, folder);
+
+  if (metadataonly) {
     unzClose(uf);
     epub_data_delete(&parsedata);
     if (reporter) {

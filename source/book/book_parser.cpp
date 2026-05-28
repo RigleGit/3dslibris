@@ -223,6 +223,12 @@ uint8_t Index(Book *book) {
     const char *t = book->GetTitle();
     entry.title            = t ? t : "";
     entry.author           = book->GetAuthor();
+    entry.series           = book->GetSeries();
+    entry.language         = book->GetLanguage();
+    entry.publisher        = book->GetPublisher();
+    entry.published        = book->GetPublished();
+    entry.subjects         = book->GetSubjects();
+    entry.description      = book->GetDescription();
     entry.cover_image_path = book->coverImagePath;
     book_meta_cache::Save(
         book_meta_cache::BuildPath(path, fsize, fmtime), entry);

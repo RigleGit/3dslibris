@@ -221,6 +221,20 @@ void App::ShowBookInfoView()
     ShowSettingsView(true);
     return;
   }
+  buttonprev.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
+  buttonprev.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  buttonprev.Label("prev");
+  buttonprev.SetIcon(UI_BUTTON_ICON_PREV);
+  buttonback.Move(screen_layout::kFooterMidX, screen_layout::kFooterY);
+  buttonback.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
+  buttonback.Label("back");
+  buttonback.SetIcon(UI_BUTTON_ICON_BACK);
+  buttonnext.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
+  buttonnext.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  buttonnext.Label("next");
+  buttonnext.SetIcon(UI_BUTTON_ICON_NEXT);
+
+  nav_.book_info_page = 0;
   nav_.mode = AppMode::BookInfo;
   ts->SetScreen(ts->screenright);
   ts->MarkScreenDirty(ts->screenright);

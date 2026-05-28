@@ -44,6 +44,13 @@ typedef struct {
   bool metadataonly;
   std::string title;
   std::string creator;
+  std::string series;
+  std::string language;
+  std::string publisher;
+  std::string published;
+  std::string subjects;
+  std::string description;
+  std::string subject_current;
   std::string coverid; //! id of the cover image item
   std::string tocid;   //! id of the NCX item (EPUB2)
   std::string navid;   //! id of the nav document (EPUB3)
