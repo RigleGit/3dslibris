@@ -489,8 +489,15 @@ void ReaderController::HandleEventInBook()
     if (fixed_layout_input::HandleInBook(app_, bookcurrent_, ts, keys, held,
                                          &pagecurrent, pagecount, ctrl))
       app_.RequestStatusRedraw();
-    if (bookcurrent_->GetPosition() != position_before)
+    if (bookcurrent_->GetPosition() != position_before) {
+#ifdef DSLIBRIS_DEBUG
+      DBG_LOGF(&app_,
+               "PROGRESS pos changed (fixed) book=%s from=%u to=%u pagecount=%u",
+               SafeBookName(bookcurrent_), (unsigned)position_before,
+               (unsigned)bookcurrent_->GetPosition(), (unsigned)pagecount);
+#endif
       MarkProgressDirty(bookcurrent_);
+    }
     TryPersistProgress(bookcurrent_, false);
     return;
   }
@@ -503,8 +510,15 @@ void ReaderController::HandleEventInBook()
     status_dirty = true;
     MarkProgressDirty(bookcurrent_);
   }
-  if (bookcurrent_->GetPosition() != position_before)
+  if (bookcurrent_->GetPosition() != position_before) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(&app_,
+             "PROGRESS pos changed (reflow) book=%s from=%u to=%u pagecount=%u",
+             SafeBookName(bookcurrent_), (unsigned)position_before,
+             (unsigned)bookcurrent_->GetPosition(), (unsigned)pagecount);
+#endif
     MarkProgressDirty(bookcurrent_);
+  }
   TryPersistProgress(bookcurrent_, false);
   if (status_dirty)
     app_.RequestStatusRedraw();

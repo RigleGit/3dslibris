@@ -146,10 +146,18 @@ uint8_t OpenPrepared(Book *book) {
   DBG_LOG(book->GetStatusReporter(), logmsg);
 
   uint8_t err = 1;
-  if (book->format == FORMAT_EPUB)
+  if (book->format == FORMAT_EPUB) {
+    DBG_LOGF(book->GetStatusReporter(),
+             "BOOK parser enter: backend=epub-open file=%s",
+             book->GetFileName() ? book->GetFileName() : "");
     err = epub_parser::Open(book, path);
-  else
+    DBG_LOGF(book->GetStatusReporter(),
+             "BOOK parser exit: backend=epub-open rc=%u pages=%u file=%s",
+             (unsigned)err, (unsigned)book->GetPageCount(),
+             book->GetFileName() ? book->GetFileName() : "");
+  } else {
     err = Parse(book, true);
+  }
 
   if (!err && book->GetPosition() > (int)book->GetPageCount())
     book->SetPosition((int)book->GetPageCount() - 1);
@@ -165,13 +173,33 @@ uint8_t Parse(Book *book, bool fulltext) {
 
   for (size_t i = 0; i < sizeof(kBookParsers) / sizeof(kBookParsers[0]); i++) {
     const BookParserEntry &entry = kBookParsers[i];
-    if (entry.can_parse(book, fulltext))
-      return entry.parse(book, path, fulltext);
+    if (entry.can_parse(book, fulltext)) {
+      DBG_LOGF(book->GetStatusReporter(),
+               "BOOK parser enter: backend=%s file=%s",
+               entry.name ? entry.name : "unknown",
+               book->GetFileName() ? book->GetFileName() : "");
+      const uint8_t err = entry.parse(book, path, fulltext);
+      DBG_LOGF(book->GetStatusReporter(),
+               "BOOK parser exit: backend=%s rc=%u pages=%u file=%s",
+               entry.name ? entry.name : "unknown", (unsigned)err,
+               (unsigned)book->GetPageCount(),
+               book->GetFileName() ? book->GetFileName() : "");
+      return err;
+    }
   }
 
   const BookParseDeps deps = BuildBookParseDeps(book);
-  return xml_book_parser::ParseXmlBookFile(book, path, fulltext, deps,
-                                           nullptr, nullptr);
+  DBG_LOGF(book->GetStatusReporter(),
+           "BOOK parser enter: backend=xml-fallback file=%s",
+           book->GetFileName() ? book->GetFileName() : "");
+  const uint8_t err =
+      xml_book_parser::ParseXmlBookFile(book, path, fulltext, deps,
+                                        nullptr, nullptr);
+  DBG_LOGF(book->GetStatusReporter(),
+           "BOOK parser exit: backend=xml-fallback rc=%u pages=%u file=%s",
+           (unsigned)err, (unsigned)book->GetPageCount(),
+           book->GetFileName() ? book->GetFileName() : "");
+  return err;
 }
 
 uint8_t IndexMetadata(Book *book, const char *path) {

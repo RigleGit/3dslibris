@@ -20,6 +20,23 @@
 #include <string>
 #include <vector>
 
+struct SavedBookState {
+  int position;
+  bool mobi_line_wrap_fix;
+  int style_font_size;
+  int style_line_spacing;
+  int style_paragraph_spacing;
+  int style_publisher_text_indent;
+  int style_publisher_block_margins;
+  uint32_t last_opened;
+
+  SavedBookState()
+      : position(0), mobi_line_wrap_fix(false), style_font_size(-1),
+        style_line_spacing(-1), style_paragraph_spacing(-1),
+        style_publisher_text_indent(-1), style_publisher_block_margins(-1),
+        last_opened(0) {}
+};
+
 class App;
 class Book;
 
@@ -44,6 +61,13 @@ public:
   bool ApplyPendingCurrentBookRestore();
   void RememberSavedLastOpened(const char *folder, const char *filename,
                                uint32_t last_opened);
+  void RememberSavedBookState(const char *folder, const char *filename,
+                              int position, bool mobi_line_wrap_fix,
+                              int style_font_size, int style_line_spacing,
+                              int style_paragraph_spacing,
+                              int style_publisher_text_indent,
+                              int style_publisher_block_margins,
+                              uint32_t last_opened);
   void ApplySavedBookState(Book *book) const;
   App *GetApp() const { return app; }
   long modtime;
@@ -70,6 +94,7 @@ private:
   int pending_current_style_publisher_block_margins;
   std::vector<uint16_t> pending_current_bookmarks;
   std::unordered_map<std::string, uint32_t> last_opened_by_book_key;
+  std::unordered_map<std::string, SavedBookState> saved_state_by_book_key;
   static std::string MakeBookKey(const char *folder, const char *filename);
   void Init();
 };

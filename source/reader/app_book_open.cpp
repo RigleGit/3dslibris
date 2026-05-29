@@ -99,6 +99,12 @@ u8 ReaderController::OpenBook()
            SafeBookName(selected_book), needs_relayout ? 1u : 0u,
            selected_book->SupportsAsyncReflowOpen() ? 1u : 0u);
 
+  // Switching books closes the previous one in DetachCurrentBookForSwitch().
+  // Persist first so Close() cannot reset/write it back as page 1.
+  if (switching_books) {
+    TryPersistProgress(bookcurrent_, true);
+  }
+
   // Fast path: selected book is already parsed and resident.
   if (selected_book->GetPageCount() > 0 && !needs_relayout &&
       !selected_book->IsOpenAbortRequested())

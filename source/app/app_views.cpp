@@ -68,7 +68,16 @@ void App::ShowLibraryView()
 
   Book *bookcurrent_ = GetCurrentBook();
   if (bookcurrent_) {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(this,
+             "PROGRESS leave reader -> library book=%s pos=%d page=%d/%d",
+             bookcurrent_->GetFileName() ? bookcurrent_->GetFileName() : "",
+             bookcurrent_->GetPosition(), bookcurrent_->GetPosition() + 1,
+             bookcurrent_->GetPageCount());
+#endif
     bookcurrent_->FlushPendingCacheSaves();
+    // Persist current page/bookmarks when leaving the reader to browser view.
+    PersistPrefs();
     // Keep recently-opened ordering in sync when returning from reader mode.
     if (prefs && prefs->library_sort_mode == LIBRARY_SORT_RECENT)
       ReSortLibraryBooks();

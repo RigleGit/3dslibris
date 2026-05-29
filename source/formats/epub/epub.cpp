@@ -384,7 +384,7 @@ static int ParseEpubSpineDocuments(
       }
     } else if (app) {
       char msg[256];
-      sprintf(msg, "NOT FOUND IN ZIP: %s", path.c_str());
+      snprintf(msg, sizeof(msg), "NOT FOUND IN ZIP: %s", path.c_str());
       DBG_LOG(app, msg);
   }
   }

@@ -61,8 +61,10 @@ static const u32 kEtaSampleMaxMs = 240000;
 static const float kEtaEmaAlpha = 0.20f;
 
 static int ClampPositionToPageCount(int pos, u16 page_count) {
+  // During startup restore we can receive a valid saved position before pages
+  // are parsed. Keep it so reopen can land on the expected page after parse.
   if (page_count == 0)
-    return 0;
+    return pos < 0 ? 0 : pos;
   if (pos < 0)
     return 0;
   if (pos >= (int)page_count)

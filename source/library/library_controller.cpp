@@ -206,6 +206,8 @@ static Book *FindBookByFolderAndFile(const std::vector<Book *> &books,
                                      const char *filename) {
   if (!filename || !*filename)
     return NULL;
+  const std::string wanted_norm =
+      utf8_utils::NormalizeFsFilenameForIo(filename);
   for (size_t i = 0; i < books.size(); i++) {
     Book *book = books[i];
     if (!book || book->IsBrowserFolder() || !book->GetFileName())
@@ -214,8 +216,84 @@ static Book *FindBookByFolderAndFile(const std::vector<Book *> &books,
       continue;
     if (strcasecmp(book->GetFileName(), filename) == 0)
       return book;
+    if (!wanted_norm.empty()) {
+      const std::string book_norm =
+          utf8_utils::NormalizeFsFilenameForIo(book->GetFileName());
+      if (!book_norm.empty() &&
+          strcasecmp(book_norm.c_str(), wanted_norm.c_str()) == 0)
+        return book;
+    }
   }
   return NULL;
+}
+
+static Book *FindBookByFileNameOnly(const std::vector<Book *> &books,
+                                    const char *filename) {
+  if (!filename || !*filename)
+    return NULL;
+  const std::string wanted_norm =
+      utf8_utils::NormalizeFsFilenameForIo(filename);
+  for (size_t i = 0; i < books.size(); i++) {
+    Book *book = books[i];
+    if (!book || book->IsBrowserFolder() || !book->GetFileName())
+      continue;
+    if (strcasecmp(book->GetFileName(), filename) == 0)
+      return book;
+    if (!wanted_norm.empty()) {
+      const std::string book_norm =
+          utf8_utils::NormalizeFsFilenameForIo(book->GetFileName());
+      if (!book_norm.empty() &&
+          strcasecmp(book_norm.c_str(), wanted_norm.c_str()) == 0)
+        return book;
+    }
+  }
+  return NULL;
+}
+
+static bool PathContainsFileCaseInsensitive(const std::string &dir,
+                                            const char *filename) {
+  if (!filename || !*filename)
+    return false;
+  DIR *dp = opendir(dir.c_str());
+  if (!dp)
+    return false;
+
+  const std::string wanted_norm =
+      utf8_utils::NormalizeFsFilenameForIo(filename);
+  bool found = false;
+  struct dirent *ent;
+  while ((ent = readdir(dp))) {
+    if (ent->d_name[0] == '.')
+      continue;
+    std::string child = dir + "/" + ent->d_name;
+    if (!PathIsRegularFile(child))
+      continue;
+    if (strcasecmp(ent->d_name, filename) == 0) {
+      found = true;
+      break;
+    }
+    if (!wanted_norm.empty()) {
+      const std::string child_norm =
+          utf8_utils::NormalizeFsFilenameForIo(ent->d_name);
+      if (!child_norm.empty() &&
+          strcasecmp(child_norm.c_str(), wanted_norm.c_str()) == 0) {
+        found = true;
+        break;
+      }
+    }
+  }
+  closedir(dp);
+  return found;
+}
+
+static bool PathContainsExactRegularFile(const std::string &dir,
+                                         const char *filename) {
+  if (!filename || !*filename)
+    return false;
+  std::string file_path = dir + "/" + filename;
+  if (PathIsRegularFile(file_path))
+    return true;
+  return PathContainsFileCaseInsensitive(dir, filename);
 }
 
 static bool HasBrowserEntryKey(std::set<std::string> *seen,
@@ -762,7 +840,7 @@ Book *LibraryController::RestoreSavedBookSelection(const char *folder,
 
   Book *root_book = FindBookByFolderAndFile(app_.books, folder, filename);
   if (!root_book && (!folder || !*folder))
-    root_book = FindBookByFolderAndFile(app_.books, NULL, filename);
+    root_book = FindBookByFileNameOnly(app_.books, filename);
   if (root_book) {
     app_.SetSelectedBook(root_book);
     return root_book;
@@ -785,8 +863,7 @@ Book *LibraryController::RestoreSavedBookSelection(const char *folder,
         std::string child = scan_dirs[i] + "/" + ent->d_name;
         if (!PathIsDirectory(child))
           continue;
-        std::string candidate = child + "/" + filename;
-        if (PathIsRegularFile(candidate)) {
+        if (PathContainsExactRegularFile(child, filename)) {
           folder_path = child;
           break;
         }

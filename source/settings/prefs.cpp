@@ -21,6 +21,7 @@
 #include "formats/common/xml_parse_utils.h"
 #include "library/browser_view_utils.h"
 #include "shared/path_constants.h"
+#include "shared/utf8_utils.h"
 #include "settings/font_config_utils.h"
 #include "sys/stat.h"
 #include "sys/time.h"
@@ -50,6 +51,22 @@ std::string Prefs::MakeBookKey(const char *folder, const char *filename) {
 }
 
 namespace xml::prefs {
+
+static bool MatchesBookFilename(const char *book_filename,
+                                const char *prefs_filename) {
+  if (!book_filename || !prefs_filename)
+    return false;
+  if (strcasecmp(book_filename, prefs_filename) == 0)
+    return true;
+
+  const std::string book_norm =
+      utf8_utils::NormalizeFsFilenameForIo(book_filename);
+  const std::string prefs_norm =
+      utf8_utils::NormalizeFsFilenameForIo(prefs_filename);
+  if (book_norm.empty() || prefs_norm.empty())
+    return false;
+  return strcasecmp(book_norm.c_str(), prefs_norm.c_str()) == 0;
+}
 
 void start(void *data, const XML_Char *name, const XML_Char **attr) {
   // Central XML dispatcher for preference tags.
@@ -192,6 +209,13 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
 
     if (filename[0] && last_opened > 0)
       p->prefs->RememberSavedLastOpened(folder, filename, last_opened);
+    if (filename[0]) {
+      p->prefs->RememberSavedBookState(
+          folder, filename, position, mobi_line_wrap_fix,
+          style_font_size, style_line_spacing,
+          style_paragraph_spacing, style_publisher_text_indent,
+          style_publisher_block_margins, last_opened);
+    }
 
     // Find the book index for this library entry and set parsing context.
     // Subsequent <bookmark> tags attach to p->book until </book>.
@@ -206,7 +230,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       std::vector<Book *>::iterator it;
       for (it = app->books.begin(); it < app->books.end(); it++) {
         const char *bookname = (*it)->GetFileName();
-        if (!strcmp(bookname, filename) &&
+        if (MatchesBookFilename(bookname, filename) &&
             (!folder[0] || !strcmp((*it)->GetFolderName(), folder))) {
           matched = *it;
           break;
@@ -358,6 +382,7 @@ int Prefs::Read() {
   int err = 0;
   ClearPendingCurrentBookRestore();
   last_opened_by_book_key.clear();
+  saved_state_by_book_key.clear();
 
   FILE *fp = fopen(paths::GetPrefsFile().c_str(), "r");
   if (!fp) {
@@ -467,6 +492,25 @@ bool Prefs::ApplyPendingCurrentBookRestore() {
   return true;
 }
 
+void Prefs::RememberSavedBookState(
+    const char *folder, const char *filename, int position,
+    bool mobi_line_wrap_fix, int style_font_size, int style_line_spacing,
+    int style_paragraph_spacing, int style_publisher_text_indent,
+    int style_publisher_block_margins, uint32_t last_opened) {
+  if (!filename || !filename[0])
+    return;
+  SavedBookState state;
+  state.position = position;
+  state.mobi_line_wrap_fix = mobi_line_wrap_fix;
+  state.style_font_size = style_font_size;
+  state.style_line_spacing = style_line_spacing;
+  state.style_paragraph_spacing = style_paragraph_spacing;
+  state.style_publisher_text_indent = style_publisher_text_indent;
+  state.style_publisher_block_margins = style_publisher_block_margins;
+  state.last_opened = last_opened;
+  saved_state_by_book_key[MakeBookKey(folder, filename)] = state;
+}
+
 void Prefs::RememberSavedLastOpened(const char *folder, const char *filename,
                                     uint32_t last_opened) {
   if (!filename || !filename[0] || last_opened == 0)
@@ -477,6 +521,24 @@ void Prefs::RememberSavedLastOpened(const char *folder, const char *filename,
 void Prefs::ApplySavedBookState(Book *book) const {
   if (!book)
     return;
+  const auto state_it =
+      saved_state_by_book_key.find(MakeBookKey(book->GetFolderName(),
+                                               book->GetFileName()));
+  if (state_it != saved_state_by_book_key.end()) {
+    const SavedBookState &state = state_it->second;
+    book->SetMobiLineWrapFix(state.mobi_line_wrap_fix);
+    book->SetStyleFontSizeOverride(state.style_font_size);
+    book->SetStyleLineSpacingOverride(state.style_line_spacing);
+    book->SetStyleParagraphSpacingOverride(state.style_paragraph_spacing);
+    book->SetStylePublisherTextIndentOverride(state.style_publisher_text_indent);
+    book->SetStylePublisherBlockMarginsOverride(
+        state.style_publisher_block_margins);
+    if (state.position > 0)
+      book->SetPosition(state.position - 1);
+    if (state.last_opened > 0)
+      book->SetLastOpenedTime(state.last_opened);
+  }
+
   const auto it =
       last_opened_by_book_key.find(MakeBookKey(book->GetFolderName(),
                                                book->GetFileName()));
@@ -605,6 +667,15 @@ int Prefs::Write() {
     }
     if (app->GetCurrentBook() == app->books[i])
       fprintf(fp, " current=\"1\"");
+#ifdef DSLIBRIS_DEBUG
+    if (app->GetCurrentBook() == app->books[i]) {
+      DBG_LOGF(app,
+               "PROGRESS write current book=%s pos=%d page=%d/%d",
+               book->GetFileName() ? book->GetFileName() : "",
+               book->GetPosition(), book->GetPosition() + 1,
+               book->GetPageCount());
+    }
+#endif
     fprintf(fp, ">\n");
     std::list<u16> &bookmarks = book->GetBookmarks();
     for (std::list<u16>::iterator j = bookmarks.begin(); j != bookmarks.end();
@@ -644,5 +715,6 @@ void Prefs::Init() {
   circle_pad_page_turn = true;
   library_sort_mode = LIBRARY_SORT_TITLE;
   last_opened_by_book_key.clear();
+  saved_state_by_book_key.clear();
   ClearPendingCurrentBookRestore();
 }
