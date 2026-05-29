@@ -242,5 +242,6 @@ int MainLoopController::RunMainLoop()
       app_.PresentIfDirty();
     }
   }
+  app_.PersistPrefs();
   return 0;
 }

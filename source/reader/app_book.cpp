@@ -56,6 +56,10 @@
 // into this TU's lookup so existing unqualified call sites still resolve.
 using namespace reader_internal;
 
+namespace {
+static const u64 kProgressAutosaveIntervalMs = 2ULL * 60ULL * 1000ULL;
+} // namespace
+
 void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
                                    void *user_data)
 {
@@ -111,6 +115,9 @@ void ReaderController::OnAppletSuspended()
   app_.SetPdfTouchLastX(-1);
   app_.SetPdfTouchLastY(-1);
   app_.SetPdfDeferredReadyAtMs(0);
+  // Persist progress on suspend from the main thread so resume can continue
+  // from the latest page even if the app is later terminated externally.
+  TryPersistProgress(bookcurrent_, true);
   if (bookcurrent_)
   {
     book_renderer::SetFixedLayoutViewportInteraction(bookcurrent_, false);
@@ -186,6 +193,53 @@ void ReaderController::OnAppletResumed()
     const u32 delay_ms = book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_);
     app_.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
   }
+}
+
+void ReaderController::MarkProgressDirty(Book *book)
+{
+  if (!book)
+    return;
+  if (progress_autosave_book_ != book)
+  {
+    progress_autosave_book_ = book;
+    progress_autosave_dirty_ = false;
+    last_progress_persist_ms_ = osGetTime();
+  }
+  progress_autosave_dirty_ = true;
+}
+
+void ReaderController::TryPersistProgress(Book *book, bool force)
+{
+  if (!book || !app_.prefs)
+    return;
+
+  if (progress_autosave_book_ != book)
+  {
+    progress_autosave_book_ = book;
+    progress_autosave_dirty_ = false;
+    last_progress_persist_ms_ = osGetTime();
+  }
+
+  if (!force && !progress_autosave_dirty_)
+    return;
+
+  const u64 now_ms = osGetTime();
+  if (!force && last_progress_persist_ms_ != 0 &&
+      (now_ms - last_progress_persist_ms_) < kProgressAutosaveIntervalMs)
+  {
+    return;
+  }
+
+  app_.PersistPrefs();
+  progress_autosave_dirty_ = false;
+  last_progress_persist_ms_ = now_ms;
+}
+
+void ReaderController::ResetProgressAutosave(Book *book)
+{
+  progress_autosave_book_ = book;
+  progress_autosave_dirty_ = false;
+  last_progress_persist_ms_ = osGetTime();
 }
 
 bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
@@ -413,6 +467,7 @@ void ReaderController::HandleEventInOpening()
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
+  ResetProgressAutosave(bookcurrent_);
   boot_trace::Boot("async open done");
 }
 
@@ -426,6 +481,7 @@ void ReaderController::HandleEventInBook()
   const ReaderControls ctrl = BuildPortraitControls(app_.key);
   const u32 keys = hidKeysDown();
   const u32 held = hidKeysHeld();
+  const u16 position_before = bookcurrent_->GetPosition();
   u16 pagecurrent = bookcurrent_->GetPosition();
   u16 pagecount = bookcurrent_->GetPageCount();
 
@@ -433,6 +489,9 @@ void ReaderController::HandleEventInBook()
     if (fixed_layout_input::HandleInBook(app_, bookcurrent_, ts, keys, held,
                                          &pagecurrent, pagecount, ctrl))
       app_.RequestStatusRedraw();
+    if (bookcurrent_->GetPosition() != position_before)
+      MarkProgressDirty(bookcurrent_);
+    TryPersistProgress(bookcurrent_, false);
     return;
   }
 
@@ -442,7 +501,11 @@ void ReaderController::HandleEventInBook()
   if (MaybeFinalizeDeferredRelayout(bookcurrent_, (int)pagecount)) {
     book_nav::DrawPage(bookcurrent_, ts);
     status_dirty = true;
+    MarkProgressDirty(bookcurrent_);
   }
+  if (bookcurrent_->GetPosition() != position_before)
+    MarkProgressDirty(bookcurrent_);
+  TryPersistProgress(bookcurrent_, false);
   if (status_dirty)
     app_.RequestStatusRedraw();
 }
@@ -476,6 +539,9 @@ void ReaderController::ToggleBookmark()
     bookmarks.insert(it, pagecurrent);
   }
 
+  MarkProgressDirty(bookcurrent_);
+  TryPersistProgress(bookcurrent_, false);
+
   book_nav::DrawPage(bookcurrent_, ts);
   const u32 delay_ms =
       bookcurrent_ ? book_renderer::GetFixedLayoutDeferredDelayMs(bookcurrent_) : 0;
@@ -493,12 +559,14 @@ void ReaderController::CloseBook()
 
   if (bookcurrent_)
   {
+    TryPersistProgress(bookcurrent_, true);
     DBG_LOGF(&app_, "BOOK close current session=%u book=%s",
              app_.GetCurrentBookSessionId(), SafeBookName(bookcurrent_));
     bookcurrent_->Close();
     app_.SetCurrentBook(NULL);
     app_.SetCurrentBookSessionId(0);
   }
+  ResetProgressAutosave(nullptr);
   app_.SetPdfDeferredReadyAtMs(0);
   ResetOpeningState(&app_);
   ClearDeferredRelayoutState();

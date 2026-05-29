@@ -2,7 +2,9 @@
 
 #include "app/app.h"
 
-ReaderController::ReaderController(App &app) : app_(app) {}
+ReaderController::ReaderController(App &app)
+    : app_(app), progress_autosave_book_(nullptr),
+      progress_autosave_dirty_(false), last_progress_persist_ms_(0) {}
 
 void App::CloseBook() { reader_controller_->CloseBook(); }
 
