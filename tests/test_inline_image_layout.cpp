@@ -162,6 +162,21 @@ int main() {
 
   {
     InlineImageLayoutRequest req = BaseRequest();
+    req.line_began = false;
+    req.pen_x = req.margin_left;
+    req.pen_y = req.margin_top + req.line_height + 2;
+    InlineImageLayoutPlan plan =
+        PlanInlineImageLayout(req, Metadata(1239, 1917));
+    ExpectMode("cover-like image near screen start stays page", plan,
+               INLINE_IMAGE_LAYOUT_PAGE);
+    ExpectFalse("near-start cover-like page image does not pre-advance",
+                plan.advance_before);
+    ExpectEq("near-start cover keeps next text on right screen",
+             plan.next_text_screen, 1);
+  }
+
+  {
+    InlineImageLayoutRequest req = BaseRequest();
     req.pen_x = 200;
     InlineImageLayoutPlan plan =
         PlanInlineImageLayout(req, Metadata(48, 16));

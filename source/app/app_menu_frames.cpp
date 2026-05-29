@@ -15,8 +15,11 @@
 #include <vector>
 
 #include "book/book.h"
+#include "book/book_xml_css_style_utils.h"
+#include "formats/common/html_entity_utils.h"
 #include "menus/bookmark_menu.h"
 #include "menus/chapter_menu.h"
+#include "shared/string_utils.h"
 #include "shared/text_unicode_utils.h"
 #include "settings/font.h"
 #include "shared/debug_log.h"
@@ -104,6 +107,74 @@ static std::vector<std::string> WrapToWidth(Text *ts, const std::string &text,
   return out;
 }
 
+static std::vector<std::string> WrapToWidthWithStyle(
+    Text *ts, const std::string &text, int max_width, int max_lines, u8 style,
+    bool dash_if_empty) {
+  std::vector<std::string> out;
+  if (!ts || max_width <= 0 || max_lines <= 0) {
+    out.push_back(text);
+    return out;
+  }
+
+  std::string remaining =
+      text.empty() ? (dash_if_empty ? std::string("-") : std::string()) : text;
+  while (!remaining.empty() && (int)out.size() < max_lines) {
+    while (!remaining.empty() && isspace((unsigned char)remaining[0]))
+      remaining.erase(remaining.begin());
+    if (remaining.empty())
+      break;
+
+    size_t newline_pos = remaining.find('\n');
+    std::string chunk =
+        (newline_pos == std::string::npos) ? remaining : remaining.substr(0, newline_pos);
+    if (chunk.empty()) {
+      out.push_back(std::string());
+      if (newline_pos == std::string::npos)
+        break;
+      remaining.erase(0, newline_pos + 1);
+      continue;
+    }
+
+    u8 chars_fit =
+        ts->GetCharCountInsideWidth(chunk.c_str(), style,
+                                    (u8)max_width);
+    if (chars_fit == 0)
+      chars_fit = 1;
+
+    size_t bytes =
+        text_unicode_utils::Utf8BytesForDisplayChars(chunk.c_str(), chars_fit);
+    if (bytes == 0 || bytes > chunk.size())
+      bytes = chunk.size();
+
+    size_t split = bytes;
+    if (split < chunk.size()) {
+      size_t ws = split;
+      while (ws > 0 && !isspace((unsigned char)chunk[ws - 1]))
+        ws--;
+      if (ws > 0)
+        split = ws;
+    }
+
+    std::string line = chunk.substr(0, split);
+    while (!line.empty() && isspace((unsigned char)line[line.size() - 1]))
+      line.erase(line.size() - 1);
+    if (line.empty() && dash_if_empty)
+      out.push_back("-");
+    else
+      out.push_back(line);
+
+    if (newline_pos != std::string::npos && split >= chunk.size()) {
+      remaining.erase(0, newline_pos + 1);
+    } else {
+      remaining.erase(0, split);
+    }
+  }
+
+  if (out.empty() && dash_if_empty)
+    out.push_back("-");
+  return out;
+}
+
 static std::string FormatTimestampLabel(uint32_t unix_time) {
   if (unix_time == 0)
     return "never";
@@ -120,6 +191,454 @@ static std::string FormatTimestampLabel(uint32_t unix_time) {
 
 static const char *DisplayOrDash(const std::string &value) {
   return value.empty() ? "-" : value.c_str();
+}
+
+static bool IsAsciiSpace(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+}
+
+static std::string TrimAscii(const std::string &in) {
+  size_t start = 0;
+  while (start < in.size() && IsAsciiSpace(in[start]))
+    start++;
+  size_t end = in.size();
+  while (end > start && IsAsciiSpace(in[end - 1]))
+    end--;
+  return in.substr(start, end - start);
+}
+
+static bool IsAsciiWordChar(char c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9') || c == '_';
+}
+
+static bool IsSelfClosingTag(const std::string &raw) {
+  size_t end = raw.size();
+  while (end > 0 && IsAsciiSpace(raw[end - 1]))
+    end--;
+  return end > 0 && raw[end - 1] == '/';
+}
+
+static std::string HtmlTagNameLower(const std::string &raw) {
+  if (raw.empty())
+    return std::string();
+  size_t i = 0;
+  while (i < raw.size() && IsAsciiSpace(raw[i]))
+    i++;
+  if (i < raw.size() && raw[i] == '/')
+    i++;
+  while (i < raw.size() && IsAsciiSpace(raw[i]))
+    i++;
+  size_t j = i;
+  while (j < raw.size() && raw[j] != '>' && !IsAsciiSpace(raw[j]) &&
+         raw[j] != '/')
+    j++;
+  std::string name = raw.substr(i, j - i);
+  for (size_t k = 0; k < name.size(); k++) {
+    if (name[k] >= 'A' && name[k] <= 'Z')
+      name[k] = (char)(name[k] - 'A' + 'a');
+  }
+  return name;
+}
+
+static std::string ExtractInlineStyleAttr(const std::string &tag_raw) {
+  if (tag_raw.empty())
+    return std::string();
+  const std::string lc = ToLowerAscii(tag_raw);
+  size_t pos = 0;
+  while (true) {
+    pos = lc.find("style", pos);
+    if (pos == std::string::npos)
+      return std::string();
+    if (pos > 0 && IsAsciiWordChar(lc[pos - 1])) {
+      pos++;
+      continue;
+    }
+    size_t p = pos + 5;
+    while (p < lc.size() && IsAsciiSpace(lc[p]))
+      p++;
+    if (p >= lc.size() || lc[p] != '=') {
+      pos++;
+      continue;
+    }
+    p++;
+    while (p < tag_raw.size() && IsAsciiSpace(tag_raw[p]))
+      p++;
+    if (p >= tag_raw.size())
+      return std::string();
+
+    if (tag_raw[p] == '"' || tag_raw[p] == '\'') {
+      const char quote = tag_raw[p++];
+      size_t end = p;
+      while (end < tag_raw.size() && tag_raw[end] != quote)
+        end++;
+      return tag_raw.substr(p, end - p);
+    }
+
+    size_t end = p;
+    while (end < tag_raw.size() && !IsAsciiSpace(tag_raw[end]) &&
+           tag_raw[end] != '>')
+      end++;
+    return tag_raw.substr(p, end - p);
+  }
+}
+
+static std::string DecodeHtmlEntitiesInText(const std::string &text) {
+  if (text.empty())
+    return std::string();
+  std::string out;
+  out.reserve(text.size());
+  for (size_t i = 0; i < text.size();) {
+    if (text[i] == '&') {
+      size_t semi = text.find(';', i + 1);
+      if (semi != std::string::npos && semi - i <= 24) {
+        std::string entity = text.substr(i, semi - i + 1);
+        std::string decoded;
+        if (html_entity_utils::DecodeHtmlEntityUtf8(entity, &decoded)) {
+          out += decoded;
+          i = semi + 1;
+          continue;
+        }
+      }
+    }
+
+    char c = text[i];
+    if (c == '\r' || c == '\t')
+      c = ' ';
+    out.push_back(c);
+    i++;
+  }
+  return out;
+}
+
+static std::string ApplyAsciiTextTransform(
+    const std::string &in,
+    book_xml_css_style_utils::TextTransform transform) {
+  if (in.empty() || transform == book_xml_css_style_utils::TextTransform::None)
+    return in;
+
+  std::string out = in;
+  if (transform == book_xml_css_style_utils::TextTransform::Uppercase) {
+    for (size_t i = 0; i < out.size(); i++) {
+      if (out[i] >= 'a' && out[i] <= 'z')
+        out[i] = (char)(out[i] - 'a' + 'A');
+    }
+    return out;
+  }
+
+  if (transform == book_xml_css_style_utils::TextTransform::Lowercase) {
+    for (size_t i = 0; i < out.size(); i++) {
+      if (out[i] >= 'A' && out[i] <= 'Z')
+        out[i] = (char)(out[i] - 'A' + 'a');
+    }
+    return out;
+  }
+
+  bool start_word = true;
+  for (size_t i = 0; i < out.size(); i++) {
+    char c = out[i];
+    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+      if (start_word && c >= 'a' && c <= 'z')
+        out[i] = (char)(c - 'a' + 'A');
+      else if (!start_word && c >= 'A' && c <= 'Z')
+        out[i] = (char)(c - 'A' + 'a');
+      start_word = false;
+    } else {
+      start_word = (c == ' ' || c == '\n' || c == '\t' || c == '-' ||
+                    c == '_' || c == '/' || c == '.');
+    }
+  }
+  return out;
+}
+
+static std::string CollapseExcessBlankLines(const std::string &in) {
+  if (in.empty())
+    return in;
+  std::string out;
+  out.reserve(in.size());
+  int newline_run = 0;
+  for (size_t i = 0; i < in.size(); i++) {
+    char c = in[i];
+    if (c == '\n') {
+      if (newline_run < 2)
+        out.push_back(c);
+      newline_run++;
+    } else {
+      newline_run = 0;
+      out.push_back(c);
+    }
+  }
+  return out;
+}
+
+static void AppendSingleNewline(std::string *out) {
+  if (!out)
+    return;
+  if (out->empty() || (*out)[out->size() - 1] != '\n')
+    out->push_back('\n');
+}
+
+static void AppendParagraphBreak(std::string *out) {
+  if (!out)
+    return;
+  if (out->empty()) {
+    out->push_back('\n');
+    return;
+  }
+  if ((*out)[out->size() - 1] != '\n')
+    out->push_back('\n');
+  if (out->size() < 2 || (*out)[out->size() - 2] != '\n')
+    out->push_back('\n');
+}
+
+struct StyledRenderLine {
+  std::string text;
+  u8 style;
+};
+
+static u8 ResolveUiTextStyle(bool bold, bool italic) {
+  if (bold && italic)
+    return TEXT_STYLE_BOLDITALIC;
+  if (bold)
+    return TEXT_STYLE_BOLD;
+  if (italic)
+    return TEXT_STYLE_ITALIC;
+  return TEXT_STYLE_BROWSER;
+}
+
+static std::vector<StyledRenderLine>
+BuildNormalizedDescriptionRenderLines(Text *ts, const std::string &raw,
+                                      int max_width) {
+  std::vector<StyledRenderLine> wrapped_lines;
+  if (raw.empty())
+    return wrapped_lines;
+
+  struct StyleState {
+    bool bold;
+    bool italic;
+    bool underline;
+    book_xml_css_style_utils::TextTransform text_transform;
+    book_xml_css_style_utils::WhiteSpaceMode white_space;
+
+    StyleState()
+        : bold(false), italic(false), underline(false),
+          text_transform(book_xml_css_style_utils::TextTransform::None),
+          white_space(book_xml_css_style_utils::WhiteSpaceMode::Normal) {}
+  };
+
+  struct TagFrame {
+    std::string name;
+    StyleState previous;
+  };
+
+  struct RawLine {
+    std::string text;
+    bool bold;
+    bool italic;
+
+    RawLine() : text(), bold(false), italic(false) {}
+    RawLine(const std::string &t, bool b, bool i) : text(t), bold(b), italic(i) {}
+  };
+
+  std::vector<RawLine> raw_lines;
+  std::string current_line;
+  current_line.reserve(raw.size() / 4 + 16);
+  bool current_line_bold = false;
+  bool current_line_italic = false;
+
+  auto flush_line = [&]() {
+    const std::string trimmed = TrimAscii(current_line);
+    if (trimmed.empty()) {
+      if (raw_lines.empty() || raw_lines.back().text.empty()) {
+        current_line.clear();
+        current_line_bold = false;
+        current_line_italic = false;
+        return;
+      }
+      raw_lines.push_back(RawLine(std::string(), false, false));
+    } else {
+      raw_lines.push_back(RawLine(trimmed, current_line_bold, current_line_italic));
+    }
+    current_line.clear();
+    current_line_bold = false;
+    current_line_italic = false;
+  };
+
+  auto paragraph_break = [&]() {
+    flush_line();
+    if (raw_lines.empty() || raw_lines.back().text.empty())
+      return;
+    raw_lines.push_back(RawLine(std::string(), false, false));
+  };
+
+  StyleState current;
+  std::vector<TagFrame> tag_stack;
+
+  for (size_t i = 0; i < raw.size();) {
+    const char c = raw[i];
+    if (c == '<') {
+      size_t gt = raw.find('>', i + 1);
+      if (gt == std::string::npos)
+        break;
+
+      std::string tag = raw.substr(i + 1, gt - i - 1);
+      tag = TrimAscii(tag);
+      const bool self_closing = IsSelfClosingTag(tag);
+      bool closing = false;
+      if (!tag.empty() && tag[0] == '/') {
+        closing = true;
+        tag = TrimAscii(tag.substr(1));
+      }
+      const std::string name = HtmlTagNameLower(tag);
+
+      if (name == "br") {
+        flush_line();
+      } else if (name == "p" || name == "div" || name == "section" ||
+                 name == "article") {
+        if (!closing)
+          paragraph_break();
+      } else if (name == "li") {
+        if (!closing) {
+          flush_line();
+          current_line += "- ";
+        } else {
+          flush_line();
+        }
+      } else if (name == "h1" || name == "h2" || name == "h3" ||
+                 name == "h4" || name == "h5" || name == "h6") {
+        if (!closing)
+          paragraph_break();
+      }
+
+      if (!name.empty()) {
+        if (closing) {
+          int match = -1;
+          for (int j = (int)tag_stack.size() - 1; j >= 0; --j) {
+            if (tag_stack[(size_t)j].name == name) {
+              match = j;
+              break;
+            }
+          }
+          if (match >= 0) {
+            while ((int)tag_stack.size() > match) {
+              TagFrame frame = tag_stack.back();
+              tag_stack.pop_back();
+              current = frame.previous;
+            }
+          }
+        } else {
+          StyleState next = current;
+          if (name == "b" || name == "strong")
+            next.bold = true;
+          if (name == "i" || name == "em")
+            next.italic = true;
+          if (name == "u")
+            next.underline = true;
+
+          const std::string inline_style = ExtractInlineStyleAttr(tag);
+          if (!inline_style.empty()) {
+            book_xml_css_style_utils::InlineStyleFlags flags{};
+            book_xml_css_style_utils::ParseInlineStyleFlags(
+                inline_style.c_str(), &flags);
+            if (flags.reset_bold)
+              next.bold = false;
+            if (flags.reset_italic)
+              next.italic = false;
+            if (flags.no_underline)
+              next.underline = false;
+            if (flags.bold)
+              next.bold = true;
+            if (flags.italic)
+              next.italic = true;
+            if (flags.underline)
+              next.underline = true;
+
+            book_xml_css_style_utils::WhiteSpaceMode ws_mode;
+            if (book_xml_css_style_utils::TryParseWhiteSpace(
+                    inline_style.c_str(), &ws_mode)) {
+              next.white_space = ws_mode;
+            }
+
+            const book_xml_css_style_utils::TextTransform tt =
+                book_xml_css_style_utils::ParseTextTransform(
+                    inline_style.c_str());
+            if (tt != book_xml_css_style_utils::TextTransform::None)
+              next.text_transform = tt;
+          }
+
+          TagFrame frame;
+          frame.name = name;
+          frame.previous = current;
+
+          if (!self_closing)
+            tag_stack.push_back(frame);
+          current = next;
+
+          if (self_closing) {
+            current = frame.previous;
+          }
+        }
+      }
+
+      i = gt + 1;
+      continue;
+    }
+
+    size_t next_tag = raw.find('<', i);
+    const std::string chunk =
+        raw.substr(i, (next_tag == std::string::npos) ? std::string::npos
+                                                       : next_tag - i);
+    std::string decoded = DecodeHtmlEntitiesInText(chunk);
+    decoded = book_xml_css_style_utils::NormalizeWhiteSpaceText(
+        decoded.c_str(), decoded.size(), current.white_space);
+    decoded = ApplyAsciiTextTransform(decoded, current.text_transform);
+
+    for (size_t k = 0; k < decoded.size(); ++k) {
+      const char ch = decoded[k];
+      if (ch == '\n') {
+        flush_line();
+        continue;
+      }
+      current_line.push_back(ch);
+      if (!IsAsciiSpace(ch)) {
+        if (current.bold)
+          current_line_bold = true;
+        if (current.italic)
+          current_line_italic = true;
+      }
+    }
+
+    if (next_tag == std::string::npos)
+      break;
+    i = next_tag;
+  }
+
+  if (!current_line.empty() || raw_lines.empty())
+    flush_line();
+
+  if (raw_lines.empty())
+    raw_lines.push_back(RawLine("-", false, false));
+
+  for (size_t i = 0; i < raw_lines.size(); i++) {
+    const RawLine &line = raw_lines[i];
+    const u8 style = ResolveUiTextStyle(line.bold, line.italic);
+    if (line.text.empty()) {
+      wrapped_lines.push_back(StyledRenderLine{"", TEXT_STYLE_BROWSER});
+      continue;
+    }
+
+    std::vector<std::string> chunks =
+        WrapToWidthWithStyle(ts, line.text, max_width, 512, style, false);
+    if (chunks.empty())
+      chunks.push_back(line.text);
+    for (size_t j = 0; j < chunks.size(); j++) {
+      wrapped_lines.push_back(StyledRenderLine{chunks[j], style});
+    }
+  }
+
+  if (wrapped_lines.empty())
+    wrapped_lines.push_back(StyledRenderLine{"-", TEXT_STYLE_BROWSER});
+  return wrapped_lines;
 }
 
 } // namespace
@@ -253,11 +772,44 @@ void App::RunChaptersMenuFrame(u32 keys)
 
 void App::RunBookInfoFrame(u32 keys)
 {
-  const int kBookInfoPageCount = 2;
   if (keys & (KEY_B | KEY_SELECT | KEY_START | KEY_Y | KEY_A)) {
     ShowSettingsView(true);
     return;
   }
+
+  const int row_h = ts->GetHeight() + 2;
+  const int label_x = 8;
+  const int value_x = 110;
+  const int value_w = 236 - value_x;
+  const int desc_x = 8;
+  const int desc_w = 236 - desc_x;
+  const int header_y = 14;
+  const int body_start_y = header_y + row_h + 2;
+  const int footer_text_y = screen_layout::kFooterY - row_h - 8;
+  const int footer_y = footer_text_y - row_h - 4;
+  const int description_text_start_y = body_start_y + row_h;
+  int description_page_lines = (footer_y - description_text_start_y) / row_h;
+  if (description_page_lines <= 0)
+    description_page_lines = 1;
+
+  Book *book = reader_state_.bookcurrent;
+  std::vector<StyledRenderLine> wrapped_desc_lines;
+  int description_pages = 1;
+  if (book) {
+    wrapped_desc_lines = BuildNormalizedDescriptionRenderLines(
+        ts.get(), book->GetDescription(), desc_w);
+    if (wrapped_desc_lines.empty())
+      wrapped_desc_lines.push_back(StyledRenderLine{"-", TEXT_STYLE_BROWSER});
+    description_pages =
+        (int)((wrapped_desc_lines.size() + (size_t)description_page_lines - 1) /
+              (size_t)description_page_lines);
+    if (description_pages < 1)
+      description_pages = 1;
+  }
+
+  const int kBookInfoPageCount = 2 + description_pages;
+  if (nav_.book_info_page >= (u8)kBookInfoPageCount)
+    nav_.book_info_page = (u8)(kBookInfoPageCount - 1);
 
   if ((keys & (key.left | key.l)) && nav_.book_info_page > 0) {
     nav_.book_info_page--;
@@ -298,17 +850,11 @@ void App::RunBookInfoFrame(u32 keys)
   const int saved_style = ts->GetStyle();
   ts->SetStyle(TEXT_STYLE_BROWSER);
 
-  int y = 14;
-  const int row_h = ts->GetHeight() + 2;
-  const int label_x = 8;
-  const int value_x = 110;
-  const int value_w = 236 - value_x;
-
+  int y = header_y;
   ts->SetPen(8, y);
   ts->PrintString("book information");
-  y += row_h + 2;
+  y = body_start_y;
 
-  Book *book = reader_state_.bookcurrent;
   if (!book)
   {
     ts->SetPen(8, y);
@@ -339,7 +885,6 @@ void App::RunBookInfoFrame(u32 keys)
     const std::string publisher = book->GetPublisher();
     const std::string published = book->GetPublished();
     const std::string subjects = book->GetSubjects();
-    const std::string description = book->GetDescription();
 
     struct InfoLine {
       const char *label;
@@ -353,49 +898,64 @@ void App::RunBookInfoFrame(u32 keys)
       {"series", series, 2},
       {"language", language, 1},
       {"format", format, 1},
-        {"page", pos, 1},
-        {"pages", pages, 1},
-        {"chapters", chapters, 1},
+      {"page", pos, 1},
+      {"pages", pages, 1},
+      {"chapters", chapters, 1},
       {"last read", last_read, 1},
     };
 
     const InfoLine page1_lines[] = {
-        {"publisher", publisher, 3},
-        {"published", published, 2},
-        {"subjects", subjects, 3},
-      {"description", description, 24},
+      {"publisher", publisher, 4},
+      {"published", published, 2},
+      {"subjects", subjects, 4},
     };
 
-    const InfoLine *lines = nav_.book_info_page == 0 ? page0_lines : page1_lines;
-    const size_t line_count =
-        nav_.book_info_page == 0 ? sizeof(page0_lines) / sizeof(page0_lines[0])
-                                 : sizeof(page1_lines) / sizeof(page1_lines[0]);
+    if (nav_.book_info_page == 0 || nav_.book_info_page == 1) {
+      const InfoLine *lines = nav_.book_info_page == 0 ? page0_lines : page1_lines;
+      const size_t line_count =
+          nav_.book_info_page == 0 ? sizeof(page0_lines) / sizeof(page0_lines[0])
+                                   : sizeof(page1_lines) / sizeof(page1_lines[0]);
 
-    const int footer_text_y = screen_layout::kFooterY - row_h - 8;
-    const int footer_y = footer_text_y - row_h - 4;
-
-    for (size_t i = 0; i < line_count; i++)
-    {
-      if (y >= footer_y)
-        break;
-      std::vector<std::string> wrapped =
-          WrapToWidth(ts.get(), DisplayOrDash(lines[i].value), value_w,
-                      lines[i].max_lines);
-      for (size_t j = 0; j < wrapped.size(); j++) {
+      for (size_t i = 0; i < line_count; i++)
+      {
         if (y >= footer_y)
           break;
-        if (j == 0) {
-          ts->SetPen(label_x, y);
-          ts->PrintString(lines[i].label);
+        std::vector<std::string> wrapped =
+            WrapToWidth(ts.get(), DisplayOrDash(lines[i].value), value_w,
+                        lines[i].max_lines);
+        for (size_t j = 0; j < wrapped.size(); j++) {
+          if (y >= footer_y)
+            break;
+          if (j == 0) {
+            ts->SetPen(label_x, y);
+            ts->PrintString(lines[i].label);
+          }
+          ts->SetPen(value_x, y);
+          ts->PrintString(wrapped[j].c_str());
+          y += row_h;
         }
-        ts->SetPen(value_x, y);
-        ts->PrintString(wrapped[j].c_str());
+      }
+    } else {
+      const int desc_page_index = (int)nav_.book_info_page - 2;
+      const size_t start_line = (size_t)desc_page_index * (size_t)description_page_lines;
+      size_t end_line = start_line + (size_t)description_page_lines;
+      if (end_line > wrapped_desc_lines.size())
+        end_line = wrapped_desc_lines.size();
+
+      ts->SetPen(desc_x, y);
+      ts->PrintString("description");
+      y += row_h;
+      for (size_t i = start_line; i < end_line && y < footer_y; i++) {
+        ts->SetPen(desc_x, y);
+        if (!wrapped_desc_lines[i].text.empty()) {
+          ts->PrintString(wrapped_desc_lines[i].text.c_str(),
+                          wrapped_desc_lines[i].style);
+        }
         y += row_h;
       }
     }
   }
 
-  const int footer_text_y = screen_layout::kFooterY - row_h - 8;
   ts->SetPen(8, footer_text_y);
   char pager[24];
   snprintf(pager, sizeof(pager), "page %d/%d", (int)nav_.book_info_page + 1,

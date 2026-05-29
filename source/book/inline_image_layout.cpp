@@ -144,6 +144,13 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
       eff_meta.height >= (8 * line_height);
   if (page_like_image_at_screen_start) {
     FillPageMode(req, &plan);
+    if (req.current_screen == 0) {
+      // Near-start covers should stay on the current left screen even when
+      // tiny CSS/whitespace offsets make IsAtScreenStart() false.
+      plan.advance_before = false;
+      plan.page_breaks = 0;
+      plan.next_text_screen = 1;
+    }
     return plan;
   }
 
