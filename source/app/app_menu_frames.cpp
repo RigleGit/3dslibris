@@ -774,11 +774,11 @@ void App::RunBookInfoFrame(const FrameInput &input)
   if (nav_.book_info_page >= (u8)kBookInfoPageCount)
     nav_.book_info_page = (u8)(kBookInfoPageCount - 1);
 
-  if ((keys & (key.left | key.l)) && nav_.book_info_page > 0) {
+  if ((keys & (key.left | key.dleft | key.l)) && nav_.book_info_page > 0) {
     nav_.book_info_page--;
     ts->MarkScreenDirty(ts->screenright);
   }
-  if ((keys & (key.right | key.r)) &&
+  if ((keys & (key.right | key.dright | key.r)) &&
       nav_.book_info_page + 1 < kBookInfoPageCount) {
     nav_.book_info_page++;
     ts->MarkScreenDirty(ts->screenright);

@@ -496,6 +496,10 @@ void SettingsController::PrefsDraw() {
 void SettingsController::PrefsHandleEvent(const FrameInput &input) {
   const u32 keys = input.keys_down;
   const u32 held = input.keys_held;
+  const u32 left_keys = app_.key.left | app_.key.dleft;
+  const u32 right_keys = app_.key.right | app_.key.dright;
+  const u32 up_keys = app_.key.up | app_.key.dup;
+  const u32 down_keys = app_.key.down | app_.key.ddown;
 #ifdef DSLIBRIS_DEBUG
   static int s_prefs_keys_budget = 48;
   if (s_prefs_keys_budget > 0 && keys) {
@@ -524,13 +528,13 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
         PrefsDraw();
       return;
     }
-    if (keys & app_.key.left) {
+    if (keys & left_keys) {
       go_to_page_dialog_.AdjustTarget(-1);
-    } else if (keys & app_.key.right) {
+    } else if (keys & right_keys) {
       go_to_page_dialog_.AdjustTarget(1);
-    } else if (keys & (app_.key.up | app_.key.l)) {
+    } else if (keys & (up_keys | app_.key.l)) {
       go_to_page_dialog_.AdjustTarget(-(int)kGoToPageCoarseStep);
-    } else if (keys & (app_.key.down | app_.key.r)) {
+    } else if (keys & (down_keys | app_.key.r)) {
       go_to_page_dialog_.AdjustTarget((int)kGoToPageCoarseStep);
     }
     if ((keys & KEY_TOUCH) || (held & KEY_TOUCH))
@@ -550,7 +554,7 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
   } else if (prefs_input_utils::ShouldReturnFromPrefs(
                  keys, book_ctx, KEY_B, KEY_SELECT, KEY_Y, KEY_START)) {
     app_.ReturnFromPrefs();
-  } else if (keys & (app_.key.left | app_.key.l)) {
+  } else if (keys & (left_keys | app_.key.l)) {
     if (app_.GetPrefsSelectedIndex() > 0) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() - 1);
       app_.MarkPrefsDirty();
@@ -559,7 +563,7 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
     } else if (prefs_general_page_ == 1 && has_submenu) {
       GoToPrefsPage(0);
     }
-  } else if (keys & (app_.key.right | app_.key.r)) {
+  } else if (keys & (right_keys | app_.key.r)) {
     if (app_.GetPrefsSelectedIndex() < visibleCount - 1) {
       app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() + 1);
       app_.MarkPrefsDirty();
@@ -569,22 +573,22 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
       GoToPrefsPage(1);
     }
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
-             (keys & app_.key.up)) {
+             (keys & up_keys)) {
     PrefsDecreasePixelSize();
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
-             (keys & app_.key.down)) {
+             (keys & down_keys)) {
     PrefsIncreasePixelSize();
   } else if (selected_button == PREFS_BUTTON_LINE_SPACING &&
-             (keys & app_.key.up)) {
+             (keys & up_keys)) {
     PrefsDecreaseLineSpacing();
   } else if (selected_button == PREFS_BUTTON_LINE_SPACING &&
-             (keys & app_.key.down)) {
+             (keys & down_keys)) {
     PrefsIncreaseLineSpacing();
   } else if (selected_button == PREFS_BUTTON_PARASPACING &&
-             (keys & app_.key.up)) {
+             (keys & up_keys)) {
     PrefsDecreaseParaspacing();
   } else if (selected_button == PREFS_BUTTON_PARASPACING &&
-             (keys & app_.key.down)) {
+             (keys & down_keys)) {
     PrefsIncreaseParaspacing();
   } else if (keys & KEY_TOUCH) {
     PrefsHandleTouch(input);
