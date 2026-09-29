@@ -371,11 +371,13 @@ static void generate_button_bitmap(ButtonCacheEntry *entry) {
         }
 
         if (state == UI_BUTTON_STATE_SELECTED) {
-          float sel = smoothstepf(-4.0f, -1.4f, sd) *
-                      (1.0f - smoothstepf(-1.1f, -0.1f, sd));
-          fr = lerpf(fr, palette.btnHighlightR, sel * 0.18f);
-          fg = lerpf(fg, palette.btnHighlightG, sel * 0.18f);
-          fb = lerpf(fb, palette.btnHighlightB, sel * 0.18f);
+          // Put the focus ring inside the button so it remains visible in
+          // light, dark and sepia modes without changing the text contrast.
+          float ring = smoothstepf(-5.0f, -4.0f, sd) *
+                       (1.0f - smoothstepf(-2.0f, -1.0f, sd));
+          fr = lerpf(fr, palette.iconR, ring * 0.88f);
+          fg = lerpf(fg, palette.iconG, ring * 0.88f);
+          fb = lerpf(fb, palette.iconB, ring * 0.88f);
         }
 
         float alpha =
