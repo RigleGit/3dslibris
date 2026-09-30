@@ -37,7 +37,7 @@ static const std::string &GetEffectiveCacheDir() {
   return kEpubCacheDir;
 }
 static const u32 kEpubPageCacheMagic = 0x45504347U;
-static const u16 kEpubPageCacheVersion = 15;
+static const u16 kEpubPageCacheVersion = 16;
 static const u16 kPageCacheHrefMaxBytes = 2048;
 // Bulk-loading cache files duplicates memory (file buffer + decoded pages).
 // Very large caches can spike memory and crash on reopen, so skip them.

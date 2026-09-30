@@ -1180,6 +1180,7 @@ void TestLargeFontPaginationDoesNotDropTextAcrossPages() {
 
 int main() {
   TestEmbeddedCssParagraphSpacing();
+  TestAdjacentDivsStartSeparateLines();
   TestEmbeddedCssAlignedLines();
   TestXmlAlignedLines();
   TestXmlPageRenderingContinuity();

@@ -244,6 +244,9 @@ bool HandleBlockElementStart(
     p->last_body_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_body_class = book_xml_css_resolver::ExtractClassAttr(attr);
   } else if (!strcmp(el, "div")) {
+    if (!p->last_block_was_standalone_band_image)
+      book_xml_element_style::EnsureBlockBoundaryBeforeBlockStart(
+          p, "div", "division-block-boundary");
     parse_push(p, TAG_DIV);
     p->last_div_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_div_class = book_xml_css_resolver::ExtractClassAttr(attr);

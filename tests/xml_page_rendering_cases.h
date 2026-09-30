@@ -153,6 +153,45 @@ void TestEmbeddedCssParagraphSpacing() {
   }
 }
 
+void TestAdjacentDivsStartSeparateLines() {
+  TestCtx tc;
+  tc.paragraph_spacing = 0;
+  tc.publisher_block_margins = true;
+  tc.text.capture_rendered_text = true;
+  u16 left = 0, right = 0;
+  tc.text.screenleft = &left;
+  tc.text.screenright = &right;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  p.pen.y = tc.text.margin.top + tc.text.GetHeight();
+  p.coalesce_text_segments = true;
+  const std::string html =
+      "<html><head><style>.toc-title{display:block;margin-bottom:0}"
+      ".toc-entry{display:block;margin-top:0}</style></head><body>"
+      "<div class='toc-title'>Table of Contents</div>"
+      "<div class='toc-entry'>Title Page</div></body></html>";
+  for (const auto &sheet : epub_stylesheet_utils::ExtractHeadStylesheets(html))
+    epub_css_class_map::ParseCssIntoClassMap(sheet.css.data(), sheet.css.size(),
+                                            &p.css_class_map);
+  ExpectTrue("adjacent divs parse",
+             xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p)).ok);
+  ExpectIntEq("adjacent divs stay on one page", book.GetPageCount(), 1);
+  book.GetPage(0)->Draw(&tc.text);
+  int first_y = -1, second_y = -1;
+  for (const auto &glyph : tc.text.rendered_glyphs) {
+    if (glyph.codepoint != 'T')
+      continue;
+    if (first_y < 0)
+      first_y = glyph.y;
+    else {
+      second_y = glyph.y;
+      break;
+    }
+  }
+  ExpectTrue("both divs rendered", first_y >= 0 && second_y >= 0);
+  ExpectTrue("adjacent divs begin on separate lines", second_y > first_y);
+}
+
 void TestEmbeddedCssAlignedLines() {
   for (int alignment : {1, 2}) {
     TestCtx tc;
