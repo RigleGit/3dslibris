@@ -228,6 +228,60 @@ void TestAdjacentDivsStartSeparateLines() {
   ExpectTrue("adjacent divs begin on separate lines", second_y > first_y);
 }
 
+void TestAdjacentDivsAfterBandImageStartSeparateLines() {
+  for (bool nested : {false, true}) {
+    TestCtx tc;
+    tc.paragraph_spacing = 0;
+    tc.text.capture_rendered_text = true;
+    u16 left = 0, right = 0;
+    tc.text.screenleft = &left;
+    tc.text.screenright = &right;
+    Book book(tc.ctx);
+    parsedata_t p = MakeParseData(tc, book);
+    p.pen.y = tc.text.margin.top + tc.text.GetHeight();
+    p.coalesce_text_segments = true;
+
+    InlineImageMetadata meta{};
+    meta.ok = true;
+    meta.width = 1200;
+    meta.height = 55;
+    InlineImageLayoutPlan plan{};
+    plan.mode = INLINE_IMAGE_LAYOUT_BAND;
+    plan.draw_width = 216;
+    plan.draw_height = 10;
+    plan.vertical_space_after_draw = 10;
+    ConfigureBookInlineImageStub(meta, plan, true);
+
+    std::string html = "<html><body><p><img src='separator.jpg'/></p>";
+    if (nested)
+      html += "<div>";
+    html += "<div>Table of Contents</div><div>Title Page</div>";
+    if (nested)
+      html += "</div>";
+    html += "</body></html>";
+    ExpectTrue("divs after band image parse",
+               xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p)).ok);
+    for (int page = 0; page < book.GetPageCount(); page++)
+      book.GetPage(page)->Draw(&tc.text);
+    int first_y = -1, second_y = -1;
+    for (const auto &glyph : tc.text.rendered_glyphs) {
+      if (glyph.codepoint != 'T')
+        continue;
+      if (first_y < 0)
+        first_y = glyph.y;
+      else {
+        second_y = glyph.y;
+        break;
+      }
+    }
+    ExpectTrue("both divs after band image rendered",
+               first_y >= 0 && second_y >= 0);
+    ExpectTrue("adjacent divs after band image begin on separate lines",
+               second_y > first_y);
+    ResetBookInlineImageStubState();
+  }
+}
+
 void TestEmbeddedCssAlignedLines() {
   for (int alignment : {1, 2}) {
     TestCtx tc;

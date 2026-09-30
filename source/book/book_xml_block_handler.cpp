@@ -244,7 +244,8 @@ bool HandleBlockElementStart(
     p->last_body_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_body_class = book_xml_css_resolver::ExtractClassAttr(attr);
   } else if (!strcmp(el, "div")) {
-    if (!p->last_block_was_standalone_band_image)
+    // Image-only spacing suppression must not join later text divisions.
+    if (!p->last_block_was_standalone_band_image || p->linebegan)
       book_xml_element_style::EnsureBlockBoundaryBeforeBlockStart(
           p, "div", "division-block-boundary");
     parse_push(p, TAG_DIV);
