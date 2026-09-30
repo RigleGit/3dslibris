@@ -92,6 +92,42 @@ void TestXmlPageRenderingContinuity() {
   }
 }
 
+void TestHrAtPageEdgeKeepsFollowingHeading() {
+  TestCtx tc;
+  tc.paragraph_spacing = 0;
+  tc.text.SetPixelSize(12);
+  tc.text.capture_rendered_text = true;
+  u16 left = 0, right = 0;
+  tc.text.screenleft = &left;
+  tc.text.screenright = &right;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  p.pen.y = tc.text.margin.top + tc.text.GetHeight();
+  p.coalesce_text_segments = true;
+
+  std::string html = "<html><body>";
+  std::string expected;
+  for (int n = 0; n < 24; n++) {
+    char token[16];
+    snprintf(token, sizeof(token), "W%03d", n);
+    html += "<p>";
+    html += token;
+    html += "</p>";
+    expected += token;
+  }
+  html += "<hr/><p style='text-align:center'><strong>HEADER2013</strong>"
+          "<br/><small>Subtitle</small></p><p>AFTERWORD</p></body></html>";
+  expected += "HEADER2013SubtitleAFTERWORD";
+
+  ExpectTrue("HR page-edge fixture parses",
+             xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p)).ok);
+  for (int page = 0; page < book.GetPageCount(); page++)
+    book.GetPage(page)->Draw(&tc.text);
+  ExpectTrue("HR page-edge heading and later text are drawn",
+             tc.text.rendered_ascii == expected);
+  ExpectIntEq("HR page-edge does not clip glyphs", tc.text.clipped_glyphs, 0);
+}
+
 
 void ExpectAlignedGlyphLines(Text &text, int alignment) {
   const std::vector<Text::RenderedGlyph> &glyphs = text.rendered_glyphs;

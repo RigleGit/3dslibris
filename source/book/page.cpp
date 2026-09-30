@@ -480,6 +480,12 @@ void Page::Draw(Text *ts) {
       next_image_align = 0;
       next_image_author_width = 0;
 
+      // A newline after a rule (or an empty block) does not move the pen.
+      // Checking for overflow anyway can abandon the rest of this page's
+      // buffer, including a heading that still fits on the current line.
+      if (!ts->linebegan)
+        continue;
+
       const text_render_layout_utils::ReadingScreenMetrics metrics =
           current_reading_metrics();
       int maxHeight = metrics.max_height;

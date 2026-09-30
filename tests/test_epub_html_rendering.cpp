@@ -1184,6 +1184,7 @@ int main() {
   TestEmbeddedCssAlignedLines();
   TestXmlAlignedLines();
   TestXmlPageRenderingContinuity();
+  TestHrAtPageEdgeKeepsFollowingHeading();
   TestRubyAnnotationEmitsBrackets();
   TestTableImgSuppressed();
   TestHiddenElementsDoNotEmitLayoutTokens();
