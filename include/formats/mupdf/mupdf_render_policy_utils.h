@@ -21,12 +21,4 @@ inline bool ShouldSkipPdfPageRender(
          content_bytes > kOld3dsPdfPreviewMaxContentBytes;
 }
 
-inline bool ShouldSkipOld3dsPdfPreview(
-    bool is_new_3ds, app_flow_utils::MuPdfDocumentKind document_kind,
-    int xobject_count, size_t content_bytes) {
-  if (is_new_3ds)
-    return false;
-  return ShouldSkipPdfPageRender(document_kind, xobject_count, content_bytes);
-}
-
 } // namespace mupdf_render_policy_utils

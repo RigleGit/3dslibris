@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -22,12 +21,4 @@ inline void GetFallbackFontSearchDirs(const std::string &configured_dir,
 
 inline bool GlyphWithinContentRight(int sx, int content_right) {
   return sx < content_right;
-}
-
-inline std::uint16_t ClampPageTarget(std::uint16_t target_page,
-                                     std::uint16_t page_count) {
-  if (page_count == 0)
-    return 0;
-  const std::uint16_t last_page = (std::uint16_t)(page_count - 1);
-  return target_page > last_page ? last_page : target_page;
 }

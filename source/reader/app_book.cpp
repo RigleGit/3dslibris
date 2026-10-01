@@ -40,7 +40,6 @@
 #include "reader/fixed_layout_reader_input.h"
 #include "reader/reader_controls.h"
 #include "reader/reflow_reader_input.h"
-#include "reader/suspend_policy_utils.h"
 #include "ui/button.h"
 #include "shared/debug_log.h"
 #include "book/layout_reflow.h"

@@ -1,5 +1,4 @@
 #include "shared/bugfix_utils.h"
-#include "shared/path_utils.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -43,11 +42,6 @@ void TestGlyphClip() {
   ExpectTrue("clipped at content right", !GlyphWithinContentRight(224, 224));
 }
 
-void TestClampPageTarget() {
-  ExpectEq("clamp within range", (int)ClampPageTarget(3, 5), 3);
-  ExpectEq("clamp high", (int)ClampPageTarget(9, 5), 4);
-  ExpectEq("clamp empty", (int)ClampPageTarget(9, 0), 0);
-}
 
 }
 
@@ -55,6 +49,5 @@ int main() {
   TestFallbackDirs();
   TestFallbackDirsDefault();
   TestGlyphClip();
-  TestClampPageTarget();
   return 0;
 }

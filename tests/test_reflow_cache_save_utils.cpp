@@ -23,17 +23,9 @@ bool ExpectFalse(const char *label, bool value) {
 } // namespace
 
 int main() {
-  using reflow_cache_save_utils::ShouldDeferAsyncOpenCacheSave;
   using reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose;
 
   bool ok = true;
-
-  ok &= ExpectTrue("defer save during async open",
-                   ShouldDeferAsyncOpenCacheSave(true, true));
-  ok &= ExpectFalse("do not defer when save not requested",
-                    ShouldDeferAsyncOpenCacheSave(false, true));
-  ok &= ExpectFalse("do not defer in sync open",
-                    ShouldDeferAsyncOpenCacheSave(true, false));
 
   ok &= ExpectTrue("flush deferred cache on close with pages",
                    ShouldFlushDeferredCacheSaveOnClose(true, false, 12));
