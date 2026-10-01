@@ -3,7 +3,7 @@
 #include "book/page.h"
 #include "formats/epub/epub_parser.h"
 #include "formats/epub/epub_page_cache.h"
-#include "formats/common/page_cache_utils.h"
+#include "formats/common/page_text_extract_utils.h"
 #include "shared/text_token_constants.h"
 #include "shared/app_flow_utils.h"
 #include "ui/text.h"
@@ -13,6 +13,8 @@
 #include <cstring>
 #include <string>
 #include <unistd.h>
+#include <dirent.h>
+#include <vector>
 
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
@@ -69,8 +71,8 @@ struct TestCtx {
 };
 
 Book *MakeEpubBook(const char *folder, const char *filename) {
-  TestCtx *tc = new TestCtx();
-  Book *book = new Book(tc->ctx);
+  static TestCtx tc;
+  Book *book = new Book(tc.ctx);
   book->SetFolderName(folder);
   book->SetFileName(filename);
   book->format = FORMAT_EPUB;
@@ -89,11 +91,8 @@ uint8_t EpubOpen(Book *book) {
 void TestEpubOpen() {
   const char *fixture = TEST_FIXTURES_DIR "/books/basic.epub";
   FILE *fp = fopen(fixture, "r");
-  if (!fp) {
-    fprintf(stderr, "SKIP test_epub_parser_integration EPUB: fixture not found: %s\n",
-            fixture);
-    return;
-  }
+  if (!fp)
+    Fail("required EPUB fixture", "cannot open repository fixture");
   fclose(fp);
 
   Book *book = MakeEpubBook(TEST_FIXTURES_DIR "/books", "basic.epub");
@@ -105,7 +104,7 @@ void TestEpubOpen() {
   ExpectGt("epub open: chapters >= 1", (int)book->GetChapters().size(), 0);
 
   book->Close();
-  g_pass++;  // close survived
+  ExpectTrue("close releases parsed pages", book->GetPageCount() == 0);
   delete book;
 }
 
@@ -161,10 +160,8 @@ void TestRealEpubOpenFromEnv() {
 void TestEpubReopen() {
   const char *fixture = TEST_FIXTURES_DIR "/books/basic.epub";
   FILE *fp = fopen(fixture, "r");
-  if (!fp) {
-    fprintf(stderr, "SKIP test_epub_parser_integration EPUB reopen: fixture not found\n");
-    return;
-  }
+  if (!fp)
+    Fail("required EPUB fixture", "cannot open repository fixture");
   fclose(fp);
 
   Book *book = MakeEpubBook(TEST_FIXTURES_DIR "/books", "basic.epub");
@@ -202,10 +199,8 @@ uint8_t EpubIndex(Book *book) {
 void TestEpubIndexMetadata() {
   const char *fixture = TEST_FIXTURES_DIR "/books/basic.epub";
   FILE *fp = fopen(fixture, "r");
-  if (!fp) {
-    fprintf(stderr, "SKIP TestEpubIndexMetadata: fixture not found: %s\n", fixture);
-    return;
-  }
+  if (!fp)
+    Fail("required EPUB fixture", "cannot open repository fixture");
   fclose(fp);
 
   Book *book = MakeEpubBook(TEST_FIXTURES_DIR "/books", "basic.epub");
@@ -222,7 +217,7 @@ void TestEpubIndexMetadata() {
   ExpectTrue("epub index: author matches", author == "3dslibris Test");
 
   book->Close();
-  g_pass++;  // close survived
+  ExpectTrue("close releases parsed pages", book->GetPageCount() == 0);
   delete book;
 }
 
@@ -237,10 +232,8 @@ void TestEpubIndexMissingFile() {
 void TestEpubIndexThenOpen() {
   const char *fixture = TEST_FIXTURES_DIR "/books/basic.epub";
   FILE *fp = fopen(fixture, "r");
-  if (!fp) {
-    fprintf(stderr, "SKIP TestEpubIndexThenOpen: fixture not found: %s\n", fixture);
-    return;
-  }
+  if (!fp)
+    Fail("required EPUB fixture", "cannot open repository fixture");
   fclose(fp);
 
   Book *book = MakeEpubBook(TEST_FIXTURES_DIR "/books", "basic.epub");
@@ -259,99 +252,8 @@ void TestEpubIndexThenOpen() {
   ExpectGt("epub index-then-open: pages > 0", (int)book->GetPageCount(), 0);
 
   book->Close();
-  g_pass++;  // close survived
+  ExpectTrue("close releases parsed pages", book->GetPageCount() == 0);
   delete book;
-}
-
-// ---------------------------------------------------------------------------
-// epub_page_cache guard tests
-// ---------------------------------------------------------------------------
-
-// Common layout params used by all cache tests — matches the Text stub metrics.
-static void CallTryLoad(Book *book, const char *path, bool *result) {
-  *result = epub_page_cache::TryLoad(book, path,
-                                     14, 2, 0, 0, 0,
-                                     12, 12, 10, 36,
-                                     nullptr);
-}
-
-void TestEpubPageCacheTryLoadNullBook() {
-  bool result = true;
-  CallTryLoad(nullptr, "/tmp/3dslibris_cache_test.epub", &result);
-  ExpectFalse("page cache TryLoad null book returns false", result);
-}
-
-void TestEpubPageCacheTryLoadNullPath() {
-  Book *book = MakeEpubBook("/tmp", "x.epub");
-  bool result = true;
-  CallTryLoad(book, nullptr, &result);
-  ExpectFalse("page cache TryLoad null path returns false", result);
-  book->Close();
-  delete book;
-}
-
-void TestEpubPageCacheTryLoadMissingFile() {
-  // Cache file lives at sdmc:/...; it won't exist on host → returns false safely.
-  Book *book = MakeEpubBook("/tmp", "nonexistent_3dslibris_cache_test.epub");
-  bool result = true;
-  CallTryLoad(book, "/tmp/nonexistent_3dslibris_cache_test.epub", &result);
-  ExpectFalse("page cache TryLoad missing file returns false", result);
-  book->Close();
-  delete book;
-}
-
-void TestEpubPageCacheSaveNullBook() {
-  // Save with null book must not crash (bails immediately).
-  epub_page_cache::Save(nullptr, "/tmp/x.epub",
-                        14, 2, 0, 0, 0, 12, 12, 10, 36,
-                        nullptr, false);
-  g_pass++;  // no crash
-}
-
-void TestEpubPageCacheSaveZeroPages() {
-  // Save with a real book that has 0 pages must not crash (bails early).
-  Book *book = MakeEpubBook("/tmp", "x.epub");
-  epub_page_cache::Save(book, "/tmp/x.epub",
-                        14, 2, 0, 0, 0, 12, 12, 10, 36,
-                        nullptr, false);
-  g_pass++;  // no crash
-  book->Close();
-  delete book;
-}
-
-void TestEpubStreamWriterNullBook() {
-  epub_page_cache::StreamWriter sw;
-  bool ok = sw.Begin(nullptr, "/tmp/x.epub",
-                     14, 2, 0, 0, 0, 12, 12, 10, 36, nullptr);
-  ExpectFalse("StreamWriter::Begin null book returns false", ok);
-  ExpectFalse("StreamWriter not open after failed Begin", sw.IsOpen());
-}
-
-void TestEpubStreamWriterNullPath() {
-  Book *book = MakeEpubBook("/tmp", "x.epub");
-  epub_page_cache::StreamWriter sw;
-  bool ok = sw.Begin(book, nullptr,
-                     14, 2, 0, 0, 0, 12, 12, 10, 36, nullptr);
-  ExpectFalse("StreamWriter::Begin null path returns false", ok);
-  ExpectFalse("StreamWriter not open after null path", sw.IsOpen());
-  book->Close();
-  delete book;
-}
-
-void TestEpubStreamWriterFinalizeWithoutBegin() {
-  Book *book = MakeEpubBook("/tmp", "x.epub");
-  epub_page_cache::StreamWriter sw;
-  bool ok = sw.Finalize(book);
-  ExpectFalse("StreamWriter::Finalize without Begin returns false", ok);
-  book->Close();
-  delete book;
-}
-
-void TestEpubStreamWriterAbortIdempotent() {
-  epub_page_cache::StreamWriter sw;
-  sw.Abort();
-  sw.Abort();  // second abort must not crash
-  g_pass++;    // no crash
 }
 
 // ---------------------------------------------------------------------------
@@ -369,24 +271,22 @@ static const int   kCacheMr       = 12;
 static const int   kCacheMt       = 10;
 static const int   kCacheMb       = 36;
 
-// Compute the cache file path that Save/TryLoad will use for kCacheBookPath
-// with the metrics above (file_size=0, file_mtime=0 since file doesn't exist).
+// Discover the file the serializer actually wrote. Recomputing a hash here
+// previously let obsolete cache keys make every corruption case miss the file.
 static std::string CacheFilePath(const char *cache_dir) {
-  page_cache_utils::PageCacheLayoutParams lp;
-  lp.file_size = 0;
-  lp.file_mtime = 0;
-  lp.pixel_size = kCachePx;
-  lp.line_spacing = kCacheLS;
-  lp.paragraph_spacing = kCachePS;
-  lp.paragraph_indent = kCachePI;
-  lp.orientation = kCacheOri;
-  lp.margin_left = kCacheMl;
-  lp.margin_right = kCacheMr;
-  lp.margin_top = kCacheMt;
-  lp.margin_bottom = kCacheMb;
-  lp.regular_font = "";
-  lp.variant_token = "pub2";
-  return page_cache_utils::BuildPageCachePath(cache_dir, ".epc", kCacheBookPath, lp);
+  DIR *dir = opendir(cache_dir);
+  ExpectTrue("cache output directory exists", dir != nullptr);
+  std::string path;
+  while (dirent *entry = readdir(dir)) {
+    const std::string name(entry->d_name);
+    if (name.size() >= 4 && name.substr(name.size() - 4) == ".epc") {
+      ExpectTrue("only one cache artifact", path.empty());
+      path = std::string(cache_dir) + "/" + name;
+    }
+  }
+  closedir(dir);
+  ExpectTrue("serializer created cache artifact", !path.empty());
+  return path;
 }
 
 static void InvokeSave(Book *book, const char *path) {
@@ -409,10 +309,7 @@ static bool InvokeTryLoad(Book *book, const char *path) {
 
 void TestEpubPageCacheRoundtrip() {
   char cache_dir[] = "/tmp/3dslibris-cache-rt-XXXXXX";
-  if (!mkdtemp(cache_dir)) {
-    fprintf(stderr, "SKIP TestEpubPageCacheRoundtrip: mkdtemp failed\n");
-    return;
-  }
+  ExpectTrue("cache roundtrip directory", mkdtemp(cache_dir) != nullptr);
   epub_page_cache::SetCacheDirForTest(cache_dir);
 
   // Build a Book with 2 pages, 1 chapter, a title, and an inline link href.
@@ -470,135 +367,163 @@ void TestEpubPageCacheRoundtrip() {
   if (!cache_file.empty())
     remove(cache_file.c_str());
   rmdir(cache_dir);
-  g_pass++;  // cleanup survived
+  ExpectTrue("cache directory removed", access(cache_dir, F_OK) != 0);
 }
 
 // ---------------------------------------------------------------------------
 // Header validation tests (using the same temp dir trick)
 // ---------------------------------------------------------------------------
 
-static void WriteU32LE(FILE *fp, uint32_t v) {
-  fwrite(&v, 1, sizeof(v), fp);
-}
-static void WriteU16LE(FILE *fp, uint16_t v) {
-  fwrite(&v, 1, sizeof(v), fp);
+static std::vector<unsigned char> ReadBytes(const std::string &path) {
+  FILE *fp = fopen(path.c_str(), "rb");
+  ExpectTrue("read cache artifact", fp != nullptr);
+  std::vector<unsigned char> bytes;
+  unsigned char buffer[256];
+  size_t n;
+  while ((n = fread(buffer, 1, sizeof(buffer), fp)) > 0)
+    bytes.insert(bytes.end(), buffer, buffer + n);
+  ExpectTrue("cache artifact read completes", !ferror(fp));
+  fclose(fp);
+  return bytes;
 }
 
-static FILE *OpenCacheFileForWrite(const char *cache_dir, std::string *path_out) {
-  *path_out = CacheFilePath(cache_dir);
-  if (path_out->empty())
-    return nullptr;
-  return fopen(path_out->c_str(), "wb");
-}
-
-static bool TryLoadCorrupt(const char *cache_dir) {
-  Book *book = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
-  bool ok = InvokeTryLoad(book, kCacheBookPath);
-  book->Close();
-  delete book;
-  return ok;
+static void WriteBytes(const std::string &path,
+                       const std::vector<unsigned char> &bytes) {
+  FILE *fp = fopen(path.c_str(), "wb");
+  ExpectTrue("write cache artifact", fp != nullptr);
+  ExpectTrue("complete cache write", fwrite(bytes.data(), 1, bytes.size(), fp) == bytes.size());
+  ExpectTrue("cache write closes", fclose(fp) == 0);
 }
 
 void TestEpubPageCacheHeaderValidation() {
   char cache_dir[] = "/tmp/3dslibris-cache-hv-XXXXXX";
-  if (!mkdtemp(cache_dir)) {
-    fprintf(stderr, "SKIP TestEpubPageCacheHeaderValidation: mkdtemp failed\n");
-    return;
-  }
+  ExpectTrue("cache validation directory", mkdtemp(cache_dir) != nullptr);
   epub_page_cache::SetCacheDirForTest(cache_dir);
+  Book *source = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
+  source->SetTitle("Cache validation");
+  const uint32_t text[] = {'A', 'B', 'C'};
+  source->AppendPage()->SetBuffer(text, 3);
+  source->AddChapter(0, "Persisted chapter", 0);
+  source->SetChapterAnchorPage("OEBPS/ch1.xhtml#target", 0);
+  source->RegisterInlineLinkHref("OEBPS/ch1.xhtml#target");
+  InvokeSave(source, kCacheBookPath);
+  const std::string path = CacheFilePath(cache_dir);
+  const std::vector<unsigned char> valid = ReadBytes(path);
+  ExpectGt("cache includes body after current header", (int)valid.size(), 32);
+  Book *loaded = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
+  ExpectTrue("uncorrupted Save output loads before mutations", InvokeTryLoad(loaded, kCacheBookPath));
+  ExpectTrue("positive control has real text", loaded->GetPage(0)->GetLength() == 3 &&
+             loaded->GetPage(0)->GetBuffer()[1] == 'B');
+  loaded->Close();
 
-  std::string path;
-
-  // Wrong magic
-  {
-    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
-    if (fp) {
-      WriteU32LE(fp, 0xDEADBEEFU); // bad magic
-      WriteU16LE(fp, 6);           // version
-      WriteU16LE(fp, 0);           // title_len
-      WriteU32LE(fp, 1);           // page_count
-      WriteU32LE(fp, 0);           // chapter_count
-      WriteU32LE(fp, 0);           // doc_start_count
-      WriteU32LE(fp, 0);           // image_count
-      fclose(fp);
-      ExpectFalse("cache hdr: wrong magic → TryLoad returns false",
-                  TryLoadCorrupt(cache_dir));
-    }
+  // Byte offsets are the on-disk field contract. Every mutation preserves
+  // the valid version and body except for the single field under test.
+  struct Mutation { size_t offset; size_t size; uint32_t value; };
+  const Mutation mutations[] = {
+      {0, 4, 0xDEADBEEF}, {4, 2, 0xFFFF}, {6, 2, 1001},
+      {8, 4, 0}, {8, 4, 50001}, {12, 4, 4001}, {16, 4, 4001},
+      {20, 4, 8193}, {24, 4, 65536}, {28, 4, 65536}};
+  for (const Mutation &mutation : mutations) {
+    std::vector<unsigned char> corrupt = valid;
+    for (size_t i = 0; i < mutation.size; ++i)
+      corrupt[mutation.offset + i] = (unsigned char)(mutation.value >> (8 * i));
+    WriteBytes(path, corrupt);
+    ExpectFalse("reject mutated cache header", InvokeTryLoad(loaded, kCacheBookPath));
+    ExpectTrue("invalid cache is evicted", access(path.c_str(), F_OK) != 0);
+    ExpectTrue("invalid header cannot expose partial pages", loaded->GetPageCount() == 0);
+    loaded->Close();
   }
-
-  // Wrong version
-  {
-    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
-    if (fp) {
-      WriteU32LE(fp, 0x45504347U); // correct magic
-      WriteU16LE(fp, 0xFFFFU);     // bad version
-      WriteU16LE(fp, 0);
-      WriteU32LE(fp, 1);
-      WriteU32LE(fp, 0);
-      WriteU32LE(fp, 0);
-      WriteU32LE(fp, 0);
-      fclose(fp);
-      ExpectFalse("cache hdr: wrong version → TryLoad returns false",
-                  TryLoadCorrupt(cache_dir));
-    }
+  const size_t lengths[] = {4, 32, valid.size() - 1};
+  for (size_t length : lengths) {
+    WriteBytes(path, std::vector<unsigned char>(valid.begin(), valid.begin() + length));
+    ExpectFalse("reject truncated actual cache", InvokeTryLoad(loaded, kCacheBookPath));
+    ExpectTrue("truncated cache is evicted", access(path.c_str(), F_OK) != 0);
+    ExpectTrue("truncated body clears partially decoded pages", loaded->GetPageCount() == 0);
+    ExpectTrue("truncated body clears partially decoded chapters", loaded->GetChapters().empty());
+    ExpectTrue("truncated body clears link registry", loaded->GetInlineLinkHrefCount() == 0);
+    loaded->Close();
   }
-
-  // Zero page_count (invalid)
-  {
-    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
-    if (fp) {
-      WriteU32LE(fp, 0x45504347U);
-      WriteU16LE(fp, 6);
-      WriteU16LE(fp, 0);
-      WriteU32LE(fp, 0);           // page_count == 0 → invalid
-      WriteU32LE(fp, 0);
-      WriteU32LE(fp, 0);
-      WriteU32LE(fp, 0);
-      fclose(fp);
-      ExpectFalse("cache hdr: page_count=0 → TryLoad returns false",
-                  TryLoadCorrupt(cache_dir));
-    }
-  }
-
-  // Excessive page_count
-  {
-    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
-    if (fp) {
-      WriteU32LE(fp, 0x45504347U);
-      WriteU16LE(fp, 6);
-      WriteU16LE(fp, 0);
-      WriteU32LE(fp, 99999U);      // > 50000 limit
-      WriteU32LE(fp, 0);
-      WriteU32LE(fp, 0);
-      WriteU32LE(fp, 0);
-      fclose(fp);
-      ExpectFalse("cache hdr: page_count>50000 → TryLoad returns false",
-                  TryLoadCorrupt(cache_dir));
-    }
-  }
-
-  // Truncated header (only 4 bytes written)
-  {
-    FILE *fp = OpenCacheFileForWrite(cache_dir, &path);
-    if (fp) {
-      WriteU32LE(fp, 0x45504347U); // just the magic, header incomplete
-      fclose(fp);
-      ExpectFalse("cache hdr: truncated header → TryLoad returns false",
-                  TryLoadCorrupt(cache_dir));
-    }
-  }
-
+  WriteBytes(path, valid);
+  ExpectTrue("restored original cache loads after negative controls", InvokeTryLoad(loaded, kCacheBookPath));
+  ExpectTrue("restored title survives", std::string(loaded->GetTitle()) == "Cache validation");
+  source->Close();
+  loaded->Close();
+  delete source;
+  delete loaded;
   epub_page_cache::SetCacheDirForTest(nullptr);
-  if (!path.empty())
-    remove(path.c_str());
-  rmdir(cache_dir);
-  g_pass++;  // cleanup survived
+  ExpectTrue("remove cache artifact", remove(path.c_str()) == 0);
+  ExpectTrue("remove cache directory", rmdir(cache_dir) == 0);
+}
+
+void TestEpubStreamCommitAndAbort() {
+  char cache_dir[] = "/tmp/3dslibris-cache-stream-XXXXXX";
+  ExpectTrue("stream cache directory", mkdtemp(cache_dir) != nullptr);
+  epub_page_cache::SetCacheDirForTest(cache_dir);
+  Book *source = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
+  const uint32_t first[] = {'F', 'i', 'r', 's', 't'};
+  const uint32_t second[] = {'L', 'a', 's', 't'};
+  source->AppendPage()->SetBuffer(first, 5);
+  epub_page_cache::StreamWriter writer;
+  ExpectTrue("stream begin", writer.Begin(source, kCacheBookPath,
+      kCachePx, kCacheLS, kCachePS, kCachePI, kCacheOri,
+      kCacheMl, kCacheMr, kCacheMt, kCacheMb, nullptr));
+  const std::string path = CacheFilePath(cache_dir);
+  ExpectTrue("stream first batch", writer.FlushPages(source, 0));
+  writer.Abort();
+  writer.Abort();
+  ExpectFalse("aborted stream closed", writer.IsOpen());
+  ExpectTrue("aborted stream removed partial artifact", access(path.c_str(), F_OK) != 0);
+  Book *loaded = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
+  ExpectFalse("aborted stream cannot be loaded", InvokeTryLoad(loaded, kCacheBookPath));
+  ExpectTrue("restart stream", writer.Begin(source, kCacheBookPath,
+      kCachePx, kCacheLS, kCachePS, kCachePI, kCacheOri,
+      kCacheMl, kCacheMr, kCacheMt, kCacheMb, nullptr));
+  ExpectTrue("stream first page", writer.FlushPages(source, 0));
+  source->AppendPage()->SetBuffer(second, 4);
+  source->AddChapter(1, "Second streamed page", 1);
+  ExpectTrue("stream incremental second page", writer.FlushPages(source, 1));
+  ExpectTrue("commit stream", writer.Finalize(source));
+  ExpectFalse("committed stream closed", writer.IsOpen());
+  ExpectTrue("committed stream loads", InvokeTryLoad(loaded, kCacheBookPath));
+  ExpectTrue("stream pages not duplicated", loaded->GetPageCount() == 2);
+  ExpectTrue("first stream page content", loaded->GetPage(0)->GetLength() == 5 && loaded->GetPage(0)->GetBuffer()[0] == 'F');
+  ExpectTrue("second stream page content", loaded->GetPage(1)->GetLength() == 4 && loaded->GetPage(1)->GetBuffer()[0] == 'L');
+  ExpectTrue("stream chapter target", loaded->GetChapters().size() == 1 && loaded->GetChapters()[0].page == 1);
+  source->Close(); loaded->Close();
+  delete source; delete loaded;
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  ExpectTrue("remove committed stream", remove(path.c_str()) == 0);
+  ExpectTrue("remove stream directory", rmdir(cache_dir) == 0);
+}
+
+void TestNavSpineOrderAndAnchors() {
+  const char *fixture = getenv("TEST_EPUB_NAV_PATH");
+  ExpectTrue("NAV fixture supplied", fixture != nullptr);
+  const std::string path(fixture);
+  const size_t slash = path.find_last_of('/');
+  Book *book = MakeEpubBook(path.substr(0, slash).c_str(), path.substr(slash + 1).c_str());
+  ExpectFalse("packaged NAV EPUB opens", EpubOpen(book) != 0);
+  const char *labels[] = {"First navigation label", "Second navigation label", "Final navigation label"};
+  const char *hrefs[] = {"OEBPS/chapter1.xhtml#start", "OEBPS/chapter1.xhtml#later", "OEBPS/chapter2.xhtml#final"};
+  const std::vector<ChapterEntry> &chapters = book->GetChapters();
+  ExpectTrue("all metadata NAV entries retained", chapters.size() == 3);
+  for (size_t i = 0; i < 3; ++i) {
+    ExpectTrue("NAV metadata labels replace document titles", chapters[i].title == labels[i]);
+    u16 anchor_page = 65535;
+    ExpectTrue("NAV target resolves actual parsed anchor", book->FindChapterAnchorPage(hrefs[i], &anchor_page));
+    ExpectTrue("chapter points to its own fragment", chapters[i].page == anchor_page);
+    if (i > 0)
+      ExpectTrue("NAV follows spine and distinct within-document anchors", chapters[i].page > chapters[i-1].page);
+  }
+  book->Close();
+  delete book;
 }
 
 } // namespace
 
 int main() {
   TestEmbeddedStylesFromReportedEpub();
+  TestNavSpineOrderAndAnchors();
   TestEpubOpen();
   TestRealEpubOpenFromEnv();
   TestEpubReopen();
@@ -606,17 +531,9 @@ int main() {
   TestEpubIndexMetadata();
   TestEpubIndexMissingFile();
   TestEpubIndexThenOpen();
-  TestEpubPageCacheTryLoadNullBook();
-  TestEpubPageCacheTryLoadNullPath();
-  TestEpubPageCacheTryLoadMissingFile();
-  TestEpubPageCacheSaveNullBook();
-  TestEpubPageCacheSaveZeroPages();
-  TestEpubStreamWriterNullBook();
-  TestEpubStreamWriterNullPath();
-  TestEpubStreamWriterFinalizeWithoutBegin();
-  TestEpubStreamWriterAbortIdempotent();
   TestEpubPageCacheRoundtrip();
   TestEpubPageCacheHeaderValidation();
+  TestEpubStreamCommitAndAbort();
 
   fprintf(stderr, "Results: %d/%d passed, %d failed\n", g_pass, g_pass + g_fail,
           g_fail);

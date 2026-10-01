@@ -270,6 +270,64 @@ void TestUserParagraphSpacingAddsExtraBlankLines() {
              CountBufValue(buf, len, '\n') >= 3);
 }
 
+void TestSemanticPageBreakVisibility() {
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  const std::string html =
+      "<html><body><p>BEFORE"
+      "<span aria-hidden=\"true\" epub:type=\"pagebreak\"><b>HIDDENONE</b></span>"
+      "<span aria-hidden=\"TRUE\" epub:type=\"footnote pagebreak\">HIDDENTWO</span>"
+      "<span aria-hidden=\"yes\" role=\"doc-pagebreak\">HIDDENTHREE</span>"
+      "<span epub:type=\"pagebreak\" role=\"doc-pagebreak\">VISIBLEBREAK</span>"
+      "<span aria-hidden=\"true\" id=\"other\">HIDDENUNRELATED</span>"
+      "<span aria-hidden=\"false\" epub:type=\"pagebreak\">VISIBLEFALSE</span>"
+      "AFTER</p></body></html>";
+  ExpectTrue("semantic pagebreak XML parses",
+             xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p)).ok);
+  ExpectTrue("semantic pagebreak produces page", book.GetPageCount() > 0);
+  const std::string visible = ExtractVisibleAsciiFromPages(book);
+  ExpectTrue("cosmetic pagebreak text is suppressed", visible.find("HIDDEN") == std::string::npos);
+  ExpectTrue("visible semantic pagebreak stays readable", visible.find("VISIBLEBREAK") != std::string::npos);
+  ExpectTrue("false aria-hidden semantic break stays readable", visible.find("VISIBLEFALSE") != std::string::npos);
+  ExpectTrue("text before and after pagebreak remains", visible.find("BEFORE") != std::string::npos && visible.find("AFTER") != std::string::npos);
+  for (int i = 0; i < book.GetPageCount(); ++i) {
+    Page *page = book.GetPage(i);
+    ExpectFalse("hidden pagebreak nested formatting cannot leak", BufContains(page->GetBuffer(), page->GetLength(), TEXT_BOLD_ON));
+  }
+}
+
+int BlockParagraphLinefeeds(const char *tag, unsigned char spacing) {
+  TestCtx tc;
+  tc.paragraph_spacing = spacing;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  const std::string html = std::string("<html><body><") + tag +
+      "><p>FIRST</p><p>SECOND</p></" + tag + "></body></html>";
+  ExpectTrue("block paragraph XML parses", xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p)).ok);
+  const std::string visible = ExtractVisibleAsciiFromPages(book);
+  ExpectTrue("both block paragraphs remain readable", visible.find("FIRST") != std::string::npos && visible.find("SECOND") != std::string::npos);
+  int linefeeds = 0;
+  for (int i = 0; i < book.GetPageCount(); ++i) {
+    Page *page = book.GetPage(i);
+    linefeeds += CountBufValue(page->GetBuffer(), page->GetLength(), '\n');
+  }
+  ExpectTrue("block paragraphs remain separate lines", linefeeds > 0);
+  return linefeeds;
+}
+
+void TestTightBlocksSuppressUserParagraphGap() {
+  const char *tight[] = {"blockquote", "dd"};
+  for (size_t i = 0; i < sizeof(tight) / sizeof(tight[0]); ++i) {
+    const int normal = BlockParagraphLinefeeds(tight[i], 0);
+    const int wide = BlockParagraphLinefeeds(tight[i], 3);
+    ExpectIntEq("quote/definition spacing ignores extra reader paragraph gap", wide, normal);
+  }
+  const int aside_normal = BlockParagraphLinefeeds("aside", 0);
+  const int aside_wide = BlockParagraphLinefeeds("aside", 3);
+  ExpectTrue("aside paragraphs retain extra reader paragraph gap", aside_wide > aside_normal);
+}
+
 void TestUserParagraphSpacingSurvivesZeroPublisherMargin() {
   TestCtx tc;
   tc.paragraph_spacing = 2;
@@ -1189,6 +1247,8 @@ int main() {
   TestRubyAnnotationEmitsBrackets();
   TestTableImgSuppressed();
   TestHiddenElementsDoNotEmitLayoutTokens();
+  TestSemanticPageBreakVisibility();
+  TestTightBlocksSuppressUserParagraphGap();
   TestUserParagraphSpacingAddsExtraBlankLines();
   TestUserParagraphSpacingSurvivesZeroPublisherMargin();
   TestBlockIndentSurvivesPageOverflow();

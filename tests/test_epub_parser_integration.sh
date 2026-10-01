@@ -167,4 +167,32 @@ fi
   -lz \
   -o "$TEST_OUTDIR/test_epub_parser_integration"
 
+export TEST_EPUB_NAV_PATH="$TEST_OUTDIR/nav-spine-anchors.epub"
+python3 - "$TEST_ROOT/tests/fixtures/books/basic.epub" "$TEST_EPUB_NAV_PATH" <<'PYFIXTURE'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as original:
+    files = {name: original.read(name) for name in original.namelist()}
+opf = files['OEBPS/content.opf'].decode()
+# Manifest order deliberately differs from the reading spine.
+first = '<item id="ch1"    href="chapter1.xhtml" media-type="application/xhtml+xml"/>'
+second = '<item id="ch2"    href="chapter2.xhtml" media-type="application/xhtml+xml"/>'
+opf = opf.replace(first, '__FIRST__').replace(second, first).replace('__FIRST__', second)
+files['OEBPS/content.opf'] = opf.encode()
+files['OEBPS/nav.xhtml'] = b'''<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol>
+<li><a href="chapter2.xhtml#final">Final navigation label</a></li>
+<li><a href="chapter1.xhtml#start">First navigation label</a></li>
+<li><a href="chapter1.xhtml#later">Second navigation label</a></li>
+</ol></nav></body></html>'''
+filler = '<p>' + ('Filler for pagination and anchor separation. ' * 20) + '</p>'
+files['OEBPS/chapter1.xhtml'] = ('<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Document A</title></head><body>'
+    '<h1 id="start">Body heading A</h1>' + filler * 15 +
+    '<h1 id="later">Body heading B</h1><p>Second target text.</p></body></html>').encode()
+files['OEBPS/chapter2.xhtml'] = b'<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Document B</title></head><body><h1 id="final">Body heading C</h1><p>Final target text.</p></body></html>'
+with zipfile.ZipFile(sys.argv[2], 'w', compression=zipfile.ZIP_DEFLATED) as generated:
+    for name, contents in files.items():
+        generated.writestr(name, contents)
+PYFIXTURE
+
 "$TEST_OUTDIR/test_epub_parser_integration"

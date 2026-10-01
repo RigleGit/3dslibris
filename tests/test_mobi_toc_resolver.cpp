@@ -216,42 +216,112 @@ void TestInlineTocEdgeCases() {
           InlineCallbacks(), &out, nullptr));
 }
 
+void WriteBE32(std::string *record, size_t offset, u32 value) {
+  for (int i = 0; i < 4; ++i)
+    (*record)[offset + i] = (char)(value >> (24 - i * 8));
+}
+
+void AppendBE16(std::string *record, size_t value) {
+  record->push_back((char)(value >> 8));
+  record->push_back((char)value);
+}
+
+// Two actual INDX entries. Tag 1 holds file position; tag 4 holds level.
+// The UTF-8 labels are stored as identifiers, without CNCX indirection.
+std::string StructuredRecords(std::vector<u32> *offsets) {
+  std::string main(184, '\0');
+  main.replace(0, 4, "INDX");
+  WriteBE32(&main, 24, 1);
+  WriteBE32(&main, 180, 184);
+  main += "TAGX";
+  main.append(8, '\0');
+  WriteBE32(&main, 188, 24);
+  WriteBE32(&main, 192, 1);
+  const unsigned char rules[] = {1, 1, 1, 0, 4, 1, 2, 0, 0, 0, 0, 1};
+  main.append((const char *)rules, sizeof(rules));
+
+  std::string data(184, '\0');
+  data.replace(0, 4, "INDX");
+  WriteBE32(&data, 24, 2);
+  const size_t first = data.size();
+  data.push_back(14);
+  data += "Structured One";
+  data.push_back(3);
+  data.push_back((char)0xEF); // 111, terminal VWI byte
+  data.push_back((char)0x80); // level 0
+  const size_t second = data.size();
+  data.push_back(14);
+  data += "Structured Two";
+  data.push_back(3);
+  data.push_back(6);
+  data.push_back((char)0x89); // 777 = 6 * 128 + 9
+  data.push_back((char)0x81); // level 1
+  WriteBE32(&data, 20, (u32)data.size());
+  data += "IDXT";
+  AppendBE16(&data, first);
+  AppendBE16(&data, second);
+  offsets->assign({0u, (u32)main.size(), (u32)(main.size() + data.size())});
+  return main + data;
+}
+
 void TestStructuredResolverAndInlineFallback() {
   std::vector<mobi_structured_toc_parser::MobiStructuredTocEntry> out;
   bool from_filepos = true;
-
   const std::string markup =
       "<a filepos='100'>Chapter One</a>"
       "<a filepos='200'>Chapter Two</a>"
       "<a filepos='300'>Chapter Three</a>"
-      "<a filepos='400'>Chapter Four</a>"
-      "<a filepos='500'>Chapter Five</a>"
-      "<a filepos='600'>Chapter Six</a>";
-
+      "<a filepos='400'>Chapter Four</a>";
   std::vector<u32> offsets;
-  offsets.push_back(0u);
-  offsets.push_back(10u);
-  offsets.push_back(20u);
-
-  test::ExpectTrue(
-      "structured parser path succeeds",
-      mobi_toc_resolver::PrepareStructuredToc(
-          "", offsets, 5u, 65001u, &markup, 1000u, PrepareCallbacks(), &out,
-          &from_filepos, nullptr));
+  std::string raw = StructuredRecords(&offsets);
+  test::ExpectTrue("binary INDX takes precedence over inline links",
+      mobi_toc_resolver::PrepareStructuredToc(raw, offsets, 0u, 65001u,
+          &markup, 1000u, PrepareCallbacks(), &out, &from_filepos, nullptr));
   test::ExpectFalse("structured path not from filepos", from_filepos);
-  test::ExpectEq("structured parser produced entries", (int)out.size(), 2);
-  test::ExpectStrEq("structured title kept", out[0].title.c_str(),
-                    "Structured One");
+  test::ExpectEq("binary INDX entry count", (int)out.size(), 2);
+  test::ExpectStrEq("structured label", out[0].title.c_str(), "Structured One");
+  test::ExpectEqU("binary first position", out[0].pos, 111u);
+  test::ExpectEqU("binary second position", out[1].pos, 777u);
+  test::ExpectEq("binary nesting level", out[1].level, 1);
 
-  out.clear();
-  from_filepos = false;
-  test::ExpectTrue(
-      "inline fallback path succeeds",
-      mobi_toc_resolver::PrepareStructuredToc(
-          "force-parse-failure", offsets, 5u, 65001u, &markup, 1000u,
-          PrepareCallbacks(), &out, &from_filepos, nullptr));
+  raw[0] = 'X'; // Invalid INDX signature, with all other bytes unchanged.
+  test::ExpectTrue("invalid binary index falls back to real inline parser",
+      mobi_toc_resolver::PrepareStructuredToc(raw, offsets, 0u, 65001u,
+          &markup, 1000u, PrepareCallbacks(), &out, &from_filepos, nullptr));
   test::ExpectTrue("inline fallback flagged", from_filepos);
-  test::ExpectGt("inline fallback generated entries", (int)out.size(), 3);
+  test::ExpectEq("inline entries replace structured entries", (int)out.size(), 4);
+  test::ExpectEqU("inline first position", out[0].pos, 100u);
+  test::ExpectStrEq("inline first label", out[0].title.c_str(), "Chapter One");
+  test::ExpectFalse("no index or markup cannot keep previous entries",
+      mobi_toc_resolver::PrepareStructuredToc(raw, offsets, 0u, 65001u,
+          nullptr, 1000u, PrepareCallbacks(), &out, &from_filepos, nullptr));
+  test::ExpectTrue("failed preparation clears entries", out.empty());
+  test::ExpectFalse("failed preparation clears source flag", from_filepos);
+}
+
+void TestTruncatedPositionMapKeepsFallbackChapters() {
+  BookContext ctx;
+  Book book(ctx);
+  for (int i = 0; i < 4; ++i)
+    AddPageWithText(&book, std::vector<std::string>(1, "Body"));
+  book.AddChapter(1, "Existing One", 0);
+  book.AddChapter(3, "Existing Two", 1);
+  const std::vector<mobi_structured_toc_parser::MobiStructuredTocEntry> toc{
+      {"Unsafe One", 100u, 0}, {"Unsafe Two", 900u, 0}};
+  const std::vector<u32> cursors{0u, 250u, 500u, 750u};
+  // Two samples are present, but the map stops before the final page.
+  const std::vector<std::pair<u32, u32>> map{{0u, 0u}, {1000u, 100u}};
+  mobi_toc_finalize::MobiTocFinalizeResult result;
+  mobi_toc_finalize::FinalizePreparedToc(&book, nullptr, toc, true, true,
+      std::vector<mobi_toc_finalize::MobiHeadingHint>(), 1000u, map, cursors,
+      FinalizeCallbacks(false), &result);
+  const std::vector<ChapterEntry> &chapters = book.GetChapters();
+  test::ExpectEq("unusable mapping retains fallback count", (int)chapters.size(), 2);
+  test::ExpectStrEq("fallback first label", chapters[0].title.c_str(), "Existing One");
+  test::ExpectEq("fallback first page", chapters[0].page, 1);
+  test::ExpectEq("fallback second page", chapters[1].page, 3);
+  test::ExpectEq("fallback nesting survives", chapters[1].level, 1);
+  test::ExpectEq("unusable map has no direct mappings", (int)result.structured_direct, 0);
 }
 
 void TestHtmlPosToPageMapping() {
@@ -379,104 +449,6 @@ void TestTocConfidenceScoringStrongMixedAndLow() {
 
 }
 
-namespace mobi_structured_toc_parser {
-
-bool ParseStructuredToc(const std::string &raw, const std::vector<u32> &, u32,
-                        u32, const ParseCallbacks &,
-                        std::vector<MobiStructuredTocEntry> *out,
-                        IStatusReporter *) {
-  if (!out)
-    return false;
-
-  static const MobiStructuredTocEntry kEntries[] = {
-      {"Structured One", 111u, 0},
-      {"Structured Two", 777u, 1},
-  };
-
-  out->clear();
-  if (!raw.empty())
-    return false;
-  out->push_back(kEntries[0]);
-  out->push_back(kEntries[1]);
-  return true;
-}
-
-}
-
-namespace file_read_utils {
-
-bool ReadPathToStringLimited(const char *, std::string *, size_t) {
-  return false;
-}
-
-bool ReadPathToStringLimited(const std::string &, std::string *, size_t) {
-  return false;
-}
-
-}
-
-namespace mobi_record_scan {
-
-std::uint16_t ReadBE16(const unsigned char *) { return 0; }
-std::uint32_t ReadBE32(const unsigned char *) { return 0; }
-
-bool ParseRecordOffsets(const std::string &, std::vector<std::uint32_t> *) {
-  return false;
-}
-
-unsigned FirstImageProbeLimit(unsigned remaining_records) {
-  return remaining_records;
-}
-
-unsigned CoverLastResortProbeLimit(unsigned remaining_records) {
-  return remaining_records;
-}
-
-}
-
-namespace mobi_record_decode {
-
-MobiRecord0Header::MobiRecord0Header()
-    : compression(1), text_len(0), text_rec_count(0), encoding(65001u),
-      resource_start(0), title_offset(0), title_length(0),
-      huffcdic_record_index(0), num_huffcdic_records(0), trailing_flags(0),
-      indx_index(0) {}
-
-bool ParseRecord0Header(const uint8_t *, size_t, MobiRecord0Header *) {
-  return false;
-}
-
-size_t CountBitsSet(uint32_t) { return 0; }
-
-uint32_t GetVarLenFromEnd(const uint8_t *, size_t) { return 0; }
-
-std::string RemoveTrailingEntries(const uint8_t *, size_t, uint32_t) {
-  return std::string();
-}
-
-bool BuildMergedText(const std::string &, const std::vector<uint32_t> &,
-                     const MobiRecord0Header &, std::string *) {
-  return false;
-}
-
-}
-
-namespace mobi_position_map {
-
-size_t HtmlSampleIntervalForTextBytes(size_t text_bytes) { return text_bytes; }
-
-bool LooksUsableForToc(
-    const std::vector<std::pair<uint32_t, uint32_t>> &html_to_text_map,
-    const std::vector<uint32_t> &text_cursor_per_page) {
-  return html_to_text_map.size() >= 2 && !text_cursor_per_page.empty();
-}
-
-void RemapHtmlToTextAfterCleanup(
-    const std::string &, const std::string &,
-    std::vector<std::pair<uint32_t, uint32_t>> *) {}
-
-}
-
 namespace page_text_extract_utils {
 
 std::vector<std::string> ExtractTextLinesFromPage(Page *page) {
@@ -544,6 +516,7 @@ int main() {
   TestInlineTocEntryCreationAndValidation();
   TestInlineTocEdgeCases();
   TestStructuredResolverAndInlineFallback();
+  TestTruncatedPositionMapKeepsFallbackChapters();
   TestHtmlPosToPageMapping();
   TestHeadingHintFallbackGeneration();
   TestTocConfidenceScoringStrongMixedAndLow();
