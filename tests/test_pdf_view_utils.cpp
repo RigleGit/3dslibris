@@ -1,4 +1,5 @@
 #include "formats/common/pdf_view_utils.h"
+#include "formats/common/fixed_layout_viewport_utils.h"
 
 #include <cmath>
 #include <cstdio>
@@ -149,9 +150,39 @@ void TestViewportAtMinimumZoomMatchesScreenAspect() {
   ExpectNear("matching page aspect keeps full height", rect.height, 1.0f);
 }
 
+void TestViewportStateFeedsGeometry() {
+  using namespace fixed_layout_viewport_utils;
+  ViewportState state; state.max_zoom_index=6; state.zoom_index=5;
+  state.center_x=0.2f; state.center_y=0.8f; state.interaction_active=true;
+  ResetViewportForTargetChange(&state, 2);
+  ExpectEq("target change returns fit zoom", state.zoom_index, 2);
+  ExpectTrue("target change ends fast interaction", !state.interaction_active);
+  auto rect=pdf_view_utils::ComputeViewportRect(1000, 2000,
+      pdf_view_utils::ZoomForIndex(state.zoom_index), 400, 240, state.center_x, state.center_y);
+  ExpectNear("target reset centers visible vertical crop", rect.top, 0.35f);
+  ExpectNear("target reset keeps whole portrait width", rect.width, 1);
+  ExpectTrue("zoom advances", AdjustZoom(&state, 3));
+  ResetViewport(&state, PAGE_TURN_RIGHT_TO_LEFT);
+  rect=pdf_view_utils::ComputeViewportRect(1000, 2000,
+      pdf_view_utils::ZoomForIndex(state.zoom_index), 400, 240, state.center_x, state.center_y);
+  ExpectNear("RTL starts at right edge", rect.left + rect.width, 1);
+  ExpectNear("page navigation starts at top", rect.top, 0);
+  ExpectTrue("page navigation ends fast interaction", !state.interaction_active);
+  ResetViewport(&state);
+  rect=pdf_view_utils::ComputeViewportRect(1000, 2000,
+      pdf_view_utils::ZoomForIndex(state.zoom_index), 400, 240, state.center_x, state.center_y);
+  ExpectNear("LTR starts at left edge", rect.left, 0);
+  ExpectTrue("pan reaches bottom-right boundary", PanViewport(&state, 2, 2));
+  rect=pdf_view_utils::ComputeViewportRect(1000, 2000,
+      pdf_view_utils::ZoomForIndex(state.zoom_index), 400, 240, state.center_x, state.center_y);
+  ExpectNear("pan clamps visible right edge", rect.left + rect.width, 1);
+  ExpectNear("pan clamps visible bottom edge", rect.top + rect.height, 1);
+  ExpectTrue("further movement at boundary is idle", !PanViewport(&state, 1, 1));
+}
 } // namespace
 
 int main() {
+  TestViewportStateFeedsGeometry();
   TestZoomPresets();
   TestDevicePolicies();
   TestPreviewFit();

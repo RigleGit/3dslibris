@@ -1,4 +1,8 @@
 #include "ui/framebuffer_blit_utils.h"
+#include "ui/frame_debug_utils.h"
+#include "shared/text_screen_geometry.h"
+#include "formats/common/fixed_layout_screen_constants.h"
+#include "app/status_layout_utils.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -198,24 +202,29 @@ void TestLandscapeOffsets() {
 }
 
 void TestOffsetsUniqueAndInBoundsPerOrientation() {
-  const framebuffer_blit_utils::FramebufferGeometry geometry =
-      framebuffer_blit_utils::MakeFramebufferGeometry(240, 400);
   const unsigned char orientations[] = {0, 1, 2};
-  for (unsigned char orientation : orientations) {
-    const int width = (orientation == 2) ? 400 : 240;
-    const int height = (orientation == 2) ? 240 : 400;
-    std::vector<unsigned char> seen(geometry.byte_size / 3u, 0);
-    for (int sy = 0; sy < height; sy++) {
-      for (int sx = 0; sx < width; sx++) {
-        const size_t off = framebuffer_blit_utils::PhysicalOffsetBytes(
-            geometry, sx, sy, orientation);
-        if (off % 3u != 0 || off + 2 >= geometry.byte_size)
-          Fail("offset out of bounds for orientation " +
-               std::to_string((int)orientation));
-        if (seen[off / 3u])
-          Fail("duplicate physical pixel for orientation " +
-               std::to_string((int)orientation));
-        seen[off / 3u] = 1;
+  for (int left = 0; left < 2; ++left) {
+    const framebuffer_blit_utils::FramebufferGeometry geometry =
+        framebuffer_blit_utils::MakeFramebufferGeometry(240, left ? 400 : 320);
+    for (unsigned char orientation : orientations) {
+      const text_screen_geometry::ScreenGeometry logical =
+          text_screen_geometry::ResolveTextScreenGeometry(orientation,
+                                                          left != 0);
+      const int width = logical.width;
+      const int height = logical.height;
+      std::vector<unsigned char> seen(geometry.byte_size / 3u, 0);
+      for (int sy = 0; sy < height; sy++) {
+        for (int sx = 0; sx < width; sx++) {
+          const size_t off = framebuffer_blit_utils::PhysicalOffsetBytes(
+              geometry, sx, sy, orientation);
+          if (off % 3u != 0 || off + 2 >= geometry.byte_size)
+            Fail("offset out of bounds for orientation " +
+                 std::to_string((int)orientation));
+          if (seen[off / 3u])
+            Fail("duplicate physical pixel for orientation " +
+                 std::to_string((int)orientation));
+          seen[off / 3u] = 1;
+        }
       }
     }
   }
@@ -249,15 +258,161 @@ void TestFramebufferSyncSkipsFreshCopies() {
       framebuffer_blit_utils::ResolvePhysicalFramebufferSlot(&sync, fb0);
   framebuffer_blit_utils::MarkPhysicalFramebufferCopied(&sync, slot, fb0, 3);
 
-  if (framebuffer_blit_utils::NeedsPhysicalFramebufferCopy(sync, slot, 3))
+  const bool fresh_copy =
+      framebuffer_blit_utils::NeedsPhysicalFramebufferCopy(sync, slot, 3);
+  const bool stale_copy =
+      framebuffer_blit_utils::NeedsPhysicalFramebufferCopy(sync, slot, 4);
+  if (fresh_copy)
     Fail("fresh framebuffer generation should skip copy");
-  if (!framebuffer_blit_utils::NeedsPhysicalFramebufferCopy(sync, slot, 4))
+  if (!stale_copy)
     Fail("stale framebuffer generation should require copy");
+  if (frame_debug_utils::ShouldLogBlitPage(false, fresh_copy))
+    Fail("steady idle framebuffer should not log");
+  if (!frame_debug_utils::ShouldLogBlitPage(false, stale_copy))
+    Fail("stale framebuffer copy should log");
+  if (!frame_debug_utils::ShouldLogBlitPage(true, fresh_copy))
+    Fail("dirty page should log even with a fresh framebuffer");
+}
+
+void ExpectTrue(const char *label, bool value) {
+  if (!value)
+    Fail(std::string(label) + ": expected true");
+}
+
+void ExpectGeometry(const char *label, unsigned char orientation,
+                    bool is_left_buffer, int width, int height) {
+  const text_screen_geometry::ScreenGeometry g =
+      text_screen_geometry::ResolveTextScreenGeometry(orientation,
+                                                      is_left_buffer);
+  ExpectEq((std::string(label) + " width").c_str(), g.width, width);
+  ExpectEq((std::string(label) + " height").c_str(), g.height, height);
+}
+
+void TestPortraitGeometry() {
+  using namespace orientation_utils;
+  ExpectGeometry("turned-left left screen", ORIENT_TURNED_LEFT, true, 240, 400);
+  ExpectGeometry("turned-left right screen", ORIENT_TURNED_LEFT, false, 240,
+                 320);
+  ExpectGeometry("turned-right left screen", ORIENT_TURNED_RIGHT, true, 240,
+                 400);
+  ExpectGeometry("turned-right right screen", ORIENT_TURNED_RIGHT, false, 240,
+                 320);
+}
+
+void TestLandscapeGeometry() {
+  using namespace orientation_utils;
+  ExpectGeometry("landscape top screen", ORIENT_LANDSCAPE, true, 400, 240);
+  ExpectGeometry("landscape bottom screen", ORIENT_LANDSCAPE, false, 320, 240);
+}
+
+void TestGeometryFitsBufferStride() {
+  using namespace orientation_utils;
+  const unsigned char orientations[] = {ORIENT_TURNED_LEFT, ORIENT_TURNED_RIGHT,
+                                        ORIENT_LANDSCAPE};
+  for (unsigned char o : orientations) {
+    for (int left = 0; left < 2; ++left) {
+      const text_screen_geometry::ScreenGeometry g =
+          text_screen_geometry::ResolveTextScreenGeometry(o, left != 0);
+      const int max_index =
+          (g.height - 1) * text_screen_geometry::kBufferStridePx +
+          (g.width - 1);
+      if (max_index >= text_screen_geometry::kBufferStridePx *
+                           text_screen_geometry::kBufferStridePx)
+        Fail("geometry exceeds square buffer");
+      if (g.width > text_screen_geometry::kBufferStridePx)
+        Fail("logical width exceeds buffer stride");
+    }
+  }
+}
+
+void TestOrientationPredicates() {
+  using namespace orientation_utils;
+  if (IsTurnedRight(ORIENT_TURNED_LEFT) ||
+      !IsTurnedRight(ORIENT_TURNED_RIGHT) || IsTurnedRight(ORIENT_LANDSCAPE))
+    Fail("IsTurnedRight must be true only for ORIENT_TURNED_RIGHT");
+  if (IsLandscape(ORIENT_TURNED_LEFT) || IsLandscape(ORIENT_TURNED_RIGHT) ||
+      !IsLandscape(ORIENT_LANDSCAPE))
+    Fail("IsLandscape must be true only for ORIENT_LANDSCAPE");
+  if (!FirstScreenIsLeft(ORIENT_TURNED_LEFT) ||
+      FirstScreenIsLeft(ORIENT_TURNED_RIGHT) ||
+      !FirstScreenIsLeft(ORIENT_LANDSCAPE))
+    Fail("FirstScreenIsLeft must be false only for ORIENT_TURNED_RIGHT");
+}
+
+void TestFixedLayoutTargetDimensions() {
+  fixed_layout_screen::TargetDimensions top = fixed_layout_screen::TargetDims(
+      orientation_utils::ORIENT_LANDSCAPE, true);
+  fixed_layout_screen::TargetDimensions bottom =
+      fixed_layout_screen::TargetDims(orientation_utils::ORIENT_LANDSCAPE,
+                                      false);
+  if (top.width != 400 || top.height != 240 || bottom.width != 320 ||
+      bottom.height != 240)
+    Fail("fixed-layout landscape target dimensions mismatch");
+}
+
+void TestTopScreenLeavesBottomPadding() {
+  status_layout_utils::BookStatusHudLayout layout =
+      status_layout_utils::ComputeBookStatusHudLayout(
+          text_screen_geometry::ResolveTextScreenGeometry(0, true).height, 12,
+          36);
+  ExpectTrue("text baseline inside screen", layout.text_y < 400);
+  ExpectTrue("progress bar bottom padded",
+             layout.progress_bar_y + layout.progress_bar_height <= 387);
+  ExpectEq("clear band starts at reserved footer", layout.clear_top, 364);
+  ExpectEq("clear band ends at screen bottom", layout.clear_bottom, 400);
+}
+
+void TestShorterScreenStillFits() {
+  status_layout_utils::BookStatusHudLayout layout =
+      status_layout_utils::ComputeBookStatusHudLayout(
+          text_screen_geometry::ResolveTextScreenGeometry(0, false).height, 12,
+          16);
+  ExpectTrue("progress bar fits shorter screen",
+             layout.progress_bar_y + layout.progress_bar_height <= 307);
+  ExpectEq("clear band respects footer reserve", layout.clear_top, 304);
+}
+
+void TestFixedLayoutBottomOverlayFits() {
+  status_layout_utils::FixedLayoutBottomHudLayout layout =
+      status_layout_utils::ComputeFixedLayoutBottomHudLayout(
+          text_screen_geometry::ResolveTextScreenGeometry(0, false).height, 12);
+  ExpectEq("fixed layout top text y", layout.time_y, 10);
+  ExpectEq("fixed layout top clear start", layout.time_clear_top, 0);
+  ExpectEq("fixed layout top clear end", layout.time_clear_bottom, 18);
+  ExpectEq("fixed layout bottom text y", layout.page_y, 298);
+  ExpectEq("fixed layout bottom clear start", layout.page_clear_top, 289);
+  ExpectEq("fixed layout bottom clear end", layout.page_clear_bottom, 306);
+  ExpectEq("fixed layout right margin", layout.right_margin, 8);
+}
+
+void TestLandscapeBookHudUsesSlimBottomStrip() {
+  status_layout_utils::LandscapeBookStatusHudLayout layout =
+      status_layout_utils::ComputeLandscapeBookStatusHudLayout(
+          text_screen_geometry::ResolveTextScreenGeometry(2, false).width,
+          text_screen_geometry::ResolveTextScreenGeometry(2, false).height, 12);
+  ExpectEq("landscape clear top", layout.clear_top, 218);
+  ExpectEq("landscape clear bottom", layout.clear_bottom, 240);
+  ExpectEq("landscape text baseline", layout.text_y, 235);
+  ExpectEq("landscape left margin", layout.left_margin, 6);
+  ExpectEq("landscape right margin", layout.right_margin, 6);
+  ExpectTrue("landscape progress bar fits strip",
+             layout.progress_bar_y >= layout.clear_top &&
+                 layout.progress_bar_y + layout.progress_bar_height <=
+                     layout.clear_bottom);
 }
 
 } // namespace
 
 int main() {
+  TestPortraitGeometry();
+  TestLandscapeGeometry();
+  TestGeometryFitsBufferStride();
+  TestOrientationPredicates();
+  TestFixedLayoutTargetDimensions();
+  TestTopScreenLeavesBottomPadding();
+  TestShorterScreenStillFits();
+  TestFixedLayoutBottomOverlayFits();
+  TestLandscapeBookHudUsesSlimBottomStrip();
   TestLogicalHeights();
   TestLogicalPixelCounts();
   TestConvertLogicalScreenToPhysicalCacheTurnedLeft();

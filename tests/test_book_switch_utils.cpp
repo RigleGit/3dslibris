@@ -1,8 +1,53 @@
 #include "reader/book_switch_utils.h"
 
+#include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+
+// Collaborators only store state and observe Close. The real transition must
+// detach the current book before invoking external cleanup.
+struct App;
+struct Book {
+  App *owner=nullptr; bool require_detached=false; int closes=0;
+  void Close();
+};
+struct App {
+  Book *current=nullptr; unsigned int session=7; unsigned int ready_at=123;
+  Book *GetCurrentBook() const { return current; }
+  void SetCurrentBook(Book *value) { current=value; }
+  void SetCurrentBookSessionId(unsigned int value) { session=value; }
+  void SetPdfDeferredReadyAtMs(unsigned int value) { ready_at=value; }
+};
+void Book::Close() {
+  if (require_detached) {
+    assert(owner && owner->current == nullptr);
+    assert(owner->session == 0 && owner->ready_at == 0);
+  }
+  ++closes;
+}
+#define DBG_LOGF(...) ((void)0)
+namespace reader_internal {
+#include "book_switch_under_test.inc"
+}
+static void TestSwitchAndFailedOpenCleanup() {
+  using namespace reader_internal;
+  App app; Book current, next; current.owner=&app; current.require_detached=true;
+  DetachCurrentBookForSwitch(nullptr, &next, 8, "test");
+  DetachCurrentBookForSwitch(&app, &next, 8, "test");
+  assert(current.closes == 0 && next.closes == 0);
+  app.current=&current;
+  DetachCurrentBookForSwitch(&app, &current, 8, "test");
+  assert(current.closes == 0 && app.current == &current && app.session == 7 && app.ready_at == 123);
+  DetachCurrentBookForSwitch(&app, &next, 8, "test");
+  assert(current.closes == 1 && next.closes == 0 && app.current == nullptr);
+  app.current=&current; app.session=9; app.ready_at=456;
+  DetachCurrentBookForSwitch(&app, nullptr, 0, "leave");
+  assert(current.closes == 2 && app.current == nullptr);
+  CloseFailedOpenBook(&app, nullptr, 8, "missing");
+  CloseFailedOpenBook(&app, &next, 8, "aborted");
+  assert(next.closes == 1 && current.closes == 2);
+}
 
 namespace {
 
@@ -21,13 +66,6 @@ void ExpectFalse(const char *label, bool value) {
     Fail(std::string(label) + ": expected false");
 }
 
-void ExpectEq(const char *label, unsigned int actual, unsigned int expected) {
-  if (actual != expected) {
-    Fail(std::string(label) + ": expected " + std::to_string(expected) +
-         ", got " + std::to_string(actual));
-  }
-}
-
 void ExpectCString(const char *label, const char *actual, const char *expected) {
   if (std::string(actual ? actual : "") != std::string(expected)) {
     Fail(std::string(label) + ": expected " + expected + ", got " +
@@ -35,19 +73,6 @@ void ExpectCString(const char *label, const char *actual, const char *expected) 
   }
 }
 
-
-void TestNextBookSessionId() {
-  ExpectEq("next after 1", NextBookSessionId(1), 2);
-  ExpectEq("wrap skips zero", NextBookSessionId(0xFFFFFFFFu), 1);
-}
-
-void TestShouldCloseCurrentBookForSwitch() {
-  int a = 1;
-  int b = 2;
-  ExpectFalse("null current", ShouldCloseCurrentBookForSwitch(nullptr, &a));
-  ExpectFalse("same book", ShouldCloseCurrentBookForSwitch(&a, &a));
-  ExpectTrue("different books", ShouldCloseCurrentBookForSwitch(&a, &b));
-}
 
 void TestShouldAttachOpeningResult() {
   ExpectTrue("valid attach", ShouldAttachOpeningResult(7, 7, false, 4));
@@ -79,8 +104,7 @@ void TestDescribeOpeningFailureCause() {
 } // namespace
 
 int main() {
-  TestNextBookSessionId();
-  TestShouldCloseCurrentBookForSwitch();
+  TestSwitchAndFailedOpenCleanup();
   TestShouldAttachOpeningResult();
   TestDescribeOpeningFailureCause();
   return 0;

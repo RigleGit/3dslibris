@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstddef>
 #include <vector>
+#include <string>
 struct fz_context {};
 struct fz_document {};
 struct fz_display_list { int page; };
@@ -33,14 +34,15 @@ struct Book {
 };
 static int renders = 0, builds = 0, drops = 0, cancels = 0;
 static bool fail = false;
+static std::vector<std::string> events;
 bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *, int) { return false; }
-void CancelMuPdfIncrementalRenderState(Book::MuPdfState *) { ++cancels; }
-void fz_drop_display_list(fz_context *, fz_display_list *p) { assert(cancels > drops); ++drops; delete p; }
+void CancelMuPdfIncrementalRenderState(Book::MuPdfState *) { ++cancels; events.push_back("cancel"); }
+void fz_drop_display_list(fz_context *, fz_display_list *p) { assert(!events.empty() && events.back() == "cancel" && "each old list must be cancelled before disposal"); events.push_back("drop"); ++drops; delete p; }
 bool BitmapCacheValid(const Cache &c, int p) { return c.page == p; }
 float ComputeMuPdfPreviewScale(float, float, int, int) { return 0.2f; }
 bool EstimateMuPdfPageRenderComplexity(fz_context *, fz_document *, int, int *, size_t *) { return true; }
 bool RenderMuPdfBitmap(fz_context *, fz_document *, int p, float, RenderedMuPdfBitmap *, float *, float *, const void *, fz_display_list *reuse, fz_display_list **out, IStatusReporter *, const char * = nullptr) {
-  ++renders;
+  ++renders; events.push_back("render");
   if (fail) return false;
   if (reuse) assert(reuse->page == p);
   else if (out) { *out = new fz_display_list{p}; ++builds; }
@@ -71,14 +73,24 @@ int main() {
   // Rebuilding just the bitmap (e.g. geometry) can reuse the same list.
   s.current_preview.page = -1;
   assert(EnsureCurrentMuPdfPreviewCache(&s, 0) && builds == 1);
+  events.clear();
   assert(EnsureCurrentMuPdfPreviewCache(&s, 1) && builds == 2 && drops == 1);
+  assert((events == std::vector<std::string>{"cancel", "drop", "render"}));
   fail = true;
   assert(!EnsureCurrentMuPdfPreviewCache(&s, 2));
   assert(!s.cached_display_list && drops == 2);
+  assert(s.current_preview.page == 1 && s.cached_display_list_page == -1);
   fail = false;
+  assert(EnsureCurrentMuPdfPreviewCache(&s, 2));
+  assert(builds == 3 && s.cached_display_list->page == 2 && s.current_preview.page == 2);
+  const int before_skip=renders;
   mupdf_render_policy_utils::skip = true;
   assert(!EnsureCurrentMuPdfPreviewCache(&s, 3));
-  assert(s.page_too_complex_for_device == 3 && builds == 2);
+  assert(s.page_too_complex_for_device == 3 && builds == 3 && renders == before_skip);
+  assert(s.current_preview.page == 2 && s.cached_display_list->page == 2);
+  assert(!EnsureMuPdfDisplayListForPage(&s, 2, nullptr));
+  assert(!EnsureMuPdfDisplayListForPage(nullptr, 2, &list));
   assert(!EnsureCurrentMuPdfPreviewCache(nullptr, 0));
+  events.push_back("cancel"); fz_drop_display_list(s.ctx, s.cached_display_list);
   puts("MuPDF preview list reuse passed");
 }
