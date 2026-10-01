@@ -169,7 +169,9 @@ std::string DecodeRtfToUtf8(const std::string &rtf) {
       i += 2;
       continue;
     }
-    if (n == 'u') {
+    if (n == 'u' && i + 2 < rtf.size() &&
+        (isdigit((unsigned char)rtf[i + 2]) || rtf[i + 2] == '-' ||
+         rtf[i + 2] == '+')) {
       size_t p = i + 2;
       int sign = 1;
       if (p < rtf.size() && (rtf[p] == '-' || rtf[p] == '+')) {

@@ -29,8 +29,13 @@ void ExpectEq(const char *label, const std::string &actual,
          "]");
 }
 
+std::string RtfPath(const char *name) {
+  const char *tmp = getenv("TMPDIR");
+  return std::string(tmp && *tmp ? tmp : "/tmp") + "/" + name;
+}
+
 void TestBasicRtf() {
-  std::string path = "/tmp/test_rtf_basic.rtf";
+  std::string path = RtfPath("test_rtf_basic.rtf");
   FILE *f = fopen(path.c_str(), "wb");
   if (!f)
     Fail("cannot create temp file");
@@ -43,7 +48,7 @@ void TestBasicRtf() {
 }
 
 void TestRtfWithNewlines() {
-  std::string path = "/tmp/test_rtf_newlines.rtf";
+  std::string path = RtfPath("test_rtf_newlines.rtf");
   FILE *f = fopen(path.c_str(), "wb");
   if (!f)
     Fail("cannot create temp file");
@@ -56,7 +61,7 @@ void TestRtfWithNewlines() {
 }
 
 void TestRtfWithUnicode() {
-  std::string path = "/tmp/test_rtf_unicode.rtf";
+  std::string path = RtfPath("test_rtf_unicode.rtf");
   FILE *f = fopen(path.c_str(), "wb");
   if (!f)
     Fail("cannot create temp file");
@@ -69,7 +74,7 @@ void TestRtfWithUnicode() {
 }
 
 void TestRtfWithParagraph() {
-  std::string path = "/tmp/test_rtf_par.rtf";
+  std::string path = RtfPath("test_rtf_par.rtf");
   FILE *f = fopen(path.c_str(), "wb");
   if (!f)
     Fail("cannot create temp file");
@@ -82,7 +87,7 @@ void TestRtfWithParagraph() {
 }
 
 void TestEmptyFile() {
-  std::string path = "/tmp/test_rtf_empty.rtf";
+  std::string path = RtfPath("test_rtf_empty.rtf");
   FILE *f = fopen(path.c_str(), "wb");
   if (!f)
     Fail("cannot create temp file");
@@ -98,7 +103,7 @@ void TestNonexistentFile() {
 }
 
 void TestRtfOnlyControlWords() {
-  std::string path = "/tmp/test_rtf_controls.rtf";
+  std::string path = RtfPath("test_rtf_controls.rtf");
   FILE *f = fopen(path.c_str(), "wb");
   if (!f)
     Fail("cannot create temp file");
@@ -108,6 +113,25 @@ void TestRtfOnlyControlWords() {
   std::string out;
   ExpectTrue("rtf empty body", rtf_loader::ReadAndDecode(path.c_str(), &out));
   ExpectEq("empty rtf body", out, "");
+}
+
+void TestControlWordsEmitRealText() {
+  const std::string path = RtfPath("test_rtf_replacements.rtf");
+  FILE *f = fopen(path.c_str(), "wb");
+  if (!f)
+    Fail("cannot create RTF replacement fixture");
+  fputs("{\\rtf1\\ansi A\\par B\\line C\\tab D"
+        "\\emdash \\endash \\bullet \\lquote \\rquote "
+        "\\ldblquote \\rdblquote \\bogus123 \\unknown123 \\ul E"
+        "\\u233?F\\u-255?G}", f);
+  fclose(f);
+  std::string out;
+  ExpectTrue("real RTF controls decode", rtf_loader::ReadAndDecode(path.c_str(), &out));
+  ExpectEq("controls emit newlines tabs and UTF8, unknown word preserves body", out,
+           "A\nB\nC\tD\xe2\x80\x94\xe2\x80\x93\xe2\x80\xa2"
+           "\xe2\x80\x98\xe2\x80\x99\xe2\x80\x9c\xe2\x80\x9d" "E"
+           "\xc3\xa9" "F\xef\xbc\x81" "G");
+  remove(path.c_str());
 }
 
 } // namespace
@@ -120,5 +144,6 @@ int main() {
   TestEmptyFile();
   TestNonexistentFile();
   TestRtfOnlyControlWords();
+  TestControlWordsEmitRealText();
   return 0;
 }
