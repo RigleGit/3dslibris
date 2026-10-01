@@ -70,11 +70,28 @@ int main() {
   reader.Close();
   reader.Close();
   ExpectTrue("reopen after explicit close", reader.Read(archive, entries[0], &bytes, 1024));
-  ExpectTrue("reject oversized entry", !reader.Read(archive, entries[0], &bytes, 1));
+  ExpectTrue("accept exact byte limit", reader.Read(archive, entries[0], &bytes, std::string(expected[0]).size()));
+  ExpectTrue("reject oversized entry", !reader.Read(archive, entries[0], &bytes, std::string(expected[0]).size() - 1));
+  ExpectTrue("oversized read clears previous bytes", bytes.empty());
   ExpectTrue("recover after read error", reader.Read(archive, entries[0], &bytes, 1024));
   ExpectTrue("reject missing archive", !reader.Read(std::string(archive) + ".missing", entries[0], &bytes, 1024));
   ExpectTrue("recover after switching path", reader.Read(archive, entries[0], &bytes, 1024));
   ExpectEq("reopened payload", std::string(bytes.begin(), bytes.end()), expected[0]);
+
+  CbzPageEntry missing = entries[0];
+  missing.path = "absent.png";
+  missing.offset = 0;
+  ExpectTrue("missing member rejected", !reader.Read(archive, missing, &bytes, 1024));
+  ExpectTrue("missing member clears previous bytes", bytes.empty());
+  ExpectTrue("missing member supplies error", GetLastCbzArchiveError()[0] != '\0');
+  ExpectTrue("valid member after locate failure", reader.Read(archive, entries[0], &bytes, 1024));
+  ExpectTrue("successful read clears stale error", GetLastCbzArchiveError()[0] == '\0');
+
+  const char *invalid_archive = std::getenv("TEST_CBZ_INVALID_PATH");
+  ExpectTrue("invalid archive fixture supplied", invalid_archive != NULL);
+  ExpectTrue("reject actual non-ZIP file", !IndexCbzArchiveEntries(invalid_archive, &entries));
+  ExpectTrue("failed archive index clears stale entries", entries.empty());
+  ExpectTrue("reindex valid archive after error", IndexCbzArchiveEntries(archive, &entries));
 
   std::vector<CbzComicInfoBookmark> bookmarks;
   ExpectTrue("read ComicInfo bookmarks", ReadComicInfoBookmarks(archive, &bookmarks));
@@ -84,6 +101,8 @@ int main() {
   ExpectEq("chapter bookmark", entries[bookmarks[1].image_index].normalized_path,
            "Chapter 5/1.png");
   ExpectEq("chapter title", bookmarks[1].title, "Chapter five");
+  ExpectTrue("bad archive has no bookmarks", !ReadComicInfoBookmarks(invalid_archive, &bookmarks));
+  ExpectTrue("bad archive clears previous bookmarks", bookmarks.empty());
   puts("PASS: CBZ natural order, ZIP reads and ComicInfo bookmarks");
   return 0;
 }

@@ -1,6 +1,7 @@
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/book_parser.h"
+#include "book/book_renderer.h"
 #include "formats/common/page_text_extract_utils.h"
 #include "formats/common/book_error.h"
 #include "formats/mobi/mobi_text_decode.h"
@@ -212,6 +213,62 @@ void TestCancelledOpenAndRecovery() {
   }
 }
 
+void TestCbzReadPageZoomCloseAndReopen() {
+  const char *folder=getenv("TEST_CBZ_READING_DIR"); assert(folder);
+  Text text; text.display.width=240; text.display.height=240;
+  std::vector<u16> top(240 * 400 + 2, 0xbeef), bottom(240 * 320 + 2, 0xbeef);
+  text.screenleft=top.data()+1; text.screenright=bottom.data()+1;
+  BookContext ctx; ctx.text=&text; Book book(ctx);
+  book.SetFolderName(folder); book.SetFileName("first.cbz");
+  book.format=FORMAT_CBZ; // LibraryController supplies the format before opening.
+  test::ExpectEq("CBZ opens through Book parser dispatch", book_parser::Open(&book), 0);
+  assert(book.IsCbz() && book.GetPageCount() == 3);
+  assert(book.GetChapters().size() == 1 && book.GetChapters()[0].page == 1);
+  assert(book.GetChapters()[0].title == "Blue chapter");
+  book_renderer::DrawCurrentView(&book, &text);
+  assert(top[1 + 200 * 240 + 120] == 0xf800 && "first naturally sorted page is red");
+  assert(book_renderer::ChangeFixedLayoutZoom(&book, 1));
+  assert(book_renderer::TranslateFixedLayoutViewport(&book, .1f, .1f));
+  book_renderer::SetFixedLayoutViewportInteraction(&book, true);
+  book_renderer::DrawCurrentView(&book, &text);
+  book_renderer::SetFixedLayoutViewportInteraction(&book, false);
+  book_renderer::DrawCurrentView(&book, &text);
+  assert(top[1 + 200 * 240 + 120] == 0xf800 && "zoom/pan retains requested page pixels");
+  book.SetPosition(1); book_renderer::ResetFixedLayoutViewportForNavigation(&book);
+  book_renderer::DrawCurrentView(&book, &text);
+  assert(top[1 + 200 * 240 + 120] == 0x001f && "page turn replaces red with blue");
+  text.printed_strings.clear();
+  book.SetPosition(2); book_renderer::DrawCurrentView(&book, &text);
+  assert(std::find(text.printed_strings.begin(), text.printed_strings.end(), "image decode failed") != text.printed_strings.end());
+  book.SetPosition(0); book_renderer::DrawCurrentView(&book, &text);
+  assert(top[1 + 200 * 240 + 120] == 0xf800);
+  // Suspend-style reset must close the retained ZIP handle. A subsequent
+  // read observes the missing path rather than the still-open old descriptor.
+  book.ResetCbzTransientViewState(true);
+  const std::string original=std::string(folder) + "/first.cbz", moved=original + ".moved";
+  assert(rename(original.c_str(), moved.c_str()) == 0);
+  text.printed_strings.clear();
+  book.SetPosition(1); book_renderer::DrawCurrentView(&book, &text);
+  assert(std::find(text.printed_strings.begin(), text.printed_strings.end(), "CBZ page unavailable") != text.printed_strings.end());
+  assert(rename(moved.c_str(), original.c_str()) == 0);
+  book.ResetCbzTransientViewState(true); book_renderer::DrawCurrentView(&book, &text);
+  assert(top[1 + 200 * 240 + 120] == 0x001f);
+  assert(top.front() == 0xbeef && top.back() == 0xbeef);
+  assert(bottom.front() == 0xbeef && bottom.back() == 0xbeef);
+  book.Close(); assert(book.GetPageCount() == 0 && book.GetChapters().empty());
+  book.SetFileName("second.cbz");
+  assert(book_parser::Open(&book) == 0 && book.GetPageCount() == 1 && book.GetChapters().empty());
+  book.SetPosition(0); book_renderer::DrawCurrentView(&book, &text);
+  assert(top[1 + 200 * 240 + 120] == 0x07e0 && "another archive cannot reuse earlier page pixels");
+  book.Close(); book.SetFileName("first.cbz");
+  assert(book_parser::Open(&book) == 0 && book.GetPageCount() == 3 && book.GetChapters().size() == 1);
+  book.SetPosition(0); book_renderer::DrawCurrentView(&book, &text);
+  assert(top[1 + 200 * 240 + 120] == 0xf800);
+  book.Close(); book.SetFileName("missing.cbz");
+  assert(book_parser::Open(&book) != 0 && book.GetPageCount() == 0);
+  book.Close();
+}
+
 void TestDecodeCp1252() {
   const std::string raw = std::string("caf") + "\xE9" + " y " + "\x97" + " fin";
   bool used_utf8_guess = true;
@@ -335,6 +392,7 @@ int main() {
   TestFb2NestedNavigation();
   TestOpenErrorMessages();
   TestEpubMetadataOpenCloseRecovery();
+  TestCbzReadPageZoomCloseAndReopen();
   TestCancelledOpenAndRecovery();
   TestDecodeCp1252();
   TestUtf8DetectionAndPassThrough();

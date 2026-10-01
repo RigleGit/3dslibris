@@ -61,8 +61,35 @@ if [ -f "$TEST_ROOT/third_party/expat/xmlparse.c" ]; then
   done
 fi
 
+CBZ_TMP="$(mktemp -d)"
+trap 'rm -rf "$CBZ_TMP"' EXIT
+export TEST_CBZ_READING_DIR="$CBZ_TMP"
+python3 - "$CBZ_TMP" <<'PYFIXTURE'
+import pathlib
+import struct
+import sys
+import zipfile
+import zlib
+folder = pathlib.Path(sys.argv[1])
+def chunk(kind, data):
+    return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+def png(rgb):
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 2, 2, 8, 2, 0, 0, 0)) +
+            chunk(b'IDAT', zlib.compress((b'\0' + bytes(rgb) * 2) * 2)) + chunk(b'IEND', b''))
+with zipfile.ZipFile(folder / 'first.cbz', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr('10-blue.png', png((0, 0, 255)))
+    archive.writestr('2-red.png', png((255, 0, 0)))
+    archive.writestr('30-broken.png', b'not an image')
+    archive.writestr('notes.txt', b'not a comic page')
+    archive.writestr('ComicInfo.xml', '<ComicInfo><Pages><Page Image="1" Bookmark="Blue chapter"/></Pages></ComicInfo>')
+with zipfile.ZipFile(folder / 'second.cbz', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr('green.png', png((0, 255, 0)))
+PYFIXTURE
+
 "$CXX_BIN" -std=c++11 \
   ${CXXFLAGS:-} \
+  -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST \
+  -include "$TEST_ROOT/tests/stubs/cbz_platform.h" \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \
   "-I$TEST_ROOT/third_party/utf8proc" \
@@ -129,6 +156,14 @@ fi
   "$TEST_ROOT/source/formats/epub/epub_toc_title_match_utils.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_page_cache.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_cache.cpp" \
+  "$TEST_ROOT/source/formats/cbz/cbz_parser.cpp" \
+  "$TEST_ROOT/source/formats/cbz/cbz_document.cpp" \
+  "$TEST_ROOT/source/formats/cbz/cbz_archive.cpp" \
+  "$TEST_ROOT/source/formats/cbz/cbz_decode.cpp" \
+  "$TEST_ROOT/source/formats/cbz/cbz_view.cpp" \
+  "$TEST_ROOT/source/formats/cbz/cbz_worker.cpp" \
+  "$TEST_ROOT/source/formats/common/pdf_view_utils.cpp" \
+  "$TEST_ROOT/source/formats/common/fixed_layout_blit_utils.cpp" \
   "$TEST_ROOT/source/formats/txt/txt_parser.cpp" \
   "$TEST_ROOT/source/formats/txt/txt_loader.cpp" \
   "$TEST_ROOT/source/formats/markdown/markdown_parser.cpp" \

@@ -17,6 +17,7 @@ class IStatusReporter;
 class Text {
 public:
   int pixelsize;
+  int color_mode = 0;
   struct { u8 r, g, b; } bgcolor;
   u16 fgcolor;
   bool usefgcolor;
@@ -33,6 +34,7 @@ public:
   bool landscape = false;
   int pen_x = 0, pen_y = 0;
   std::string rendered_ascii;
+  std::vector<std::string> printed_strings;
   int clipped_glyphs = 0;
   struct RenderedGlyph { u32 codepoint; int x, y; u16 *screen; };
   std::vector<RenderedGlyph> rendered_glyphs;
@@ -61,7 +63,8 @@ public:
   int GetStyle() const { return 0; }
   std::string GetFontFile(u8) const { return ""; }
   std::string GetFontFile(u8, int) const { return ""; }
-  int GetColorMode() { return 0; }
+  int GetColorMode() { return color_mode; }
+  void SetColorMode(int value) { color_mode = value; }
   u16 GetFgColor() { return fgcolor; }
   void SetTextColorOverride(u16) {}
   void ClearTextColorOverride() {}
@@ -110,6 +113,7 @@ public:
 
   // Drawing
   void FillRect(u16, u16, u16, u16, u16) {}
+  void DrawRect(u16, u16, u16, u16, u16) {}
   bool PrintNewLine() {
     if (!capture_rendered_text) return false;
     pen_x = margin.left;
@@ -138,8 +142,8 @@ public:
     pen_x += GetAdvance(c);
   }
   void PrintChar(u32 c, u8) { PrintChar(c); }
-  void PrintString(const char *) {}
-  void PrintString(const char *, u8) {}
+  void PrintString(const char *value) { if (value) printed_strings.push_back(value); }
+  void PrintString(const char *value, u8) { PrintString(value); }
 
   // Wrap / clip flags
   bool IsAutoWrapEnabled() const { return false; }

@@ -18,7 +18,8 @@ mkdir -p "$OUTDIR" "$WORKDIR"
 
 PNG_PATH="$WORKDIR/sample.png"
 JPG_PATH="$WORKDIR/sample.jpg"
-python3 - "$PNG_PATH" <<'PY'
+python3 - "$PNG_PATH" "$JPG_PATH" <<'PY'
+import base64
 import struct
 import sys
 import zlib
@@ -49,15 +50,9 @@ png = (
 
 with open(sys.argv[1], "wb") as f:
     f.write(png)
+# Fixed 8x8 JPEG of the same RGB gradient, independent of image converters.
+with open(sys.argv[2], "wb") as f:
+    f.write(base64.b64decode("/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZgAATU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAA6ABAAMAAAABAAEAAKACAAQAAAABAAAACKADAAQAAAABAAAACAAAAAD/7QA4UGhvdG9zaG9wIDMuMAA4QklNBAQAAAAAAAA4QklNBCUAAAAAABDUHYzZjwCyBOmACZjs+EJ+/8AAEQgACAAIAwEiAAIRAQMRAf/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/bAEMAAgICAgICAwICAwUDAwMFBgUFBQUGCAYGBgYGCAoICAgICAgKCgoKCgoKCgwMDAwMDA4ODg4ODw8PDw8PDw8PD//bAEMBAgICBAQEBwQEBxALCQsQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEP/dAAQAAf/aAAwDAQACEQMRAD8A5X4Ufsqf6n/Q/T+Gvob/AIZU/wCnP/x2voH4Uf8ALH8K+h6OKPE3OPrkv3v9fePwK8Ys+/1bofvvz7LzP//Z"))
 PY
-
-if command -v sips >/dev/null 2>&1; then
-  sips -s format jpeg "$PNG_PATH" --out "$JPG_PATH" >/dev/null
-elif command -v convert >/dev/null 2>&1; then
-  convert "$PNG_PATH" "$JPG_PATH"
-else
-  echo "SKIP test_cbz_decode: requires 'sips' (macOS) or 'convert' (ImageMagick)"
-  exit 0
-fi
 
 "$OUTDIR/test_cbz_decode" "$PNG_PATH" "$JPG_PATH"

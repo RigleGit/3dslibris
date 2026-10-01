@@ -5,8 +5,9 @@ source "$(dirname "$0")/test_build.sh"
 WORKDIR="$TEST_OUTDIR/cbz-archive"
 mkdir -p "$WORKDIR"
 export TEST_CBZ_ARCHIVE_PATH="$WORKDIR/sample.cbz"
+export TEST_CBZ_INVALID_PATH="$WORKDIR/not-a-zip.cbz"
 
-python3 - "$TEST_CBZ_ARCHIVE_PATH" <<'PYFIXTURE'
+python3 - "$TEST_CBZ_ARCHIVE_PATH" "$TEST_CBZ_INVALID_PATH" <<'PYFIXTURE'
 import sys
 import zipfile
 
@@ -28,17 +29,22 @@ with zipfile.ZipFile(sys.argv[1], "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(name, normalized.encode("ascii"))
     zf.writestr("notes.txt", b"not a page")
     zf.writestr("__MACOSX/", b"")
-    zf.writestr("ComicInfo.xml", b'<ComicInfo><Pages>'
+    zf.writestr("ComicInfo.xml", b'<ComicInfo><Page Image="3" Bookmark="Outside pages"/><Pages>'
+                b'<Page Image="-1" Bookmark="Invalid index"/>'
+                b'<Page Image="4" Bookmark=""/>'
+                b'<Page Bookmark="Missing index"/>'
                 b'<Page Image="6" Bookmark="Chapter five"/>'
                 b'<Page Image="0" Bookmark="Cover"/>'
                 b'</Pages></ComicInfo>')
+with open(sys.argv[2], 'wb') as invalid:
+    invalid.write(b'not a ZIP archive')
 PYFIXTURE
 
 # Build the vendored minizip for the host instead of silently skipping the
 # regression when only the cross-compiled 3DS library is installed.
 MINIZIP="$TEST_ROOT/third_party/mupdf/thirdparty/zlib/contrib/minizip"
 for name in unzip ioapi; do
-  "$CC_BIN" -c "$MINIZIP/$name.c" -o "$WORKDIR/$name.o"
+  "$CC_BIN" ${CFLAGS:-} -c "$MINIZIP/$name.c" -o "$WORKDIR/$name.o"
 done
 
 build_test test_cbz_archive \

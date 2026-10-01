@@ -9,6 +9,7 @@
 
 // ---- CBZ ----
 
+#ifndef DSLIBRIS_REAL_CBZ_TEST
 CbzArchiveReader::CbzArchiveReader() : archive_(nullptr), path_() {}
 CbzArchiveReader::~CbzArchiveReader() {
   assert(!archive_); // These parser tests never open a CBZ archive.
@@ -36,6 +37,8 @@ u32 Book::GetCbzDeferredDelayMs() const { return 0; }
 void Book::InitCbzView(const std::string &, const std::vector<CbzPageEntry> &,
                        bool) {}
 
+#endif
+
 void Book::InitMuPdfView(u16, fz_context *, fz_document *, fz_outline *,
                          bool, app_flow_utils::MuPdfDocumentKind) {}
 
@@ -59,6 +62,8 @@ void Book::CancelMuPdfIncrementalRender() {}
 u32 Book::GetMuPdfDeferredDelayMs() const { return 0; }
 void Book::DrawCurrentMuPdfView(Text *) {}
 
+#ifndef DSLIBRIS_REAL_CBZ_TEST
 bool Book::PumpDeferredCbzWork(u32) { return false; }
 void Book::CancelCbzDeferredWork() {}
+#endif
 bool Book::PumpDeferredMuPdfWork(u32) { return false; }
