@@ -5,6 +5,8 @@
 #include "formats/common/book_error.h"
 #include "formats/mobi/mobi_text_decode.h"
 #include "shared/app_flow_utils.h"
+#include "shared/open_cancel_poll.h"
+#include "shared/status_reporter.h"
 #include "ui/text.h"
 #include "test_assert.h"
 
@@ -175,6 +177,41 @@ void TestEpubMetadataOpenCloseRecovery() {
 
 
 
+struct CancelReporter : IStatusReporter {
+  bool requested=false;
+  void PrintStatus(const char *) override {}
+  void PrintStatus(std::string) override {}
+  bool ShouldAbortWork() const override { return requested; }
+};
+void TestCancelledOpenAndRecovery() {
+  Text text; CancelReporter reporter; BookContext ctx;
+  ctx.text=&text; ctx.status_reporter=&reporter; Book book(ctx);
+  for (int flags=0; flags<4; ++flags) {
+    reporter.requested=(flags & 1) != 0;
+    book.ClearOpenAbortRequest();
+    if (flags & 2) book.RequestAbortOpen();
+    assert(open_cancel_poll::Poll(&book, &reporter, "test") == (flags != 0));
+  }
+  assert(open_cancel_poll::Poll(nullptr, &reporter, "test"));
+  reporter.requested=false;
+  assert(!open_cancel_poll::Poll(nullptr, &reporter, "test"));
+  assert(!open_cancel_poll::Poll(nullptr, nullptr, "test"));
+  const char *names[]={"basic.txt", "basic.fb2", "basic.epub"};
+  book.SetFolderName(TEST_FIXTURES_DIR "/books");
+  for (const char *name : names) {
+    book.SetFileName(name); book.format=std::string(name) == "basic.epub" ? FORMAT_EPUB : FORMAT_UNDEF;
+    book.PrepareForOpen(); book.RequestAbortOpen();
+    test::ExpectEq("prepared parser respects book cancellation", book_parser::OpenPrepared(&book), BOOK_ERR_CANCELLED);
+    book.Close(); assert(book.GetPageCount() == 0 && !book.IsOpenAbortRequested());
+    reporter.requested=true; book.PrepareForOpen();
+    test::ExpectEq("prepared parser respects application cancellation", book_parser::OpenPrepared(&book), BOOK_ERR_CANCELLED);
+    book.Close(); reporter.requested=false;
+    test::ExpectEq("normal open recovers after cancellation", book_parser::Open(&book), 0);
+    assert(book.GetPageCount() > 0 && !BookText(&book).empty());
+    book.Close();
+  }
+}
+
 void TestDecodeCp1252() {
   const std::string raw = std::string("caf") + "\xE9" + " y " + "\x97" + " fin";
   bool used_utf8_guess = true;
@@ -298,6 +335,7 @@ int main() {
   TestFb2NestedNavigation();
   TestOpenErrorMessages();
   TestEpubMetadataOpenCloseRecovery();
+  TestCancelledOpenAndRecovery();
   TestDecodeCp1252();
   TestUtf8DetectionAndPassThrough();
   TestDecodeIso88591();

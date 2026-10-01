@@ -16,6 +16,7 @@
 #include "formats/txt/txt_parser.h"
 #include "shared/debug_log.h"
 #include "shared/string_utils.h"
+#include "shared/open_cancel_poll.h"
 
 #include <stdio.h>
 #include <sys/param.h>
@@ -139,6 +140,9 @@ uint8_t Open(Book *book) {
 uint8_t OpenPrepared(Book *book) {
   if (!book)
     return 1;
+  if (open_cancel_poll::Poll(book, book->GetStatusReporter(),
+                             "book-open-prepared"))
+    return BOOK_ERR_CANCELLED;
 
   const std::string path = BuildPath(book);
   char logmsg[256];
