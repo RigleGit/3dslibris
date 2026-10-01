@@ -1,0 +1,15 @@
+{
+  "path": ["source", "include"],
+  "format": ["cpp", "cpp-header"],
+  "formatsExts": {"cpp-header": ["h"]},
+  "minTokens": 100,
+  "minLines": 12,
+  "mode": "weak",
+  "ignore": [
+    "**/source/expat/**",
+    "**/source/core/stb_image_impl.cpp",
+    "**/include/expat*.h"
+  ],
+  "reporters": ["json", "markdown"],
+  "output": "build/quality/duplicates"
+}

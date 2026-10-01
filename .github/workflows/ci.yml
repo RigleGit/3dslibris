@@ -78,6 +78,8 @@ jobs:
           path: |
             build/coverage-host/report/llvm-cov-report.txt
             build/coverage-host/report/llvm-cov-summary.json
+            build/coverage-host/report/app-coverage.md
+            build/coverage-host/report/llvm-cov-diagnostics.txt
 
   build-3dsx:
     runs-on: ubuntu-latest
