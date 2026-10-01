@@ -13,7 +13,7 @@ if [ ! -x "$ARM_GCC" ]; then
     ARM_GCC="$(command -v arm-none-eabi-gcc)"
   else
     echo "SKIP test_mupdf_minimal_build: missing arm-none-eabi-gcc"
-    exit 0
+    exit 77
   fi
 fi
 

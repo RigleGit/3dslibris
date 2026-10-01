@@ -1,6 +1,7 @@
 # 3dslibris test build helper
 # Usage: source test_build.sh
 # Then call: build_test <test_name> <source_files...> [-l<lib>...] [-I<include>...]
+# Use -- before raw compiler arguments when include order matters.
 
 set -eu
 
@@ -139,6 +140,11 @@ build_test() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
+      --)
+        shift
+        sources+=("$@")
+        break
+        ;;
       -l*)
         libs+=("$1")
         ;;
