@@ -7,6 +7,8 @@
 #include "formats/common/book_error.h"
 #include "formats/mobi/mobi_text_decode.h"
 #include "formats/mobi/mobi_page_cache.h"
+#include "formats/epub/epub_page_cache.h"
+#include "minizip/unzip.h"
 #include "shared/app_flow_utils.h"
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
@@ -449,6 +451,162 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
   mobi_page_cache::SetCacheDirForTest(nullptr);
 }
 
+void ExpectClosedReadingState(Book *book) {
+  test::ExpectEq("Close releases pages after interruption", book->GetPageCount(), 0);
+  test::ExpectTrue("Close releases chapters after interruption", book->GetChapters().empty());
+  test::ExpectEqU("Close releases links after interruption", book->GetInlineLinkHrefCount(), 0);
+  test::ExpectEqU("Close releases anchors after interruption", book->GetChapterAnchorCount(), 0);
+  test::ExpectTrue("Close releases document navigation", book->GetChapterDocStartPages().empty());
+  test::ExpectFalse("Close clears pending EPUB cache", book->HasPendingEpubPageCacheSave());
+}
+
+void ExpectCompleteRecoveryEpub(Book *book, bool expect_middle = true) {
+  const std::string content = BookText(book);
+  test::ExpectStrContains("EPUB includes start of first document", content.c_str(), "FIRST-START");
+  test::ExpectStrContains("EPUB includes end of first document", content.c_str(), "FIRST-END");
+  test::ExpectStrContains("EPUB reaches final spine document", content.c_str(), "FINAL-SPINE");
+  test::ExpectStrEq("EPUB metadata survives recovery", book->GetTitle(), "EPUB Recovery Fixture");
+  if (expect_middle) {
+    test::ExpectStrContains("EPUB includes the middle document", content.c_str(), "MIDDLE-SPINE");
+  }
+  test::ExpectEq("EPUB retains complete navigation", (int)book->GetChapters().size(), 3);
+  bool first_found = false, last_found = false;
+  for (const ChapterEntry &chapter : book->GetChapters()) {
+    test::ExpectTrue("recovered EPUB chapter targets a readable page", chapter.page < book->GetPageCount());
+    first_found |= chapter.title == "first chapter";
+    last_found |= chapter.title == "last chapter";
+  }
+  test::ExpectTrue("EPUB keeps navigation for the valid documents", first_found && last_found);
+  test::ExpectGt("EPUB registers real inline links", book->GetInlineLinkHrefCount(), 0);
+  test::ExpectGt("EPUB registers real anchors", (int)book->GetChapterAnchorCount(), 0);
+}
+
+struct SpineCancellation : IStatusReporter {
+  Book *book = nullptr;
+  int mode = 0;
+  bool enabled = true;
+  bool requested = false;
+  bool first_completed = false;
+  void PrintStatus(const char *) override {}
+  void PrintStatus(std::string) override {}
+  bool ShouldAbortWork() const override {
+    return enabled && (requested || (mode == 2 && book && book->GetPageCount() > 0));
+  }
+  static void OnProgress(unsigned done, unsigned total, void *user_data) {
+    SpineCancellation *self = static_cast<SpineCancellation *>(user_data);
+    if (!self->enabled || done != 1)
+      return;
+    test::ExpectEq("cancellation fixture contains three spine documents", total, 3);
+    self->first_completed = true;
+    if (self->mode == 0)
+      self->book->RequestAbortOpen();
+    else if (self->mode == 1)
+      self->requested = true;
+  }
+};
+
+void TestEpubInterruptedSpineAndRecovery() {
+  const char *folder = getenv("TEST_EPUB_RECOVERY_DIR");
+  test::ExpectTrue("EPUB recovery folder supplied", folder != nullptr);
+  const std::string cache_dir = std::string(folder) + "/cache-cancel";
+  epub_page_cache::SetCacheDirForTest(cache_dir.c_str());
+  for (int mode = 0; mode < 3; ++mode) {
+    Text text;
+    SpineCancellation cancellation;
+    cancellation.mode = mode;
+    BookContext ctx;
+    ctx.text = &text;
+    ctx.status_reporter = &cancellation;
+    ctx.on_spine_progress = SpineCancellation::OnProgress;
+    ctx.on_spine_progress_user_data = &cancellation;
+    Book book(ctx);
+    cancellation.book = &book;
+    book.SetFolderName(folder);
+    book.SetFileName("valid.epub");
+    book.format = FORMAT_EPUB;
+    test::ExpectEq("interrupted EPUB returns cancellation", book_parser::Open(&book), BOOK_ERR_CANCELLED);
+    test::ExpectGt("cancellation occurs after actual content was parsed", book.GetPageCount(), 0);
+    const std::string partial = BookText(&book);
+    test::ExpectStrContains("cancelled book reached the first document", partial.c_str(), "FIRST-START");
+    test::ExpectTrue("cancelled book never reaches the next document", partial.find("MIDDLE-SPINE") == std::string::npos);
+    test::ExpectTrue("cancelled book never reaches the last document", partial.find("FINAL-SPINE") == std::string::npos);
+    test::ExpectTrue("cancellation happens at the intended boundary", cancellation.first_completed == (mode != 2));
+    if (mode == 2)
+      test::ExpectTrue("XML streaming aborts before the first document finishes", partial.find("FIRST-END") == std::string::npos);
+    else
+      test::ExpectStrContains("progress cancellation follows completed document", partial.c_str(), "FIRST-END");
+    test::ExpectFalse("partial EPUB cannot schedule a cache save", book.HasPendingEpubPageCacheSave());
+    book.Close();
+    ExpectClosedReadingState(&book);
+    test::ExpectTrue("cancelled EPUB Close writes no partial cache", CacheFiles(cache_dir).empty());
+
+    cancellation.enabled = false;
+    // Reuse the Book through a different parser before returning to this EPUB.
+    book.SetFolderName(TEST_FIXTURES_DIR "/books");
+    book.SetFileName("basic.txt");
+    book.format = FORMAT_UNDEF;
+    test::ExpectEq("TXT opens after interrupted EPUB", book_parser::Open(&book), 0);
+    const std::string other = BookText(&book);
+    test::ExpectStrContains("recovery uses the requested TXT", other.c_str(), "tiny TXT fixture");
+    test::ExpectTrue("TXT contains no interrupted EPUB content", other.find("FIRST-START") == std::string::npos);
+    book.Close();
+    book.SetFolderName(folder);
+    book.SetFileName("valid.epub");
+    book.format = FORMAT_EPUB;
+    test::ExpectEq("same EPUB opens completely after cancellation", book_parser::Open(&book), 0);
+    ExpectCompleteRecoveryEpub(&book);
+    test::ExpectTrue("complete recovery can schedule a cache", book.HasPendingEpubPageCacheSave());
+    book.Close();
+    ExpectClosedReadingState(&book);
+    const std::vector<std::string> caches = CacheFiles(cache_dir);
+    test::ExpectEq("complete recovery creates one EPUB cache", (int)caches.size(), 1);
+    test::ExpectEq("remove isolated recovery cache", remove(caches[0].c_str()), 0);
+    printf("PASS: EPUB cancellation mode %d, partial-cache rejection and cross-format recovery\n", mode);
+  }
+  epub_page_cache::SetCacheDirForTest(nullptr);
+}
+
+void TestEpubXmlRecoveryAndZipFailure() {
+  const char *folder = getenv("TEST_EPUB_RECOVERY_DIR");
+  test::ExpectTrue("EPUB recovery folder supplied", folder != nullptr);
+  const char *variants[] = {"valid", "badxml", "badcrc"};
+  for (const char *variant : variants) {
+    const std::string cache_dir = std::string(folder) + "/cache-" + variant;
+    epub_page_cache::SetCacheDirForTest(cache_dir.c_str());
+    Text text;
+    CancelReporter reporter;
+    BookContext ctx;
+    ctx.text = &text;
+    ctx.status_reporter = &reporter;
+    Book book(ctx);
+    book.SetFolderName(folder);
+    book.SetFileName((std::string(variant) + ".epub").c_str());
+    book.format = FORMAT_EPUB;
+    const u8 result = book_parser::Open(&book);
+    if (std::string(variant) == "badcrc") {
+      test::ExpectEq("ZIP checksum failure rejects the opening", result, (u8)UNZ_CRCERROR);
+      const std::string partial = BookText(&book);
+      test::ExpectStrContains("CRC failure occurs after the valid first document", partial.c_str(), "FIRST-END");
+      test::ExpectTrue("CRC failure stops before the last document", partial.find("FINAL-SPINE") == std::string::npos);
+      test::ExpectFalse("CRC failure cannot schedule a cache", book.HasPendingEpubPageCacheSave());
+      book.Close();
+      ExpectClosedReadingState(&book);
+      test::ExpectTrue("CRC failure writes no partial cache", CacheFiles(cache_dir).empty());
+      book.SetFileName("valid.epub");
+      test::ExpectEq("valid EPUB opens after fatal ZIP failure", book_parser::Open(&book), 0);
+    } else {
+      test::ExpectEq("valid ZIP with recoverable XHTML opens", result, 0);
+    }
+    ExpectCompleteRecoveryEpub(&book, std::string(variant) != "badxml");
+    book.Close();
+    ExpectClosedReadingState(&book);
+    for (const std::string &cache : CacheFiles(cache_dir))
+      test::ExpectEq("remove isolated archive test cache", remove(cache.c_str()), 0);
+    printf("PASS: EPUB %s, XML/ZIP error distinction and recovery\n", variant);
+  }
+  epub_page_cache::SetCacheDirForTest(nullptr);
+}
+
 void TestUtf8DetectionAndPassThrough() {
   const std::string utf8 = "\xC2\xA1Hola, se\xC3\xB1or!";
 
@@ -562,6 +720,8 @@ int main() {
   TestCbzReadPageZoomCloseAndReopen();
   TestCancelledOpenAndRecovery();
   TestMobiParseCloseCachedReopenAndRecovery();
+  TestEpubInterruptedSpineAndRecovery();
+  TestEpubXmlRecoveryAndZipFailure();
   TestDecodeCp1252();
   TestUtf8DetectionAndPassThrough();
   TestDecodeIso88591();

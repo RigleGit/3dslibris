@@ -123,9 +123,12 @@ void ResolveEpubTocFromPackageData(
         page = hit->second;
       }
 
-      if (used_pages[page])
+      // Distinct fragment targets can share a page, including after XHTML
+      // recovery. Keep their entries as in the deferred TOC resolver.
+      if (!has_fragment && used_pages[page])
         continue;
-      used_pages[page] = true;
+      if (!has_fragment)
+        used_pages[page] = true;
 
       ChapterEntry entry;
       entry.page = page;

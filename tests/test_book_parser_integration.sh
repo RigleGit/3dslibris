@@ -65,6 +65,8 @@ CBZ_TMP="$(mktemp -d)"
 trap 'rm -rf "$CBZ_TMP"' EXIT
 export TEST_CBZ_READING_DIR="$CBZ_TMP"
 export TEST_MOBI_READING_DIR="$CBZ_TMP/mobi"
+export TEST_EPUB_RECOVERY_DIR="$CBZ_TMP/epub"
+python3 "$TEST_ROOT/tests/fixtures/generate_epub_recovery.py" "$TEST_EPUB_RECOVERY_DIR"
 python3 "$TEST_ROOT/tests/fixtures/generate_mobi_reading.py" "$TEST_MOBI_READING_DIR"
 python3 - "$CBZ_TMP" <<'PYFIXTURE'
 import pathlib
