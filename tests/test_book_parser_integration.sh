@@ -64,6 +64,8 @@ fi
 CBZ_TMP="$(mktemp -d)"
 trap 'rm -rf "$CBZ_TMP"' EXIT
 export TEST_CBZ_READING_DIR="$CBZ_TMP"
+export TEST_MOBI_READING_DIR="$CBZ_TMP/mobi"
+python3 "$TEST_ROOT/tests/fixtures/generate_mobi_reading.py" "$TEST_MOBI_READING_DIR"
 python3 - "$CBZ_TMP" <<'PYFIXTURE'
 import pathlib
 import struct
@@ -88,7 +90,7 @@ PYFIXTURE
 
 "$CXX_BIN" -std=c++11 \
   ${CXXFLAGS:-} \
-  -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST \
+  -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST -DDSLIBRIS_REAL_MOBI_TEST \
   -include "$TEST_ROOT/tests/stubs/cbz_platform.h" \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \
@@ -186,6 +188,22 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/common/page_text_extract_utils.cpp" \
   "$TEST_ROOT/source/formats/common/epub_image_utils.cpp" \
   "$TEST_ROOT/source/formats/common/zip_read_utils.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_parser.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_parse_book.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_book_hooks.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_safe_markup_extract.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_toc_prepare.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_toc_resolver.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_structured_toc_parser.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_position_map.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_text_cleanup.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_cleanup_policy.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_toc_finalize.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_toc_finalize_policy.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_toc_apply.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_cover_extract.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_cover_meta_cache.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_text_decode.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_parser_core.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_record_scan.cpp" \

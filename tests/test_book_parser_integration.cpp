@@ -2,9 +2,11 @@
 #include "book/book_context.h"
 #include "book/book_parser.h"
 #include "book/book_renderer.h"
+#include "book/page.h"
 #include "formats/common/page_text_extract_utils.h"
 #include "formats/common/book_error.h"
 #include "formats/mobi/mobi_text_decode.h"
+#include "formats/mobi/mobi_page_cache.h"
 #include "shared/app_flow_utils.h"
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
@@ -13,9 +15,12 @@
 
 #include <algorithm>
 #include <cassert>
+#include <dirent.h>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <sys/stat.h>
+#include <utime.h>
 #include <vector>
 
 #ifndef TEST_FIXTURES_DIR
@@ -282,6 +287,168 @@ void TestDecodeCp1252() {
   test::ExpectFalse("cp1252 used_legacy_guess", used_legacy_guess);
 }
 
+std::vector<std::string> CacheFiles(const std::string &folder) {
+  DIR *dir = opendir(folder.c_str());
+  test::ExpectTrue("cache directory is readable", dir != nullptr);
+  std::vector<std::string> files;
+  while (dirent *entry = readdir(dir)) {
+    if (entry->d_name[0] != '.')
+      files.push_back(folder + "/" + entry->d_name);
+  }
+  closedir(dir);
+  return files;
+}
+
+std::string ReadFileBytes(const std::string &path) {
+  FILE *fp = fopen(path.c_str(), "rb");
+  test::ExpectTrue("source fixture exists", fp != nullptr);
+  std::string data;
+  char buffer[4096];
+  size_t length;
+  while ((length = fread(buffer, 1, sizeof(buffer), fp)) != 0)
+    data.append(buffer, length);
+  test::ExpectFalse("fixture read has no I/O error", ferror(fp));
+  test::ExpectEq("fixture read closes", fclose(fp), 0);
+  return data;
+}
+
+void WriteFileBytes(const std::string &path, const std::string &data) {
+  FILE *fp = fopen(path.c_str(), "wb");
+  test::ExpectTrue("fixture opens for replacement", fp != nullptr);
+  test::ExpectTrue("fixture replacement writes all bytes",
+                   fwrite(data.data(), 1, data.size(), fp) == data.size());
+  test::ExpectEq("fixture replacement closes", fclose(fp), 0);
+}
+
+typedef std::vector<std::vector<u32>> PageData;
+
+PageData CapturePageData(Book *book) {
+  PageData data;
+  for (int i = 0; i < book->GetPageCount(); ++i) {
+    Page *page = book->GetPage(i);
+    data.push_back(std::vector<u32>());
+    if (page->GetLength() > 0)
+      data.back().assign(page->GetBuffer(), page->GetBuffer() + page->GetLength());
+  }
+  return data;
+}
+
+void ExpectMobiContent(Book *book) {
+  const std::string content = BookText(book);
+  size_t cursor = 0;
+  for (unsigned word = 1; word <= 4000; ++word) {
+    char expected[16];
+    snprintf(expected, sizeof(expected), "TOKEN%04u", word);
+    const size_t found = content.find(expected, cursor);
+    test::ExpectTrue(expected, found != std::string::npos);
+    test::ExpectTrue("every MOBI word appears exactly once",
+                     content.find(expected, found + 1) == std::string::npos);
+    cursor = found + 9;
+  }
+  test::ExpectStrContains("MOBI pagination reaches the end", content.c_str(), "MOBIEND");
+  test::ExpectStrContains("MOBI decodes UTF-8 and entities", content.c_str(), "café & tea");
+  test::ExpectTrue("MOBI excludes script text", content.find("HIDDEN-MOBI") == std::string::npos);
+  test::ExpectTrue("MOBI consumes HTML", content.find("<h1>") == std::string::npos);
+  test::ExpectGt("MOBI fixture actually spans pages", book->GetPageCount(), 1);
+  const char *labels[] = {"Chapter One", "Chapter Two", "Chapter Three", "Chapter Four"};
+  const std::vector<ChapterEntry> &chapters = book->GetChapters();
+  test::ExpectEq("real MOBI hooks retain all TOC entries", (int)chapters.size(), 4);
+  for (size_t i = 0; i < 4; ++i) {
+    test::ExpectStrEq("MOBI chapter label", chapters[i].title.c_str(), labels[i]);
+    test::ExpectTrue("MOBI chapter targets a readable page", chapters[i].page < book->GetPageCount());
+    if (i)
+      test::ExpectTrue("MOBI chapters follow the source order", chapters[i].page > chapters[i - 1].page);
+  }
+}
+
+void TestMobiParseCloseCachedReopenAndRecovery() {
+  const char *folder = getenv("TEST_MOBI_READING_DIR");
+  test::ExpectTrue("MOBI fixture folder supplied", folder != nullptr);
+  const std::string cache_dir = std::string(folder) + "/cache";
+  mobi_page_cache::SetCacheDirForTest(cache_dir.c_str());
+  const char *names[] = {"raw.mobi", "palmdoc.mobi"};
+  for (const char *name : names) {
+    Text text;
+    CancelReporter reporter;
+    BookContext ctx;
+    ctx.text = &text;
+    ctx.status_reporter = &reporter;
+    PageData pages;
+    std::vector<ChapterEntry> chapters;
+    {
+      Book book(ctx);
+      book.SetFolderName(folder);
+      book.SetFileName(name);
+      test::ExpectEq(name, book_parser::Open(&book), 0);
+      ExpectMobiContent(&book);
+      pages = CapturePageData(&book);
+      chapters = book.GetChapters();
+      test::ExpectTrue("cold MOBI open schedules a real cache save", book.HasPendingMobiPageCacheSave());
+      test::ExpectTrue("cold open leaves cache write off the critical path", CacheFiles(cache_dir).empty());
+      book.Close();
+      test::ExpectEq("MOBI close releases pages", book.GetPageCount(), 0);
+      test::ExpectTrue("MOBI close releases chapters", book.GetChapters().empty());
+    }
+    const std::vector<std::string> caches = CacheFiles(cache_dir);
+    test::ExpectEq("Close saves one MOBI cache artifact", (int)caches.size(), 1);
+    const std::string path = std::string(folder) + "/" + name;
+    const std::string source = ReadFileBytes(path);
+    struct stat original;
+    test::ExpectEq("source attributes readable", stat(path.c_str(), &original), 0);
+    // Preserve the source identity used by the cache key but make decoding
+    // impossible. A successful warm open must therefore come from the cache.
+    WriteFileBytes(path, std::string(source.size(), '\0'));
+    const utimbuf times = {original.st_atime, original.st_mtime};
+    test::ExpectEq("preserve fixture timestamp", utime(path.c_str(), &times), 0);
+    Book reopened(ctx);
+    reopened.SetFolderName(folder);
+    reopened.SetFileName(name);
+    test::ExpectEq("cached open succeeds with source decoding unavailable", book_parser::Open(&reopened), 0);
+    ExpectMobiContent(&reopened);
+    test::ExpectTrue("cache preserves every page codepoint", CapturePageData(&reopened) == pages);
+    for (size_t i = 0; i < chapters.size(); ++i)
+      test::ExpectEq("cache preserves chapter targets", reopened.GetChapters()[i].page, chapters[i].page);
+    test::ExpectFalse("cache hit does not schedule reparsed content", reopened.HasPendingMobiPageCacheSave());
+    reopened.Close();
+    test::ExpectEq("remove cache for negative control", remove(caches[0].c_str()), 0);
+    test::ExpectTrue("same invalid source fails without the cache", book_parser::Open(&reopened) != 0);
+    test::ExpectEq("rejected source creates no pages", reopened.GetPageCount(), 0);
+    test::ExpectFalse("failed source cannot schedule a cache", reopened.HasPendingMobiPageCacheSave());
+    reopened.Close();
+    WriteFileBytes(path, source);
+    test::ExpectEq("restore fixture timestamp", utime(path.c_str(), &times), 0);
+    test::ExpectEq("MOBI recovers after invalid source", book_parser::Open(&reopened), 0);
+    ExpectMobiContent(&reopened);
+    reopened.Close();
+    const std::vector<std::string> restored_caches = CacheFiles(cache_dir);
+    test::ExpectEq("recovery recreates one cache", (int)restored_caches.size(), 1);
+    const std::string saved_cache = ReadFileBytes(restored_caches[0]);
+    WriteFileBytes(restored_caches[0], saved_cache.substr(0, saved_cache.size() / 2));
+    test::ExpectEq("partial cache falls back to the real MOBI parser", book_parser::Open(&reopened), 0);
+    ExpectMobiContent(&reopened);
+    test::ExpectTrue("fallback discards partially loaded pages", CapturePageData(&reopened) == pages);
+    test::ExpectTrue("cache fallback schedules replacement", reopened.HasPendingMobiPageCacheSave());
+    reopened.Close();
+    test::ExpectTrue("Close replaces the partial cache", ReadFileBytes(restored_caches[0]) == saved_cache);
+    text.pixelsize += 4;
+    test::ExpectEq("MOBI opens with a different layout", book_parser::Open(&reopened), 0);
+    ExpectMobiContent(&reopened);
+    test::ExpectTrue("different layout requires new cache save", reopened.HasPendingMobiPageCacheSave());
+    test::ExpectGt("larger font actually repaginates", reopened.GetPageCount(), (int)pages.size());
+    reopened.Close();
+    for (const std::string &cache : CacheFiles(cache_dir))
+      test::ExpectEq("remove isolated MOBI cache", remove(cache.c_str()), 0);
+    reopened.SetFileName((std::string("truncated-") + name).c_str());
+    test::ExpectTrue("truncated MOBI is rejected through dispatch", book_parser::Open(&reopened) != 0);
+    test::ExpectFalse("truncated MOBI cannot schedule cache save", reopened.HasPendingMobiPageCacheSave());
+    reopened.Close();
+    test::ExpectTrue("failed MOBI close leaves no cache", CacheFiles(cache_dir).empty());
+    printf("PASS: real MOBI %s, %lu pages, 4000 ordered words, four chapters, cache and recovery\n",
+           name, (unsigned long)pages.size());
+  }
+  mobi_page_cache::SetCacheDirForTest(nullptr);
+}
+
 void TestUtf8DetectionAndPassThrough() {
   const std::string utf8 = "\xC2\xA1Hola, se\xC3\xB1or!";
 
@@ -394,6 +561,7 @@ int main() {
   TestEpubMetadataOpenCloseRecovery();
   TestCbzReadPageZoomCloseAndReopen();
   TestCancelledOpenAndRecovery();
+  TestMobiParseCloseCachedReopenAndRecovery();
   TestDecodeCp1252();
   TestUtf8DetectionAndPassThrough();
   TestDecodeIso88591();

@@ -8,11 +8,13 @@
 #include "formats/odt/odt_parser.h"
 #include "formats/pdf/pdf_parser.h"
 
+#ifndef DSLIBRIS_REAL_MOBI_TEST
 namespace mobi_parser {
 u8 ParseFile(Book *, const char *, const Hooks &) { return 1; }
 u8 Parse(Book *, const char *) { return 1; }
 int ExtractCover(Book *, const std::string &) { return -1; }
 } // namespace mobi_parser
+#endif
 
 namespace odt_parser {
 uint8_t Parse(Book *, const char *) { return 1; }
