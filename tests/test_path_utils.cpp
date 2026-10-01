@@ -1,9 +1,12 @@
 #include "../include/shared/path_constants.h"
 #include "../include/shared/path_utils.h"
 #include "test_assert.h"
+#include "library/cover_override_utils.h"
 
 #include <cstring>
 #include <string>
+
+#include "font_filename_match.inc"
 
 namespace {
 
@@ -16,7 +19,8 @@ void ExpectNonEmpty(const char *label, const std::string &value) {
   test::ExpectTrue(label, !value.empty());
 }
 
-void ExpectPathPrefix(const char *label, const std::string &value, const char *prefix) {
+void ExpectPathPrefix(const char *label, const std::string &value,
+                      const char *prefix) {
   test::ExpectStrContains(label, value.c_str(), prefix);
 }
 
@@ -27,9 +31,83 @@ void ExpectFontEntry(const char *label, const char *name, const char *path) {
   test::ExpectStrContains(label, path, name);
 }
 
+void TestFallbackFontConfigurationAtRuntimeMatcher() {
+  const char *recognized[] = {
+      "NotoSansCJKSC-Regular.ttf",
+      "NotoSansCJKtc-Bold.otf",
+      "NotoSerifCJKsc-Regular.ttf",
+      "SourceHanSansSC-Regular.otf",
+      "SourceHanSansTC-Bold.ttc",
+      "SourceHanSerifSC-Regular.ttf",
+      "WenQuanYiMicroHei.ttf",
+      "WenQuanYiZenHei.ttf",
+      "ARPLUKaiCN-Regular.ttf",
+      "ARPLUKaiTW-MBE.ttf",
+      "ARPLUMingCN-Regular.ttf",
+      "DroidSansFallbackFull.ttf",
+      "HanaMinA.ttf",
+      "HanaMinB.ttf",
+      "My-CJK-Font.ttf",
+      "NotoSansHebrew-Regular.ttf",
+      "NotoSansHebrew-Bold.ttf",
+      "NotoSerifHebrew-Regular.ttf",
+      "FrankRuhlLibre-Regular.ttf",
+      "Alef-Regular.ttf",
+      "NotoSansArabic-Regular.ttf",
+      "NotoNaskhArabic-Regular.ttf",
+      "Amiri-Regular.ttf",
+      "ScheherazadeNew-Regular.ttf",
+      "NanumGothic-Regular.ttf",
+      "NanumGothicCoding.ttf",
+      "NanumMyeongjo-Regular.ttf",
+      "NotoSansKR-Regular.otf",
+      "NotoSerifKR-Regular.otf",
+      "UnBatang.ttf",
+      "UnDotum.ttf",
+      "Baekmuk-Batang.ttf",
+  };
+  for (const char *name : recognized)
+    test::ExpectTrue(name, FilenameMatchesCjkPattern(name));
+  const char *ordinary[] = {
+      "LiberationSerif-Regular.ttf",
+      "LiberationSans-Regular.ttf",
+      "LiberationSans-Bold.ttf",
+      "LiberationSans-Italic.ttf",
+      "OpenSans-Regular.ttf",
+      "Roboto-Regular.ttf",
+      "DejaVuSans.ttf",
+      "TimesNewRoman.ttf",
+      "",
+  };
+  for (const char *name : ordinary)
+    test::ExpectTrue(name, !FilenameMatchesCjkPattern(name));
+  test::ExpectTrue("null font filename", !FilenameMatchesCjkPattern(nullptr));
+  const size_t count =
+      sizeof(paths::kCjkFontPatterns) / sizeof(paths::kCjkFontPatterns[0]);
+  test::ExpectEq("font matcher scans complete configuration",
+                 paths::kCjkFontPatternCount, (int)count);
+  for (size_t i = 0; i < count; ++i)
+    ExpectNonEmpty("fallback font pattern", paths::kCjkFontPatterns[i]);
 }
 
+void TestBookCoverSidecarPaths() {
+  const std::vector<std::string> candidates =
+      cover_override_utils::BuildBookCandidates("sdmc:/books/Novel.epub");
+  const char *extensions[] = {".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"};
+  for (const char *extension : extensions) {
+    const std::string expected = std::string("sdmc:/books/Novel") + extension;
+    bool found = false;
+    for (const std::string &candidate : candidates)
+      found = found || candidate == expected;
+    test::ExpectTrue(expected.c_str(), found);
+  }
+}
+
+} // namespace
+
 int main() {
+  TestFallbackFontConfigurationAtRuntimeMatcher();
+  TestBookCoverSidecarPaths();
   ExpectNonEmpty("GetSdmcBase exists", paths::GetSdmcBase());
   ExpectNonEmpty("kLegacySdmcBase exists", paths::kLegacySdmcBase);
   ExpectNonEmpty("kConfigSdmcBase exists", paths::kConfigSdmcBase);

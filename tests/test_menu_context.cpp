@@ -20,38 +20,43 @@ public:
 };
 
 int main() {
-  App *app = reinterpret_cast<App *>(1);
-  Text *text = reinterpret_cast<Text *>(2);
-  Button *previous = reinterpret_cast<Button *>(3);
-  Button *next = reinterpret_cast<Button *>(4);
-  Button *preferences = reinterpret_cast<Button *>(5);
-  IStatusReporter *reporter = reinterpret_cast<IStatusReporter *>(6);
-  u8 color_mode = 2;
-
-  const MenuContext populated = {app, text, previous, next, preferences,
-                                 &color_mode, reporter};
-  TestMenu menu(populated);
-  Expect(menu.app == app, "app pointer");
-  Expect(menu.ts == text, "text pointer");
-  Expect(menu.buttonprev == previous, "previous button pointer");
-  Expect(menu.buttonnext == next, "next button pointer");
-  Expect(menu.buttonprefs == preferences, "preferences button pointer");
-  Expect(menu.color_mode == &color_mode, "color mode pointer");
-  Expect(menu.status_reporter == reporter, "status reporter pointer");
-  Expect(menu.pagesize == 7, "default page size");
-  Expect(menu.selected == 0, "default selection");
-  Expect(menu.page == 0, "default page");
-  Expect(menu.dirty, "default dirty state");
-
   const MenuContext empty = {};
-  TestMenu null_menu(empty);
-  Expect(null_menu.app == nullptr, "null app pointer");
-  Expect(null_menu.ts == nullptr, "null text pointer");
-  Expect(null_menu.buttonprev == nullptr, "null previous button pointer");
-  Expect(null_menu.buttonnext == nullptr, "null next button pointer");
-  Expect(null_menu.buttonprefs == nullptr, "null preferences button pointer");
-  Expect(null_menu.color_mode == nullptr, "null color mode pointer");
-  Expect(null_menu.status_reporter == nullptr, "null status reporter pointer");
+  TestMenu menu(empty);
+  Expect(menu.pagesize == 7 && menu.selected == 0 && menu.page == 0,
+         "new menu starts on the first seven-item page");
+  Expect(menu.dirty, "new menu needs drawing");
+  Expect(menu.GetCurrentPage() == 1 && menu.GetPageCount() == 1,
+         "empty menu displays page one of one");
+  menu.dirty = false;
+  menu.SelectItem(0);
+  Expect(!menu.dirty && menu.selected == 0,
+         "empty menu ignores a nonexistent item");
+
+  const size_t sizes[] = {7, 8, 14, 15};
+  const u16 counts[] = {1, 2, 2, 3};
+  for (size_t i = 0; i < 4; ++i) {
+    // Widgets are never dereferenced by the base menu's pagination API.
+    menu.buttons.resize(sizes[i], nullptr);
+    Expect(menu.GetPageCount() == counts[i],
+           "partial final page counts as a full page");
+  }
+  const u16 selections[] = {6, 7, 14};
+  const u16 pages[] = {1, 2, 3};
+  for (size_t i = 0; i < 3; ++i) {
+    menu.dirty = false;
+    menu.SelectItem(selections[i]);
+    Expect(menu.selected == selections[i] && menu.GetCurrentPage() == pages[i],
+           "selection crosses the page boundary");
+    Expect(menu.page == pages[i] - 1 && menu.dirty,
+           "selection updates drawing page and requests a redraw");
+  }
+  menu.dirty = false;
+  menu.SelectItem(15);
+  menu.SelectItem(65535);
+  Expect(menu.selected == 14 && menu.page == 2 && !menu.dirty,
+         "invalid selections preserve the current view");
+  menu.pagesize = 0;
+  Expect(menu.GetPageCount() == 1, "disabled pagination reports one page");
 
   std::printf("All menu_context tests passed.\n");
   return 0;

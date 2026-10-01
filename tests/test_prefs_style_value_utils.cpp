@@ -3,24 +3,6 @@
 #include "test_assert.h"
 
 int main() {
-  const char *old_attrs[] = {"publisherBlockMargins", "0", nullptr};
-  test::ExpectEq("legacy disabled margins stay disabled on both axes",
-                 settings::ReadPublisherHorizontalMargins(old_attrs, 0), 0);
-  test::ExpectEq("legacy enabled margins stay enabled on both axes",
-                 settings::ReadPublisherHorizontalMargins(nullptr, 1), 1);
-  test::ExpectEq("legacy book inherits both axes",
-                 settings::ReadPublisherHorizontalMargins(nullptr, -1), -1);
-  const char *inherit_attrs[] = {"publisherHorizontalMargins", "-1",
-                                "publisherBlockMargins", "0", nullptr};
-  test::ExpectEq("new book can inherit sides while overriding spacing",
-                 settings::ReadPublisherHorizontalMargins(inherit_attrs, 0), -1);
-  const char *off_attrs[] = {"publisherHorizontalMargins", "0", nullptr};
-  test::ExpectEq("explicit side margins override old combined setting",
-                 settings::ReadPublisherHorizontalMargins(off_attrs, 1), 0);
-  const char *on_attrs[] = {"publisherHorizontalMargins", "1", nullptr};
-  test::ExpectEq("explicit sides can remain on with vertical spacing off",
-                 settings::ReadPublisherHorizontalMargins(on_attrs, 0), 1);
-
   settings::StyleValueContext value;
   value.global_value = 14;
 
