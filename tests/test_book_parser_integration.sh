@@ -103,6 +103,7 @@ PYFIXTURE
   "-I$TEST_ROOT/third_party/stb" \
   -DTEST_FIXTURES_DIR=\""$TEST_ROOT/tests/fixtures"\" \
   "$TEST_ROOT/tests/test_book_parser_integration.cpp" \
+  "$TEST_ROOT/source/book/text_search.cpp" \
   "$TEST_ROOT/tests/stubs/book_reflow_worker_stub.cpp" \
   "$TEST_ROOT/tests/stubs/book_worker_lifecycle_stub.cpp" \
   "$TEST_ROOT/tests/stubs/book_fixed_layout_stubs.cpp" \

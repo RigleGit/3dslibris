@@ -1,3 +1,4 @@
+#include "book/book_search_source.h"
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/book_parser.h"
@@ -67,6 +68,14 @@ void TestDispatchContentAndCloseBetweenFormats() {
     book.format = FORMAT_UNDEF; // Dispatch must recognize the file extension.
     test::ExpectEq("format dispatch opens actual fixture", book_parser::Open(&book), 0);
     test::ExpectGt("format dispatch creates pages", book.GetPageCount(), 0);
+    text_search::Engine search;
+    test::ExpectTrue("configure actual format search", search.Configure(cases[i].content, true));
+    search.Start(text_search::FromBook(&book), {}, false, true);
+    unsigned iterations = 0;
+    while (search.GetStatus() == text_search::Searching && iterations++ < 100000)
+      search.Pump(7);
+    test::ExpectTrue("search rendered text through actual format pipeline",
+                     search.GetStatus() == text_search::Found);
     const std::string rendered = BookText(&book);
     test::ExpectStrContains(cases[i].name, rendered.c_str(), cases[i].content);
     test::ExpectTrue("format markup is consumed", rendered.find(cases[i].excluded_markup) == std::string::npos);
