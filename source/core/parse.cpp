@@ -50,6 +50,7 @@ void parse_reset_page_buffer(parsedata_t *data) {
     return;
   memset(data->buf, 0, PAGEBUFSIZE * sizeof(u32));
   data->buflen = 0;
+  data->search_events.clear();
   data->pagebuf_overflowed = false;
   data->pagebuf_overflow_bytes = 0;
 }

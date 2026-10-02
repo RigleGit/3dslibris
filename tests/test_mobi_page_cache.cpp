@@ -92,6 +92,9 @@ void AddPages(Book *book) {
   Page *page0 = book->AppendPage();
   const uint32_t first[] = {'M', 'O', 'B', 'I'};
   page0->SetBuffer(first, 4);
+  page_search::Events events;
+  page_search::Annotate(events, 1, page_search::Skip);
+  page0->SetSearchEvents(events);
 
   Page *page1 = book->AppendPage();
   const uint32_t second[] = {'c', 'a', 'c', 'h', 'e'};
@@ -113,6 +116,8 @@ bool InvokeTryLoad(Book *book) {
 
 void AssertLoadedBook(Book *book) {
   ExpectEq("loaded page count", book->GetPageCount(), 2);
+  ExpectEq("search continuity survives cache",
+           page_search::FlagsAt(book->GetPage(0)->GetSearchEvents(), 1), page_search::Skip);
   ExpectEqString("loaded title", book->GetTitle(), "MOBI Cache Title");
   ExpectEq("loaded chapter count", (int)book->GetChapters().size(), 1);
   ExpectEqString("loaded chapter title", book->GetChapters()[0].title,

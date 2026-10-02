@@ -143,6 +143,7 @@ void Page::SyncBufferAlias() {
 }
 
 void Page::SetBuffer(const u32 *src, int len) {
+  search_events_.clear();
   if (len <= 0) {
     std::vector<u32>().swap(storage);
     SyncBufferAlias();
@@ -162,6 +163,7 @@ void Page::SetBuffer(const u32 *src, int len) {
 }
 
 void Page::AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned) {
+  search_events_.clear();
   if (!owned) {
     SetBuffer(NULL, 0);
     return;
@@ -179,6 +181,7 @@ void Page::AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned) {
 }
 
 void Page::FreeBuffer() {
+  search_events_.clear();
   std::vector<u32>().swap(storage);
   SyncBufferAlias();
 }

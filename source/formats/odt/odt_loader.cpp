@@ -91,6 +91,7 @@ static void FinalizePlainPage(parsedata_t *p) {
   if (p->buflen > 0 || p->book->GetPageCount() == 0) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
+    page->SetSearchEvents(p->search_events);
   }
 }
 

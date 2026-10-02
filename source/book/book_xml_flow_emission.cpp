@@ -355,6 +355,7 @@ static void EmitPreformattedUtf8Segment(
     if (text_layout_utils::PreformattedSegmentNeedsNewLine(
             p->pen.x, advance,
             ReadingWidthForParseScreen(p, ts) - ts->margin.right)) {
+      page_search::Annotate(p->search_events, p->buflen, page_search::Skip);
       parse_append_page_byte(p, '\n');
       p->pen.x = ts->margin.left;
       p->pen.y += (lineheight + linespacing);
@@ -383,6 +384,7 @@ static void EmitPreformattedUtf8Segment(
 
     if (unit_index < pre_run.size() &&
         pre_run[unit_index].text.codepoint != '\n') {
+      page_search::Annotate(p->search_events, p->buflen, page_search::Skip);
       parse_append_page_byte(p, '\n');
       p->pen.x = ts->margin.left;
       p->pen.y += (lineheight + linespacing);

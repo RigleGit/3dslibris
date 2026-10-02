@@ -163,6 +163,7 @@ static void FinalizePlainPage(parsedata_t *p) {
   if (p->buflen > 0 || p->book->GetPageCount() == 0) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
+    page->SetSearchEvents(p->search_events);
   }
 }
 
@@ -187,6 +188,7 @@ static void PlainAdvanceScreen(parsedata_t *p) {
   if (p->screen == 1) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
+    page->SetSearchEvents(p->search_events);
     parse_reset_page_buffer(p);
     if (p->italic)
       parse_append_page_byte(p, TEXT_ITALIC_ON);
@@ -211,6 +213,7 @@ static bool PlainForceAdvancePageForBufferLimit(parsedata_t *p, void *ctx) {
   Text *ts = p->ts;
   Page *page = p->book->AppendPage();
   page->SetBuffer(p->buf, p->buflen);
+    page->SetSearchEvents(p->search_events);
   parse_reset_page_buffer(p);
   if (p->italic)
     parse_append_page_byte(p, TEXT_ITALIC_ON);

@@ -82,6 +82,25 @@ void TestEmitFlowedLtrWrapsIntoPageBuffer() {
   ExpectEq("pen x moved to second word width", p.pen.x, 3);
 }
 
+void TestSearchContinuityAcrossVisualWrap() {
+  parsedata_t p{};
+  parse_init(&p);
+  p.pen.y = 10;
+  const char *text = "abcdefghij";
+  std::vector<text_layout_utils::ShapedGlyph> run;
+  bool rtl = false;
+  text_layout_utils::ShapeTextRunBidi(text, 10, NULL, MeasureMono, NULL, &run, &rtl);
+  book_xml_text_emit::EmitFlowedShapedText(
+      &p, text, run, rtl, std::vector<text_bidi_utils::BidiRun>(),
+      BaseMetrics(), NULL, NULL);
+  std::string logical;
+  for (int i = 0; i < p.buflen; ++i) {
+    if (!(page_search::FlagsAt(p.search_events, i) & page_search::Skip))
+      logical += (char)p.buf[i];
+  }
+  ExpectTrue("wrapped word remains searchable", logical == text);
+}
+
 void TestEmitFlowedRtlAddsParagraphAndWidthTokens() {
   parsedata_t p{};
   parse_init(&p);
@@ -782,6 +801,7 @@ void TestNewRunWordUsesCurrentVisibleLineIfItFits() {
 
 int main() {
   TestEmitFlowedLtrWrapsIntoPageBuffer();
+  TestSearchContinuityAcrossVisualWrap();
   TestEmitFlowedRtlAddsParagraphAndWidthTokens();
   TestEmitKeepsClosingPunctuationOnCurrentLine();
   TestEmitStartsLtrLineAtLeftMargin();

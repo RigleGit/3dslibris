@@ -33,6 +33,7 @@ A Book contains a vector of Pages.
 
 #include <3ds.h>
 #include "book/page_buffer_utils.h"
+#include "book/page_search_data.h"
 #include "reader/inline_link_utils.h"
 #include "ui/text.h"
 #include <cstddef>
@@ -51,6 +52,7 @@ class Page {
  private:
 	class Book *book;
 	std::vector<u32> storage;
+	page_search::Events search_events_;
 	std::vector<InlineLinkRenderEntry> rendered_inline_links_;
 	mutable int cached_inline_link_count_;
 	void DrawNumber(Text *ts, u16 *number_screen);
@@ -77,6 +79,8 @@ class Page {
 	void SetBuffer(const u32 *src, int len); 
 	void AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned);
 	void FreeBuffer();
+	const page_search::Events &GetSearchEvents() const { return search_events_; }
+	void SetSearchEvents(const page_search::Events &events) { search_events_ = events; }
 	const std::vector<InlineLinkRenderEntry> &GetRenderedInlineLinks() const {
 		return rendered_inline_links_;
 	}

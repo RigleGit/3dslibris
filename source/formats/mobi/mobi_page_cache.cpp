@@ -1,3 +1,4 @@
+#include "formats/common/book_search_cache.h"
 #include "formats/mobi/mobi_page_cache.h"
 
 #include "book/book.h"
@@ -18,7 +19,7 @@ namespace mobi_page_cache {
 namespace {
 
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-static const u16 kMobiPageCacheVersion = 21;
+static const u16 kMobiPageCacheVersion = 22;
 static const size_t kPageCacheIoBufferBytes = 262144;
 // Bulk reads avoid per-record SD overhead for small books. Stream larger
 // caches so the full serialized file does not coexist with decoded pages.
@@ -278,6 +279,7 @@ bool TryLoad(Book *book, const char *book_path,
 #endif
     ok = ReadPagesIntoBook(fp, hdr.page_count,
                            page_cache_limits::kPageMaxBytes, book);
+    if (ok) ok = book_search_cache::Read(fp, book);
 
     if (ok) {
       std::vector<page_cache_utils::CachedChapter> chapters;
@@ -338,6 +340,7 @@ bool TryLoad(Book *book, const char *book_path,
 
     ok = ReadPagesIntoBook(&reader, hdr.page_count,
                            page_cache_limits::kPageMaxBytes, book);
+    if (ok) ok = book_search_cache::Read(&reader, book);
 
     if (ok) {
       std::vector<page_cache_utils::CachedChapter> chapters;
@@ -439,6 +442,7 @@ void Save(Book *book, const char *book_path,
 
   if (ok)
     ok = WritePagesFromBook(fp, book, page_cache_limits::kPageMaxBytes);
+  if (ok) ok = book_search_cache::Write(fp, book);
 
   if (ok)
     ok = page_cache_utils::WriteChapters(fp, cached_chapters,

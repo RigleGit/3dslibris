@@ -1,3 +1,4 @@
+#include "formats/common/book_search_cache.h"
 /*
     3dslibris - epub_page_cache.cpp
     EPUB persistent page cache serialization.
@@ -37,7 +38,7 @@ static const std::string &GetEffectiveCacheDir() {
   return kEpubCacheDir;
 }
 static const u32 kEpubPageCacheMagic = 0x45504347U;
-static const u16 kEpubPageCacheVersion = 17;
+static const u16 kEpubPageCacheVersion = 18;
 static const u16 kPageCacheHrefMaxBytes = 2048;
 // Bulk-loading cache files duplicates memory (file buffer + decoded pages).
 // Very large caches can spike memory and crash on reopen, so skip them.
@@ -296,6 +297,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
 #endif
     ok = AppendPagesFromFile(fp, book, hdr.page_count,
                              page_cache_limits::kPageMaxBytes);
+    if (ok) ok = book_search_cache::Read(fp, book);
   } else {
     std::vector<uint8_t> file_buf((size_t)file_size_long);
     memcpy(file_buf.data(), &hdr, sizeof(hdr));
@@ -327,6 +329,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
                                      page_cache_limits::kPageMaxBytes, &pages);
     if (ok)
       AppendPages(book, pages);
+    if (ok) ok = book_search_cache::Read(&reader, book);
 
     if (ok) {
       std::vector<page_cache_utils::CachedChapter> chapters;
@@ -617,6 +620,7 @@ void Save(Book *book, const char *book_path, int pixel_size,
   }
   DBG_LOGF(r, "EPUB cache save: write-pages done ok=%d", (int)ok);
 
+  if (ok) ok = book_search_cache::Write(fp, book);
   if (ok)
     ok = page_cache_utils::WriteChapters(fp, cached_chapters,
                                          page_cache_limits::kChapterTitleMaxBytes);
@@ -839,7 +843,8 @@ bool StreamWriter::Finalize(Book *book) {
   const std::unordered_map<std::string, u16> &anchors =
       book->GetChapterAnchorPages();
 
-  bool ok = page_cache_utils::WriteChapters(fp_, cached_chapters,
+  bool ok = book_search_cache::Write(fp_, book);
+  if (ok) ok = page_cache_utils::WriteChapters(fp_, cached_chapters,
                                             page_cache_limits::kChapterTitleMaxBytes);
 
   if (ok) {

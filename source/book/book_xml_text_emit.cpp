@@ -283,6 +283,8 @@ void EmitBidiSegment(parsedata_t *p,
     uint32_t cp = cps[i];
     if (transform)
       cp = ApplyTextTransform(cp, transform, &p->text_transform_word_start);
+    page_search::Annotate(p->search_events, p->buflen,
+                          page_search::Skip | page_search::Barrier);
     parse_append_page_byte(p, (u32)cp);
   }
 }
@@ -440,6 +442,8 @@ void EmitFlowedShapedText(
     }
 
     if (unit.text.whitespace) {
+      if (unit.text.breakable_space && !p->linebegan)
+        page_search::Annotate(p->search_events, p->buflen, page_search::Space);
       if (unit.text.breakable_space && p->linebegan &&
           !ParsedBufferEndsWithWhitespace(p)) {
         parse_append_page_byte(p, ' ');
@@ -513,6 +517,9 @@ void EmitFlowedShapedText(
     const int segment_x_before = p->pen.x;
 #endif
     if (need_wrap) {
+      // A layout newline inside a word is not a searchable space.
+      if (unit_index == 0 || !run[unit_index - 1].text.whitespace)
+        page_search::Annotate(p->search_events, p->buflen, page_search::Skip);
 #if defined(DSLIBRIS_DEBUG) && EPUB_LINE_TRACE
       TraceParserLineEvent(p, metrics, "wrap-width-before", p->pen.y,
                            p->pen.x, segment_text.c_str());

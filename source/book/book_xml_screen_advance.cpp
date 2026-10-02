@@ -131,6 +131,7 @@ void AdvanceParsedPageOnOverflow(parsedata_t *p, int lineheight) {
   if (p->screen == 1) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
+    page->SetSearchEvents(p->search_events);
     page->start = p->pos;
     p->pos += p->buflen;
     page->end = p->pos;
@@ -165,6 +166,7 @@ void AdvanceParsedScreen(parsedata_t *p) {
   if (p->screen == 1) {
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
+    page->SetSearchEvents(p->search_events);
     parse_reset_page_buffer(p);
     book_xml_parser_style_utils::RestoreParsedStyleMarkers(p);
     book_xml_inline_state::RestoreParsedInlineLinkMarker(p);

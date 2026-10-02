@@ -463,6 +463,9 @@ void TestEpubStreamCommitAndAbort() {
   const uint32_t first[] = {'F', 'i', 'r', 's', 't'};
   const uint32_t second[] = {'L', 'a', 's', 't'};
   source->AppendPage()->SetBuffer(first, 5);
+  page_search::Events search_events;
+  page_search::Annotate(search_events, 2, page_search::Skip);
+  source->GetPage(0)->SetSearchEvents(search_events);
   epub_page_cache::StreamWriter writer;
   ExpectTrue("stream begin", writer.Begin(source, kCacheBookPath,
       kCachePx, kCacheLS, kCachePS, kCachePI, kCacheOri,
@@ -486,6 +489,7 @@ void TestEpubStreamCommitAndAbort() {
   ExpectFalse("committed stream closed", writer.IsOpen());
   ExpectTrue("committed stream loads", InvokeTryLoad(loaded, kCacheBookPath));
   ExpectTrue("stream pages not duplicated", loaded->GetPageCount() == 2);
+  ExpectTrue("stream preserves search metadata", loaded->GetPage(0)->GetSearchEvents() == search_events);
   ExpectTrue("first stream page content", loaded->GetPage(0)->GetLength() == 5 && loaded->GetPage(0)->GetBuffer()[0] == 'F');
   ExpectTrue("second stream page content", loaded->GetPage(1)->GetLength() == 4 && loaded->GetPage(1)->GetBuffer()[0] == 'L');
   ExpectTrue("stream chapter target", loaded->GetChapters().size() == 1 && loaded->GetChapters()[0].page == 1);

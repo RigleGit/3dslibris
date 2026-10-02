@@ -1,3 +1,4 @@
+#include "book/page_search_data.h"
 /*
     3dslibris - parse.h
     Adapted from dslibris for Nintendo 3DS.
@@ -76,6 +77,7 @@ struct parsedata_t {
 	parse_pen_t pen;
 	u32 buf[PAGEBUFSIZE];
 	int buflen;
+	page_search::Events search_events;
 	bool pagebuf_overflowed;
 	size_t pagebuf_overflow_bytes;
 	//! Our total parse position in terms of cooked text.

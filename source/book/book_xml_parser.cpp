@@ -483,9 +483,11 @@ void end(void *data, const char *el) {
 
   if (!strcmp(el, "body")) {
     FlushInlineTailAndDeferredStyle(p, ts);
+    page_search::Annotate(p->search_events, p->buflen, page_search::Barrier);
     // Save off our last page.
     Page *page = p->book->AppendPage();
     page->SetBuffer(p->buf, p->buflen);
+    page->SetSearchEvents(p->search_events);
     parse_reset_page_buffer(p);
     // Retain styles across the page.
     book_xml_parser_style_utils::RestoreParsedStyleMarkers(p);
