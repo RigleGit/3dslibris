@@ -136,6 +136,8 @@ void TestEmitFlowedRtlAddsParagraphAndWidthTokens() {
   ExpectEq("rtl width value", (int)p.buf[2], 9);
   ExpectTrue("paragraph marked with content", p.paragraph_has_content);
   ExpectTrue("rtl emitted glyphs", p.buflen > 3);
+  ExpectTrue("one reordered line needs at most 16 metadata bytes",
+             p.search_events.size() * sizeof(uint32_t) <= 16);
   ExpectEq("pen x equals rtl line width", p.pen.x, 9);
 }
 

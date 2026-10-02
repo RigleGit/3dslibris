@@ -17,9 +17,9 @@ class Text;
 namespace book_nav {
 
 void DrawPage(Book *book, Text *ts);
-bool SetPage(Book *book, Text *ts, uint16_t page);
+bool SetPage(Book *book, Text *ts, uint16_t page, bool draw = true);
 bool TurnPage(Book *book, Text *ts, uint16_t *pagecurrent, uint16_t pagecount,
-              int delta);
+              int delta, bool draw = true);
 bool AdvancePage(Book *book, Text *ts, uint16_t *pagecurrent,
                  uint16_t *pagecount, bool *status_dirty);
 

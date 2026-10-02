@@ -136,6 +136,8 @@ inline void RestoreParsedParagraphAlignmentMarker(parsedata_t *p) {
   if (!in_alignable_block)
     return;
 
+  // Restoring layout state on a fresh page does not start a paragraph.
+  page_search::Annotate(p->search_events, p->buflen, page_search::Skip);
   if (!have_align || align == book_xml_css_style_utils::TextAlign::Left) {
     parse_append_page_byte(p, TEXT_PARAGRAPH_LEFT);
   } else if (align == book_xml_css_style_utils::TextAlign::Center) {

@@ -193,7 +193,9 @@ size_t Page::GetInlineLinkCount() const {
   return (size_t)cached_inline_link_count_;
 }
 
-void Page::Draw(Text *ts) {
+void Page::Draw(Text *ts, const Highlight *highlight) {
+  struct SearchRect { inline_link_utils::LinkRect bounds; u16 *screen; int baseline; };
+  std::vector<SearchRect> search_rects;
   const bool saved_auto_wrap = ts->IsAutoWrapEnabled();
   const bool saved_clip_to_content = ts->IsClipToContentEnabled();
   const u8 saved_pixel_size = ts->GetPixelSize();
@@ -934,6 +936,18 @@ void Page::Draw(Text *ts) {
         ts->PrintChar(c, TEXT_STYLE_REGULAR);
 
       const int glyph_x1 = (int)ts->GetPenX();
+      if (highlight && (uint32_t)(i - 1) >= highlight->begin &&
+          (uint32_t)(i - 1) < highlight->end &&
+          glyph_x1 > glyph_x0) {
+        if (search_rects.empty() || search_rects.back().screen != ts->GetScreen() ||
+            search_rects.back().baseline != base_pen_y) {
+          SearchRect rect = {{0, 0, 0, 0}, ts->GetScreen(), base_pen_y};
+          search_rects.push_back(rect);
+        }
+        ExpandLinkBounds(&search_rects.back().bounds, glyph_x0,
+                         (int)ts->GetPenY() - ts->GetHeight(), glyph_x1,
+                         (int)ts->GetPenY() + 2);
+      }
       if (link_active && active_link_render_index >= 0 &&
           active_link_render_index < (int)rendered_inline_links_.size()) {
         InlineLinkRenderEntry &entry =
@@ -998,6 +1012,18 @@ void Page::Draw(Text *ts) {
       }
     }
   }
+  u16 *search_saved_screen = ts->GetScreen();
+  for (size_t r = 0; r < search_rects.size(); ++r) {
+    const SearchRect &rect = search_rects[r];
+    ts->SetScreen(rect.screen);
+    const int x0 = std::max(0, rect.bounds.x0 - 1);
+    const int y0 = std::max(0, rect.bounds.y0 - 1);
+    const int x1 = std::min(ts->LogicalWidth() - 1, rect.bounds.x1 + 1);
+    const int y1 = std::min(ts->LogicalHeight() - 1, rect.bounds.y1 + 1);
+    if (x1 > x0 && y1 > y0)
+      ts->DrawRect(x0, y0, x1, y1, ts->GetFgColor());
+  }
+  ts->SetScreen(search_saved_screen);
   ts->SetPixelSize(saved_pixel_size);
   DrawNumber(ts, second_screen);
 #ifdef OFFSCREEN

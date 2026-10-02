@@ -45,6 +45,32 @@ std::string BookText(Book *book) {
   return text;
 }
 
+text_search::Match ExpectSearch(Book *book, const char *phrase, bool expected = true) {
+  text_search::Engine engine;
+  test::ExpectTrue("format search accepts query", engine.Configure(phrase, true));
+  engine.Start(text_search::FromBook(book), {}, false, true);
+  unsigned ticks = 0;
+  while (engine.GetStatus() == text_search::Searching && ++ticks < 1000000)
+    engine.Pump(31);
+  test::ExpectTrue("format search terminates", ticks < 1000000);
+  test::ExpectTrue(phrase, engine.GetStatus() == (expected ? text_search::Found : text_search::NotFound));
+  return engine.GetMatch();
+}
+
+void TestOdtSearch() {
+  Text text;
+  BookContext ctx;
+  ctx.text = &text;
+  Book book(ctx);
+  book.SetFolderName(getenv("TEST_CBZ_READING_DIR"));
+  book.SetFileName("search.odt");
+  test::ExpectEq("real ODT dispatch opens", book_parser::Open(&book), 0);
+  ExpectSearch(&book, "tiny ODT fixture");
+  ExpectSearch(&book, "café año");
+  ExpectSearch(&book, "ano", false);
+  book.Close();
+}
+
 void TestDispatchContentAndCloseBetweenFormats() {
   struct Case {
     const char *name;
@@ -68,14 +94,7 @@ void TestDispatchContentAndCloseBetweenFormats() {
     book.format = FORMAT_UNDEF; // Dispatch must recognize the file extension.
     test::ExpectEq("format dispatch opens actual fixture", book_parser::Open(&book), 0);
     test::ExpectGt("format dispatch creates pages", book.GetPageCount(), 0);
-    text_search::Engine search;
-    test::ExpectTrue("configure actual format search", search.Configure(cases[i].content, true));
-    search.Start(text_search::FromBook(&book), {}, false, true);
-    unsigned iterations = 0;
-    while (search.GetStatus() == text_search::Searching && iterations++ < 100000)
-      search.Pump(7);
-    test::ExpectTrue("search rendered text through actual format pipeline",
-                     search.GetStatus() == text_search::Found);
+    ExpectSearch(&book, cases[i].content);
     const std::string rendered = BookText(&book);
     test::ExpectStrContains(cases[i].name, rendered.c_str(), cases[i].content);
     test::ExpectTrue("format markup is consumed", rendered.find(cases[i].excluded_markup) == std::string::npos);
@@ -345,6 +364,9 @@ PageData CapturePageData(Book *book) {
 }
 
 void ExpectMobiContent(Book *book) {
+  ExpectSearch(book, "café & tea");
+  ExpectSearch(book, "TOKEN1999 TOKEN2000");
+  ExpectSearch(book, "HIDDEN-MOBI", false);
   const std::string content = BookText(book);
   size_t cursor = 0;
   for (unsigned word = 1; word <= 4000; ++word) {
@@ -607,6 +629,15 @@ void TestEpubXmlRecoveryAndZipFailure() {
       test::ExpectEq("valid ZIP with recoverable XHTML opens", result, 0);
     }
     ExpectCompleteRecoveryEpub(&book, std::string(variant) != "badxml");
+    const text_search::Match before = ExpectSearch(&book, "FIRST-START link label");
+    ExpectSearch(&book, "FINAL-SPINE");
+    ExpectSearch(&book, "FIRST-END MIDDLE-SPINE", false); // Separate XHTML documents are barriers.
+    book.Close();
+    test::ExpectEq("reopen EPUB through actual page cache", book_parser::Open(&book), 0);
+    test::ExpectFalse("cached EPUB does not schedule another save", book.HasPendingEpubPageCacheSave());
+    const text_search::Match after = ExpectSearch(&book, "FIRST-START link label");
+    test::ExpectTrue("cached EPUB retains search coordinates", before.start == after.start && before.end == after.end);
+    ExpectSearch(&book, "FINAL-SPINE");
     book.Close();
     ExpectClosedReadingState(&book);
     for (const std::string &cache : CacheFiles(cache_dir))
@@ -723,6 +754,7 @@ void TestNullAndEmptyInputHandling() {
 
 int main() {
   TestDispatchContentAndCloseBetweenFormats();
+  TestOdtSearch();
   TestFb2NestedNavigation();
   TestOpenErrorMessages();
   TestEpubMetadataOpenCloseRecovery();

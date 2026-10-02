@@ -70,6 +70,7 @@ u8 ReaderController::OpenBook()
   Text *ts = app_.ts.get();
   Book *selected_book = app_.GetSelectedBook();
   Book *bookcurrent_ = app_.GetCurrentBook();
+  InvalidateSearch(selected_book != bookcurrent_);
 
   if (app_.ShouldAbortWork()) {
     boot_trace::Boot("open book aborted before start");

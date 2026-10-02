@@ -202,6 +202,9 @@ public:
   void ToggleBookmark();
   void MarkBookLayoutDirty();
   void ShowCurrentBookView();
+  void OpenSearch();
+  void RunSearchFrame(const FrameInput &input);
+  void InvalidateSearch(bool forget_query);
   bool IsOpeningPending() const;
   void SetOpeningPending(bool pending);
   Book *GetOpeningBook() const;

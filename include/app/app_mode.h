@@ -16,4 +16,5 @@ enum class AppMode : u8
   Chapters = 9,
   Opening = 10,
   BookInfo = 11,
+  Search = 12,
 };

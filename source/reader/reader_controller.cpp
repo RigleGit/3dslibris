@@ -1,10 +1,17 @@
 #include "app/reader_controller.h"
+#include "reader/search_session.h"
 
 #include "app/app.h"
 
 ReaderController::ReaderController(App &app)
     : app_(app), progress_autosave_book_(nullptr),
       progress_autosave_dirty_(false), last_progress_persist_ms_(0) {}
+
+ReaderController::~ReaderController() {}
+
+void App::OpenSearch() { reader_controller_->OpenSearch(); }
+void App::RunSearchFrame(const FrameInput &input) { reader_controller_->RunSearchFrame(input); }
+void App::InvalidateSearch(bool forget) { reader_controller_->InvalidateSearch(forget); }
 
 void App::CloseBook() { reader_controller_->CloseBook(); }
 

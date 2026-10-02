@@ -23,7 +23,7 @@ void DrawPage(Book *book, Text *ts) {
   book_renderer::DrawCurrentView(book, ts);
 }
 
-bool SetPage(Book *book, Text *ts, uint16_t page) {
+bool SetPage(Book *book, Text *ts, uint16_t page, bool draw) {
   if (!book || !ts || page >= book->GetPageCount())
     return false;
   if (book->IsCbz())
@@ -34,12 +34,12 @@ bool SetPage(Book *book, Text *ts, uint16_t page) {
   book->ClearFocusedInlineLink();
   if (book->IsFixedLayout())
     book_renderer::ResetFixedLayoutViewportForNavigation(book);
-  DrawPage(book, ts);
+  if (draw) DrawPage(book, ts);
   return true;
 }
 
 bool TurnPage(Book *book, Text *ts, uint16_t *pagecurrent, uint16_t pagecount,
-              int delta) {
+              int delta, bool draw) {
   if (!book || !ts || !pagecurrent || pagecount == 0)
     return false;
   if (delta < 0) {
@@ -49,7 +49,7 @@ bool TurnPage(Book *book, Text *ts, uint16_t *pagecurrent, uint16_t pagecount,
     return false;
   }
   *pagecurrent = (uint16_t)((int)*pagecurrent + delta);
-  return SetPage(book, ts, *pagecurrent);
+  return SetPage(book, ts, *pagecurrent, draw);
 }
 
 bool AdvancePage(Book *book, Text *ts, uint16_t *pagecurrent,

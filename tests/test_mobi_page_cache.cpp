@@ -99,6 +99,10 @@ void AddPages(Book *book) {
   Page *page1 = book->AppendPage();
   const uint32_t second[] = {'c', 'a', 'c', 'h', 'e'};
   page1->SetBuffer(second, 5);
+  page_search::Events rtl;
+  page_search::Annotate(rtl, 1, page_search::RtlStart);
+  page_search::Annotate(rtl, 3, page_search::RtlEnd);
+  page1->SetSearchEvents(rtl);
 }
 
 void InvokeSave(Book *book) {
@@ -118,6 +122,12 @@ void AssertLoadedBook(Book *book) {
   ExpectEq("loaded page count", book->GetPageCount(), 2);
   ExpectEq("search continuity survives cache",
            page_search::FlagsAt(book->GetPage(0)->GetSearchEvents(), 1), page_search::Skip);
+  ExpectTrue("cached RTL range remains balanced",
+             page_search::Valid(book->GetPage(1)->GetSearchEvents(), 5));
+  ExpectEq("cached RTL range begins at original offset",
+           page_search::FlagsAt(book->GetPage(1)->GetSearchEvents(), 1), page_search::RtlStart);
+  ExpectEq("cached RTL range ends at original offset",
+           page_search::FlagsAt(book->GetPage(1)->GetSearchEvents(), 3), page_search::RtlEnd);
   ExpectEqString("loaded title", book->GetTitle(), "MOBI Cache Title");
   ExpectEq("loaded chapter count", (int)book->GetChapters().size(), 1);
   ExpectEqString("loaded chapter title", book->GetChapters()[0].title,
@@ -243,7 +253,7 @@ void TestTruncatedCaches() {
   ExpectTrue("read fixture", fread(bytes.data(), 1, bytes.size(), fp) == bytes.size());
   fclose(fp);
 
-  // The v21 wire header stores image_count at offset 16. Add a trailing image
+  // The v22 wire header stores image_count at offset 16. Add a trailing image
   // record to exercise EOF in the path and follow-lines fields as well.
   bytes[16] = 1;
   const std::string image_path = "mobi:recindex:1";
@@ -273,6 +283,30 @@ void TestTruncatedCaches() {
       }
       delete loaded;
       cases++;
+    }
+  }
+  // Independent v22 wire layout: 32-byte header, raw title, then two
+  // length-prefixed u32 page buffers before the search event section.
+  const size_t event = 32 + std::string("MOBI Cache Title").size() + 2 + 4*4 + 2 + 5*4 + 2;
+  ExpectEq("fixture event offset matches wire schema", bytes[event], 33);
+  for (bool stream : {false, true}) {
+    mobi_page_cache::SetMaxBulkCacheLoadBytesForTest(stream ? 1 : -1);
+    for (int fault = 0; fault < 5; ++fault) {
+      std::vector<unsigned char> corrupt = bytes;
+      if (fault == 0) corrupt[event] = (5 << 5) | 1; // Beyond four-token page.
+      if (fault == 1) corrupt[event] = 32; // Offset one without any event flag.
+      if (fault == 3) corrupt[event] = 32 | 8; // Unclosed RTL range.
+      if (fault == 4) corrupt[event] = 32 | 16; // RTL end without a start.
+      if (fault == 2) corrupt[4] = 21; // Previous cache version lacks this section.
+      fp = fopen(cache_file.c_str(), "wb");
+      ExpectTrue("open corrupt metadata fixture", fp != nullptr);
+      ExpectTrue("write corrupt metadata fixture", fwrite(corrupt.data(), 1, corrupt.size(), fp) == corrupt.size());
+      fclose(fp);
+      Book *loaded = MakeMobiBook();
+      ExpectFalse("invalid metadata or old cache rejected", InvokeTryLoad(loaded));
+      ExpectEq("invalid metadata exposes no partial pages", loaded->GetPageCount(), 0);
+      ExpectTrue("invalid cache removed for normal regeneration", access(cache_file.c_str(), F_OK) != 0);
+      delete loaded;
     }
   }
   mobi_page_cache::SetMaxBulkCacheLoadBytesForTest(-1);

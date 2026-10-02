@@ -13,6 +13,7 @@
 
 #include "app/app.h"
 #include "app/reader_controller.h"
+#include "reader/search_session.h"
 
 #include <errno.h>
 #include <stdint.h>
@@ -104,6 +105,7 @@ void ReaderController::OnAppletSuspended()
 
 void ReaderController::OnAppletResumed()
 {
+  if (search_) search_->dirty = true;
   Book *bookcurrent_ = app_.GetCurrentBook();
   if (!bookcurrent_)
     return;
@@ -497,6 +499,7 @@ void ReaderController::ToggleBookmark()
 
 void ReaderController::CloseBook()
 {
+  InvalidateSearch(true);
   Book *bookcurrent_ = app_.GetCurrentBook();
   app_.SetInlineLinkFocusActive(false);
   app_.SetInlineLinkHoldArmed(false);

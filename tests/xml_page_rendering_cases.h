@@ -1,12 +1,80 @@
 #pragma once
 
 #include "formats/common/xml_book_parser.h"
+#include "book/book_search_source.h"
 #include "formats/epub/epub_stylesheet_utils.h"
 #include "shared/orientation_utils.h"
 
 #include <unistd.h>
 
 namespace {
+
+void TestSearchHighlightGeometry() {
+  TestCtx tc;
+  Text &text = tc.text;
+  text.capture_rendered_text = true;
+  text.display.width = 240;
+  u16 left = 0, right = 0;
+  text.screenleft = &left; text.screenright = &right;
+  Book book(tc.ctx);
+  Page &page = *book.AppendPage();
+  const u32 content[] = {'x','a','b','\n','c','d','y'};
+  page.SetBuffer(content, 7);
+  Page::Highlight highlight = {1, 6};
+  page.Draw(&text, &highlight);
+  ExpectTrue("highlight leaves all glyphs visible", text.rendered_ascii == "xabcdy");
+  ExpectTrue("one highlight rectangle per matching line", text.rendered_rects.size() == 2);
+  const Text::RenderedRect &first = text.rendered_rects[0];
+  const Text::RenderedRect &second = text.rendered_rects[1];
+  ExpectTrue("first highlight excludes preceding x", first.x0 == 19 && first.x1 == 37);
+  ExpectTrue("second highlight excludes following y", second.x0 == 11 && second.x1 == 29);
+  ExpectTrue("highlight follows line break", first.y1 < second.y1);
+  text.rendered_rects.clear();
+  page.Draw(&text);
+  ExpectTrue("ordinary reading has no search decoration", text.rendered_rects.empty());
+}
+
+
+// The oracle is the authored prose, independent of page/token extraction.
+void TestSearchSurvivesPagination() {
+  for (int px : {12, 24}) {
+    for (int width : {120, 240}) {
+      TestCtx tc;
+      tc.text.SetPixelSize(px);
+      tc.text.display.width = width;
+      Book book(tc.ctx);
+      parsedata_t p = MakeParseData(tc, book);
+      p.base_font_size_px = px;
+      p.pen.y = tc.text.margin.top + tc.text.GetHeight();
+      p.coalesce_text_segments = true;
+      std::string html = "<html><body>";
+      for (int i = 0; i < 25; ++i)
+        html += "<p>" + std::string(220, 'x') + "needle<b>work</b> café año.</p>";
+      html += "<pre>preformatted wrapping needlework</pre></body></html>";
+      ExpectTrue("search layout fixture parses",
+                 xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p)).ok);
+      ExpectTrue("search fixture crosses pages", book.GetPageCount() > 1);
+      text_search::Engine engine;
+      ExpectTrue("configure cross-style phrase", engine.Configure("needlework CAFÉ año", false));
+      engine.Start(text_search::FromBook(&book), {}, false, true);
+      int found = 0;
+      unsigned ticks = 0;
+      while (++ticks < 1000000) {
+        if (engine.Pump(13) == text_search::Searching) continue;
+        if (engine.GetStatus() != text_search::Found || engine.Wrapped()) break;
+        ++found;
+        engine.Start(text_search::FromBook(&book), engine.GetMatch().start, false);
+      }
+      ExpectTrue("incremental search terminates", ticks < 1000000);
+      ExpectIntEq("same 25 authored phrases survive reflow", found, 25);
+      ExpectTrue("configure preformatted phrase", engine.Configure("preformatted wrapping needlework", true));
+      engine.Start(text_search::FromBook(&book), {}, false, true);
+      ticks = 0;
+      while (engine.Pump(17) == text_search::Searching && ++ticks < 1000000) {}
+      ExpectTrue("preformatted visual wrapping preserves phrase", engine.GetStatus() == text_search::Found);
+    }
+  }
+}
 
 // A buffer-only continuity assertion misses text abandoned by Page::Draw
 // when the paginator has placed more lines on a screen than it can display.

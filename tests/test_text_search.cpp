@@ -70,8 +70,8 @@ int main() {
   e.Start(p.Source(), e.GetMatch().start, false);
   assert(Run(e) == text_search::NotFound);
   p = {{{'x', 0x5e9, 'a', 'b', 'c', ' ', 'o','k'}}, {{}}};
-  for (unsigned i = 2; i <= 4; ++i)
-    page_search::Annotate(p.events[0], i, page_search::Skip | page_search::Barrier);
+  page_search::Annotate(p.events[0], 2, page_search::RtlStart);
+  page_search::Annotate(p.events[0], 5, page_search::RtlEnd);
   assert(e.Configure("abc", false));
   e.Start(p.Source(), {}, false, true);
   assert(Run(e) == text_search::NotFound && e.ExcludedRtl());
@@ -82,6 +82,14 @@ int main() {
   assert(e.Configure("à̕", true));
   e.Start(p.Source(), {}, false, true);
   assert(Run(e) == text_search::Found && e.GetMatch().end.token == 3);
+  // Equivalent whitespace must not consume the cross-page lookahead budget.
+  p = {{{'f','o','o'}, std::vector<uint32_t>(100, ' ')}, {{}, {}}};
+  p.text[1].insert(p.text[1].end(), {'b','a','r'});
+  assert(e.Configure("foo bar", true));
+  e.Start(p.Source(), {}, false, true);
+  assert(Run(e) == text_search::Found && e.GetMatch().end.page == 1);
+  e.Start(p.Source(), {1, 103}, true);
+  assert(Run(e) == text_search::Found && e.GetMatch().start.page == 0);
   p = {{{TEXT_LINK_START}}, {{}}};
   e.Start(p.Source(), {}, false, true);
   assert(Run(e) == text_search::Failed);

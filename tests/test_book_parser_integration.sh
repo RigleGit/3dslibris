@@ -88,11 +88,14 @@ with zipfile.ZipFile(folder / 'first.cbz', 'w', compression=zipfile.ZIP_DEFLATED
     archive.writestr('ComicInfo.xml', '<ComicInfo><Pages><Page Image="1" Bookmark="Blue chapter"/></Pages></ComicInfo>')
 with zipfile.ZipFile(folder / 'second.cbz', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
     archive.writestr('green.png', png((0, 255, 0)))
+with zipfile.ZipFile(folder / 'search.odt', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr('mimetype', 'application/vnd.oasis.opendocument.text')
+    archive.writestr('content.xml', '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:p>tiny <text:span>ODT</text:span> fixture café año.</text:p></office:text></office:body></office:document-content>')
 PYFIXTURE
 
 "$CXX_BIN" -std=c++11 \
   ${CXXFLAGS:-} \
-  -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST -DDSLIBRIS_REAL_MOBI_TEST \
+  -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST -DDSLIBRIS_REAL_MOBI_TEST -DDSLIBRIS_REAL_ODT_TEST \
   -include "$TEST_ROOT/tests/stubs/cbz_platform.h" \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \
@@ -169,6 +172,8 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/cbz/cbz_worker.cpp" \
   "$TEST_ROOT/source/formats/common/pdf_view_utils.cpp" \
   "$TEST_ROOT/source/formats/common/fixed_layout_blit_utils.cpp" \
+  "$TEST_ROOT/source/formats/odt/odt_parser.cpp" \
+  "$TEST_ROOT/source/formats/odt/odt_loader.cpp" \
   "$TEST_ROOT/source/formats/txt/txt_parser.cpp" \
   "$TEST_ROOT/source/formats/txt/txt_loader.cpp" \
   "$TEST_ROOT/source/formats/markdown/markdown_parser.cpp" \

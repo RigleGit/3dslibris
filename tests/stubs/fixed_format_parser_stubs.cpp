@@ -16,9 +16,11 @@ int ExtractCover(Book *, const std::string &) { return -1; }
 } // namespace mobi_parser
 #endif
 
+#ifndef DSLIBRIS_REAL_ODT_TEST
 namespace odt_parser {
 uint8_t Parse(Book *, const char *) { return 1; }
 } // namespace odt_parser
+#endif
 
 namespace pdf_parser {
 uint8_t Parse(Book *, const char *) { return 1; }

@@ -38,6 +38,8 @@ public:
   int clipped_glyphs = 0;
   struct RenderedGlyph { u32 codepoint; int x, y; u16 *screen; };
   std::vector<RenderedGlyph> rendered_glyphs;
+  struct RenderedRect { int x0, y0, x1, y1; u16 *screen; };
+  std::vector<RenderedRect> rendered_rects;
 
   Text()
       : pixelsize(14), fgcolor(0), usefgcolor(false), usebgcolor(false),
@@ -113,7 +115,9 @@ public:
 
   // Drawing
   void FillRect(u16, u16, u16, u16, u16) {}
-  void DrawRect(u16, u16, u16, u16, u16) {}
+  void DrawRect(u16 x0, u16 y0, u16 x1, u16 y1, u16) {
+    if (capture_rendered_text) rendered_rects.push_back({x0, y0, x1, y1, screen});
+  }
   bool PrintNewLine() {
     if (!capture_rendered_text) return false;
     pen_x = margin.left;

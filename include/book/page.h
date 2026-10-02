@@ -86,5 +86,6 @@ class Page {
 	}
 	size_t GetInlineLinkCount() const;
 	//	void Draw();
-	void Draw(Text *ts);
+	struct Highlight { uint32_t begin, end; };
+	void Draw(Text *ts, const Highlight *highlight = NULL);
 };

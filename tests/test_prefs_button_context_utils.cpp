@@ -138,6 +138,9 @@ int main() {
     for (int p = 0; p < 3; ++p) {
       page.page = p;
       CheckDrawablePage(page);
+        test::ExpectTrue("search only appears for reflow book actions",
+            HasButton(page, PREFS_BUTTON_SEARCH) ==
+            (page.from_book && !page.fixed_layout && page.page == 0));
       test::ExpectFalse("general preferences exclude bookmarks",
                         HasButton(page, PREFS_BUTTON_BOOKMARKS));
       test::ExpectFalse("general preferences exclude book information",
@@ -165,6 +168,9 @@ int main() {
       page.include_line_wrap_fix = wrap != 0;
       page.page = 0;
       CheckDrawablePage(page);
+        test::ExpectTrue("search only appears for reflow book actions",
+            HasButton(page, PREFS_BUTTON_SEARCH) ==
+            (page.from_book && !page.fixed_layout && page.page == 0));
       test::ExpectTrue("book navigation remains available",
                        HasButton(page, PREFS_BUTTON_BOOK_INFO) &&
                        HasButton(page, PREFS_BUTTON_INDEX) &&
@@ -180,6 +186,9 @@ int main() {
       }
       page.page = 1;
       CheckDrawablePage(page);
+        test::ExpectTrue("search only appears for reflow book actions",
+            HasButton(page, PREFS_BUTTON_SEARCH) ==
+            (page.from_book && !page.fixed_layout && page.page == 0));
       test::ExpectTrue("both layouts retain orientation and handedness",
                        HasButton(page, PREFS_BUTTON_ORIENTATION) &&
                        HasButton(page, PREFS_BUTTON_HANDEDNESS));

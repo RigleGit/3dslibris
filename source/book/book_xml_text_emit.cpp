@@ -279,13 +279,16 @@ void EmitBidiSegment(parsedata_t *p,
   text_bidi_utils::ReorderLineForDisplay(cps, 0, cps.size(), local_runs);
   const u8 transform =
       apply_text_transform ? parse_resolve_text_transform(p) : 0;
+  const uint32_t search_begin = p->buflen;
   for (size_t i = 0; i < cps.size(); i++) {
     uint32_t cp = cps[i];
     if (transform)
       cp = ApplyTextTransform(cp, transform, &p->text_transform_word_start);
-    page_search::Annotate(p->search_events, p->buflen,
-                          page_search::Skip | page_search::Barrier);
     parse_append_page_byte(p, (u32)cp);
+  }
+  if ((uint32_t)p->buflen > search_begin) {
+    page_search::Annotate(p->search_events, search_begin, page_search::RtlStart);
+    page_search::Annotate(p->search_events, p->buflen, page_search::RtlEnd);
   }
 }
 

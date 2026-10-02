@@ -64,13 +64,13 @@ struct Engine::State {
   unsigned unit = 0, tail = 0;
   uint64_t scanned = 0;
   bool whole = false, backwards = false, include = false, wrapped = false;
-  bool excluded = false, annotated = false, raw_end = false;
+  bool excluded = false, annotated = false, raw_end = false, in_rtl = false;
   bool have_pending = false, have_candidate = false, previous_word = false, previous_space = false;
 
   void Fail(const char *message) { error = message; status = Failed; }
   void ResetUnit() {
     cursor = Position(unit ? unit - 1 : 0, 0);
-    annotated = raw_end = false;
+    annotated = raw_end = in_rtl = false;
     matched = ring_next = ring_count = tail = 0;
     cluster.clear(); ready.clear(); ready_index = 0;
     decomposition_count = decomposition_index = 0;
@@ -109,21 +109,23 @@ struct Engine::State {
     unsigned flags = page_search::FlagsAt(*page.events, cursor.token);
     if (!annotated) {
       annotated = true;
-      if (flags & page_search::Barrier) {
+      if (flags & page_search::RtlEnd) in_rtl = false;
+      if (flags & page_search::RtlStart) { in_rtl = true; excluded = true; }
+      if (flags & (page_search::Barrier | page_search::RtlStart | page_search::RtlEnd)) {
         if (flags & page_search::Skip) excluded = true;
         *out = Character(0, cursor, cursor); return 1;
       }
       if (flags & page_search::Space) { *out = Character(' ', cursor, cursor); return 1; }
     }
     annotated = false;
-    if (cursor.token == page.length) { ++cursor.page; cursor.token = 0; return 0; }
+    if (cursor.token == page.length) { in_rtl = false; ++cursor.page; cursor.token = 0; return 0; }
     Position start = cursor;
     uint32_t cp = page.text[cursor.token++];
     ++scanned;
     unsigned payload = Payload(cp);
     if (payload > page.length - cursor.token) { Fail("Truncated page token"); return -1; }
     cursor.token += payload;
-    if (flags & page_search::Skip) return 0;
+    if (in_rtl || (flags & page_search::Skip)) return 0;
     if (cp == TEXT_IMAGE || cp == TEXT_HR || cp == TEXT_HR_BOUNDS || Rtl(cp)) {
       if (Rtl(cp)) excluded = true;
       *out = Character(0, start, cursor); return 1;
@@ -172,9 +174,10 @@ struct Engine::State {
   void Step() {
     if (ready_index < ready.size()) {
       Character c = ready[ready_index++];
+      const bool collapsed_space = Space(c.cp) && previous_space;
       Feed(c);
       if (status != Searching) return;
-      if (c.start.page > unit && ++tail > query.size() + 2) FinishUnit();
+      if (!collapsed_space && c.start.page > unit && ++tail > query.size() + 2) FinishUnit();
       return;
     }
     ready.clear(); ready_index = 0;

@@ -340,7 +340,7 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks",
       "reset settings",
       "clear cache",        "publisher indent", "publisher spacing",
-      "publisher sides"};
+      "publisher sides", "search"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -871,6 +871,9 @@ void SettingsController::PrefsRefreshButton(int index) {
   Book *book = app_.GetCurrentBook();
   char msg[64];
   switch (index) {
+  case PREFS_BUTTON_SEARCH:
+    app_.prefsButtons[index].SetLabel2("word or phrase >");
+    break;
   case PREFS_BUTTON_FONT_CONFIG:
     app_.prefsButtons[PREFS_BUTTON_FONT_CONFIG].SetLabel2(
         std::string("open menu >"));
@@ -1173,6 +1176,11 @@ void SettingsController::PrefsHandlePress() {
   const bool is_book_ctx = app_.IsBookSettingsContext();
   Book *book = app_.GetCurrentBook();
   const int selected_button = EffectiveButtonForSlot(app_.GetPrefsSelectedIndex());
+
+  if (selected_button == PREFS_BUTTON_SEARCH) {
+    app_.OpenSearch();
+    return;
+  }
 
   if (selected_button == PREFS_BUTTON_ORIENTATION) {
     PrefsFlipOrientation();

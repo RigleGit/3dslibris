@@ -49,6 +49,7 @@ void App::ShowFontView(AppMode app_font_mode)
 
 void App::ShowLibraryView()
 {
+  InvalidateSearch(false);
   ApplyRenderOrientation(portrait_orientation);
   // Reset shared bottom buttons immediately; prefs view reuses/moves them.
   buttonprev.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
@@ -105,6 +106,7 @@ void App::ShowLibraryView()
 
 void App::ShowSettingsView(bool from_book)
 {
+  InvalidateSearch(false);
   settings_controller_->ShowSettingsView(from_book);
 }
 
@@ -127,6 +129,7 @@ void App::ReturnFromPrefs()
 
 void App::MarkBookLayoutDirty()
 {
+  InvalidateSearch(false);
   // Bump the global layout generation so already-paginated books are reopened
   // before they are reused.
   reader_state_.layout_revision++;

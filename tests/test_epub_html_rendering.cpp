@@ -1242,6 +1242,8 @@ int main() {
   TestAdjacentDivsAfterBandImageStartSeparateLines();
   TestEmbeddedCssAlignedLines();
   TestXmlAlignedLines();
+  TestSearchHighlightGeometry();
+  TestSearchSurvivesPagination();
   TestXmlPageRenderingContinuity();
   TestHrAtPageEdgeKeepsFollowingHeading();
   TestRubyAnnotationEmitsBrackets();

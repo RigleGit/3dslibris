@@ -1,6 +1,8 @@
 #pragma once
 
 #include <stdint.h>
+#include <memory>
+struct ReaderSearchSession;
 
 class App;
 struct FrameInput;
@@ -9,6 +11,10 @@ class Book;
 class ReaderController {
 public:
   explicit ReaderController(App &app);
+  ~ReaderController();
+  void OpenSearch();
+  void RunSearchFrame(const FrameInput &input);
+  void InvalidateSearch(bool forget_query);
 
   void CloseBook();
   int GetBookIndex(Book *book);
@@ -22,6 +28,10 @@ public:
 
 private:
   void ClearDeferredRelayoutState();
+  void DrawSearch();
+  void StartSearch(bool backwards, bool first);
+  void EditSearchText();
+  std::unique_ptr<ReaderSearchSession> search_;
   bool MaybeFinalizeDeferredRelayout(Book *book, int page_count);
   void MarkProgressDirty(Book *book);
   void TryPersistProgress(Book *book, bool force);

@@ -40,6 +40,7 @@ static const int kGeneralStyleButtons[] = {
 static const int kBookPrefsButtons[] = {
     PREFS_BUTTON_STYLE_CUSTOMIZATION,
     PREFS_BUTTON_TIME24H,
+    PREFS_BUTTON_SEARCH,
     PREFS_BUTTON_TIME_REMAINING,
     PREFS_BUTTON_BOOK_INFO,
     PREFS_BUTTON_INDEX,
@@ -50,6 +51,7 @@ static const int kBookPrefsButtonsWithBookOption[] = {
     PREFS_BUTTON_STYLE_CUSTOMIZATION,
     PREFS_BUTTON_LIBRARY_VIEW,
     PREFS_BUTTON_TIME24H,
+    PREFS_BUTTON_SEARCH,
     PREFS_BUTTON_TIME_REMAINING,
     PREFS_BUTTON_BOOK_INFO,
     PREFS_BUTTON_INDEX,
@@ -85,7 +87,8 @@ unsigned char PrefsPageButtonCount(const PrefsPageContext &context) {
   if (context.from_book && context.page == 1)
     return BookPrefsPage2ButtonCount(context.fixed_layout);
   return VisiblePrefsButtonCount(context.from_book,
-                                 context.include_line_wrap_fix);
+                                 context.include_line_wrap_fix) -
+         (context.from_book && context.fixed_layout ? 1 : 0);
 }
 
 int PrefsPageButtonForSlot(const PrefsPageContext &context,
@@ -96,6 +99,13 @@ int PrefsPageButtonForSlot(const PrefsPageContext &context,
     return ExtraPrefsButtonForSlot(slot);
   if (context.from_book && context.page == 1)
     return BookPrefsPage2ButtonForSlot(context.fixed_layout, slot);
+  if (context.from_book && context.fixed_layout) {
+    for (unsigned char i = 0, visible = 0; ; ++i) {
+      const int id = PrefsButtonForVisibleSlot(true, context.include_line_wrap_fix, i);
+      if (id == PREFS_BUTTON_SEARCH) continue;
+      if (visible++ == slot) return id;
+    }
+  }
   return PrefsButtonForVisibleSlot(context.from_book,
                                    context.include_line_wrap_fix, slot);
 }
