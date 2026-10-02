@@ -125,6 +125,16 @@ Notes:
 5) EPUB / FB2 / TXT / RTF / ODT / MOBI
 ------------------------------------------------------------
 
+Search inside the book:
+- Select -> BOOK settings -> search.
+- Use the system keyboard to enter a word or phrase, then select find.
+- whole words is off by default. Search ignores case but keeps accents.
+- L / R: previous / next match. X: edit query or whole words.
+- A / B: return to reading. While searching, B cancels without moving.
+- The search wraps once at the end and marks the found text.
+- Queries are kept only for the current book session.
+- PDF / CBZ / XPS and RTL text are not searchable.
+
 Text flow features:
 - Paragraph spacing and indent settings
 - Font size and orientation options

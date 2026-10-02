@@ -26,6 +26,7 @@ Nintendo 3DS homebrew ebook and manga reader based on the original Nintendo DS p
 - Six reading themes with matching splash screens and reader gradients.
 - Supported formats: `EPUB`, `FB2`, `TXT`, `Markdown`, `RTF`, `ODT`, `MOBI`, `PDF`, `CBZ` and `XPS`.
 - `EPUB` reflow with TOC support, bookmarks, `go to page`, cached pagination, and broad inline/block formatting support.
+- Word and phrase search in reflowable books, with whole-word matching and next/previous results.
 - Portrait and landscape reading, with separate handedness and PDF/CBZ reading direction settings.
 - Global and per-book controls for font size, spacing, and EPUB publisher layout.
 - Reading progress and bookmarks saved across library folders, with an option to reopen the last book on startup.
@@ -99,6 +100,14 @@ Standard reading:
 - `X`: change background color
 - `SELECT`: open `BOOK` settings
 - `START`: return to library
+
+Text search (`BOOK` settings → `search`):
+
+- Enter a word or phrase with the system keyboard, then select `find`.
+- `L` / `R`: previous or next match
+- `X`: edit the query or `whole words`
+- `A` / `B`: return to reading at the found page; `B` cancels a pending search
+- Search ignores case and preserves accents. PDF/CBZ/XPS and RTL search are not supported.
 
 Fixed-layout documents (`PDF` / `CBZ` / `XPS`):
 
@@ -194,6 +203,7 @@ Expected outputs:
 ## Documentation
 
 - [sdmc/3ds/3dslibris/book/QuickStart.txt](sdmc/3ds/3dslibris/book/QuickStart.txt) - Quickstart guide explaining menus, options, and controls
+- [docs/BOOK_SEARCH.md](docs/BOOK_SEARCH.md) - search behavior, implementation, and validation
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 - [docs/PDF_SOURCE_RELEASE.md](docs/PDF_SOURCE_RELEASE.md) - source release and rebuild notes for distributed binaries
