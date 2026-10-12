@@ -78,7 +78,7 @@ jobs:
             -e DEVKITPRO="$DEVKITPRO" \
             -e DEVKITARM="$DEVKITARM" \
             "$DOCKER_IMAGE" \
-            sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx && make cia && make debug-cia && make source-release'
+            sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx && bash tests/test_main_stack.sh 3dslibris.elf && bash tests/test_main_stack.sh 3dslibris-debug.elf && make cia && make debug-cia && make source-release'
 
       - name: Verify release outputs
         run: |

@@ -97,7 +97,7 @@ jobs:
             -e DEVKITPRO="$DEVKITPRO" \
             -e DEVKITARM="$DEVKITARM" \
             "$DEVKITARM_IMAGE" \
-            sh -lc 'make clean && make -j2 && make debug-3dsx'
+            sh -lc 'make clean && make -j2 && make debug-3dsx && bash tests/test_main_stack.sh 3dslibris.elf && bash tests/test_main_stack.sh 3dslibris-debug.elf'
 
       - name: Verify outputs
         run: |
@@ -138,7 +138,7 @@ jobs:
             -e DEVKITPRO="$DEVKITPRO" \
             -e DEVKITARM="$DEVKITARM" \
             3dslibris-build \
-            sh -lc 'make clean && make -j2 && make debug-3dsx && make cia'
+            sh -lc 'make clean && make -j2 && make debug-3dsx && bash tests/test_main_stack.sh 3dslibris.elf && bash tests/test_main_stack.sh 3dslibris-debug.elf && make cia'
 
       - name: Verify CIA outputs
         run: |
