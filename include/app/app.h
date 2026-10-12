@@ -202,6 +202,9 @@ public:
   void ToggleBookmark();
   void MarkBookLayoutDirty();
   void ShowCurrentBookView();
+  void OpenImageViewer();
+  void RunImageViewerFrame(const FrameInput &input);
+  void InvalidateImageViewer();
   void OpenSearch();
   void RunSearchFrame(const FrameInput &input);
   void InvalidateSearch(bool forget_query);

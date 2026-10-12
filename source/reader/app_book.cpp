@@ -87,7 +87,10 @@ void ReaderController::ClearDeferredRelayoutState()
 
 void ReaderController::OnAppletSuspendRequested()
 {
-  // Called synchronously from the APT hook: signal only. In-progress reflow
+  // CPU-only viewer buffers have no worker/GPU references. Free them here
+  // before aptMainLoop waits in HOME; the session rebuilds on a safe frame.
+  SuspendImageViewer();
+  // Called synchronously from the APT hook: signal only for workers. In-progress reflow
   // and opening state remain owned by their workers across OS suspension.
   Book *bookcurrent_ = app_.GetCurrentBook();
   app_.SetPdfTouchDragActive(false);
@@ -439,6 +442,7 @@ void ReaderController::HandleEventInBook(const FrameInput &input)
   bool status_dirty = reflow_input::HandleInBook(
       app_, bookcurrent_, ts, app_.prefs.get(), input,
       &pagecurrent, &pagecount, ctrl);
+  if (app_.GetMode() == AppMode::ImageViewer) return;
   if (MaybeFinalizeDeferredRelayout(bookcurrent_, (int)pagecount)) {
     book_nav::DrawPage(bookcurrent_, ts);
     status_dirty = true;
@@ -499,6 +503,7 @@ void ReaderController::ToggleBookmark()
 
 void ReaderController::CloseBook()
 {
+  InvalidateImageViewer();
   InvalidateSearch(true);
   Book *bookcurrent_ = app_.GetCurrentBook();
   app_.SetInlineLinkFocusActive(false);

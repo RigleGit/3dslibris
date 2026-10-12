@@ -221,6 +221,10 @@ int MainLoopController::RunMainLoop()
       app_.RunChaptersMenuFrame(input);
       break;
 
+    case AppMode::ImageViewer:
+      app_.RunImageViewerFrame(input);
+      break;
+
     case AppMode::Search:
       app_.RunSearchFrame(input);
       break;

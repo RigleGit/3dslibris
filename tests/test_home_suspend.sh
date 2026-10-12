@@ -8,4 +8,5 @@ python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/app/app_lifecycle.c
 python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/book/book_worker_lifecycle.cpp" "void Book::SuspendFixedLayoutWorkers(" >> "$TASK_TMP/home_suspend_under_test.inc"
 python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/book/book_worker_lifecycle.cpp" "void Book::ResumeFixedLayoutWorkers(" >> "$TASK_TMP/home_suspend_under_test.inc"
 python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/reader/app_book.cpp" "void ReaderController::OnAppletSuspendRequested(" >> "$TASK_TMP/home_suspend_under_test.inc"
-build_test test_home_suspend -- -I"$TASK_TMP" -I"$ROOT/include" "$ROOT/tests/test_home_suspend.cpp"
+python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/reader/image_viewer.cpp" "void ReaderController::SuspendImageViewer(" >> "$TASK_TMP/home_suspend_under_test.inc"
+build_test test_home_suspend -- -I"$TASK_TMP" -I"$ROOT/tests/stubs" -I"$ROOT/include" -I"$ROOT/third_party/stb" "$ROOT/tests/test_home_suspend.cpp" "$ROOT/source/formats/common/raster_image_decode.cpp"

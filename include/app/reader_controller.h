@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <memory>
 struct ReaderSearchSession;
+struct ReaderImageViewerSession;
 
 class App;
 struct FrameInput;
@@ -12,6 +13,10 @@ class ReaderController {
 public:
   explicit ReaderController(App &app);
   ~ReaderController();
+  void OpenImageViewer();
+  void RunImageViewerFrame(const FrameInput &input);
+  void InvalidateImageViewer();
+  void SuspendImageViewer();
   void OpenSearch();
   void RunSearchFrame(const FrameInput &input);
   void InvalidateSearch(bool forget_query);
@@ -27,6 +32,11 @@ public:
   void OnAppletResumed();
 
 private:
+  void DrawImageViewer();
+  bool LoadImageViewer(int zoom);
+  void CloseImageViewer();
+  bool ImageViewerValid() const;
+  std::unique_ptr<ReaderImageViewerSession> image_viewer_;
   void ClearDeferredRelayoutState();
   void DrawSearch();
   void StartSearch(bool backwards, bool first);

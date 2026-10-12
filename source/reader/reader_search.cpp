@@ -40,6 +40,7 @@ void ReaderController::InvalidateSearch(bool forget_query) {
 }
 
 void ReaderController::OpenSearch() {
+  InvalidateImageViewer();
   Book *book = app_.GetCurrentBook();
   if (!book || book->IsFixedLayout() || !book->GetPageCount() ||
       book->IsAsyncReflowOpenPending()) return;

@@ -21,6 +21,7 @@
 #include "reader/page_repeat_utils.h"
 #include "settings/prefs.h"
 #include "shared/app_flow_utils.h"
+#include "shared/orientation_utils.h"
 #include "ui/text.h"
 #include "ui/ui_button_skin.h"
 
@@ -105,28 +106,20 @@ static bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction) {
 
   const int page_count = (int)book->GetPageCount();
   const int current_page = book->GetPosition();
-  if (direction > 0) {
-    for (int page_index = current_page + 1; page_index < page_count; ++page_index) {
-      const size_t link_count = InlineLinkCountForPage(book, page_index);
-      if (link_count == 0)
-        continue;
-      book->SetPosition(page_index);
-      book->SetFocusedInlineLinkIndex(0);
-      book_nav::DrawPage(book, ts);
-      return true;
-    }
-    return false;
-  }
-
-  for (int page_index = current_page - 1; page_index >= 0; --page_index) {
-    const size_t link_count = InlineLinkCountForPage(book, page_index);
-    if (link_count == 0)
-      continue;
+  for (int page_index = current_page + direction;
+       page_index >= 0 && page_index < page_count; page_index += direction) {
+    if (InlineLinkCountForPage(book, page_index) == 0) continue;
     book->SetPosition(page_index);
-    book->SetFocusedInlineLinkIndex((int)link_count - 1);
+    book->ClearFocusedInlineLink();
+    book_nav::DrawPage(book, ts);
+    const auto &targets = book->GetPage()->GetRenderedSelectables();
+    if (targets.empty()) continue;
+    book->SetFocusedInlineLinkIndex(direction > 0 ? 0 : (int)targets.size()-1);
     book_nav::DrawPage(book, ts);
     return true;
   }
+  book->SetPosition(current_page); book->SetFocusedInlineLinkIndex(current_index);
+  book_nav::DrawPage(book, ts);
   return false;
 }
 
@@ -155,7 +148,7 @@ static bool FollowFocusedInlineLink(Book *book, Text *ts) {
   return book_nav::SetPage(book, ts, target_page);
 }
 
-static bool TryFollowTouchLink(Book *book, Text *ts, int tx, int ty) {
+static bool TryTouchTarget(Book *book, Text *ts, int tx, int ty, bool selection) {
   if (!book || !ts)
     return false;
   const std::vector<Page::SelectableRenderEntry> *links =
@@ -166,8 +159,9 @@ static bool TryFollowTouchLink(Book *book, Text *ts, int tx, int ty) {
   int best_index = -1;
   for (int i = 0; i < (int)links->size(); ++i) {
     const Page::SelectableRenderEntry &entry = (*links)[(size_t)i];
-    if (entry.screen_index != 1)
-      continue;
+    const bool first_left = orientation_utils::FirstScreenIsLeft(book->GetOrientation());
+    if (entry.screen_index != (first_left ? 1 : 0) ||
+        (!selection && entry.href_id == 0)) continue;
 
     inline_link_utils::LinkRect r = entry.bounds;
     const int w = r.x1 - r.x0;
@@ -197,6 +191,7 @@ static bool TryFollowTouchLink(Book *book, Text *ts, int tx, int ty) {
     return false;
 
   book->SetFocusedInlineLinkIndex(best_index);
+  if (selection) { book_nav::DrawPage(book, ts); return true; }
   return FollowFocusedInlineLink(book, ts);
 }
 
@@ -234,10 +229,27 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
       ExitInlineLinkFocus(&app, book);
       book_nav::DrawPage(book, ts);
       status_dirty = true;
+    } else if (keys & KEY_TOUCH) {
+      touchPosition mapped = app.MapTouch(input);
+      status_dirty = TryTouchTarget(book, ts, mapped.px, mapped.py, true);
     } else if (keys & app.key.a) {
+      const auto *targets = CurrentPageInlineLinks(book);
+      const int selected = book->GetFocusedInlineLinkIndex();
+      if (targets && selected >= 0 && selected < (int)targets->size() &&
+          (*targets)[selected].kind == Page::IMAGE) {
+        app.OpenImageViewer();
+        return false;
+      }
       if (FollowFocusedInlineLink(book, ts)) {
         app.SetInlineLinkFocusActive(false);
         status_dirty = true;
+      }
+    } else if (keys & app.key.x) {
+      const auto *targets = CurrentPageInlineLinks(book);
+      const int selected = book->GetFocusedInlineLinkIndex();
+      if (targets && selected >= 0 && selected < (int)targets->size() &&
+          (*targets)[selected].kind == Page::IMAGE && FollowFocusedInlineLink(book, ts)) {
+        app.SetInlineLinkFocusActive(false); status_dirty = true;
       }
     } else if (keys & ctrl.link_next) {
       if (MoveInlineLinkFocusSequential(book, ts, 1))
@@ -307,7 +319,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
     } else if (keys & KEY_TOUCH) {
       app.ResetPageRepeat();
       touchPosition mapped = app.MapTouch(input);
-      if (TryFollowTouchLink(book, ts, (int)mapped.px, (int)mapped.py)) {
+      if (TryTouchTarget(book, ts, (int)mapped.px, (int)mapped.py, false)) {
         status_dirty = true;
       } else {
         const bool forward_zone =

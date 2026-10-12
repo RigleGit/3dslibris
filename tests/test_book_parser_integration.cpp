@@ -57,6 +57,92 @@ text_search::Match ExpectSearch(Book *book, const char *phrase, bool expected = 
   return engine.GetMatch();
 }
 
+void TestOriginalImageResourceAndDrawBounds() {
+  for (unsigned char orientation : {0, 1, 2}) {
+    Text text;
+    text.capture_rendered_text = true;
+    text.landscape = orientation == 2;
+    text.display.width = orientation == 2 ? 400 : 240;
+    text.display.height = 400; // real square-buffer stride
+    std::vector<u16> left(400*400, 0xffff), right(400*400, 0xffff);
+    text.screenleft = left.data(); text.screenright = right.data();
+    BookContext ctx; ctx.text = &text; ctx.orientation = &orientation;
+    Book book(ctx);
+    test::ExpectTrue("store original FB2 resource", book.StoreFb2InlineImage("red", "iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAIAAAB/FOjAAAAAFElEQVR4nGP4z8BAEiJN9agGIhEAJMZ/gd5KfaIAAAAASUVORK5CYII="));
+    const u16 image = book.RegisterInlineImage("fb2:red");
+    std::vector<u8> original;
+    test::ExpectTrue("read original bytes", book.ReadInlineImageSource(image, &original));
+    test::ExpectTrue("original PNG dimensions retained", original.size() > 24 &&
+        original[19] == 16 && original[23] == 8);
+    for (int reading_screen = 0; reading_screen < 2; ++reading_screen) {
+      const bool is_left = (orientation != 1) == (reading_screen == 0);
+      auto &pixels = is_left ? left : right;
+      text.SetScreen(pixels.data());
+      for (int mode : {0,1,2}) for (int align : {0,1,2}) {
+        std::fill(pixels.begin(), pixels.end(), 0xffff);
+        text.SetPen(230,40);
+        InlineImageLayoutPlan plan{};
+        plan.mode = (InlineImageLayoutMode)mode; plan.draw_width = 20; plan.draw_height = 10;
+        InlineImageDrawBounds bounds{};
+        test::ExpectTrue("draw real source image", book.DrawInlineImage(&text,image,&plan,reading_screen,align,&bounds));
+        int x0=400,y0=400,x1=0,y1=0;
+        for (int y=0;y<400;++y) for(int x=0;x<400;++x) {
+          if (pixels[y*400+x] != 0xffff) {
+            test::ExpectTrue("source red survives decode and cache", pixels[y*400+x] == 0xf800);
+            x0=std::min(x0,x); y0=std::min(y0,y); x1=std::max(x1,x+1); y1=std::max(y1,y+1);
+          }
+        }
+        test::ExpectTrue("returned bounds equal actual painted pixels",
+            bounds.x0==x0 && bounds.y0==y0 && bounds.x1==x1 && bounds.y1==y1);
+      }
+    }
+    test::ExpectTrue("reading original never changes pages", book.GetPageCount() == 0 && book.GetPosition() == 0);
+    book.ClearInlineImages();
+    test::ExpectFalse("closed resource cannot be reused", book.ReadInlineImageSource(image,&original));
+  }
+}
+
+void TestImageResourcesAcrossBookFormats() {
+  const char *folder = getenv("TEST_IMAGE_VIEWER_DIR");
+  test::ExpectTrue("image fixture directory", folder != nullptr);
+  const std::string cache = std::string(folder) + "/cache";
+  mkdir(cache.c_str(), 0700);
+  mobi_page_cache::SetCacheDirForTest(cache.c_str());
+  epub_page_cache::SetCacheDirForTest(cache.c_str());
+  for (const char *name : {"images.epub", "images.mobi", "images.fb2"}) {
+    Text text; BookContext ctx; ctx.text = &text;
+    text.display.width = 240;
+    Book book(ctx); book.SetFolderName(folder); book.SetFileName(name);
+    if (std::string(name) == "images.epub") book.format = FORMAT_EPUB;
+    test::ExpectEq(name, book_parser::Open(&book), 0);
+    const int pages = book.GetPageCount(), position = book.GetPosition();
+    test::ExpectTrue("image book spans pages", pages > 1);
+    test::ExpectTrue("format registers all original resources", book.GetInlineImageCount() >= 3);
+    bool found_detail = false;
+    for (u16 id = 0; id < book.GetInlineImageCount(); ++id) {
+      std::vector<u8> bytes;
+      test::ExpectTrue("format reads original image", book.ReadInlineImageSource(id,&bytes));
+      if (bytes.size() > 24 && bytes[0] == 0x89 && bytes[16] == 0 && bytes[17] == 0 &&
+          bytes[18] == 4 && bytes[19] == 0) found_detail = true;
+    }
+    test::ExpectTrue("1024px detail never replaced by page thumbnail", found_detail);
+    test::ExpectEq("resource reading preserves page count",book.GetPageCount(),pages);
+    test::ExpectEq("resource reading preserves position",book.GetPosition(),position);
+    book.Close();
+    test::ExpectEq("book close releases image resources",book.GetInlineImageCount(),0);
+    // Exercise warm EPUB/MOBI cache reconstruction as well as a cold parse.
+    if (std::string(name) == "images.epub") book.format = FORMAT_EPUB;
+    test::ExpectEq("image book reopens", book_parser::Open(&book),0);
+    test::ExpectEq("image book reopens at identical layout",book.GetPageCount(),pages);
+    test::ExpectTrue("cache retains image resource mapping",book.GetInlineImageCount() >= 3);
+    for (u16 id = 0; id < book.GetInlineImageCount(); ++id) {
+      std::vector<u8> bytes;
+      test::ExpectTrue("reopened image resolves original",book.ReadInlineImageSource(id,&bytes));
+    }
+    book.Close();
+  }
+}
+
 void TestOdtSearch() {
   Text text;
   BookContext ctx;
@@ -753,6 +839,8 @@ void TestNullAndEmptyInputHandling() {
 } // namespace
 
 int main() {
+  TestOriginalImageResourceAndDrawBounds();
+  TestImageResourcesAcrossBookFormats();
   TestDispatchContentAndCloseBetweenFormats();
   TestOdtSearch();
   TestFb2NestedNavigation();

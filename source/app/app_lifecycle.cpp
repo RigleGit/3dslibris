@@ -81,7 +81,8 @@ void App::HandleAppletHook(APT_HookType hook)
 {
   // libctru invokes suspend/sleep hooks synchronously from aptMainLoop.
   // Its body will not run again until HOME/sleep returns. Prepare here, but
-  // keep this path free of SD writes, rendering, joins and cache destruction.
+  // keep this path free of SD writes, rendering, joins and book cache destruction.
+  // The reader may release its isolated CPU-only image-viewer buffers here.
   switch (hook)
   {
   case APTHOOK_ONSUSPEND:

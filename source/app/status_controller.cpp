@@ -194,6 +194,14 @@ void StatusController::UpdateStatus()
     } else if (mode == AppMode::Opening) {
       snprintf(page_msg, sizeof(page_msg), "%s", kOpeningStatusLabel);
     }
+    if (app_.IsInlineLinkFocusActive() && current_book && current_book->GetPage()) {
+      const auto &items = current_book->GetPage()->GetRenderedSelectables();
+      const int selected = current_book->GetFocusedInlineLinkIndex();
+      const char *hint = "A:link";
+      if (selected >= 0 && selected < (int)items.size() && items[selected].kind == Page::IMAGE)
+        hint = items[selected].href_id ? "A:image X:link" : "A:image";
+      snprintf(page_msg, sizeof(page_msg), "%s", hint);
+    }
     const int page_width =
         app_.ts->GetStringWidth(page_msg, TEXT_STYLE_BROWSER);
     const int page_x = std::max(
@@ -300,7 +308,14 @@ void StatusController::UpdateStatus()
     int right_edge = 232;
     if (mode == AppMode::Book)
     {
-      const char *hint = app_.IsInlineLinkFocusActive() ? "A:go" : "Y:lnk";
+      const char *hint = "Y:select";
+      if (app_.IsInlineLinkFocusActive()) {
+        hint = "A:go";
+        const auto &items = current_book->GetPage()->GetRenderedSelectables();
+        const int selected = current_book->GetFocusedInlineLinkIndex();
+        if (selected >= 0 && selected < (int)items.size() && items[selected].kind == Page::IMAGE)
+          hint = items[selected].href_id ? "A:image X:link" : "A:image";
+      }
       if (hint)
       {
         int hw = app_.ts->GetStringWidth(hint, TEXT_STYLE_BROWSER);

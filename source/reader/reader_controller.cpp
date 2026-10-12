@@ -1,5 +1,6 @@
 #include "app/reader_controller.h"
 #include "reader/search_session.h"
+#include "reader/image_viewer_session.h"
 
 #include "app/app.h"
 
@@ -8,6 +9,10 @@ ReaderController::ReaderController(App &app)
       progress_autosave_dirty_(false), last_progress_persist_ms_(0) {}
 
 ReaderController::~ReaderController() {}
+
+void App::OpenImageViewer() { reader_controller_->OpenImageViewer(); }
+void App::RunImageViewerFrame(const FrameInput &input) { reader_controller_->RunImageViewerFrame(input); }
+void App::InvalidateImageViewer() { reader_controller_->InvalidateImageViewer(); }
 
 void App::OpenSearch() { reader_controller_->OpenSearch(); }
 void App::RunSearchFrame(const FrameInput &input) { reader_controller_->RunSearchFrame(input); }

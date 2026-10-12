@@ -17,4 +17,5 @@ enum class AppMode : u8
   Opening = 10,
   BookInfo = 11,
   Search = 12,
+  ImageViewer = 13,
 };

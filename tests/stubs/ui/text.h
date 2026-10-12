@@ -56,6 +56,7 @@ public:
   u8 GetHeight() const { return (u8)pixelsize; }
   u8 GetAdvance(u32) const { return (u8)(pixelsize * 8 / 14); }
   u8 GetAdvance(u32, u8) const { return (u8)(pixelsize * 8 / 14); }
+  u16 GetBgColor() const { return ((bgcolor.r >> 3) << 11) | ((bgcolor.g >> 2) << 5) | (bgcolor.b >> 3); }
   u8 GetPixelSize() const { return (u8)pixelsize; }
   void SetPixelSize(u8 size) { pixelsize = (int)size; }
   int GetStringAdvance(const char *) { return 0; }

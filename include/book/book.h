@@ -326,6 +326,10 @@ public:
   void ClearChapterDocStartPages();
   const std::string *GetInlineImagePath(u16 id) const;
   u32 GetInlineImageCount() const;
+  // Original compressed resource, using the existing format limits/resolver.
+  bool ReadInlineImageSource(u16 id, std::vector<u8> *bytes) {
+    return LoadInlineImageSource(id, bytes);
+  }
   bool GetInlineImageMetadata(u16 id, InlineImageMetadata *out);
   void SetInlineImageFollowTextLines(u16 id, u8 lines);
   u8 GetInlineImageFollowTextLines(u16 id) const;

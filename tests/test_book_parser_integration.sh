@@ -65,6 +65,8 @@ CBZ_TMP="$(mktemp -d)"
 trap 'rm -rf "$CBZ_TMP"' EXIT
 export TEST_CBZ_READING_DIR="$CBZ_TMP"
 export TEST_MOBI_READING_DIR="$CBZ_TMP/mobi"
+export TEST_IMAGE_VIEWER_DIR="$CBZ_TMP/images"
+python3 "$TEST_ROOT/tests/fixtures/generate_image_viewer_books.py" "$TEST_IMAGE_VIEWER_DIR"
 export TEST_EPUB_RECOVERY_DIR="$CBZ_TMP/epub"
 python3 "$TEST_ROOT/tests/fixtures/generate_epub_recovery.py" "$TEST_EPUB_RECOVERY_DIR"
 python3 "$TEST_ROOT/tests/fixtures/generate_mobi_reading.py" "$TEST_MOBI_READING_DIR"
@@ -110,7 +112,7 @@ PYFIXTURE
   "$TEST_ROOT/tests/stubs/book_reflow_worker_stub.cpp" \
   "$TEST_ROOT/tests/stubs/book_worker_lifecycle_stub.cpp" \
   "$TEST_ROOT/tests/stubs/book_fixed_layout_stubs.cpp" \
-  "$TEST_ROOT/tests/stubs/book_inline_image_stub.cpp" \
+  "$TEST_ROOT/source/book/book_inline_image.cpp" \
   "$TEST_ROOT/tests/stubs/epub_cover_stub.cpp" \
   "$TEST_ROOT/tests/stubs/fixed_format_parser_stubs.cpp" \
   "$TEST_ROOT/tests/stubs/mupdf_bidi_stub.cpp" \

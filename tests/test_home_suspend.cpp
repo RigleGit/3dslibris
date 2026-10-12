@@ -2,6 +2,9 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include "reader/image_viewer_session.h"
+// Rendering is not part of this CPU-only lifecycle test.
+Button::Button() {}
 #define DBG_LOGF(...) ((void)0)
 enum APT_HookType { APTHOOK_ONSUSPEND, APTHOOK_ONRESTORE, APTHOOK_ONSLEEP,
                     APTHOOK_ONWAKEUP, APTHOOK_ONEXIT };
@@ -15,9 +18,11 @@ struct State {
 };
 static std::vector<std::string> events;
 struct Book;
+struct ReaderController;
 struct App {
   State lifecycle_state_;
   Book *current=nullptr;
+  ReaderController *reader=nullptr;
   bool touch=true;
   int last_x=10, last_y=20, deferred=30;
   Book *GetCurrentBook() { return current; }
@@ -57,16 +62,19 @@ void InitMuPdfWorker(Book::MuPdfState *s) {
 }
 struct ReaderController {
   App &app_;
+  std::unique_ptr<ReaderImageViewerSession> image_viewer_;
   explicit ReaderController(App &app) : app_(app) {}
   void OnAppletSuspendRequested();
+  void SuspendImageViewer();
 };
 void App::OnReaderAppletSuspendRequested() {
   assert(lifecycle_state_.suspended && !lifecycle_state_.resume);
-  ReaderController(*this).OnAppletSuspendRequested();
+  reader->OnAppletSuspendRequested();
 }
 #include "home_suspend_under_test.inc"
 int main() {
   App app; Book b; app.current=&b;
+  ReaderController reader(app); app.reader=&reader;
   app.lifecycle_state_.resume=true;
   // The complete synchronous hook path must prepare the current book before
   // aptMainLoop yields; only the main-loop resume path may join or free.
@@ -88,8 +96,28 @@ int main() {
   assert((events == std::vector<std::string>{"cbz-signal", "cbz-restart"}));
   events.clear();
   b.format=Book::Reflowable;
+  reader.image_viewer_.reset(new ReaderImageViewerSession);
+  ReaderImageViewerSession &viewer = *reader.image_viewer_;
+  viewer.book = &b; viewer.page = 7; viewer.selection = 3;
+  viewer.session = 42; viewer.revision = 8;
+  viewer.loading = viewer.dirty = viewer.wait_release = false;
+  viewer.preview_ready = true;
+  viewer.viewport.zoom_index = 5;
+  viewer.viewport.center_x = 0.75f;
+  viewer.viewport.interaction_active = true;
+  assert(viewer.image.Allocate(1024, 1024));
+  assert(viewer.preview.Allocate(64, 64));
   app.HandleAppletHook(APTHOOK_ONSUSPEND);
   assert(events.empty());
+  assert(!viewer.image.pixels && !viewer.preview.pixels);
+  assert(viewer.suspended && viewer.loading && viewer.dirty && viewer.wait_release);
+  assert(!viewer.preview_ready && !viewer.viewport.interaction_active);
+  assert(viewer.book == &b && viewer.page == 7 && viewer.selection == 3);
+  assert(viewer.session == 42 && viewer.revision == 8);
+  assert(viewer.viewport.zoom_index == 5 && viewer.viewport.center_x == 0.75f);
+  // Repeated HOME/sleep notifications must remain safe and keep the session.
+  app.HandleAppletHook(APTHOOK_ONSLEEP);
+  assert(!viewer.image.pixels && !viewer.preview.pixels && events.empty());
   b.format=Book::Pdf; b.pdf.worker=nullptr;
   app.HandleAppletHook(APTHOOK_ONSUSPEND);
   assert(events.empty());
@@ -102,5 +130,5 @@ int main() {
   assert(events.empty());
   app.HandleAppletHook(APTHOOK_ONEXIT);
   assert(app.lifecycle_state_.exit && events.empty());
-  puts("PASS: HOME hooks signal only; resume joins before releasing and restarting");
+  puts("PASS: HOME releases isolated image buffers and preserves session; fixed-layout resume joins before releasing");
 }
