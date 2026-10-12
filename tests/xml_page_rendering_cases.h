@@ -9,6 +9,41 @@
 
 namespace {
 
+// Page consumes geometry supplied by the image renderer; it must not guess
+// a full-width band or merge a linked image into neighboring text targets.
+void TestImageSelectionGeometry() {
+  TestCtx tc;
+  tc.text.capture_rendered_text = true;
+  Text &text = tc.text;
+  u16 left = 0, right = 0;
+  text.screenleft = &left; text.screenright = &right;
+  Book book(tc.ctx);
+  Page &page = *book.AppendPage();
+  InlineImageLayoutPlan plan{};
+  plan.mode = INLINE_IMAGE_LAYOUT_INLINE;
+  plan.draw_width = 40; plan.draw_height = 20;
+  ConfigureBookInlineImageStub({40,20,true}, plan, true);
+  ConfigureBookInlineImageDrawBounds({31,17,71,37});
+  const u32 tokens[] = {TEXT_LINK_START, 1, 'a', TEXT_IMAGE, 5,
+      'b', TEXT_LINK_END, TEXT_SCREEN_BREAK, TEXT_IMAGE, 5};
+  page.SetBuffer(tokens, 10);
+  page.Draw(&text);
+  const auto &items = page.GetRenderedSelectables();
+  ExpectIntEq("linked image keeps both text fragments", items.size(), 4);
+  ExpectTrue("image is a single target with two actions",
+      items[1].kind == Page::IMAGE && items[1].href_id == 1 && items[1].image_id == 5);
+  ExpectTrue("selection consumes actual image bounds",
+      items[1].bounds.x0 == 31 && items[1].bounds.y0 == 17 &&
+      items[1].bounds.x1 == 71 && items[1].bounds.y1 == 37);
+  ExpectTrue("repeated images retain occurrence and screen",
+      items[1].token_offset == 3 && items[3].token_offset == 8 &&
+      items[1].screen_index == 0 && items[3].screen_index == 1);
+  const u32 plain[] = {'x'};
+  page.SetBuffer(plain, 1); page.Draw(&text);
+  ExpectTrue("redraw replaces stale image targets", page.GetRenderedSelectables().empty());
+  ResetBookInlineImageStubState();
+}
+
 void TestSearchHighlightGeometry() {
   TestCtx tc;
   Text &text = tc.text;

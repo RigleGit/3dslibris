@@ -13,11 +13,14 @@ namespace {
 InlineImageMetadata g_stub_meta{};
 InlineImageLayoutPlan g_stub_plan{};
 bool g_stub_plan_result = false;
+InlineImageDrawBounds g_stub_bounds{};
+bool g_stub_draw = false;
 
 } // namespace
 
 void ResetBookInlineImageStubState() {
   g_stub_meta = InlineImageMetadata{};
+  g_stub_draw = false;
   g_stub_plan = InlineImageLayoutPlan{};
   g_stub_plan_result = false;
 }
@@ -28,6 +31,10 @@ void ConfigureBookInlineImageStub(const InlineImageMetadata &meta,
   g_stub_meta = meta;
   g_stub_plan = plan;
   g_stub_plan_result = plan_result;
+}
+
+void ConfigureBookInlineImageDrawBounds(const InlineImageDrawBounds &bounds) {
+  g_stub_bounds = bounds; g_stub_draw = true;
 }
 
 u16 Book::RegisterInlineImage(const std::string &) { return 0; }
@@ -69,8 +76,9 @@ bool Book::PlanInlineImageLayout(Text *, u16, int, int, int, bool,
   return g_stub_plan_result;
 }
 bool Book::DrawInlineImage(Text *, u16, const InlineImageLayoutPlan *, int,
-                           u8) {
-  return false;
+                           u8, InlineImageDrawBounds *bounds) {
+  if (bounds) *bounds = g_stub_bounds;
+  return g_stub_draw;
 }
 
 const std::string *Book::GetInlineImagePath(u16) const { return nullptr; }

@@ -136,6 +136,7 @@ void Page::InvalidateLinkCountCache() {
 }
 
 void Page::SyncBufferAlias() {
+  rendered_selectables_.clear();
   buf = storage.empty() ? NULL : storage.data();
   length = (int)storage.size();
   capacity = (int)storage.capacity();
@@ -186,10 +187,10 @@ void Page::FreeBuffer() {
   SyncBufferAlias();
 }
 
-size_t Page::GetInlineLinkCount() const {
+size_t Page::GetSelectableCount() const {
   if (cached_inline_link_count_ < 0)
     cached_inline_link_count_ =
-        (int)inline_link_utils::CountInlineLinksInBuffer(buf, length);
+        (int)inline_link_utils::CountSelectableItemsInBuffer(buf, length);
   return (size_t)cached_inline_link_count_;
 }
 
@@ -237,7 +238,7 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
   bool link_active = false;
   u16 active_link_href_id = 0;
   int active_link_render_index = -1;
-  rendered_inline_links_.clear();
+  rendered_selectables_.clear();
 
 #ifdef OFFSCREEN
   // Draw offscreen.
@@ -423,17 +424,6 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
         active_link_href_id = (u16)buf[i + 1];
         link_active = active_link_href_id != 0;
         active_link_render_index = -1;
-        if (link_active) {
-          InlineLinkRenderEntry entry{};
-          entry.href_id = active_link_href_id;
-          entry.screen_index = on_first_screen ? 0 : 1;
-          entry.bounds.x0 = 0;
-          entry.bounds.y0 = 0;
-          entry.bounds.x1 = 0;
-          entry.bounds.y1 = 0;
-          rendered_inline_links_.push_back(entry);
-          active_link_render_index = (int)rendered_inline_links_.size() - 1;
-        }
         i += 2;
       } else {
         i++;
@@ -694,6 +684,7 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
       next_image_context = INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION;
     } else if (c == TEXT_IMAGE) {
       if (i + 1 < length) {
+        const u32 image_token = i;
         u16 image_id = (u16)buf[i + 1];
         i += 2;
 
@@ -749,16 +740,18 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
                      ts->GetPenY());
         }
 
+#if defined(DSLIBRIS_DEBUG) && PAGE_RENDER_TRACE
         const int image_pen_x = (int)ts->GetPenX();
-        const int image_line_top = (int)ts->GetPenY() - ts->GetHeight();
+#endif
         const u8 draw_image_align =
             image_plan.mode == INLINE_IMAGE_LAYOUT_BAND
                 ? page_alignment_utils::ResolveBandImageAlignMode(
                       next_image_align, (int)paragraph_align)
                 : next_image_align;
+        InlineImageDrawBounds image_bounds{};
         const bool image_drawn =
             book->DrawInlineImage(ts, image_id, &image_plan, current_screen,
-                                  draw_image_align);
+                                  draw_image_align, &image_bounds);
 #if defined(DSLIBRIS_DEBUG) && PAGE_RENDER_TRACE
         DBG_LOGF_CAT(
             ts->GetReporter(), DBG_LEVEL_DEBUG, DBG_CAT_EPUB,
@@ -768,26 +761,21 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
             image_plan.draw_height, image_drawn ? 1 : 0,
             (int)draw_image_align);
 #endif
-        if (image_drawn && link_active && active_link_render_index >= 0 &&
-            active_link_render_index < (int)rendered_inline_links_.size()) {
-          InlineLinkRenderEntry &entry =
-              rendered_inline_links_[(size_t)active_link_render_index];
-          entry.screen_index = on_first_screen ? 0 : 1;
-          int image_x0 = image_pen_x;
-          int image_y0 = image_line_top;
-          int image_x1 = image_x0 + image_plan.draw_width;
-          int image_y1 = image_y0 + image_plan.draw_height;
-          if (image_plan.mode == INLINE_IMAGE_LAYOUT_PAGE) {
-            image_x0 = 0;
-            image_y0 = 0;
-            image_x1 = ts->LogicalWidth();
-            image_y1 = ts->LogicalHeight();
-          } else if (image_plan.mode == INLINE_IMAGE_LAYOUT_BAND) {
-            image_x0 = ts->margin.left;
-            image_x1 = ts->LogicalWidth() - ts->margin.right;
-          }
-          ExpandLinkBounds(&entry.bounds, image_x0, image_y0, image_x1,
-                           image_y1);
+        // An image is one target, even inside a link. Text on either side
+        // remains independently selectable, and repeated resources keep their
+        // occurrence identity in the page token stream.
+        active_link_render_index = -1;
+        if (image_drawn && image_bounds.x1 > image_bounds.x0 &&
+            image_bounds.y1 > image_bounds.y0) {
+          SelectableRenderEntry entry{};
+          entry.kind = IMAGE;
+          entry.image_id = image_id;
+          entry.token_offset = image_token;
+          entry.href_id = link_active ? active_link_href_id : 0;
+          entry.screen_index = current_screen;
+          entry.bounds = {image_bounds.x0, image_bounds.y0,
+                          image_bounds.x1, image_bounds.y1};
+          rendered_selectables_.push_back(entry);
         }
 
         bool stop_page_draw = false;
@@ -948,11 +936,19 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
                          (int)ts->GetPenY() - ts->GetHeight(), glyph_x1,
                          (int)ts->GetPenY() + 2);
       }
-      if (link_active && active_link_render_index >= 0 &&
-          active_link_render_index < (int)rendered_inline_links_.size()) {
-        InlineLinkRenderEntry &entry =
-            rendered_inline_links_[(size_t)active_link_render_index];
-        entry.screen_index = on_first_screen ? 0 : 1;
+      if (link_active && glyph_x1 > glyph_x0) {
+        const u8 screen_index = on_first_screen ? 0 : 1;
+        if (active_link_render_index < 0 ||
+            rendered_selectables_[(size_t)active_link_render_index].screen_index != screen_index) {
+          SelectableRenderEntry entry{};
+          entry.kind = TEXT_LINK;
+          entry.href_id = active_link_href_id;
+          entry.token_offset = i - 1;
+          entry.screen_index = screen_index;
+          rendered_selectables_.push_back(entry);
+          active_link_render_index = (int)rendered_selectables_.size() - 1;
+        }
+        SelectableRenderEntry &entry = rendered_selectables_[(size_t)active_link_render_index];
         ExpandLinkBounds(&entry.bounds, glyph_x0, base_pen_y - ts->GetHeight(),
                          glyph_x1, base_pen_y + 2);
       }
@@ -983,6 +979,7 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
     }
   }
 
+  cached_inline_link_count_ = (int)rendered_selectables_.size();
   flush_render_line("page-end");
   if (in_preformatted_block)
     ts->SetClipToContentEnabled(saved_clip_to_content);
@@ -990,9 +987,9 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
   if (book) {
     const int focused_index = book->GetFocusedInlineLinkIndex();
     if (focused_index >= 0 &&
-        focused_index < (int)rendered_inline_links_.size()) {
-      const InlineLinkRenderEntry &entry =
-          rendered_inline_links_[(size_t)focused_index];
+        focused_index < (int)rendered_selectables_.size()) {
+      const SelectableRenderEntry &entry =
+          rendered_selectables_[(size_t)focused_index];
       if (inline_link_utils::IsValidRect(entry.bounds)) {
         u16 *saved_screen = ts->GetScreen();
         u16 *target = (entry.screen_index == 0) ? first_screen : second_screen;

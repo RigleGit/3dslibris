@@ -349,7 +349,7 @@ void TestEpubPageCacheRoundtrip() {
              href && *href == "OEBPS/ch1.xhtml#section");
   Page *loaded_linked_page = book2->GetPage(1);
   ExpectTrue("cache roundtrip: link token page survives",
-             loaded_linked_page && loaded_linked_page->GetInlineLinkCount() == 1);
+             loaded_linked_page && loaded_linked_page->GetSelectableCount() == 1);
   u16 anchor_page = 0;
   ExpectTrue("cache roundtrip: inline anchor target survives",
              book2->FindChapterAnchorPage("OEBPS/ch1.xhtml#section",

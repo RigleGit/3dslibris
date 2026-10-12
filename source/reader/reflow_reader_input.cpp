@@ -33,18 +33,18 @@ static const int kInlineLinkSecondScreenYOffset = 420;
 static const int kTouchLinkMinHitPx = 12;
 static const int kTouchLinkPadPx = 4;
 
-static const std::vector<Page::InlineLinkRenderEntry> *
+static const std::vector<Page::SelectableRenderEntry> *
 CurrentPageInlineLinks(Book *book) {
   if (!book || book->GetPageCount() == 0 || book->IsFixedLayout())
     return NULL;
   Page *page = book->GetPage();
   if (!page)
     return NULL;
-  return &page->GetRenderedInlineLinks();
+  return &page->GetRenderedSelectables();
 }
 
 static bool CurrentPageHasInlineLinks(Book *book) {
-  const std::vector<Page::InlineLinkRenderEntry> *links =
+  const std::vector<Page::SelectableRenderEntry> *links =
       CurrentPageInlineLinks(book);
   return links && !links->empty();
 }
@@ -59,7 +59,7 @@ static void ExitInlineLinkFocus(App *app, Book *book) {
 static bool EnterInlineLinkFocus(App *app, Book *book, Text *ts) {
   if (!app || !book || !ts)
     return false;
-  const std::vector<Page::InlineLinkRenderEntry> *links =
+  const std::vector<Page::SelectableRenderEntry> *links =
       CurrentPageInlineLinks(book);
   if (!links || links->empty())
     return false;
@@ -77,13 +77,13 @@ static size_t InlineLinkCountForPage(Book *book, int page_index) {
       page_index >= book->GetPageCount())
     return 0;
   Page *page = book->GetPage(page_index);
-  return page ? page->GetInlineLinkCount() : 0;
+  return page ? page->GetSelectableCount() : 0;
 }
 
 static bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction) {
   if (!book || !ts || direction == 0 || book->IsFixedLayout())
     return false;
-  const std::vector<Page::InlineLinkRenderEntry> *links =
+  const std::vector<Page::SelectableRenderEntry> *links =
       CurrentPageInlineLinks(book);
   if (!links || links->empty())
     return false;
@@ -133,7 +133,7 @@ static bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction) {
 static bool FollowFocusedInlineLink(Book *book, Text *ts) {
   if (!book || !ts)
     return false;
-  const std::vector<Page::InlineLinkRenderEntry> *links =
+  const std::vector<Page::SelectableRenderEntry> *links =
       CurrentPageInlineLinks(book);
   if (!links || links->empty())
     return false;
@@ -158,14 +158,14 @@ static bool FollowFocusedInlineLink(Book *book, Text *ts) {
 static bool TryFollowTouchLink(Book *book, Text *ts, int tx, int ty) {
   if (!book || !ts)
     return false;
-  const std::vector<Page::InlineLinkRenderEntry> *links =
+  const std::vector<Page::SelectableRenderEntry> *links =
       CurrentPageInlineLinks(book);
   if (!links || links->empty())
     return false;
 
   int best_index = -1;
   for (int i = 0; i < (int)links->size(); ++i) {
-    const Page::InlineLinkRenderEntry &entry = (*links)[(size_t)i];
+    const Page::SelectableRenderEntry &entry = (*links)[(size_t)i];
     if (entry.screen_index != 1)
       continue;
 

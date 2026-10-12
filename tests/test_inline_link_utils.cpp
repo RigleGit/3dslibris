@@ -88,21 +88,31 @@ void TestLinkRectHelpers() {
   ExpectFalse("rect invalid", IsValidRect({5, 5, 5, 10}));
 }
 
-void TestCountInlineLinksInBuffer() {
+void TestCountSelectableItemsInBuffer() {
   using namespace inline_link_utils;
 
   const uint32_t one_link[] = {'a', TEXT_LINK_START, 7, 'b', TEXT_LINK_END};
-  ExpectEq("one link marker", (int)CountInlineLinksInBuffer(one_link, 5), 1);
+  ExpectEq("one link marker", (int)CountSelectableItemsInBuffer(one_link, 5), 1);
 
   const uint32_t two_links[] = {TEXT_LINK_START, 1, 'a', TEXT_LINK_END,
                                 TEXT_LINK_START, 2, 'b', TEXT_LINK_END};
-  ExpectEq("two link markers", (int)CountInlineLinksInBuffer(two_links, 8), 2);
+  ExpectEq("two link markers", (int)CountSelectableItemsInBuffer(two_links, 8), 2);
 
   const uint32_t incomplete_link[] = {'a', TEXT_LINK_START};
   ExpectEq("incomplete link marker ignored",
-           (int)CountInlineLinksInBuffer(incomplete_link, 2), 0);
+           (int)CountSelectableItemsInBuffer(incomplete_link, 2), 0);
 
-  ExpectEq("empty buffer", (int)CountInlineLinksInBuffer(NULL, 0), 0);
+  ExpectEq("empty buffer", (int)CountSelectableItemsInBuffer(NULL, 0), 0);
+  const uint32_t mixed[] = {TEXT_LINK_START, 3, 'a', TEXT_IMAGE, 4,
+      'b', TEXT_LINK_END, TEXT_IMAGE, 4};
+  ExpectEq("text fragments and repeated linked images",
+           (int)CountSelectableItemsInBuffer(mixed, 9), 4);
+  const uint32_t parameters[] = {TEXT_FONT_SIZE, TEXT_LINK_START,
+      TEXT_IMAGE_AUTHOR_WIDTH, TEXT_IMAGE, TEXT_HR_BOUNDS, TEXT_LINK_START,
+      TEXT_IMAGE, TEXT_IMAGE};
+  ExpectEq("parameters and truncated image are not targets",
+           (int)CountSelectableItemsInBuffer(parameters, 8), 0);
+
 }
 
 } // namespace
@@ -111,6 +121,6 @@ int main() {
   TestResolveInternalHref();
   TestLinkNavigation();
   TestLinkRectHelpers();
-  TestCountInlineLinksInBuffer();
+  TestCountSelectableItemsInBuffer();
   return 0;
 }

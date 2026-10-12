@@ -28,6 +28,6 @@ int RectCenterX(const LinkRect &rect);
 int RectCenterY(const LinkRect &rect);
 int FindNeighborIndex(const std::vector<LinkRect> &rects, int current_index,
                       InlineLinkNavDirection direction);
-size_t CountInlineLinksInBuffer(const uint32_t *buffer, int length);
+size_t CountSelectableItemsInBuffer(const uint32_t *buffer, int length);
 
 } // namespace inline_link_utils

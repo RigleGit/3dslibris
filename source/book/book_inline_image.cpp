@@ -796,7 +796,9 @@ bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
 
 bool Book::DrawInlineImage(Text *ts, u16 image_id,
                            const InlineImageLayoutPlan *plan_ptr,
-                           int current_screen, u8 align_mode) {
+                           int current_screen, u8 align_mode,
+                           InlineImageDrawBounds *draw_bounds) {
+  if (draw_bounds) *draw_bounds = InlineImageDrawBounds{};
   if (!ts)
     return false;
 
@@ -877,6 +879,12 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
 
   auto blit_pixels = [&](const InlineImageCacheEntry &entry, int dst_x,
                          int dst_y) {
+    if (draw_bounds) {
+      draw_bounds->x0 = std::max(0, dst_x);
+      draw_bounds->y0 = std::max(0, dst_y);
+      draw_bounds->x1 = std::min(screen_w, dst_x + entry.width);
+      draw_bounds->y1 = std::min(screen_h, dst_y + entry.height);
+    }
     u16 *dst = ts->GetScreen();
     const int stride = ts->BufferStride();
     for (int y = 0; y < entry.height; y++) {

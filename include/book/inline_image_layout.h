@@ -12,6 +12,11 @@ enum InlineImageContext {
   INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION
 };
 
+// Exclusive bounds of pixels actually drawn, after screen clipping.
+struct InlineImageDrawBounds {
+  int x0, y0, x1, y1;
+};
+
 struct InlineImageMetadata {
   int width;
   int height;

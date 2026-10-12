@@ -6,3 +6,5 @@ void ResetBookInlineImageStubState();
 void ConfigureBookInlineImageStub(const InlineImageMetadata &meta,
                                   const InlineImageLayoutPlan &plan,
                                   bool plan_result);
+
+void ConfigureBookInlineImageDrawBounds(const InlineImageDrawBounds &bounds);

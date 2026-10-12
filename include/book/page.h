@@ -43,7 +43,11 @@ class Book;
 
 class Page {
  public:
-	struct InlineLinkRenderEntry {
+	enum SelectableKind { TEXT_LINK, IMAGE };
+	struct SelectableRenderEntry {
+		SelectableKind kind;
+		u16 image_id;
+		u32 token_offset;
 		u16 href_id;
 		u8 screen_index;
 		inline_link_utils::LinkRect bounds;
@@ -53,7 +57,7 @@ class Page {
 	class Book *book;
 	std::vector<u32> storage;
 	page_search::Events search_events_;
-	std::vector<InlineLinkRenderEntry> rendered_inline_links_;
+	std::vector<SelectableRenderEntry> rendered_selectables_;
 	mutable int cached_inline_link_count_;
 	void DrawNumber(Text *ts, u16 *number_screen);
 	void SyncBufferAlias();
@@ -81,10 +85,10 @@ class Page {
 	void FreeBuffer();
 	const page_search::Events &GetSearchEvents() const { return search_events_; }
 	void SetSearchEvents(const page_search::Events &events) { search_events_ = events; }
-	const std::vector<InlineLinkRenderEntry> &GetRenderedInlineLinks() const {
-		return rendered_inline_links_;
+	const std::vector<SelectableRenderEntry> &GetRenderedSelectables() const {
+		return rendered_selectables_;
 	}
-	size_t GetInlineLinkCount() const;
+	size_t GetSelectableCount() const;
 	//	void Draw();
 	struct Highlight { uint32_t begin, end; };
 	void Draw(Text *ts, const Highlight *highlight = NULL);

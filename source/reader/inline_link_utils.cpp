@@ -116,15 +116,45 @@ int FindNeighborIndex(const std::vector<LinkRect> &rects, int current_index,
   return best_index;
 }
 
-size_t CountInlineLinksInBuffer(const uint32_t *buffer, int length) {
+size_t CountSelectableItemsInBuffer(const uint32_t *buffer, int length) {
   if (!buffer || length <= 1)
     return 0;
 
   size_t count = 0;
-  for (int i = 0; i + 1 < length; ++i) {
-    if (buffer[i] == TEXT_LINK_START && buffer[i + 1] != 0) {
-      count++;
-      i++;
+  bool linked = false, text_fragment = false;
+  for (int i = 0; i < length; ++i) {
+    const uint32_t token = buffer[i];
+    switch (token) {
+    case TEXT_LINK_START:
+      linked = i + 1 < length && buffer[i + 1] != 0;
+      text_fragment = false;
+      ++i;
+      break;
+    case TEXT_LINK_END:
+      linked = text_fragment = false;
+      break;
+    case TEXT_IMAGE:
+      if (i + 1 < length) ++count;
+      text_fragment = false;
+      ++i;
+      break;
+    case TEXT_SCREEN_BREAK:
+      text_fragment = false;
+      break;
+    case TEXT_HR_BOUNDS:
+      i += 2;
+      break;
+    case TEXT_FONT_SIZE: case TEXT_IMAGE_ALIGN: case TEXT_IMAGE_AUTHOR_WIDTH:
+    case TEXT_LINE_START_X: case TEXT_RTL_LINE_PX: case TEXT_LINE_PX:
+    case TEXT_UNDERLINE_STYLE:
+      ++i;
+      break;
+    default:
+      if (linked && !text_fragment && token >= 32 && token <= 0x10ffff) {
+        ++count;
+        text_fragment = true;
+      }
+      break;
     }
   }
   return count;

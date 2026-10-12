@@ -1243,6 +1243,7 @@ int main() {
   TestEmbeddedCssAlignedLines();
   TestXmlAlignedLines();
   TestSearchHighlightGeometry();
+  TestImageSelectionGeometry();
   TestSearchSurvivesPagination();
   TestXmlPageRenderingContinuity();
   TestHrAtPageEdgeKeepsFollowingHeading();
