@@ -11,19 +11,19 @@ namespace fixed_layout_blit_utils {
 void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int x, int y, int draw_width,
                                 int draw_height,
-                                const std::vector<u16> &pixels,
+                                const u16 *pixels, size_t pixel_count,
                                 int src_width, int src_height,
                                 int crop_x, int crop_y,
                                 int crop_width, int crop_height,
                                 bool high_quality_filter) {
-  if (!ts || !screen || pixels.empty() || draw_width <= 0 || draw_height <= 0 ||
+  if (!ts || !screen || !pixels || draw_width <= 0 || draw_height <= 0 ||
       src_width <= 0 || src_height <= 0 || crop_width <= 0 ||
       crop_height <= 0) {
     return;
   }
 
   const size_t required_pixels = (size_t)src_width * (size_t)src_height;
-  if (pixels.size() < required_pixels)
+  if (pixel_count < required_pixels)
     return;
 
   crop_x = std::max(0, std::min(src_width - 1, crop_x));
@@ -131,6 +131,17 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
           b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11 + 0.5f);
     }
   }
+}
+
+void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
+                                int x, int y, int draw_width, int draw_height,
+                                const std::vector<u16> &pixels,
+                                int src_width, int src_height,
+                                int crop_x, int crop_y, int crop_width, int crop_height,
+                                bool high_quality_filter) {
+  BlitRgb565BitmapScaledCrop(ts, screen, logical_height, x, y, draw_width, draw_height,
+      pixels.data(), pixels.size(), src_width, src_height, crop_x, crop_y,
+      crop_width, crop_height, high_quality_filter);
 }
 
 } // namespace fixed_layout_blit_utils

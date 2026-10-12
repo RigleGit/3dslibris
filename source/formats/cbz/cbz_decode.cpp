@@ -1,4 +1,5 @@
 #include "formats/cbz/cbz_decode.h"
+#include "formats/common/raster_image_decode.h"
 
 #include "formats/common/fixed_layout_screen_constants.h"
 #include "formats/common/pdf_view_utils.h"
@@ -236,11 +237,8 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
 
     fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_target", 0, 1,
                        0, target.width, target.height);
-    int l2factor = 0;
-    while ((image->w >> (l2factor + 1)) >= target.width + 2 &&
-           (image->h >> (l2factor + 1)) >= target.height + 2 && l2factor < 6) {
-      l2factor++;
-    }
+    int l2factor = raster_image::SubsampleFactor(
+        image->w, image->h, target.width, target.height);
 
     const uint64_t pixmap_start = fixed_perf::Now();
     pixmap = image->get_pixmap(ctx, image, NULL, target.width, target.height,
