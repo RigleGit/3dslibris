@@ -69,6 +69,16 @@ Bookmarks:
 - D-Pad Left/Right: jump between bookmarks
   - current mapping uses Left = next bookmark, Right = previous bookmark
 
+Links and images:
+- Hold Y: select links and images; D-Pad moves between them across pages.
+- A: follow the selected text link or enlarge an EPUB / MOBI / FB2 image.
+- X on a linked image: follow its link. B / Y: leave selection.
+- Touch selects an image while selection is active; press A to open it.
+- In the image viewer, A / B zooms, D-Pad / Circle Pad pans, and the stylus
+  moves the visible region using the touch-screen overview.
+- X fits and centers; Y or touch back returns to the same page and selection.
+- Start returns to the library; Select opens BOOK settings.
+
 Other:
 - X: cycle theme (normal / dark / sepia)
 - Start: return to library

@@ -96,10 +96,18 @@ Standard reading:
 - `A` / `B` / `L` / `R`: turn pages
 - `ZL` / `ZR` (New 3DS): previous or next page
 - `D-Pad Left` / `D-Pad Right`: jump between bookmarks
-- `Y`: toggle bookmark; hold `Y` on a page with inline links to enter link-focus mode, then D-Pad to move and `A` to follow
+- `Y`: toggle bookmark; hold `Y` to select links and images, then D-Pad to move and `A` to open. For linked images, `X` follows the link; `B` / `Y` exits selection.
 - `X`: change background color
 - `SELECT`: open `BOOK` settings
 - `START`: return to library
+
+Book images (`EPUB` / `MOBI` / `FB2`):
+
+- Select an image with hold `Y`, then `A` to enlarge it.
+- `A` / `B`: zoom in / out; `X`: fit and center
+- `D-Pad` / `Circle Pad` / stylus on the overview: move the viewport
+- `Y` or touch `back`: return to the same page and selection
+- `SELECT`: book settings; `START`: library
 
 Text search (`BOOK` settings → `search`):
 
@@ -203,6 +211,7 @@ Expected outputs:
 ## Documentation
 
 - [sdmc/3ds/3dslibris/book/QuickStart.txt](sdmc/3ds/3dslibris/book/QuickStart.txt) - Quickstart guide explaining menus, options, and controls
+- [docs/IMAGE_VIEWER.md](docs/IMAGE_VIEWER.md) - enlarged book images and validation
 - [docs/BOOK_SEARCH.md](docs/BOOK_SEARCH.md) - search behavior, implementation, and validation
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
