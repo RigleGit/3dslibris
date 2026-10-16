@@ -124,6 +124,16 @@ static void TestSettingsInputContext() {
   }
 }
 int main() {
+  for (bool from_book : {false,true}) for(bool fixed : {false,true})
+    for(bool option : {false,true}) for(int page : {0,1,2}) {
+      settings::PrefsPageContext context;
+      context.from_book=from_book; context.fixed_layout=fixed;
+      context.include_line_wrap_fix=option; context.page=page;
+      const unsigned count=settings::PrefsPageButtonCount(context);
+      for(unsigned slot=count;slot<256;++slot)
+        test::ExpectEq("out-of-range preference row has no action",
+            settings::PrefsPageButtonForSlot(context,(unsigned char)slot),-1);
+    }
   TestSettingsActions();
   TestSettingsInputContext();
   settings::PrefsPageContext page;

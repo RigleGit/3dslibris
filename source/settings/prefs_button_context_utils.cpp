@@ -93,6 +93,7 @@ unsigned char PrefsPageButtonCount(const PrefsPageContext &context) {
 
 int PrefsPageButtonForSlot(const PrefsPageContext &context,
                            unsigned char slot) {
+  if (slot >= PrefsPageButtonCount(context)) return -1;
   if (!context.from_book && context.page == 1)
     return kGeneralStyleButtons[slot];
   if (!context.from_book && context.page == 2)
@@ -100,11 +101,13 @@ int PrefsPageButtonForSlot(const PrefsPageContext &context,
   if (context.from_book && context.page == 1)
     return BookPrefsPage2ButtonForSlot(context.fixed_layout, slot);
   if (context.from_book && context.fixed_layout) {
-    for (unsigned char i = 0, visible = 0; ; ++i) {
+    const unsigned count=VisiblePrefsButtonCount(true,context.include_line_wrap_fix);
+    for (unsigned i = 0, visible = 0; i<count; ++i) {
       const int id = PrefsButtonForVisibleSlot(true, context.include_line_wrap_fix, i);
       if (id == PREFS_BUTTON_SEARCH) continue;
       if (visible++ == slot) return id;
     }
+    return -1;
   }
   return PrefsButtonForVisibleSlot(context.from_book,
                                    context.include_line_wrap_fix, slot);
@@ -122,6 +125,7 @@ unsigned char VisiblePrefsButtonCount(bool from_book,
 
 int PrefsButtonForVisibleSlot(bool from_book, bool include_line_wrap_fix,
                               unsigned char slot) {
+  if (slot >= VisiblePrefsButtonCount(from_book,include_line_wrap_fix)) return -1;
   if (!from_book)
     return kGeneralPrefsButtons[slot];
   if (include_line_wrap_fix)
@@ -134,6 +138,7 @@ unsigned char ExtraPrefsButtonCount() {
 }
 
 int ExtraPrefsButtonForSlot(unsigned char slot) {
+  if (slot >= ExtraPrefsButtonCount()) return -1;
   return kGeneralExtraButtons[slot];
 }
 
@@ -147,6 +152,7 @@ unsigned char BookPrefsPage2ButtonCount(bool fixed_layout) {
 }
 
 int BookPrefsPage2ButtonForSlot(bool fixed_layout, unsigned char slot) {
+  if (slot >= BookPrefsPage2ButtonCount(fixed_layout)) return -1;
   return fixed_layout ? kFixedLayoutBookPrefsPage2Buttons[slot]
                       : kReflowBookPrefsPage2Buttons[slot];
 }
