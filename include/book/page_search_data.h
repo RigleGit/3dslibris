@@ -20,7 +20,15 @@ inline void Annotate(Events &events, uint32_t offset, unsigned flags) {
     if (events.back() & RtlStart) trimmed_rtl_end = false;
     events.pop_back();
   }
-  if (trimmed_rtl_end) flags |= RtlEnd;
+  if (trimmed_rtl_end) {
+    if (!events.empty() && (events.back() >> 5) == offset &&
+        (events.back() & RtlStart)) {
+      // The removed end belonged to a run starting at this very offset.
+      // Remove only that start; an adjacent run's existing end must survive.
+      events.back() &= ~RtlStart;
+      if (!(events.back() & 31)) events.pop_back();
+    } else flags |= RtlEnd;
+  }
   if (!events.empty() && (events.back() >> 5) == offset)
     events.back() |= flags;
   else

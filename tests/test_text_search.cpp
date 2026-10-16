@@ -22,6 +22,26 @@ static text_search::Status Run(text_search::Engine &e, unsigned slice = 1) {
   return e.GetStatus();
 }
 int main() {
+  // Trimming an entire excluded run must keep the following LTR text searchable.
+  {
+    Pages trimmed{{{'a','b','c',' ', 'o','k'}}, {{}}};
+    page_search::Annotate(trimmed.events[0],3,page_search::RtlStart);
+    page_search::Annotate(trimmed.events[0],5,page_search::RtlEnd);
+    page_search::Annotate(trimmed.events[0],3,page_search::Space);
+    assert(page_search::Valid(trimmed.events[0],6));
+    text_search::Engine engine;
+    assert(engine.Configure("ok",true));
+    engine.Start(trimmed.Source(),{},false,true);
+    assert(Run(engine)==text_search::Found && engine.GetMatch().start.token==4);
+    page_search::Events adjacent;
+    page_search::Annotate(adjacent,0,page_search::RtlStart);
+    page_search::Annotate(adjacent,2,page_search::RtlEnd);
+    page_search::Annotate(adjacent,2,page_search::RtlStart);
+    page_search::Annotate(adjacent,4,page_search::RtlEnd);
+    page_search::Annotate(adjacent,2,page_search::Space);
+    assert(page_search::Valid(adjacent,2));
+    assert(page_search::FlagsAt(adjacent,2)==(page_search::RtlEnd|page_search::Space));
+  }
   Pages p{{{'c','a','f',0xe9,' ', 'a',0xf1,'o',' ', 'a','n','o',' ',
             'b','a','n','a','n','a',' ',TEXT_LINK_START,99,'t','e',TEXT_LINK_END},
            {'s','t',' ', 'c','a','f','e',0x301}}, {{}, {}}};
