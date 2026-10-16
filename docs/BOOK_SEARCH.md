@@ -24,7 +24,12 @@ Search ignores case using Unicode case folding, accepts canonically equivalent
 composed/decomposed characters, and collapses equivalent whitespace. Accents
 remain significant: `cafe` does not match `café`, and `ano` does not match `año`.
 Whole words use Unicode letters, marks, numbers and connectors as word characters.
+Optional soft hyphens are ignored in both the book and query; real hyphens remain
+significant. After paging outside a match, L/R searches from the selected page.
+Paging within a multi-page match keeps its anchor and highlight.
 The input limit is 128 UTF-16 units; supplementary characters occupy two units.
+The system keyboard enables predictive input, required for kanji on Japanese
+systems. Available scripts still depend on the console's keyboard.
 
 PDF, CBZ, XPS, OCR and searching across books are excluded. RTL queries are
 rejected with an explanation. Reordered RTL runs in mixed content are skipped,
