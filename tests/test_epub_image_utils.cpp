@@ -61,6 +61,14 @@ int main() {
   out.clear();
   ExpectFalse("reject non-base64 data uri",
               DecodeDataUriImage("data:text/plain,Hello", &out, 64));
+  image_memory::Bytes checked;
+  ExpectTrue("checked source decodes data URI",
+      DecodeDataUriImage("data:image/png;base64,SGVsbG8=",&checked,64));
+  ExpectEq("checked source original bytes",
+      std::string((const char*)checked.data(),checked.size()),"Hello");
+  ExpectFalse("checked source rejects oversized decoded payload",
+      DecodeDataUriImage("data:image/png;base64,SGVsbG8=",&checked,4));
+  ExpectTrue("failed source leaves no partial bytes",checked.empty());
 
   return 0;
 }

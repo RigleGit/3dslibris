@@ -53,7 +53,7 @@ void Book::SetInlineImageProbeZip(void *uf) { inline_image_probe_uf = uf; }
 bool Book::StoreFb2InlineImage(const std::string &, const std::string &) {
   return false;
 }
-bool Book::LoadInlineImageSource(u16, std::vector<u8> *,
+bool Book::LoadInlineImageSource(u16, image_memory::Bytes *,
                                  std::string *) {
   return false;
 }

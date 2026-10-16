@@ -16,6 +16,7 @@
 
 #include "book/book_context.h"
 #include "book/inline_image_layout.h"
+#include "formats/common/image_buffer.h"
 #include "shared/app_flow_utils.h"
 #include <3ds.h>
 #include <list>
@@ -83,7 +84,7 @@ public:
     u8 layout_mode;
     u16 width;
     u16 height;
-    std::vector<u32> pixels;  // ARGB8888: (a8<<24)|(r8<<16)|(g8<<8)|b8
+    image_memory::Pixels pixels;  // ARGB8888
   };
 
 private:
@@ -122,7 +123,7 @@ private:
   std::unordered_map<std::string, unsigned long> inline_image_zip_offsets;
   bool mobi_inline_index_ready;
   u32 mobi_first_image_index;
-  std::vector<u32> mobi_record_offsets;
+  image_memory::Buffer<u32> mobi_record_offsets;
   size_t fb2_inline_images_bytes;
   std::list<InlineImageCacheEntry> inline_image_cache;
   std::unordered_map<u64, std::list<InlineImageCacheEntry>::iterator> inline_image_cache_index;
@@ -145,7 +146,7 @@ private:
   int focused_inline_link_index;
 
   void ClearInlineImageCache();
-  bool LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
+  bool LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
                              std::string *resolved_path = nullptr);
   bool EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out);
   void ResetMuPdfState();
@@ -327,7 +328,7 @@ public:
   const std::string *GetInlineImagePath(u16 id) const;
   u32 GetInlineImageCount() const;
   // Original compressed resource, using the existing format limits/resolver.
-  bool ReadInlineImageSource(u16 id, std::vector<u8> *bytes) {
+  bool ReadInlineImageSource(u16 id, image_memory::Bytes *bytes) {
     return LoadInlineImageSource(id, bytes);
   }
   bool GetInlineImageMetadata(u16 id, InlineImageMetadata *out);

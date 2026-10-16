@@ -3,6 +3,10 @@ source "$(dirname "$0")/test_build.sh"
 
 CC_BIN="${CC:-cc}"
 CXX_BIN="${CXX:-c++}"
+IMAGE_ALLOC_FLAGS=()
+if [ "$(uname -s)" = Linux ]; then
+  IMAGE_ALLOC_FLAGS=(-DIMAGE_TEST_WRAP_MALLOC -Wl,--wrap=malloc)
+fi
 
 ZLIB_DIR="$TEST_ROOT/third_party/mupdf/thirdparty/zlib"
 MINIZIP_DIR="$ZLIB_DIR/contrib/minizip"
@@ -49,8 +53,12 @@ $(_build_zlib_objs)
 EOF
 
 if [ -f "$TEST_ROOT/third_party/expat/xmlparse.c" ]; then
-  expat_flags="-DXML_CONTEXT_BYTES=1024 -DXML_DTD=1 -DXML_GE=1 -DHAVE_GETRANDOM -DHAVE_SYS_RANDOM_H"
-  expat_inc="-I$TEST_ROOT/third_party/expat"
+  expat_flags=""
+  case "$(uname -s)" in
+    Linux) expat_flags="-DHAVE_GETRANDOM -DHAVE_SYS_RANDOM_H" ;;
+    Darwin) expat_flags="-DHAVE_ARC4RANDOM_BUF" ;;
+  esac
+  expat_inc="-I$TEST_ROOT/third_party/expat -I$TEST_ROOT/include"
   for f in xmlparse xmlrole xmltok; do
     src="$TEST_ROOT/third_party/expat/${f}.c"
     if [ -f "$src" ] && [ ! -f "$TEST_OUTDIR/expat_${f}.o" ]; then
@@ -95,7 +103,7 @@ with zipfile.ZipFile(folder / 'search.odt', 'w', compression=zipfile.ZIP_DEFLATE
     archive.writestr('content.xml', '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:p>tiny <text:span>ODT</text:span> fixture café año.</text:p></office:text></office:body></office:document-content>')
 PYFIXTURE
 
-"$CXX_BIN" -std=c++11 \
+"$CXX_BIN" -std=c++11 ${IMAGE_ALLOC_FLAGS[@]+"${IMAGE_ALLOC_FLAGS[@]}"} \
   ${CXXFLAGS:-} \
   -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST -DDSLIBRIS_REAL_MOBI_TEST -DDSLIBRIS_REAL_ODT_TEST \
   -include "$TEST_ROOT/tests/stubs/cbz_platform.h" \
@@ -113,6 +121,7 @@ PYFIXTURE
   "$TEST_ROOT/tests/stubs/book_worker_lifecycle_stub.cpp" \
   "$TEST_ROOT/tests/stubs/book_fixed_layout_stubs.cpp" \
   "$TEST_ROOT/source/book/book_inline_image.cpp" \
+  "$TEST_ROOT/source/formats/common/raster_image_decode.cpp" \
   "$TEST_ROOT/tests/stubs/epub_cover_stub.cpp" \
   "$TEST_ROOT/tests/stubs/fixed_format_parser_stubs.cpp" \
   "$TEST_ROOT/tests/stubs/mupdf_bidi_stub.cpp" \

@@ -12,16 +12,17 @@ namespace epub_image_utils {
 
 namespace {
 
+template <typename Bytes>
 static bool DefaultZipBinaryReader(unzFile uf, const std::string &path,
-                                   std::vector<unsigned char> *out,
+                                   Bytes *out,
                                    size_t max_bytes, void *) {
   return ReadZipEntryBinary(uf, path, out, max_bytes);
 }
 
 } // namespace
 
-bool LooksLikeSvgWrapper(const std::string &path_hint,
-                         const std::vector<unsigned char> &buf) {
+template <typename Bytes>
+bool LooksLikeSvgWrapperImpl(const std::string &path_hint,const Bytes &buf) {
   std::string lower_path = ToLowerAscii(path_hint);
   if (lower_path.size() >= 4 &&
       lower_path.rfind(".svg") == lower_path.size() - 4) {
@@ -56,12 +57,12 @@ bool ReadZipEntryBinary(unzFile uf, const std::string &path,
   return zip_read_utils::ReadEntryBinary(uf, path, out, max_bytes, NULL);
 }
 
-bool ResolveSvgWrapperImage(unzFile uf, const std::string &svg_path,
-                            const std::vector<unsigned char> &svg_buf,
-                            std::vector<unsigned char> *out,
+template <typename Bytes,typename Reader>
+bool ResolveSvgWrapperImageImpl(unzFile uf, const std::string &svg_path,
+                            const Bytes &svg_buf,Bytes *out,
                             size_t max_bytes,
                             std::string *resolved_path,
-                            ZipBinaryReader reader, void *reader_ctx) {
+                            Reader reader, void *reader_ctx) {
   if (!out || !uf || svg_buf.empty() || svg_buf.size() > max_bytes) {
     if (resolved_path)
       resolved_path->clear();
@@ -117,7 +118,7 @@ bool ResolveSvgWrapperImage(unzFile uf, const std::string &svg_path,
     if (resolved.empty() || resolved == svg_path)
       continue;
     if (!reader)
-      reader = DefaultZipBinaryReader;
+      reader = DefaultZipBinaryReader<Bytes>;
     if (reader(uf, resolved, out, max_bytes, reader_ctx)) {
       if (resolved_path)
         *resolved_path = resolved;
@@ -129,4 +130,62 @@ bool ResolveSvgWrapperImage(unzFile uf, const std::string &svg_path,
   return false;
 }
 
+bool LooksLikeSvgWrapper(const std::string &path,const std::vector<unsigned char> &buf) {
+  return LooksLikeSvgWrapperImpl(path,buf);
+}
+bool LooksLikeSvgWrapper(const std::string &path,const image_memory::Bytes &buf) {
+  return LooksLikeSvgWrapperImpl(path,buf);
+}
+bool ResolveSvgWrapperImage(unzFile uf,const std::string &path,
+    const std::vector<unsigned char> &input,std::vector<unsigned char> *out,
+    size_t limit,std::string *resolved,ZipBinaryReader reader,void *ctx) {
+  return ResolveSvgWrapperImageImpl(uf,path,input,out,limit,resolved,reader,ctx);
+}
+bool ResolveSvgWrapperImage(unzFile uf,const std::string &path,
+    const image_memory::Bytes &input,image_memory::Bytes *out,size_t limit,
+    std::string *resolved,CheckedZipBinaryReader reader,void *ctx) {
+  return ResolveSvgWrapperImageImpl(uf,path,input,out,limit,resolved,reader,ctx);
+}
+bool ReadZipEntryBinary(unzFile uf,const std::string &path,
+                        image_memory::Bytes *out,size_t limit) {
+  if(!uf || !out) return false;
+  out->clear();
+  if(unzLocateFile(uf,path.c_str(),2)!=UNZ_OK || unzOpenCurrentFile(uf)!=UNZ_OK) return false;
+  unz_file_info info;
+  bool ok=unzGetCurrentFileInfo(uf,&info,NULL,0,NULL,0,NULL,0)==UNZ_OK &&
+      info.uncompressed_size>0 && info.uncompressed_size<=limit &&
+      out->resize(info.uncompressed_size,limit);
+  size_t total=0;
+  while(ok && total<out->size()) {
+    int n=unzReadCurrentFile(uf,out->mutable_data()+total,(unsigned)(out->size()-total));
+    if(n<=0) {ok=false;break;} total+=(size_t)n;
+  }
+  if(unzCloseCurrentFile(uf)!=UNZ_OK) ok=false;
+  if(!ok) out->clear();
+  return ok;
+}
+bool DecodeDataUriImage(const std::string &href,image_memory::Bytes *out,size_t limit) {
+  if(!out) return false;
+  out->clear();
+  const size_t comma=href.find(',');
+  if(!StartsWithNoCase(href,"data:") || comma==std::string::npos) return false;
+  const std::string meta=ToLowerAscii(href.substr(5,comma-5));
+  if(meta.find("image/")==std::string::npos || meta.find(";base64")==std::string::npos) return false;
+  size_t digits=0;
+  for(size_t i=comma+1;i<href.size() && href[i]!='=';++i) {
+    const unsigned char c=href[i];
+    if(c==' ' || c=='\t' || c=='\r' || c=='\n') continue;
+    if(Base64Value(c)<0) return false;
+    ++digits;
+  }
+  const size_t size=(digits/4)*3+(digits%4)*3/4;
+  if(!size || !out->resize(size,limit)) return false;
+  uint32_t accum=0;int bits=-8;size_t written=0;
+  for(size_t i=comma+1;i<href.size() && href[i]!='=';++i) {
+    int v=Base64Value((unsigned char)href[i]);if(v<0) continue;
+    accum=(accum<<6)|(unsigned)v;bits+=6;
+    if(bits>=0) {out->mutable_data()[written++]=(unsigned char)(accum>>bits);bits-=8;}
+  }
+  return written==size;
+}
 } // namespace epub_image_utils

@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <string>
 #include <vector>
+#include "formats/common/image_buffer.h"
 
 #include "minizip/unzip.h"
 
@@ -11,6 +12,14 @@ namespace epub_image_utils {
 typedef bool (*ZipBinaryReader)(unzFile uf, const std::string &path,
                                 std::vector<unsigned char> *out,
                                 size_t max_bytes, void *ctx);
+typedef bool (*CheckedZipBinaryReader)(unzFile,const std::string&,
+                                      image_memory::Bytes*,size_t,void*);
+bool LooksLikeSvgWrapper(const std::string&,const image_memory::Bytes&);
+bool ResolveSvgWrapperImage(unzFile,const std::string&,const image_memory::Bytes&,
+                            image_memory::Bytes*,size_t,std::string* = NULL,
+                            CheckedZipBinaryReader = NULL,void* = NULL);
+bool ReadZipEntryBinary(unzFile,const std::string&,image_memory::Bytes*,size_t);
+bool DecodeDataUriImage(const std::string&,image_memory::Bytes*,size_t);
 
 bool LooksLikeSvgWrapper(const std::string &path_hint,
                          const std::vector<unsigned char> &buf);

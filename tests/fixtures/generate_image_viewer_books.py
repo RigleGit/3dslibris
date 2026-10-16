@@ -62,6 +62,9 @@ def generate(folder):
     frame = b'\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02'
     gif = b'GIF89a\x01\x00\x01\x00\x80\x00\x00' + b'\xff\x00\x00\x00\x00\xff' + frame+b'\x44\x01\x00'+frame+b'\x4c\x01\x00\x3b'
     images = {'tiny.png': tiny, 'fine.png': fine, 'first.gif': gif}
+    # A tiny compressed resource that requires >16 MiB to decode fully.
+    (folder/'oversized-image.base64').write_bytes(base64.b64encode(
+        png(3000,3000,bytes(3000*(1+3000*4)))))
     filler = '<p>' + 'Continuity across pages. ' * 200 + '</p>'
     body = ('<h1>Image viewer</h1><p>Hold Y, then A to open an image.</p>'
             '<p><a href="#end">linked text <img src="tiny.png"/> after image</a></p>'

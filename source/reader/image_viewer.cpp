@@ -100,7 +100,12 @@ void ReaderController::OpenImageViewer() {
       !book->GetPageCount() || book->IsAsyncReflowOpenPending() ||
       app_.ShouldAbortWork() || app_.BookNeedsRelayout(book))
     return;
-  const auto &items = book->GetPage()->GetRenderedSelectables();
+  if (book->GetPosition() >= book->GetPageCount())
+    return;
+  Page *page = book->GetPage();
+  if (!page)
+    return;
+  const auto &items = page->GetRenderedSelectables();
   const int selected = book->GetFocusedInlineLinkIndex();
   if (selected < 0 || selected >= (int)items.size() ||
       items[selected].kind != Page::IMAGE)
@@ -142,7 +147,7 @@ bool ReaderController::LoadImageViewer(int zoom) {
   if (app_.ShouldAbortWork() || !ImageViewerValid())
     return false;
   const uint64_t started = osGetTime();
-  std::vector<unsigned char> bytes;
+  image_memory::Bytes bytes;
   const bool read = s.book->ReadInlineImageSource(s.image_id, &bytes);
   const uint64_t read_ms = osGetTime() - started;
   const auto target = fixed_layout_screen::TargetDims(app_.orientation, true);
@@ -160,10 +165,10 @@ bool ReaderController::LoadImageViewer(int zoom) {
           ? image_view::RequiredSize(width, height, target.width, target.height,
                                      zoom)
           : image_view::Size{target.width * 4, target.height * 4};
-  const char *error = "Image missing or unsupported";
+  const char *error = "Image unavailable (resource/memory limit)";
   const bool decoded =
       read && !app_.ShouldAbortWork() &&
-      raster_image::Decode(bytes, required.width, required.height,
+      raster_image::Decode(bytes.data(),bytes.size(),required.width, required.height,
                            app_.ts->GetBgColor(), &s.image, &error);
   s.loading = false;
   s.suspended = false;

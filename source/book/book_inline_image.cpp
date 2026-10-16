@@ -16,15 +16,13 @@
 #include "shared/base64_utils.h"
 #include "shared/debug_log.h"
 #include "formats/common/epub_image_utils.h"
-#include "formats/common/file_read_utils.h"
-#include "formats/epub/epub_cover_decode_utils.h"
+#include "formats/common/raster_image_decode.h"
 #include "formats/mobi/mobi.h"
 #include "formats/mobi/mobi_record_scan.h"
 #include "shared/orientation_utils.h"
 #include "shared/path_constants.h"
 #include "shared/status_reporter.h"
 #include "stb_image.h"
-#include "shared/stb_image_gif_utils.h"
 #include "shared/string_utils.h"
 #include "ui/text.h"
 #include "minizip/unzip.h"
@@ -34,12 +32,6 @@
 #include <string.h>
 #include <utility>
 
-#ifdef __3DS__
-#include "formats/mupdf/mupdf_common.h"
-extern "C" {
-#include "mupdf/fitz.h"
-}
-#endif
 
 namespace {
 static const size_t kInlineImageCacheMaxBytes = 1024 * 1024;
@@ -51,104 +43,6 @@ static const size_t kEpubInlineImageProbeBytes = 64 * 1024;
 static const size_t kSvgWrapperMaxBytes = 512 * 1024;
 static const size_t kMobiInlineFileMaxBytes = 64 * 1024 * 1024;
 static const size_t kMobiInlineRecordMaxBytes = 8 * 1024 * 1024;
-
-static bool LooksLikeJpegPayload(const std::vector<u8> &buf) {
-  return buf.size() >= 3 && buf[0] == 0xFF && buf[1] == 0xD8 && buf[2] == 0xFF;
-}
-
-#ifdef __3DS__
-static bool
-DecodeInlineJpegToCacheEntry3ds(const std::vector<u8> &compressed, u16 image_id,
-                                u16 screen_h, u16 bg565, u8 layout_mode,
-                                int draw_w, int draw_h,
-                                Book::InlineImageCacheEntry *entry) {
-  if (!entry || compressed.empty() || draw_w <= 0 || draw_h <= 0)
-    return false;
-
-  InitMuPdfLocks();
-
-  fz_context *ctx = NULL;
-  fz_buffer *buffer = NULL;
-  fz_image *image = NULL;
-  fz_pixmap *pixmap = NULL;
-  bool ok = false;
-
-  fz_var(buffer);
-  fz_var(image);
-  fz_var(pixmap);
-
-  ctx = fz_new_context(NULL, &g_mupdf_locks_ctx, FZ_STORE_DEFAULT);
-  if (!ctx)
-    return false;
-
-  fz_try(ctx) {
-    buffer = fz_new_buffer_from_copied_data(ctx, compressed.data(),
-                                            compressed.size());
-    image = fz_new_image_from_buffer(ctx, buffer);
-    if (!image || image->w <= 0 || image->h <= 0)
-      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid inline image dimensions");
-
-    int target_w = 0;
-    int target_h = 0;
-    if (!epub_cover_decode_utils::ComputeInlineImageDecodeTargetSize(
-            image->w, image->h, draw_w, draw_h, &target_w, &target_h)) {
-      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid inline image target");
-    }
-
-    int l2factor = epub_cover_decode_utils::ComputeJpegL2SubsampleFactor(
-        image->w, image->h, target_w, target_h);
-    pixmap = image->get_pixmap(ctx, image, NULL, target_w, target_h, &l2factor);
-    if (!pixmap)
-      fz_throw(ctx, FZ_ERROR_FORMAT, "inline image->get_pixmap failed");
-    if (l2factor > 0)
-      fz_subsample_pixmap(ctx, pixmap, l2factor);
-
-    const int pix_w = fz_pixmap_width(ctx, pixmap);
-    const int pix_h = fz_pixmap_height(ctx, pixmap);
-    const int stride = fz_pixmap_stride(ctx, pixmap);
-    const int comps = fz_pixmap_components(ctx, pixmap);
-    unsigned char *samples = fz_pixmap_samples(ctx, pixmap);
-    if (!samples || pix_w <= 0 || pix_h <= 0 || stride <= 0 || comps < 1)
-      fz_throw(ctx, FZ_ERROR_FORMAT, "invalid inline image pixmap");
-
-    entry->image_id = image_id;
-    entry->screen_h = screen_h;
-    entry->bg565 = bg565;
-    entry->layout_mode = layout_mode;
-    entry->width = (u16)draw_w;
-    entry->height = (u16)draw_h;
-    entry->pixels.assign((size_t)draw_w * (size_t)draw_h, 0);
-
-    for (int y = 0; y < draw_h; y++) {
-      int src_y = (int)((long long)y * (long long)pix_h / (long long)draw_h);
-      if (src_y >= pix_h)
-        src_y = pix_h - 1;
-      const unsigned char *row = samples + (size_t)src_y * (size_t)stride;
-      for (int x = 0; x < draw_w; x++) {
-        int src_x = (int)((long long)x * (long long)pix_w / (long long)draw_w);
-        if (src_x >= pix_w)
-          src_x = pix_w - 1;
-        const unsigned char *px = row + (size_t)src_x * (size_t)comps;
-        const unsigned char r = px[0];
-        const unsigned char g = (comps >= 3) ? px[1] : px[0];
-        const unsigned char b = (comps >= 3) ? px[2] : px[0];
-        entry->pixels[(size_t)y * (size_t)draw_w + (size_t)x] =
-            0xFF000000u | ((u32)r << 16) | ((u32)g << 8) | (u32)b;
-      }
-    }
-    ok = true;
-  }
-  fz_catch(ctx) {
-    ok = false;
-  }
-
-  fz_drop_pixmap(ctx, pixmap);
-  fz_drop_image(ctx, image);
-  fz_drop_buffer(ctx, buffer);
-  fz_drop_context(ctx);
-  return ok;
-}
-#endif
 
 static std::string NormalizeZipEntryKey(const std::string &path) {
   std::string normalized;
@@ -201,7 +95,7 @@ static bool LocateBookInlineZipEntry(
 static bool ReadZipEntryBinaryPrefix(
     unzFile uf, bool *index_built,
     std::unordered_map<std::string, unsigned long> *offsets,
-    const std::string &path, std::vector<u8> *out, size_t max_prefix_bytes) {
+    const std::string &path, image_memory::Bytes *out, size_t max_prefix_bytes) {
   if (!out || !uf || path.empty() || max_prefix_bytes == 0)
     return false;
   out->clear();
@@ -220,10 +114,10 @@ static bool ReadZipEntryBinaryPrefix(
   }
 
   size_t want = std::min((size_t)fi.uncompressed_size, max_prefix_bytes);
-  out->resize(want);
+  if(!out->resize(want)) {unzCloseCurrentFile(uf);return false;}
   int total = 0;
   while (total < (int)want) {
-    int n = unzReadCurrentFile(uf, out->data() + total,
+    int n = unzReadCurrentFile(uf, out->mutable_data() + total,
                                (unsigned int)(want - (size_t)total));
     if (n < 0) {
       unzCloseCurrentFile(uf);
@@ -244,13 +138,13 @@ static bool ReadZipEntryBinaryPrefix(
 }
 
 static bool LooksLikeSvgWrapper(const std::string &path_hint,
-                                const std::vector<u8> &buf) {
+                                const image_memory::Bytes &buf) {
   return epub_image_utils::LooksLikeSvgWrapper(path_hint, buf);
 }
 
 static bool ResolveSvgWrapperImage(unzFile uf, const std::string &svg_path,
-                                   const std::vector<u8> &svg_buf,
-                                   std::vector<u8> *out,
+                                   const image_memory::Bytes &svg_buf,
+                                   image_memory::Bytes *out,
                                    std::string *resolved_path = NULL,
                                    IStatusReporter *reporter = NULL) {
   if (!out || !uf || svg_buf.empty() || svg_buf.size() > kSvgWrapperMaxBytes) {
@@ -270,7 +164,7 @@ static bool ResolveSvgWrapperImage(unzFile uf, const std::string &svg_path,
 }
 
 static bool ReadFileSlice(const std::string &path, u32 start, u32 end,
-                          std::vector<u8> *out) {
+                          image_memory::Bytes *out) {
   if (!out || path.empty() || end <= start)
     return false;
   out->clear();
@@ -283,8 +177,8 @@ static bool ReadFileSlice(const std::string &path, u32 start, u32 end,
     return false;
   bool ok = false;
   if (fseek(fp, (long)start, SEEK_SET) == 0) {
-    out->resize(len);
-    ok = fread(out->data(), 1, len, fp) == len;
+    if(out->resize(len))
+      ok = fread(out->mutable_data(), 1, len, fp) == len;
   }
   fclose(fp);
   if (!ok)
@@ -393,7 +287,7 @@ bool Book::StoreFb2InlineImage(const std::string &id,
   return true;
 }
 
-bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
+bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
                                  std::string *resolved_path) {
   if (!out)
     return false;
@@ -416,7 +310,7 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
         fb2_inline_images.find(key);
     if (hit == fb2_inline_images.end() || hit->second.empty())
       return false;
-    *out = hit->second;
+    out->Borrow(hit->second.data(),hit->second.size());
     if (resolved_path)
       *resolved_path = image_path;
     return true;
@@ -429,75 +323,71 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
       mobi_first_image_index = 0;
       mobi_record_offsets.clear();
 
-      std::string mobipath = foldername + "/" + filename;
-      std::string raw;
-      if (file_read_utils::ReadPathToStringLimited(mobipath.c_str(), &raw,
-                                                   kMobiInlineFileMaxBytes) &&
-          mobi_parse_offsets(raw, &mobi_record_offsets) &&
-          mobi_record_offsets.size() >= 3) {
-        const u8 *data = (const u8 *)raw.data();
-        const u32 rec0_start = mobi_record_offsets[0];
-        const u32 rec0_end = mobi_record_offsets[1];
-        if (rec0_end > rec0_start && rec0_end - rec0_start >= 16) {
-          const u8 *rec0 = data + rec0_start;
-          const size_t rec0_len = (size_t)(rec0_end - rec0_start);
-          u32 text_rec_count = (u32)rec0[8] << 8 | (u32)rec0[9];
-          u32 first_non_book_index = 0;
-          if (rec0_len >= 24 && memcmp(rec0 + 16, "MOBI", 4) == 0) {
-            const u8 *mobi = rec0 + 16;
-            const u32 mobi_len = (u32)mobi[4] << 24 | (u32)mobi[5] << 16 |
-                                 (u32)mobi[6] << 8 | (u32)mobi[7];
-            if (mobi_len >= 0x70 && rec0_len >= 16 + (size_t)0x70) {
-              mobi_first_image_index = (u32)mobi[0x6C] << 24 |
-                                       (u32)mobi[0x6D] << 16 |
-                                       (u32)mobi[0x6E] << 8 | (u32)mobi[0x6F];
-            }
-            if (mobi_len >= 0x84 && rec0_len >= 16 + (size_t)0x84) {
-              first_non_book_index = (u32)mobi[0x80] << 24 |
-                                     (u32)mobi[0x81] << 16 |
-                                     (u32)mobi[0x82] << 8 | (u32)mobi[0x83];
-            }
+      const std::string mobipath=foldername+"/"+filename;
+      FILE *fp=fopen(mobipath.c_str(),"rb");
+      if(!fp) {mobi_inline_index_ready=false;return false;}
+      // Read the Palm table and bounded record prefixes, never the whole book.
+      unsigned char header[78];
+      bool ok=fseek(fp,0,SEEK_END)==0;
+      const long file_size=ok ? ftell(fp) : -1;
+      ok=file_size>=78 && (size_t)file_size<=kMobiInlineFileMaxBytes &&
+          fseek(fp,0,SEEK_SET)==0 && fread(header,1,sizeof(header),fp)==sizeof(header);
+      const unsigned records=ok ? mobi_record_scan::ReadBE16(header+76) : 0;
+      const size_t table_end=78+(size_t)records*8;
+      ok=ok && records>=2 && table_end<=(size_t)file_size &&
+          mobi_record_offsets.resize(records+1);
+      for(unsigned i=0;ok && i<records;++i) {
+        unsigned char entry[8];
+        ok=fread(entry,1,sizeof(entry),fp)==sizeof(entry);
+        if(!ok) break;
+        const u32 offset=mobi_record_scan::ReadBE32(entry);
+        ok=offset>=table_end && offset<(u32)file_size &&
+            (!i || offset>=mobi_record_offsets[i-1]);
+        mobi_record_offsets.mutable_data()[i]=offset;
+      }
+      unsigned char rec0[16+0x84]={};
+      if(ok) {
+        mobi_record_offsets.mutable_data()[records]=(u32)file_size;
+        const size_t length=std::min(sizeof(rec0),(size_t)(mobi_record_offsets[1]-mobi_record_offsets[0]));
+        ok=length>=16 && fseek(fp,mobi_record_offsets[0],SEEK_SET)==0 &&
+            fread(rec0,1,length,fp)==length;
+        if(ok) {
+          u32 text_count=mobi_record_scan::ReadBE16(rec0+8);
+          u32 first_non_book=0;
+          if(length>=24 && memcmp(rec0+16,"MOBI",4)==0) {
+            const u8 *mobi=rec0+16;
+            const u32 mobi_length=mobi_record_scan::ReadBE32(mobi+4);
+            if(mobi_length>=0x70 && length>=16+0x70)
+              mobi_first_image_index=mobi_record_scan::ReadBE32(mobi+0x6c);
+            if(mobi_length>=0x84 && length>=16+0x84)
+              first_non_book=mobi_record_scan::ReadBE32(mobi+0x80);
           }
-
-          const u32 rec_count = (u32)mobi_record_offsets.size() - 1;
-          const u32 max_text_records = rec_count > 1 ? rec_count - 2 : 0;
-          if (text_rec_count == 0 || text_rec_count > max_text_records)
-            text_rec_count = max_text_records;
-          if (first_non_book_index > 1) {
-            const u32 boundary = first_non_book_index - 1;
-            if (boundary > 0 && boundary < text_rec_count)
-              text_rec_count = boundary;
-          }
-
-          u32 detected_first_image_index = 0;
-          const u32 probe_start = text_rec_count + 1;
-          if (probe_start < rec_count) {
-            const u32 remaining = rec_count - probe_start;
-            const u32 probe_end = std::min<u32>(
-                rec_count, probe_start + mobi_record_scan::FirstImageProbeLimit(
-                                             remaining));
-            for (u32 rec = probe_start; rec < probe_end; rec++) {
-              const u32 start = mobi_record_offsets[(size_t)rec];
-              const u32 end = mobi_record_offsets[(size_t)rec + 1];
-              if (end <= start)
-                continue;
-              const size_t len = (size_t)(end - start);
-              if (len < 32 || len > kMobiInlineRecordMaxBytes)
-                continue;
-              if (mobi_find_image_start_offset(data + start, len) != SIZE_MAX) {
-                detected_first_image_index = rec;
-                break;
-              }
+          const u32 max_text=records>1 ? records-2 : 0;
+          if(!text_count || text_count>max_text) text_count=max_text;
+          if(first_non_book>1 && first_non_book-1<text_count) text_count=first_non_book-1;
+          const u32 probe_start=text_count+1;
+          image_memory::Bytes prefix;
+          const u32 probe_end=probe_start+mobi_record_scan::FirstImageProbeLimit(
+              records>probe_start ? records-probe_start : 0);
+          for(u32 record=probe_start;record<probe_end;++record) {
+            const u32 begin=mobi_record_offsets[record],end=mobi_record_offsets[record+1];
+            const size_t length=(size_t)(end-begin);
+            if(length<32 || length>kMobiInlineRecordMaxBytes) continue;
+            const size_t want=std::min(length,(size_t)16384);
+            if(!prefix.resize(want) || fseek(fp,begin,SEEK_SET)!=0 ||
+                fread(prefix.mutable_data(),1,want,fp)!=want) {ok=false;break;}
+            if(mobi_find_image_start_offset(prefix.data(),want)!=SIZE_MAX) {
+              mobi_first_image_index=record;break;
             }
           }
-
-          if (mobi_first_image_index == 0 && text_rec_count + 1 < rec_count)
-            mobi_first_image_index = text_rec_count + 1;
-          if (detected_first_image_index > 0)
-            mobi_first_image_index = detected_first_image_index;
-          if (mobi_first_image_index >= rec_count)
-            mobi_first_image_index = 0;
+          if(!mobi_first_image_index && probe_start<records) mobi_first_image_index=probe_start;
+          if(mobi_first_image_index>=records) mobi_first_image_index=0;
         }
+      }
+      fclose(fp);
+      if(!ok) {
+        mobi_record_offsets.clear();mobi_first_image_index=0;
+        mobi_inline_index_ready=false;return false;
       }
     }
 
@@ -518,7 +408,7 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
     if (image_off == SIZE_MAX)
       return false;
     if (image_off > 0)
-      out->erase(out->begin(), out->begin() + image_off);
+      out->RemovePrefix(image_off);
     if (out->empty())
       return false;
     if (resolved_path)
@@ -558,16 +448,20 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
     return false;
   }
 
-  out->resize(fi.uncompressed_size);
-  int bytes_read = unzReadCurrentFile(uf, out->data(), fi.uncompressed_size);
-  unzCloseCurrentFile(uf);
-  if (bytes_read <= 0) {
-    if (close_uf)
-      unzClose(uf);
-    out->clear();
-    return false;
+  if(!out->resize(fi.uncompressed_size)) {
+    unzCloseCurrentFile(uf);if(close_uf) unzClose(uf);return false;
   }
-  out->resize((size_t)bytes_read);
+  size_t total=0;
+  bool ok=true;
+  while(total<out->size()) {
+    int n=unzReadCurrentFile(uf,out->mutable_data()+total,(unsigned)(out->size()-total));
+    if(n<=0) {ok=false;break;}total+=(size_t)n;
+  }
+  if(unzCloseCurrentFile(uf)!=UNZ_OK) ok=false;
+  if(!ok) {
+    if(close_uf) unzClose(uf);
+    out->clear();return false;
+  }
 
   if (resolved_path)
     *resolved_path = image_path;
@@ -581,7 +475,7 @@ bool Book::LoadInlineImageSource(u16 image_id, std::vector<u8> *out,
   }
 
   bool is_svg_wrapper = LooksLikeSvgWrapper(image_path, *out);
-  std::vector<u8> resolved_svg_image;
+  image_memory::Bytes resolved_svg_image;
   std::string resolved_svg_path;
   if (is_svg_wrapper && reporter) {
     char msg[192];
@@ -640,7 +534,7 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
     entry.source_height = 0;
 
     const std::string &image_path = entry.path;
-    std::vector<u8> compressed;
+    image_memory::Bytes compressed;
     std::string resolved_path;
     bool need_full_load = false;
     bool already_loaded_full = false;
@@ -697,7 +591,7 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
       // layout gets real dimensions instead of falling back to PAGE mode.
       if ((!have_info || info_w <= 0 || info_h <= 0) && !already_loaded_full &&
           image_path.compare(0, 14, "mobi:recindex:") != 0) {
-        std::vector<u8> full_source;
+        image_memory::Bytes full_source;
         std::string full_resolved_path;
         if (LoadInlineImageSource(image_id, &full_source, &full_resolved_path) &&
             !full_source.empty()) {
@@ -716,15 +610,12 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
           image_path.compare(0, 14, "mobi:recindex:") == 0) {
         // Some MOBI photo records decode fine but fail the lightweight probe.
         // Fall back to a full decode once so pagination still gets dimensions.
-        int load_w = 0, load_h = 0, load_c = 0;
-        unsigned char *pixels = stb_image_gif_utils::LoadFromMemory(
-            compressed.data(), (int)compressed.size(), &load_w, &load_h,
-            &load_c, 0);
-        if (pixels) {
-          stbi_image_free(pixels);
-          info_w = load_w;
-          info_h = load_h;
-          have_info = true;
+        raster_image::Bitmap decoded;
+        const char *error=NULL;
+        if(raster_image::Decode(compressed.data(),compressed.size(),1,1,0,
+                                &decoded,&error)) {
+          info_w=decoded.original_width;info_h=decoded.original_height;
+          have_info=true;
         }
       }
       if (have_info && info_w > 0 && info_h > 0) {
@@ -952,95 +843,37 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     }
   }
 
-  std::vector<u8> compressed;
+  image_memory::Bytes compressed;
   if (!LoadInlineImageSource(image_id, &compressed, NULL) || compressed.empty())
     return false;
 
-  InlineImageCacheEntry entry;
-  bool entry_ready = false;
-
-#ifdef __3DS__
-  if (LooksLikeJpegPayload(compressed)) {
-    entry_ready = DecodeInlineJpegToCacheEntry3ds(
-        compressed, image_id, (u16)screen_h, bg565, (u8)plan.mode, draw_w,
-        draw_h, &entry);
+  raster_image::ArgbBitmap decoded;
+  const char *error=NULL;
+  if(!raster_image::DecodeArgb(compressed.data(),compressed.size(),
+      draw_w>0 ? draw_w : screen_w,draw_h>0 ? draw_h : screen_h,
+      &decoded,&error)) return false;
+  if(need_page_recompute && page_imgW==0 && page_imgH==0) {
+    const auto placement=ResolveInlineImagePagePlacement(
+        screen_w,screen_h,0,0,0,draw_screen_layout.current_margin_bottom,
+        decoded.original_width,decoded.original_height,0,0,0);
+    draw_w=placement.draw_width;draw_h=placement.draw_height;
+    start_x=placement.start_x;start_y=placement.start_y;
   }
-#endif
-
-  if (!entry_ready) {
-    int imgW = 0, imgH = 0, channels = 0;
-    int loaded_channels = 4;
-    unsigned char *pixels = stb_image_gif_utils::LoadFromMemory(
-        compressed.data(), (int)compressed.size(), &imgW, &imgH, &channels, 4);
-    if (!pixels) {
-      // Some valid JPEGs fail the 4-channel expansion path on-device. Retry
-      // with RGB data and treat the image as fully opaque during the scale/blit
-      // pass.
-      loaded_channels = 3;
-      pixels = stb_image_gif_utils::LoadFromMemory(
-          compressed.data(), (int)compressed.size(), &imgW, &imgH, &channels,
-          3);
-    }
-    if (!pixels)
-      return false;
-
-    // PAGE fallback: metadata was unavailable, compute from decoded pixels.
-    if (need_page_recompute && page_imgW == 0 && page_imgH == 0) {
-      const InlineImagePagePlacement placement =
-          ResolveInlineImagePagePlacement(
-              screen_w, screen_h, 0, 0, 0,
-              draw_screen_layout.current_margin_bottom, imgW, imgH, 0, 0, 0);
-      draw_w = placement.draw_width;
-      draw_h = placement.draw_height;
-      start_x = placement.start_x;
-      start_y = placement.start_y;
-    }
-
-    // Guard: cap draw buffer to 1.5M pixels to bound memory usage.
-    if ((long long)draw_w * (long long)draw_h > 1500000LL) {
-      stbi_image_free(pixels);
-      return false;
-    }
-
-    entry.image_id = image_id;
-    entry.screen_h = (u16)screen_h;
-    entry.bg565 = bg565;
-    entry.layout_mode = (u8)plan.mode;
-    entry.width = (u16)draw_w;
-    entry.height = (u16)draw_h;
-    entry.pixels.resize((size_t)draw_w * (size_t)draw_h);
-
-    // PRECOMPUTE: src_x and src_y lookup tables (avoids per-pixel division)
-    std::vector<int> src_x_lut(draw_w);
-    std::vector<int> src_y_lut(draw_h);
-    for (int x = 0; x < draw_w; x++) {
-      src_x_lut[x] = (x * imgW) / std::max(1, draw_w);
-    }
-    for (int y = 0; y < draw_h; y++) {
-      src_y_lut[y] = (y * imgH) / std::max(1, draw_h);
-    }
-
-    for (int y = 0; y < draw_h; y++) {
-      int src_y = src_y_lut[y];
-      if (src_y >= imgH)
-        src_y = imgH - 1;
-      for (int x = 0; x < draw_w; x++) {
-        int src_x = src_x_lut[x];
-        if (src_x >= imgW)
-          src_x = imgW - 1;
-        unsigned char *px = &pixels[(src_y * imgW + src_x) * loaded_channels];
-
-        u8 r8 = px[0];
-        u8 g8 = px[1];
-        u8 b8 = px[2];
-        u8 a8 = (loaded_channels >= 4) ? px[3] : 255;
-        entry.pixels[(y * draw_w) + x] =
-            ((u32)a8 << 24) | ((u32)r8 << 16) | ((u32)g8 << 8) | (u32)b8;
+  if(draw_w<=0 || draw_h<=0 || (long long)draw_w*draw_h>1500000LL) return false;
+  InlineImageCacheEntry entry;
+  entry.image_id=image_id;entry.screen_h=(u16)screen_h;entry.bg565=bg565;
+  entry.layout_mode=(u8)plan.mode;entry.width=(u16)draw_w;entry.height=(u16)draw_h;
+  if(draw_w==decoded.width && draw_h==decoded.height) {
+    entry.pixels=std::move(decoded.pixels);
+  } else {
+    if(!entry.pixels.resize((size_t)draw_w*draw_h,6000000)) return false;
+    for(int y=0;y<draw_h;++y) {
+      const size_t sy=(size_t)y*decoded.height/draw_h;
+      for(int x=0;x<draw_w;++x) {
+        const size_t sx=(size_t)x*decoded.width/draw_w;
+        entry.pixels.mutable_data()[(size_t)y*draw_w+x]=decoded.pixels[sy*decoded.width+sx];
       }
     }
-
-    stbi_image_free(pixels);
-    entry_ready = true;
   }
 
   const size_t entry_bytes = entry.pixels.size() * sizeof(u32);

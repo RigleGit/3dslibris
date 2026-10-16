@@ -30,6 +30,19 @@
 #define TEST_FIXTURES_DIR "tests/fixtures"
 #endif
 
+#ifdef IMAGE_TEST_WRAP_MALLOC
+// Exercise real allocation refusal without adding a production injection hook.
+static size_t fail_image_allocation = 0;
+extern "C" void *__real_malloc(size_t);
+extern "C" void *__wrap_malloc(size_t size) {
+  if (fail_image_allocation && size == fail_image_allocation) {
+    fail_image_allocation = 0;
+    return nullptr;
+  }
+  return __real_malloc(size);
+}
+#endif
+
 namespace {
 
 std::string BookText(Book *book) {
@@ -58,6 +71,33 @@ text_search::Match ExpectSearch(Book *book, const char *phrase, bool expected = 
 }
 
 void TestOriginalImageResourceAndDrawBounds() {
+  {
+    Text text;
+    text.capture_rendered_text=true;
+    text.display.width=240;text.display.height=400;
+    BookContext ctx;ctx.text=&text;Book book(ctx);
+    test::ExpectTrue("store alpha reference",book.StoreFb2InlineImage("alpha",
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR4nGNgYGBoYGD4zwAABIcBgPkkc34AAAAASUVORK5CYII="));
+    const u16 id=book.RegisterInlineImage("fb2:alpha");
+    std::vector<u16> screen(400*400);
+    text.screenleft=text.screenright=screen.data();text.SetScreen(screen.data());
+    InlineImageLayoutPlan plan{};plan.draw_width=20;plan.draw_height=10;
+    // The framebuffer may contain a gradient or drawing under the image.
+    // Changing background colors must work on both cold and cached draws.
+    for(int theme=0;theme<2;++theme) {
+      const u16 background=theme ? 0x07e0 : 0x001f;
+      std::fill(screen.begin(),screen.end(),background);
+      text.bgcolor.r=text.bgcolor.g=text.bgcolor.b=theme ? 0 : 255;
+      text.SetPen(20,40);
+      InlineImageDrawBounds bounds{};
+      test::ExpectTrue("draw transparent image",book.DrawInlineImage(&text,id,&plan,0,0,&bounds));
+      const size_t row=(size_t)(bounds.y0+bounds.y1)/2*400;
+      test::ExpectEq("transparent pixel preserves actual framebuffer",
+          screen[row+bounds.x1-1],background);
+      test::ExpectEq("partial alpha blends actual framebuffer",
+          screen[row+bounds.x0],theme ? 0x03e0 : 0x000f);
+    }
+  }
   for (unsigned char orientation : {0, 1, 2}) {
     Text text;
     text.capture_rendered_text = true;
@@ -70,10 +110,13 @@ void TestOriginalImageResourceAndDrawBounds() {
     Book book(ctx);
     test::ExpectTrue("store original FB2 resource", book.StoreFb2InlineImage("red", "iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAIAAAB/FOjAAAAAFElEQVR4nGP4z8BAEiJN9agGIhEAJMZ/gd5KfaIAAAAASUVORK5CYII="));
     const u16 image = book.RegisterInlineImage("fb2:red");
-    std::vector<u8> original;
+    image_memory::Bytes original;
     test::ExpectTrue("read original bytes", book.ReadInlineImageSource(image, &original));
     test::ExpectTrue("original PNG dimensions retained", original.size() > 24 &&
         original[19] == 16 && original[23] == 8);
+    image_memory::Bytes borrowed;
+    test::ExpectTrue("FB2 original remains owned by book",book.ReadInlineImageSource(image,&borrowed));
+    test::ExpectTrue("FB2 source reading avoids a duplicate payload",borrowed.data()==original.data());
     for (int reading_screen = 0; reading_screen < 2; ++reading_screen) {
       const bool is_left = (orientation != 1) == (reading_screen == 0);
       auto &pixels = is_left ? left : right;
@@ -109,6 +152,50 @@ void TestImageResourcesAcrossBookFormats() {
   mkdir(cache.c_str(), 0700);
   mobi_page_cache::SetCacheDirForTest(cache.c_str());
   epub_page_cache::SetCacheDirForTest(cache.c_str());
+  {
+    Text text;BookContext ctx;ctx.text=&text;Book book(ctx);
+    const std::string path=std::string(folder)+"/oversized-image.base64";
+    FILE *fp=fopen(path.c_str(),"rb");test::ExpectTrue("large image fixture exists",fp!=nullptr);
+    std::string encoded;char chunk[4096];size_t n;
+    while((n=fread(chunk,1,sizeof(chunk),fp))) encoded.append(chunk,n);
+    fclose(fp);
+    test::ExpectTrue("compressed large image fits resource limit",book.StoreFb2InlineImage("huge",encoded));
+    const u16 image=book.RegisterInlineImage("fb2:huge");
+    std::vector<u16> screen(400*400,0xffff);
+    text.screenleft=text.screenright=screen.data();text.SetScreen(screen.data());text.SetPen(0,30);
+    InlineImageLayoutPlan plan{};plan.draw_width=20;plan.draw_height=20;
+    InlineImageDrawBounds bounds{1,1,2,2};
+    test::ExpectFalse("inline decode rejects excessive memory without drawing",
+        book.DrawInlineImage(&text,image,&plan,0,0,&bounds));
+    test::ExpectTrue("failed inline image leaves the framebuffer intact",
+        std::all_of(screen.begin(),screen.end(),[](u16 p){return p==0xffff;}));
+    test::ExpectTrue("failed inline image has no selectable geometry",
+        bounds.x0==0 && bounds.y0==0 && bounds.x1==0 && bounds.y1==0);
+  }
+#ifdef IMAGE_TEST_WRAP_MALLOC
+  {
+    Text text; text.capture_rendered_text=true;
+    text.display.width=240;text.display.height=400;
+    BookContext ctx;ctx.text=&text;Book book(ctx);
+    book.SetFolderName(folder);book.SetFileName("images.epub");book.format=FORMAT_EPUB;
+    const u16 id=book.RegisterInlineImage("OEBPS/tiny.png");
+    image_memory::Bytes source;
+    test::ExpectTrue("read EPUB source before failure",book.ReadInlineImageSource(id,&source));
+    // Metadata probing and the full read allocate exactly this resource size.
+    // Only the first allocation fails: PAGE mode must recover via full decode.
+    fail_image_allocation=source.size();
+    std::vector<u16> screen(400*400,0xffff);
+    text.screenleft=text.screenright=screen.data();text.SetScreen(screen.data());
+    InlineImageLayoutPlan plan{};plan.mode=INLINE_IMAGE_LAYOUT_PAGE;
+    InlineImageDrawBounds bounds{};
+    test::ExpectTrue("PAGE image recovers from failed metadata allocation",
+        book.DrawInlineImage(&text,id,&plan,0,0,&bounds));
+    test::ExpectEq("metadata allocation failure was exercised",fail_image_allocation,(size_t)0);
+    test::ExpectTrue("recovered image has visible bounds",bounds.x1>bounds.x0 && bounds.y1>bounds.y0);
+    test::ExpectTrue("recovered image draws original red pixels",
+        std::find(screen.begin(),screen.end(),(u16)0xf800)!=screen.end());
+  }
+#endif
   for (const char *name : {"images.epub", "images.mobi", "images.fb2"}) {
     Text text; BookContext ctx; ctx.text = &text;
     text.display.width = 240;
@@ -120,7 +207,7 @@ void TestImageResourcesAcrossBookFormats() {
     test::ExpectTrue("format registers all original resources", book.GetInlineImageCount() >= 3);
     bool found_detail = false;
     for (u16 id = 0; id < book.GetInlineImageCount(); ++id) {
-      std::vector<u8> bytes;
+      image_memory::Bytes bytes;
       test::ExpectTrue("format reads original image", book.ReadInlineImageSource(id,&bytes));
       if (bytes.size() > 24 && bytes[0] == 0x89 && bytes[16] == 0 && bytes[17] == 0 &&
           bytes[18] == 4 && bytes[19] == 0) found_detail = true;
@@ -136,7 +223,7 @@ void TestImageResourcesAcrossBookFormats() {
     test::ExpectEq("image book reopens at identical layout",book.GetPageCount(),pages);
     test::ExpectTrue("cache retains image resource mapping",book.GetInlineImageCount() >= 3);
     for (u16 id = 0; id < book.GetInlineImageCount(); ++id) {
-      std::vector<u8> bytes;
+      image_memory::Bytes bytes;
       test::ExpectTrue("reopened image resolves original",book.ReadInlineImageSource(id,&bytes));
     }
     book.Close();

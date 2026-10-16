@@ -134,28 +134,42 @@ bool Bitmap::Allocate(int w, int h) {
 }
 
 namespace {
+template <typename Output>
 bool Target(int source_w, int source_h, int requested_w, int requested_h,
-            Bitmap *bitmap) {
+            Output *bitmap) {
   if (source_w <= 0 || source_h <= 0 || requested_w <= 0 || requested_h <= 0)
     return false;
   const double scale = std::min(1.0, std::max((double)requested_w / source_w,
                                               (double)requested_h / source_h));
   bitmap->width = std::max(1, (int)(source_w * scale + 0.5));
   bitmap->height = std::max(1, (int)(source_h * scale + 0.5));
-  if ((size_t)bitmap->width > kBitmapLimit / sizeof(uint16_t) / bitmap->height)
-    return false;
   if (!bitmap->Allocate(bitmap->width, bitmap->height))
     return false;
   bitmap->original_width = source_w;
   bitmap->original_height = source_h;
-  return bitmap->pixels.get() != NULL;
+  return true;
 }
 
-// Resample premultiplied colors, then compose onto the reader background.
+void StorePixel(Bitmap *out,size_t index,float rgb[3],float alpha,const int bg[3]) {
+  for(int c=0;c<3;++c) rgb[c]+=bg[c]*(1.0-alpha/255.0);
+  out->pixels.get()[index]=RGB565FromU8(rgb[0]+0.5,rgb[1]+0.5,rgb[2]+0.5);
+}
+void StorePixel(ArgbBitmap *out,size_t index,float rgb[3],float alpha,const int[3]) {
+  const unsigned a=std::max(0,std::min(255,(int)(alpha+0.5f)));
+  uint32_t pixel=a<<24;
+  if(alpha>0) for(int c=0;c<3;++c) {
+    const unsigned value=std::max(0,std::min(255,(int)(rgb[c]*255.0f/alpha+0.5f)));
+    pixel|=value<<((2-c)*8);
+  }
+  out->pixels.mutable_data()[index]=pixel;
+}
+
+// Resample premultiplied colors, then retain alpha or compose onto the background.
 // This avoids dark fringes around transparent pixels when reducing images.
+template <typename Output>
 void Convert(const unsigned char *samples, int width, int height, int stride,
              int components, bool alpha, bool premultiplied,
-             uint16_t background, Bitmap *out) {
+             uint16_t background, Output *out) {
   const int colors = components - (alpha ? 1 : 0);
   const int bg[3] = {((background >> 11) & 31) * 255 / 31,
                      ((background >> 5) & 63) * 255 / 63,
@@ -185,27 +199,25 @@ void Convert(const unsigned char *samples, int width, int height, int stride,
           rgb[c] += weights[k] * p[k][colors == 1 ? 0 : c] *
                     (premultiplied ? 1.0 : opacity / 255.0);
       }
-      for (int c = 0; c < 3; ++c)
-        rgb[c] += bg[c] * (1.0 - a / 255.0);
-      out->pixels.get()[(size_t)y * out->width + x] =
-          RGB565FromU8(rgb[0] + 0.5, rgb[1] + 0.5, rgb[2] + 0.5);
+      StorePixel(out,(size_t)y*out->width+x,rgb,a,bg);
     }
   }
 }
 } // namespace
 
 namespace {
-bool DecodeWithStbi(const std::vector<unsigned char> &bytes, int target_width,
-                    int target_height, uint16_t background, Bitmap *out,
+template <typename Output>
+bool DecodeWithStbi(const unsigned char *bytes,size_t length,int target_width,
+                    int target_height, uint16_t background, Output *out,
                     Budget *budget) {
   stbi_budget = budget;
   int w = 0, h = 0, channels = 0;
   bool ok = false;
-  if (stbi_info_from_memory(bytes.data(), (int)bytes.size(), &w, &h,
+  if (stbi_info_from_memory(bytes, (int)length, &w, &h,
                             &channels) &&
       Target(w, h, target_width, target_height, out)) {
     unsigned char *pixels = stbi_load_from_memory(
-        bytes.data(), (int)bytes.size(), &w, &h, &channels, 4);
+        bytes, (int)length, &w, &h, &channels, 4);
     if (pixels) {
       Convert(pixels, w, h, w * 4, 4, true, false, background, out);
       ok = true;
@@ -217,22 +229,23 @@ bool DecodeWithStbi(const std::vector<unsigned char> &bytes, int target_width,
 }
 } // namespace
 
-bool Decode(const std::vector<unsigned char> &bytes, int target_width,
-            int target_height, uint16_t background, Bitmap *out,
+template <typename Output>
+bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
+            int target_height, uint16_t background, Output *out,
             const char **error) {
   if (error)
     *error = "Image missing or unsupported";
-  if (!out || bytes.empty() || bytes.size() > INT_MAX || target_width <= 0 ||
+  if (!out || !bytes || !length || length > INT_MAX || target_width <= 0 ||
       target_height <= 0)
     return false;
-  Bitmap next;
+  Output next;
   Budget budget;
   bool ok = false;
 #ifdef __3DS__
   const bool is_gif =
-      bytes.size() >= 6 && std::memcmp(bytes.data(), "GIF8", 4) == 0;
+      length >= 6 && std::memcmp(bytes, "GIF8", 4) == 0;
   if (is_gif) {
-    ok = DecodeWithStbi(bytes, target_width, target_height, background, &next,
+    ok = DecodeWithStbi(bytes, length, target_width, target_height, background, &next,
                         &budget);
   } else {
     InitMuPdfLocks();
@@ -254,7 +267,7 @@ bool Decode(const std::vector<unsigned char> &bytes, int target_width,
     fz_var(next);
     fz_var(budget);
     fz_try(ctx) {
-      buffer = fz_new_buffer_from_shared_data(ctx, bytes.data(), bytes.size());
+      buffer = fz_new_buffer_from_shared_data(ctx, bytes, length);
       image = fz_new_image_from_buffer(ctx, buffer);
       if (!image ||
           !Target(image->w, image->h, target_width, target_height, &next))
@@ -292,13 +305,13 @@ bool Decode(const std::vector<unsigned char> &bytes, int target_width,
     fz_drop_context(ctx);
   }
 #else
-  ok = DecodeWithStbi(bytes, target_width, target_height, background, &next,
+  ok = DecodeWithStbi(bytes, length, target_width, target_height, background, &next,
                       &budget);
 #endif
   if (!ok) {
     if (error)
       *error = budget.exhausted ? "Decoder memory limit (16 MiB)"
-                                : "Image corrupt or bitmap limit (4 MiB)";
+                                : "Image corrupt or bitmap limit";
     return false;
   }
   next.decoder_peak = budget.peak;
@@ -306,5 +319,13 @@ bool Decode(const std::vector<unsigned char> &bytes, int target_width,
   if (error)
     *error = NULL;
   return true;
+}
+bool Decode(const unsigned char *bytes,size_t length,int w,int h,
+            uint16_t bg,Bitmap *out,const char **error) {
+  return DecodeImage(bytes,length,w,h,bg,out,error);
+}
+bool DecodeArgb(const unsigned char *bytes,size_t length,int w,int h,
+                ArgbBitmap *out,const char **error) {
+  return DecodeImage(bytes,length,w,h,0,out,error);
 }
 } // namespace raster_image

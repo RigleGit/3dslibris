@@ -40,10 +40,13 @@ int main(int argc, char **argv) {
   assert(image.width == 1 && image.height == 1);
   assert(image.pixels.get()[0] ==
          0xf800); // first (red), not final (blue) GIF frame
-  raster_image::Bitmap full, extra;
+  image=raster_image::Bitmap();
+  raster_image::Bitmap full, extra, blocked;
   assert(full.Allocate(2048, 1024));
-  assert(!extra.Allocate(2048,
-                         1024)); // active image + replacement bounded together
+  assert(extra.Allocate(2048,1024)); // Exactly 8 MiB is allowed.
+  assert(!blocked.Allocate(1,1));
+  extra=raster_image::Bitmap();
+  assert(blocked.Allocate(1,1)); // Releasing returns budget.
   assert(!extra.Allocate(0, 1) && !extra.Allocate(2147483647, 2147483647));
   for (unsigned char orientation : {0, 1, 2}) {
     const auto fit = image_view::Viewport(1000, 2000, 240, 400, 2, 0.5f, 0.5f);
