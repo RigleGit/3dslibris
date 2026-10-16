@@ -82,7 +82,8 @@ void ReaderController::EditSearchText() {
   swkbdSetValidation(&keyboard, SWKBD_NOTEMPTY_NOTBLANK, 0, 0);
   swkbdSetButton(&keyboard, SWKBD_BUTTON_LEFT, "Cancel", false);
   swkbdSetButton(&keyboard, SWKBD_BUTTON_RIGHT, "OK", true);
-  swkbdSetFeatures(&keyboard, SWKBD_ALLOW_HOME | SWKBD_ALLOW_POWER);
+  swkbdSetFeatures(&keyboard, SWKBD_PREDICTIVE_INPUT |
+                             SWKBD_ALLOW_HOME | SWKBD_ALLOW_POWER);
   char query[128 * 4 + 1] = {};
   const SwkbdButton result = swkbdInputText(&keyboard, query, sizeof(query));
   if (result == SWKBD_BUTTON_RIGHT) {

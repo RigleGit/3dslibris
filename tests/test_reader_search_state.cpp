@@ -69,6 +69,20 @@ struct App {
   void PresentIfDirty() {}
   touchPosition MapTouch(const FrameInput&) { return {}; }
 };
+struct SwkbdState {};
+enum { SWKBD_TYPE_NORMAL,SWKBD_NOTEMPTY_NOTBLANK,SWKBD_BUTTON_LEFT,
+       SWKBD_BUTTON_RIGHT,SWKBD_BUTTON_NONE };
+enum { SWKBD_PREDICTIVE_INPUT=1<<2,SWKBD_ALLOW_HOME=1<<5,SWKBD_ALLOW_POWER=1<<7 };
+typedef int SwkbdButton;
+static u32 keyboard_features=0;
+void swkbdInit(SwkbdState*,int,int,int) {}
+void swkbdSetHintText(SwkbdState*,const char*) {}
+void swkbdSetInitialText(SwkbdState*,const char*) {}
+void swkbdSetValidation(SwkbdState*,int,int,int) {}
+void swkbdSetButton(SwkbdState*,int,const char*,bool) {}
+void swkbdSetFeatures(SwkbdState*,u32 flags) { keyboard_features=flags; }
+int swkbdInputText(SwkbdState*,char*,size_t) { return SWKBD_BUTTON_LEFT; }
+int swkbdGetResult(SwkbdState*) { return 10; }
 struct ReaderController {
   App &app_;
   std::unique_ptr<ReaderSearchSession> search_{new ReaderSearchSession};
@@ -82,7 +96,7 @@ struct ReaderController {
   void TryPersistProgress(Book*,bool) {}
   void StartSearch(bool,bool);
   void RunSearchFrame(const FrameInput&);
-  void EditSearchText() {}
+  void EditSearchText();
 };
 void LogSearch(App&,const ReaderSearchSession&,const char*) {}
 #include "reader_search_under_test.inc"
@@ -110,5 +124,9 @@ int main() {
   input.keys_down=KEY_R;reader.RunSearchFrame(input);
   while(s.engine.GetStatus()==text_search::Searching) reader.RunSearchFrame({});
   assert(s.engine.GetStatus()==text_search::NotFound && app.book.position==1);
-  puts("PASS: search navigation anchors, continuation and cancellation message");
+  // The platform ABI requires predictive input for kanji on Japanese systems.
+  s.editor=true;reader.EditSearchText();
+  assert((keyboard_features&SWKBD_PREDICTIVE_INPUT)!=0);
+  assert((keyboard_features&(SWKBD_ALLOW_HOME|SWKBD_ALLOW_POWER))==(SWKBD_ALLOW_HOME|SWKBD_ALLOW_POWER));
+  puts("PASS: search navigation anchors, continuation, cancellation message and keyboard features");
 }
