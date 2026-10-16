@@ -101,10 +101,15 @@ void ReaderController::StartSearch(bool backwards, bool first) {
   if (!s.engine.Configure(s.query, s.whole_words)) {
     s.message = s.engine.GetError(); s.editor = s.dirty = true; return;
   }
-  const text_search::Position anchor = !first && s.has_match ? s.match.start :
+  const unsigned page=s.book->GetPosition();
+  // Keep the anchor while inspecting a match's continuation, but a manually
+  // selected page outside that span becomes the new search origin.
+  const bool resume_match=!first && s.has_match &&
+      page>=s.match.start.page && page<=s.match.end.page;
+  const text_search::Position anchor = resume_match ? s.match.start :
       text_search::Position(s.book->GetPosition(), 0);
-  s.engine.Start(text_search::FromBook(s.book), anchor, backwards, first || !s.has_match);
-  if (first) s.has_match = false;
+  s.engine.Start(text_search::FromBook(s.book), anchor, backwards, !resume_match);
+  if (!resume_match) s.has_match = false;
   s.editor = false; s.message = "Searching... B: cancel"; s.dirty = true;
   s.started_ms = osGetTime(); s.scan_ms = s.max_slice_ms = 0;
   app_.ShowCurrentBookView(); app_.SetMode(AppMode::Search);
@@ -206,6 +211,7 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
       InvalidateSearch(false); app_.ShowCurrentBookView(); book_nav::DrawPage(book, app_.ts.get()); return;
     } else if (keys & app_.key.x) {
       s.engine.Cancel(); s.editor = s.dirty = true; s.selected = 0;
+      s.message.clear();
     } else if (keys & (KEY_L | KEY_R)) {
       StartSearch((keys & KEY_L) != 0, false);
     } else if (keys & (KEY_DLEFT | KEY_DRIGHT | KEY_DUP | KEY_DDOWN)) {
@@ -213,11 +219,14 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
           BuildLandscapeControls(app_.key) : BuildPortraitControls(app_.key);
       const int delta = (keys & controls.page_next) ? 1 : (keys & controls.page_prev) ? -1 : 0;
       if (delta) {
+        const bool cancelled=s.engine.GetStatus()==text_search::Searching;
         s.engine.Cancel();
         u16 position = book->GetPosition();
         if (book_nav::TurnPage(book, app_.ts.get(), &position, book->GetPageCount(), delta, false)) {
           MarkProgressDirty(book); s.dirty = true;
         }
+        s.message=cancelled ? "Search cancelled" : "L/R search from this page";
+        s.dirty=true;
       }
     }
     if (s.engine.GetStatus() == text_search::Searching) {
