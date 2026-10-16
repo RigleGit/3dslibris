@@ -69,7 +69,7 @@ struct Engine::State {
 
   void Fail(const char *message) { error = message; status = Failed; }
   void ResetUnit() {
-    cursor = Position(unit ? unit - 1 : 0, 0);
+    cursor = Position(!backwards && wrapped ? 0 : (unit ? unit - 1 : 0), 0);
     annotated = raw_end = in_rtl = false;
     matched = ring_next = ring_count = tail = 0;
     cluster.clear(); ready.clear(); ready_index = 0;
@@ -77,6 +77,10 @@ struct Engine::State {
     have_pending = have_candidate = previous_word = previous_space = false;
   }
   bool Eligible(Position p) const {
+    if (!backwards) {
+      if (p == anchor) return include && !wrapped;
+      return wrapped ? p < anchor : anchor < p;
+    }
     if (p.page != unit) return false;
     if (p == anchor) return include && !wrapped;
     if (backwards) return wrapped ? anchor < p : p < anchor;
@@ -88,6 +92,12 @@ struct Engine::State {
     else { match = m; status = Found; }
   }
   void FinishUnit() {
+    if (!backwards) {
+      if (wrapped) { status = NotFound; return; }
+      wrapped = true;
+      ResetUnit();
+      return;
+    }
     if (have_candidate) { match = candidate; status = Found; return; }
     if (wrapped && unit == anchor.page) { status = NotFound; return; }
     if (backwards) {
@@ -179,7 +189,13 @@ struct Engine::State {
       const bool collapsed_space = Space(c.cp) && previous_space;
       Feed(c);
       if (status != Searching) return;
-      if (!collapsed_space && c.start.page > unit && ++tail > query.size() + 2) FinishUnit();
+      if (!collapsed_space) {
+        // Forward search keeps the normalization/KMP stream across pages. Only
+        // its wrapped prefix needs lookahead beyond the final eligible start.
+        const bool beyond = backwards ? c.start.page > unit :
+            wrapped && !(c.start < anchor);
+        if (beyond && ++tail > query.size() + 2) FinishUnit();
+      }
       return;
     }
     ready.clear(); ready_index = 0;

@@ -22,6 +22,48 @@ static text_search::Status Run(text_search::Engine &e, unsigned slice = 1) {
   return e.GetStatus();
 }
 int main() {
+  {
+    Pages large;
+    large.text.assign(300,std::vector<uint32_t>(100,'x'));
+    large.events.resize(300);
+    text_search::Engine engine;
+    assert(engine.Configure("missing",false));
+    engine.Start(large.Source(),{},false,true);
+    assert(Run(engine)==text_search::NotFound);
+    // A forward traversal should not read the previous page again at every
+    // boundary. Allow bounded normalization/lookahead overhead, not a second pass.
+    assert(engine.Scanned()<=30100);
+  }
+  // Independent literal oracle for page boundaries, overlaps and both directions.
+  for(unsigned trial=0,random=17;trial<100;++trial) {
+    std::string text;
+    Pages pages;
+    for(unsigned page=0;page<5;++page) {
+      std::vector<uint32_t> tokens;
+      for(unsigned i=0;i<7;++i) {
+        random=random*1664525u+1013904223u;
+        char c="abc"[(random>>16)%3];text+=c;tokens.push_back(c);
+      }
+      pages.text.push_back(tokens);pages.events.push_back({});
+    }
+    const std::string query=trial%2 ? "ab" : "aa";
+    const size_t anchor=(trial*11)%text.size();
+    for(bool backward : {false,true}) for(bool include : {false,true}) {
+      size_t expected=std::string::npos;
+      for(size_t step=include?0:1;step<text.size();++step) {
+        const size_t pos=backward ? (anchor+text.size()-step)%text.size() : (anchor+step)%text.size();
+        if(text.compare(pos,query.size(),query)==0) {expected=pos;break;}
+      }
+      text_search::Engine engine;assert(engine.Configure(query,false));
+      engine.Start(pages.Source(),{(uint32_t)(anchor/7),(uint32_t)(anchor%7)},backward,include);
+      const auto status=Run(engine);
+      if(expected==std::string::npos) assert(status==text_search::NotFound);
+      else {
+        assert(status==text_search::Found);
+        assert(engine.GetMatch().start==text_search::Position(expected/7,expected%7));
+      }
+    }
+  }
   // Optional hyphenation is invisible text, even across page/style boundaries.
   {
     Pages hyphen{{{'c','o','n',0xad,TEXT_BOLD_ON,'s'},
