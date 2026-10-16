@@ -126,6 +126,8 @@ struct Engine::State {
     if (payload > page.length - cursor.token) { Fail("Truncated page token"); return -1; }
     cursor.token += payload;
     if (in_rtl || (flags & page_search::Skip)) return 0;
+    // Optional hyphenation has no textual width; real hyphens remain significant.
+    if (cp == 0x00ad) return 0;
     if (cp == TEXT_IMAGE || cp == TEXT_HR || cp == TEXT_HR_BOUNDS || Rtl(cp)) {
       if (Rtl(cp)) excluded = true;
       *out = Character(0, start, cursor); return 1;
@@ -242,6 +244,7 @@ bool Engine::Configure(const std::string &query, bool whole_words) {
     int32_t cp;
     auto n = utf8proc_iterate(normalized + offset, count - offset, &cp);
     offset += n;
+    if (cp == 0x00ad) continue;
     if (Space(cp)) {
       if (!s.query.empty() && s.query.back() != ' ') s.query.push_back(' ');
     } else s.query.push_back(cp);

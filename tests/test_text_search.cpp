@@ -22,6 +22,23 @@ static text_search::Status Run(text_search::Engine &e, unsigned slice = 1) {
   return e.GetStatus();
 }
 int main() {
+  // Optional hyphenation is invisible text, even across page/style boundaries.
+  {
+    Pages hyphen{{{'c','o','n',0xad,TEXT_BOLD_ON,'s'},
+                  {'u','l','t',TEXT_BOLD_OFF,' ', 'x'}}, {{}, {}}};
+    text_search::Engine engine;
+    assert(engine.Configure("consult", true));
+    engine.Start(hyphen.Source(), {}, false, true);
+    assert(Run(engine) == text_search::Found);
+    assert(engine.GetMatch().start == text_search::Position(0,0));
+    assert(engine.GetMatch().end == text_search::Position(1,3));
+    assert(engine.Configure("con\xC2\xADsult", true));
+    engine.Start(hyphen.Source(), {}, false, true);
+    assert(Run(engine) == text_search::Found);
+    assert(engine.Configure("con-sult", false));
+    engine.Start(hyphen.Source(), {}, false, true);
+    assert(Run(engine) == text_search::NotFound);
+  }
   // Trimming an entire excluded run must keep the following LTR text searchable.
   {
     Pages trimmed{{{'a','b','c',' ', 'o','k'}}, {{}}};
