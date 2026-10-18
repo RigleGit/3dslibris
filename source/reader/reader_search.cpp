@@ -71,10 +71,11 @@ void ReaderController::OpenSearch() {
 
 void ReaderController::EditSearchText() {
   ReaderSearchSession &s = *search_;
-  s.keyboard_pending = false;
+  s.keyboard_pending = true;
   // Present the editor before transferring control to the system applet.
   DrawSearch(); app_.PresentIfDirty();
   if (app_.ShouldAbortWork()) return;
+  s.keyboard_pending = false;
   SwkbdState keyboard;
   swkbdInit(&keyboard, SWKBD_TYPE_NORMAL, 2, 128);
   swkbdSetHintText(&keyboard, "Search in this book");

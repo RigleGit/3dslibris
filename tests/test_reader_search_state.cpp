@@ -60,13 +60,14 @@ struct App {
     u32 left=0,right=0,up=0,down=0,zl=0,zr=0;
   } key;
   AppMode mode=AppMode::Search;
-  bool ShouldAbortWork() { return false; }
+  bool abort_work=false, abort_on_present=false;
+  bool ShouldAbortWork() { return abort_work; }
   Book *GetCurrentBook() { return &book; }
   void ShowCurrentBookView() { mode=AppMode::Book; }
   void ShowLibraryView() { mode=AppMode::Browser; }
   void ShowSettingsView(bool) { mode=AppMode::Prefs; }
   void SetMode(AppMode m) { mode=m; }
-  void PresentIfDirty() {}
+  void PresentIfDirty() { if(abort_on_present) abort_work=true; }
   touchPosition MapTouch(const FrameInput&) { return {}; }
 };
 struct SwkbdState {};
@@ -75,13 +76,14 @@ enum { SWKBD_TYPE_NORMAL,SWKBD_NOTEMPTY_NOTBLANK,SWKBD_BUTTON_LEFT,
 enum { SWKBD_PREDICTIVE_INPUT=1<<2,SWKBD_ALLOW_HOME=1<<5,SWKBD_ALLOW_POWER=1<<7 };
 typedef int SwkbdButton;
 static u32 keyboard_features=0;
+static unsigned keyboard_inputs=0;
 void swkbdInit(SwkbdState*,int,int,int) {}
 void swkbdSetHintText(SwkbdState*,const char*) {}
 void swkbdSetInitialText(SwkbdState*,const char*) {}
 void swkbdSetValidation(SwkbdState*,int,int,int) {}
 void swkbdSetButton(SwkbdState*,int,const char*,bool) {}
 void swkbdSetFeatures(SwkbdState*,u32 flags) { keyboard_features=flags; }
-int swkbdInputText(SwkbdState*,char*,size_t) { return SWKBD_BUTTON_LEFT; }
+int swkbdInputText(SwkbdState*,char*,size_t) { ++keyboard_inputs; return SWKBD_BUTTON_LEFT; }
 int swkbdGetResult(SwkbdState*) { return 10; }
 struct ReaderController {
   App &app_;
@@ -157,8 +159,18 @@ void TestStartFailure() {
   assert(s.engine.GetStatus()==text_search::Failed);
   assert(s.editor && s.message=="No searchable pages");
 }
+void TestKeyboardDeferredByHome() {
+  App app;ReaderController reader(app);auto &s=*reader.search_;
+  s.editor=true;s.keyboard_pending=true;keyboard_inputs=0;
+  app.abort_on_present=true;reader.RunSearchFrame({});
+  assert(s.keyboard_pending && keyboard_inputs==0);
+  app.abort_work=app.abort_on_present=false;
+  reader.RunSearchFrame({});
+  assert(!s.keyboard_pending && keyboard_inputs==1);
+}
 int main() {
   TestExistingSearchState();
   TestMappedShoulders();
   TestStartFailure();
+  TestKeyboardDeferredByHome();
 }
