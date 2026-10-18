@@ -234,7 +234,6 @@ void Book::SetInlineImageAuthorMaxWidth(u16 id, int px) {
 
 void Book::ClearInlineImageCache() {
   inline_image_cache.clear();
-  inline_image_cache_index.clear();
   inline_image_cache_bytes = 0;
 }
 
@@ -820,21 +819,14 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     }
   };
 
-  // LRU cache lookup before image decode; skip when dimensions unknown.
+  // At most 64 retained images: compare the complete dimensions without a
+  // lossy secondary key that can hide another still-resident variant.
   if (draw_w > 0 && draw_h > 0) {
-    // Hash-based O(1) lookup using composite key
-    u64 composite_key = ((u64)image_id << 48) | ((u64)(u16)screen_h << 32) |
-                        ((u64)(u8)plan.mode << 8) |
-                        ((u64)(u16)draw_w & 0xFF);
-    auto index_it = inline_image_cache_index.find(composite_key);
-    if (index_it != inline_image_cache_index.end()) {
-      auto list_it = index_it->second;
-      // Verify full match to guard against hash collisions
-      if (list_it->image_id == image_id && list_it->screen_h == (u16)screen_h &&
-          list_it->layout_mode == (u8)plan.mode &&
-          list_it->width == draw_w && list_it->height == draw_h) {
-        inline_image_cache.splice(inline_image_cache.begin(),
-                                  inline_image_cache, list_it);
+    for (auto it = inline_image_cache.begin(); it != inline_image_cache.end(); ++it) {
+      if (it->image_id == image_id && it->screen_h == (u16)screen_h &&
+          it->layout_mode == (u8)plan.mode &&
+          it->width == draw_w && it->height == draw_h) {
+        inline_image_cache.splice(inline_image_cache.begin(), inline_image_cache, it);
         blit_pixels(inline_image_cache.front(), start_x, start_y);
         return true;
       }
@@ -880,24 +872,12 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
         !inline_image_cache.empty() &&
         (inline_image_cache_bytes + entry_bytes > kInlineImageCacheMaxBytes ||
          inline_image_cache.size() >= kInlineImageCacheMaxEntries)) {
-      // Remove evicted entry from hash index
-      u64 evict_key = ((u64)inline_image_cache.back().image_id << 48) |
-                      ((u64)inline_image_cache.back().screen_h << 32) |
-                      ((u64)inline_image_cache.back().layout_mode << 8) |
-                      ((u64)inline_image_cache.back().width & 0xFF);
-      inline_image_cache_index.erase(evict_key);
       inline_image_cache_bytes -=
           inline_image_cache.back().pixels.size() * sizeof(u32);
       inline_image_cache.pop_back();
     }
     inline_image_cache.push_front(std::move(entry));
     inline_image_cache_bytes += entry_bytes;
-    // Insert new entry into hash index
-    u64 new_key = ((u64)inline_image_cache.front().image_id << 48) |
-                  ((u64)inline_image_cache.front().screen_h << 32) |
-                  ((u64)inline_image_cache.front().layout_mode << 8) |
-                  ((u64)inline_image_cache.front().width & 0xFF);
-    inline_image_cache_index[new_key] = inline_image_cache.begin();
     blit_pixels(inline_image_cache.front(), start_x, start_y);
   } else {
     blit_pixels(entry, start_x, start_y);

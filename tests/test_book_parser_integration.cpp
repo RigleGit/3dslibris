@@ -220,6 +220,69 @@ void TestOriginalImageResourceAndDrawBounds() {
   }
 }
 
+void TestInlineImageCacheRetainsDistinctDimensions() {
+  const char *folder = getenv("TEST_IMAGE_VIEWER_DIR");
+  test::ExpectTrue("cache test image fixture directory", folder != nullptr);
+  for (int changed_dimension = 0; changed_dimension < 2; ++changed_dimension) {
+    const std::string source_path = std::string(folder) + "/images.epub";
+    std::string copy_template = std::string(folder) + "/cache-variants-XXXXXX";
+    std::vector<char> copy_name(copy_template.begin(), copy_template.end());
+    copy_name.push_back('\0');
+    const int fd = mkstemp(copy_name.data());
+    test::ExpectTrue("create isolated image cache archive", fd >= 0);
+    FILE *copy = fdopen(fd, "wb");
+    FILE *source = fopen(source_path.c_str(), "rb");
+    test::ExpectTrue("open archive copy streams", copy != nullptr && source != nullptr);
+    char chunk[4096];
+    size_t count;
+    while ((count = fread(chunk, 1, sizeof(chunk), source)))
+      test::ExpectEq("copy archive fixture bytes", fwrite(chunk, 1, count, copy), count);
+    test::ExpectEq("read complete image cache archive fixture", ferror(source), 0);
+    test::ExpectEq("close image cache archive source", fclose(source), 0);
+    test::ExpectEq("finish isolated image cache archive", fclose(copy), 0);
+
+    unsigned char orientation = 2;
+    Text text;
+    text.capture_rendered_text = true;
+    text.landscape = true;
+    text.display.width = 400;
+    text.display.height = 400;
+    BookContext ctx;
+    ctx.text = &text;
+    ctx.orientation = &orientation;
+    Book book(ctx);
+    book.SetFolderName(folder);
+    const std::string copied_path = copy_name.data();
+    book.SetFileName(copied_path.substr(copied_path.find_last_of('/') + 1).c_str());
+    book.format = FORMAT_EPUB;
+    const u16 image = book.RegisterInlineImage("OEBPS/tiny.png");
+    std::vector<u16> screen(400 * 400, 0xffff);
+    text.screenleft = text.screenright = screen.data();
+    text.SetScreen(screen.data());
+    auto draw = [&](int width, int height) {
+      std::fill(screen.begin(), screen.end(), 0xffff);
+      text.SetPen(10, 40);
+      InlineImageLayoutPlan plan{};
+      plan.mode = INLINE_IMAGE_LAYOUT_INLINE;
+      plan.draw_width = width;
+      plan.draw_height = height;
+      InlineImageDrawBounds bounds{};
+      test::ExpectTrue("draw retained inline image variant",
+          book.DrawInlineImage(&text, image, &plan, 0, 0, &bounds));
+      test::ExpectTrue("cached variant keeps requested dimensions",
+          bounds.x1 - bounds.x0 == width && bounds.y1 - bounds.y0 == height);
+      for (int y = bounds.y0; y < bounds.y1; ++y)
+        for (int x = bounds.x0; x < bounds.x1; ++x)
+          test::ExpectEq("cached variant retains original red pixels", screen[y * 400 + x], (u16)0xf800);
+    };
+    draw(40, 20);
+    draw(changed_dimension == 0 ? 296 : 40, changed_dimension == 0 ? 20 : 30);
+    test::ExpectEq("remove only isolated image cache archive", remove(copied_path.c_str()), 0);
+    // Both variants fit the cache. The first must remain usable after the
+    // source disappears, including widths separated by 256 and distinct heights.
+    draw(40, 20);
+  }
+}
 
 void TestImageResourcesAcrossBookFormats() {
   const char *folder = getenv("TEST_IMAGE_VIEWER_DIR");
@@ -1004,10 +1067,12 @@ void TestNullAndEmptyInputHandling() {
 int main(int argc, char **argv) {
   if(argc==2) {
     if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
+    else if(std::string(argv[1])=="image-cache") TestInlineImageCacheRetainsDistinctDimensions();
     else return 2;
     return 0;
   }
   TestFb2ResourceStorageLimitsAndRecovery();
+  TestInlineImageCacheRetainsDistinctDimensions();
   TestOriginalImageResourceAndDrawBounds();
   TestImageResourcesAcrossBookFormats();
   TestDispatchContentAndCloseBetweenFormats();
