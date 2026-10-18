@@ -117,7 +117,7 @@ private:
   std::unordered_map<std::string, u16> inline_link_href_index;
   std::unordered_map<std::string, u16> chapter_anchor_pages;
   std::unordered_map<std::string, u16> chapter_doc_start_pages;
-  std::unordered_map<std::string, std::vector<u8>> fb2_inline_images;
+  std::unordered_map<std::string, image_memory::Bytes> fb2_inline_images;
   void *inline_image_probe_uf;
   bool inline_image_zip_index_built;
   std::unordered_map<std::string, unsigned long> inline_image_zip_offsets;

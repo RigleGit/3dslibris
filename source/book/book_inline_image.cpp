@@ -13,7 +13,7 @@
 
 #include "book/inline_image_page_layout_utils.h"
 #include "book/inline_image_screen_layout.h"
-#include "shared/base64_utils.h"
+#include "formats/common/image_base64_utils.h"
 #include "shared/debug_log.h"
 #include "formats/common/epub_image_utils.h"
 #include "formats/common/raster_image_decode.h"
@@ -267,22 +267,20 @@ bool Book::StoreFb2InlineImage(const std::string &id,
   if (key.empty())
     return false;
 
-  std::vector<u8> decoded;
-  if (!DecodeBase64Bytes(base64_data, &decoded, kFb2InlineImageMaxBytes))
-    return false;
-
   size_t old_size = 0;
-  std::unordered_map<std::string, std::vector<u8>>::iterator it =
+  std::unordered_map<std::string, image_memory::Bytes>::iterator it =
       fb2_inline_images.find(key);
   if (it != fb2_inline_images.end())
     old_size = it->second.size();
 
-  if (fb2_inline_images_bytes - old_size + decoded.size() >
-      kFb2InlineImageMaxTotalBytes) {
+  const size_t retained_size = fb2_inline_images_bytes - old_size;
+  const size_t available = std::min(kFb2InlineImageMaxBytes,
+      kFb2InlineImageMaxTotalBytes - retained_size);
+  image_memory::Bytes decoded;
+  if (!DecodeBase64Bytes(base64_data, &decoded, available))
     return false;
-  }
 
-  fb2_inline_images_bytes = fb2_inline_images_bytes - old_size + decoded.size();
+  fb2_inline_images_bytes = retained_size + decoded.size();
   fb2_inline_images[key] = std::move(decoded);
   return true;
 }
@@ -306,7 +304,7 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
     std::string key = image_path.substr(4);
     if (!key.empty() && key[0] == '#')
       key.erase(0, 1);
-    std::unordered_map<std::string, std::vector<u8>>::const_iterator hit =
+    std::unordered_map<std::string, image_memory::Bytes>::const_iterator hit =
         fb2_inline_images.find(key);
     if (hit == fb2_inline_images.end() || hit->second.empty())
       return false;

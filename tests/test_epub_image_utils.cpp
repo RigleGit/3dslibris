@@ -1,4 +1,5 @@
 #include "formats/common/epub_image_utils.h"
+#include "shared/base64_utils.h"
 #include "shared/string_utils.h"
 
 #include <cstdlib>
@@ -69,6 +70,38 @@ int main() {
   ExpectFalse("checked source rejects oversized decoded payload",
       DecodeDataUriImage("data:image/png;base64,SGVsbG8=",&checked,4));
   ExpectTrue("failed source leaves no partial bytes",checked.empty());
+
+  struct DecodeCase {
+    const char *payload;
+    size_t limit;
+    bool succeeds;
+    std::string expected;
+  };
+  const DecodeCase cases[] = {
+      {"SGVsbG8=", 5, true, "Hello"},
+      {" S G\tV s\rb G\n8=", 5, true, "Hello"},
+      {"SGVsbG8", 5, true, "Hello"},
+      {"-_8=", 2, true, std::string("\xfb\xff", 2)},
+      {"SGVsbG8=ignored", 5, true, "Hello"},
+      {"SGVsbG8=", 4, false, ""},
+      {"AA==", 0, false, ""},
+      {"SGVsbG8!", 5, false, ""},
+      {"A", 5, false, ""},
+      {" \t\r\n", 5, false, ""},
+  };
+  for (const DecodeCase &entry : cases) {
+    out.assign(3, 'x');
+    ExpectTrue("legacy Base64 result matches limit and alphabet",
+        DecodeBase64Bytes(entry.payload, &out, entry.limit) == entry.succeeds);
+    ExpectEq("legacy Base64 returns complete bytes or empty failure",
+        out.empty() ? "" : std::string((const char *)out.data(), out.size()), entry.expected);
+    const std::string uri = std::string("data:image/png;base64,") + entry.payload;
+    ExpectTrue("checked data URI result matches limit and alphabet",
+        DecodeDataUriImage(uri, &checked, entry.limit) == entry.succeeds);
+    ExpectEq("checked data URI returns complete bytes or empty failure",
+        checked.empty() ? "" :
+            std::string((const char *)checked.data(), checked.size()), entry.expected);
+  }
 
   return 0;
 }

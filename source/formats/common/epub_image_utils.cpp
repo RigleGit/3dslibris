@@ -1,6 +1,7 @@
 #include "formats/common/epub_image_utils.h"
 
 #include "formats/common/zip_read_utils.h"
+#include "formats/common/image_base64_utils.h"
 #include "shared/base64_utils.h"
 #include "shared/path_utils.h"
 #include "shared/string_utils.h"
@@ -171,21 +172,6 @@ bool DecodeDataUriImage(const std::string &href,image_memory::Bytes *out,size_t 
   if(!StartsWithNoCase(href,"data:") || comma==std::string::npos) return false;
   const std::string meta=ToLowerAscii(href.substr(5,comma-5));
   if(meta.find("image/")==std::string::npos || meta.find(";base64")==std::string::npos) return false;
-  size_t digits=0;
-  for(size_t i=comma+1;i<href.size() && href[i]!='=';++i) {
-    const unsigned char c=href[i];
-    if(c==' ' || c=='\t' || c=='\r' || c=='\n') continue;
-    if(Base64Value(c)<0) return false;
-    ++digits;
-  }
-  const size_t size=(digits/4)*3+(digits%4)*3/4;
-  if(!size || !out->resize(size,limit)) return false;
-  uint32_t accum=0;int bits=-8;size_t written=0;
-  for(size_t i=comma+1;i<href.size() && href[i]!='=';++i) {
-    int v=Base64Value((unsigned char)href[i]);if(v<0) continue;
-    accum=(accum<<6)|(unsigned)v;bits+=6;
-    if(bits>=0) {out->mutable_data()[written++]=(unsigned char)(accum>>bits);bits-=8;}
-  }
-  return written==size;
+  return DecodeBase64Bytes(href.data()+comma+1,href.size()-comma-1,out,limit);
 }
 } // namespace epub_image_utils

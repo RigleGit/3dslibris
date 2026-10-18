@@ -70,6 +70,81 @@ text_search::Match ExpectSearch(Book *book, const char *phrase, bool expected = 
   return engine.GetMatch();
 }
 
+std::string EncodeZeroImageBytes(size_t count) {
+  std::string encoded((count / 3) * 4, 'A');
+  if (count % 3 == 1)
+    encoded += "AA==";
+  else if (count % 3 == 2)
+    encoded += "AAA=";
+  return encoded;
+}
+
+void TestFb2ResourceStorageLimitsAndRecovery() {
+  Text text;
+  BookContext ctx;
+  ctx.text = &text;
+  Book book(ctx);
+  const u16 first = book.RegisterInlineImage("fb2:first");
+  image_memory::Bytes bytes;
+  test::ExpectTrue("store initial FB2 bytes", book.StoreFb2InlineImage("first", "T2xk"));
+#ifdef IMAGE_TEST_WRAP_MALLOC
+  const std::string replacement = "UmVwbGFjZW1lbnQ=";
+  fail_image_allocation = 11;
+  test::ExpectFalse("FB2 replacement survives refused payload allocation",
+      book.StoreFb2InlineImage("#first", replacement));
+  test::ExpectEq("FB2 replacement exercised allocation refusal", fail_image_allocation, (size_t)0);
+  test::ExpectTrue("failed FB2 replacement keeps original resource",
+      book.ReadInlineImageSource(first, &bytes));
+  test::ExpectTrue("failed FB2 replacement preserves original bytes",
+      bytes.size() == 3 && std::string((const char *)bytes.data(), bytes.size()) == "Old");
+  const u16 missing = book.RegisterInlineImage("fb2:missing");
+  fail_image_allocation = 11;
+  test::ExpectFalse("new FB2 resource survives refused payload allocation",
+      book.StoreFb2InlineImage("missing", replacement));
+  test::ExpectEq("new FB2 resource exercised allocation refusal", fail_image_allocation, (size_t)0);
+  test::ExpectFalse("refused FB2 resource leaves no readable partial bytes",
+      book.ReadInlineImageSource(missing, &bytes));
+  test::ExpectTrue("FB2 storage recovers after allocation refusal",
+      book.StoreFb2InlineImage("first", replacement));
+  test::ExpectTrue("recovered FB2 replacement is readable",
+      book.ReadInlineImageSource(first, &bytes));
+  test::ExpectTrue("recovered FB2 replacement has complete bytes",
+      bytes.size() == 11 && std::string((const char *)bytes.data(), bytes.size()) == "Replacement");
+#endif
+  const size_t resource_limit = 4u * 1024u * 1024u;
+  const std::string full = EncodeZeroImageBytes(resource_limit);
+  test::ExpectFalse("FB2 rejects a resource one byte over its limit",
+      book.StoreFb2InlineImage("oversized", EncodeZeroImageBytes(resource_limit + 1)));
+  for (const char *id : {"first", "second", "third"})
+    test::ExpectTrue("FB2 admits resources at exact aggregate limit",
+        book.StoreFb2InlineImage(id, full));
+  const u16 overflow = book.RegisterInlineImage("fb2:overflow");
+  test::ExpectFalse("FB2 rejects aggregate limit plus one byte",
+      book.StoreFb2InlineImage("overflow", "AA=="));
+  test::ExpectFalse("aggregate rejection publishes no resource",
+      book.ReadInlineImageSource(overflow, &bytes));
+  test::ExpectTrue("same-sized FB2 replacement fits at aggregate limit",
+      book.StoreFb2InlineImage("#first", full));
+  test::ExpectTrue("exact-limit FB2 resource remains readable",
+      book.ReadInlineImageSource(first, &bytes));
+  test::ExpectTrue("exact-limit FB2 resource is complete",
+      bytes.size() == resource_limit && bytes[0] == 0 && bytes[resource_limit - 1] == 0);
+  image_memory::Bytes again;
+  test::ExpectTrue("repeated exact-limit FB2 lookup works",
+      book.ReadInlineImageSource(first, &again));
+  test::ExpectTrue("repeated FB2 lookup borrows one retained payload",
+      again.data() == bytes.data());
+  test::ExpectTrue("smaller FB2 replacement releases aggregate budget",
+      book.StoreFb2InlineImage("first", "T2xk"));
+  test::ExpectTrue("released FB2 budget admits a new resource",
+      book.StoreFb2InlineImage("overflow", "AA=="));
+  book.ClearInlineImages();
+  test::ExpectFalse("cleared FB2 resource cannot be read",
+      book.ReadInlineImageSource(first, &bytes));
+  test::ExpectTrue("clearing FB2 resources resets the aggregate budget",
+      book.StoreFb2InlineImage("first", full));
+}
+
 void TestOriginalImageResourceAndDrawBounds() {
   {
     Text text;
@@ -144,6 +219,7 @@ void TestOriginalImageResourceAndDrawBounds() {
     test::ExpectFalse("closed resource cannot be reused", book.ReadInlineImageSource(image,&original));
   }
 }
+
 
 void TestImageResourcesAcrossBookFormats() {
   const char *folder = getenv("TEST_IMAGE_VIEWER_DIR");
@@ -925,7 +1001,13 @@ void TestNullAndEmptyInputHandling() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+  if(argc==2) {
+    if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
+    else return 2;
+    return 0;
+  }
+  TestFb2ResourceStorageLimitsAndRecovery();
   TestOriginalImageResourceAndDrawBounds();
   TestImageResourcesAcrossBookFormats();
   TestDispatchContentAndCloseBetweenFormats();

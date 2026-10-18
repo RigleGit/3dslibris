@@ -12,7 +12,7 @@
 
 #include "book/cover_layout_constants.h"
 #include "shared/aspect_fit_utils.h"
-#include "shared/base64_utils.h"
+#include "formats/common/image_base64_utils.h"
 #include "shared/cover_decode_utils.h"
 #include "formats/common/xml_parse_utils.h"
 #include "stb_image.h"
@@ -222,7 +222,7 @@ int fb2_extract_cover(Book *book, const std::string &fb2path) {
   if (!bin.done || bin.base64.empty())
     return 5;
 
-  std::vector<u8> decoded;
+  image_memory::Bytes decoded;
   if (!DecodeBase64Bytes(bin.base64, &decoded, kFb2CoverDecodedMaxBytes))
     return 6;
 

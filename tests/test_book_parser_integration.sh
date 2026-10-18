@@ -249,4 +249,4 @@ PYFIXTURE
   -lz \
   -o "$TEST_OUTDIR/test_book_parser_integration"
 
-"$TEST_OUTDIR/test_book_parser_integration"
+"$TEST_OUTDIR/test_book_parser_integration" "$@"
