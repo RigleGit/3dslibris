@@ -213,8 +213,8 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
     } else if (keys & app_.key.x) {
       s.engine.Cancel(); s.editor = s.dirty = true; s.selected = 0;
       s.message.clear();
-    } else if (keys & (KEY_L | KEY_R)) {
-      StartSearch((keys & KEY_L) != 0, false);
+    } else if (keys & (app_.key.l | app_.key.r)) {
+      StartSearch((keys & app_.key.l) != 0, false);
     } else if (keys & (KEY_DLEFT | KEY_DRIGHT | KEY_DUP | KEY_DDOWN)) {
       const ReaderControls controls = orientation_utils::IsLandscape(book->GetOrientation()) ?
           BuildLandscapeControls(app_.key) : BuildPortraitControls(app_.key);

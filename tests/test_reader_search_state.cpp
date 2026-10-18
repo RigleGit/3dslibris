@@ -101,7 +101,7 @@ struct ReaderController {
 void LogSearch(App&,const ReaderSearchSession&,const char*) {}
 #include "reader_search_under_test.inc"
 
-int main() {
+void TestExistingSearchState() {
   App app;ReaderController reader(app);auto &s=*reader.search_;
   reader.StartSearch(false,true);
   while(s.engine.GetStatus()==text_search::Searching) reader.RunSearchFrame({});
@@ -129,4 +129,28 @@ int main() {
   assert((keyboard_features&SWKBD_PREDICTIVE_INPUT)!=0);
   assert((keyboard_features&(SWKBD_ALLOW_HOME|SWKBD_ALLOW_POWER))==(SWKBD_ALLOW_HOME|SWKBD_ALLOW_POWER));
   puts("PASS: search navigation anchors, continuation, cancellation message and keyboard features");
+}
+
+void FinishSearch(ReaderController &reader) {
+  unsigned ticks=0;
+  while(reader.search_->engine.GetStatus()==text_search::Searching && ++ticks<10000)
+    reader.RunSearchFrame({});
+  assert(ticks<10000);
+}
+void TestMappedShoulders() {
+  for(bool swapped : {false,true}) {
+    App app;ReaderController reader(app);
+    app.key.l=swapped?KEY_R:KEY_L;app.key.r=swapped?KEY_L:KEY_R;
+    app.book.position=1;reader.StartSearch(false,true);FinishSearch(reader);
+    assert(app.book.position==1);
+    FrameInput input;input.keys_down=app.key.r;
+    reader.RunSearchFrame(input);FinishSearch(reader);
+    assert(app.book.position==4);
+    input.keys_down=app.key.l;reader.RunSearchFrame(input);FinishSearch(reader);
+    assert(app.book.position==1);
+  }
+}
+int main() {
+  TestExistingSearchState();
+  TestMappedShoulders();
 }
