@@ -122,6 +122,11 @@ void StatusController::UpdateStatus()
   }
 
   Book *current_book = app_.GetCurrentBook();
+  Page *focused_page = nullptr;
+  if (app_.IsInlineLinkFocusActive() && current_book &&
+      !current_book->IsFixedLayout() && current_book->GetPageCount() > 0 &&
+      current_book->GetPosition() < current_book->GetPageCount())
+    focused_page = current_book->GetPage();
   app_flow_utils::StatusSnapshot snapshot = {};
   if (mode == AppMode::Book)
   {
@@ -194,8 +199,8 @@ void StatusController::UpdateStatus()
     } else if (mode == AppMode::Opening) {
       snprintf(page_msg, sizeof(page_msg), "%s", kOpeningStatusLabel);
     }
-    if (app_.IsInlineLinkFocusActive() && current_book && current_book->GetPage()) {
-      const auto &items = current_book->GetPage()->GetRenderedSelectables();
+    if (focused_page) {
+      const auto &items = focused_page->GetRenderedSelectables();
       const int selected = current_book->GetFocusedInlineLinkIndex();
       const char *hint = "A:link";
       if (selected >= 0 && selected < (int)items.size() && items[selected].kind == Page::IMAGE)
@@ -309,9 +314,9 @@ void StatusController::UpdateStatus()
     if (mode == AppMode::Book)
     {
       const char *hint = "Y:select";
-      if (app_.IsInlineLinkFocusActive()) {
+      if (focused_page) {
         hint = "A:go";
-        const auto &items = current_book->GetPage()->GetRenderedSelectables();
+        const auto &items = focused_page->GetRenderedSelectables();
         const int selected = current_book->GetFocusedInlineLinkIndex();
         if (selected >= 0 && selected < (int)items.size() && items[selected].kind == Page::IMAGE)
           hint = items[selected].href_id ? "A:image X:link" : "A:image";
