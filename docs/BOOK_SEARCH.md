@@ -7,7 +7,8 @@ and select `find`. The first search starts at the beginning of the current page.
 
 In search mode:
 
-- `L` / `R` find the previous / next match.
+- `L` / `R` find the previous / next match, following the reader's handedness
+  and swapped-shoulder settings.
 - `X` opens the query and whole-word options again.
 - `A` / `B` return to reading at the current page.
 - While a search is pending, `B` cancels it without changing the page.
