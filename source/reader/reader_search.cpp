@@ -111,6 +111,9 @@ void ReaderController::StartSearch(bool backwards, bool first) {
       text_search::Position(s.book->GetPosition(), 0);
   s.engine.Start(text_search::FromBook(s.book), anchor, backwards, !resume_match);
   if (!resume_match) s.has_match = false;
+  if (s.engine.GetStatus() == text_search::Failed) {
+    s.message = s.engine.GetError(); s.editor = s.dirty = true; return;
+  }
   s.editor = false; s.message = "Searching... B: cancel"; s.dirty = true;
   s.started_ms = osGetTime(); s.scan_ms = s.max_slice_ms = 0;
   app_.ShowCurrentBookView(); app_.SetMode(AppMode::Search);

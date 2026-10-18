@@ -150,7 +150,15 @@ void TestMappedShoulders() {
     assert(app.book.position==1);
   }
 }
+void TestStartFailure() {
+  App app;ReaderController reader(app);auto &s=*reader.search_;
+  app.book.position=app.book.GetPageCount();
+  reader.StartSearch(false,true);
+  assert(s.engine.GetStatus()==text_search::Failed);
+  assert(s.editor && s.message=="No searchable pages");
+}
 int main() {
   TestExistingSearchState();
   TestMappedShoulders();
+  TestStartFailure();
 }
