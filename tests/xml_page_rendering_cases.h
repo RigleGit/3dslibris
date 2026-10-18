@@ -67,6 +67,18 @@ void TestSearchHighlightGeometry() {
   text.rendered_rects.clear();
   page.Draw(&text);
   ExpectTrue("ordinary reading has no search decoration", text.rendered_rects.empty());
+  const u32 edge_content[]={'a'};
+  page.SetBuffer(edge_content,1);highlight={0,1};
+  text.display.width=20;text.margin.right=0;
+  page.Draw(&text,&highlight);
+  ExpectTrue("highlight reaches the final screen column",
+      text.rendered_rects.size()==1 && text.rendered_rects[0].x1==20);
+  text.rendered_rects.clear();text.display.width=240;
+  text.margin.top=text.LogicalHeightFor(true)-text.GetHeight()-3;
+  text.margin.bottom=0;
+  page.Draw(&text,&highlight);
+  ExpectTrue("highlight reaches the final screen row",
+      text.rendered_rects.size()==1 && text.rendered_rects[0].y1==text.LogicalHeightFor(true));
 }
 
 

@@ -1015,8 +1015,8 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
     ts->SetScreen(rect.screen);
     const int x0 = std::max(0, rect.bounds.x0 - 1);
     const int y0 = std::max(0, rect.bounds.y0 - 1);
-    const int x1 = std::min(ts->LogicalWidth() - 1, rect.bounds.x1 + 1);
-    const int y1 = std::min(ts->LogicalHeight() - 1, rect.bounds.y1 + 1);
+    const int x1 = std::min(ts->LogicalWidth(), rect.bounds.x1 + 1);
+    const int y1 = std::min(ts->LogicalHeight(), rect.bounds.y1 + 1);
     if (x1 > x0 && y1 > y0)
       ts->DrawRect(x0, y0, x1, y1, ts->GetFgColor());
   }
