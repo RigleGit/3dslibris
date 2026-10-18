@@ -168,9 +168,27 @@ void TestKeyboardDeferredByHome() {
   reader.RunSearchFrame({});
   assert(!s.keyboard_pending && keyboard_inputs==1);
 }
+void TestExclusiveMatchEnd() {
+  App app;ReaderController reader(app);auto &s=*reader.search_;
+  app.book.pages={{'h','i','t',' ','h','i','t'},{'h','i','t'},{'h','i','t'}};
+  app.book.position=1;s.pages=3;s.has_match=true;
+  s.match.start={0,0};s.match.end={1,0};
+  reader.StartSearch(false,false);FinishSearch(reader);
+  assert(app.book.position==1 && s.match.start.page==1);
+}
+void TestContinuationMessage() {
+  App app;ReaderController reader(app);auto &s=*reader.search_;
+  app.book.pages={{'a','b'},{'c','d'},{'x'}};s.pages=3;s.query="abcd";
+  reader.StartSearch(false,true);FinishSearch(reader);
+  assert(s.message=="Match");
+  FrameInput input;input.keys_down=KEY_DRIGHT;reader.RunSearchFrame(input);
+  assert(app.book.position==1 && s.has_match && s.message=="Match");
+}
 int main() {
   TestExistingSearchState();
   TestMappedShoulders();
   TestStartFailure();
   TestKeyboardDeferredByHome();
+  TestExclusiveMatchEnd();
+  TestContinuationMessage();
 }

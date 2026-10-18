@@ -18,6 +18,10 @@ std::string ShortLabel(const std::string &s, size_t chars) {
   const size_t bytes = text_unicode_utils::Utf8BytesForDisplayChars(s.c_str(), chars);
   return bytes < s.size() ? s.substr(0, bytes) + "..." : s;
 }
+bool MatchIncludesPage(const text_search::Match &match, unsigned page) {
+  return page >= match.start.page &&
+      (page < match.end.page || (page == match.end.page && match.end.token != 0));
+}
 void LogSearch(App &app, const ReaderSearchSession &s, const char *reason) {
   DBG_LOGF(&app,
       "SEARCH %s status=%d elapsed_ms=%llu scan_ms=%llu max_slice_ms=%llu tokens=%llu auxiliary_bytes=%lu pages=%u wrapped=%d rtl_excluded=%d",
@@ -107,7 +111,7 @@ void ReaderController::StartSearch(bool backwards, bool first) {
   // Keep the anchor while inspecting a match's continuation, but a manually
   // selected page outside that span becomes the new search origin.
   const bool resume_match=!first && s.has_match &&
-      page>=s.match.start.page && page<=s.match.end.page;
+      MatchIncludesPage(s.match, page);
   const text_search::Position anchor = resume_match ? s.match.start :
       text_search::Position(s.book->GetPosition(), 0);
   s.engine.Start(text_search::FromBook(s.book), anchor, backwards, !resume_match);
@@ -146,7 +150,7 @@ void ReaderController::DrawSearch() {
     Page *page = s.book->GetPage();
     Page::Highlight highlight{};
     const unsigned current = s.book->GetPosition();
-    const bool on_match = s.has_match && current >= s.match.start.page && current <= s.match.end.page;
+    const bool on_match = s.has_match && MatchIncludesPage(s.match, current);
     if (on_match) {
       highlight.begin = current == s.match.start.page ? s.match.start.token : 0;
       highlight.end = current == s.match.end.page ? s.match.end.token : page->GetLength();
@@ -230,7 +234,9 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
         if (book_nav::TurnPage(book, app_.ts.get(), &position, book->GetPageCount(), delta, false)) {
           MarkProgressDirty(book); s.dirty = true;
         }
-        s.message=cancelled ? "Search cancelled" : "L/R search from this page";
+        s.message=cancelled ? "Search cancelled" :
+            s.has_match && MatchIncludesPage(s.match, book->GetPosition()) ?
+                "Match" : "L/R search from this page";
         s.dirty=true;
       }
     }
