@@ -103,6 +103,8 @@ void ReaderController::EditSearchText() {
 
 void ReaderController::StartSearch(bool backwards, bool first) {
   ReaderSearchSession &s = *search_;
+  if (s.engine.GetStatus() == text_search::Searching)
+    LogSearch(app_, s, "cancel");
   s.engine.Cancel();
   if (!s.engine.Configure(s.query, s.whole_words)) {
     s.message = s.engine.GetError(); s.editor = s.dirty = true; return;
@@ -219,6 +221,8 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
     } else if (keys & (app_.key.a | app_.key.b)) {
       InvalidateSearch(false); app_.ShowCurrentBookView(); book_nav::DrawPage(book, app_.ts.get()); return;
     } else if (keys & app_.key.x) {
+      if (s.engine.GetStatus() == text_search::Searching)
+        LogSearch(app_, s, "cancel");
       s.engine.Cancel(); s.editor = s.dirty = true; s.selected = 0;
       s.message.clear();
     } else if (keys & (app_.key.l | app_.key.r)) {
@@ -229,6 +233,7 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
       const int delta = (keys & controls.page_next) ? 1 : (keys & controls.page_prev) ? -1 : 0;
       if (delta) {
         const bool cancelled=s.engine.GetStatus()==text_search::Searching;
+        if (cancelled) LogSearch(app_, s, "cancel");
         s.engine.Cancel();
         u16 position = book->GetPosition();
         if (book_nav::TurnPage(book, app_.ts.get(), &position, book->GetPageCount(), delta, false)) {

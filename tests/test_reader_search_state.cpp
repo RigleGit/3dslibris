@@ -5,6 +5,7 @@
 #include <cassert>
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 
 Button::Button() {}
 enum { KEY_L=1, KEY_R=2, KEY_DLEFT=4, KEY_DRIGHT=8, KEY_DUP=16,
@@ -61,6 +62,7 @@ struct App {
   } key;
   AppMode mode=AppMode::Search;
   bool abort_work=false, abort_on_present=false;
+  std::vector<std::string> search_logs;
   bool ShouldAbortWork() { return abort_work; }
   Book *GetCurrentBook() { return &book; }
   void ShowCurrentBookView() { mode=AppMode::Book; }
@@ -100,7 +102,7 @@ struct ReaderController {
   void RunSearchFrame(const FrameInput&);
   void EditSearchText();
 };
-void LogSearch(App&,const ReaderSearchSession&,const char*) {}
+void LogSearch(App &app,const ReaderSearchSession&,const char *reason) { app.search_logs.push_back(reason); }
 #include "reader_search_under_test.inc"
 
 void TestExistingSearchState() {
@@ -184,11 +186,27 @@ void TestContinuationMessage() {
   FrameInput input;input.keys_down=KEY_DRIGHT;reader.RunSearchFrame(input);
   assert(app.book.position==1 && s.has_match && s.message=="Match");
 }
-int main() {
-  TestExistingSearchState();
-  TestMappedShoulders();
-  TestStartFailure();
-  TestKeyboardDeferredByHome();
-  TestExclusiveMatchEnd();
-  TestContinuationMessage();
+void TestCancellationLogging() {
+  for(u32 key : {512u,(u32)KEY_DRIGHT}) {
+    App app;ReaderController reader(app);auto &s=*reader.search_;
+    s.query="missing";reader.StartSearch(false,true);
+    FrameInput input;input.keys_down=key;reader.RunSearchFrame(input);
+    assert(app.search_logs==std::vector<std::string>{"cancel"});
+  }
+  App app;ReaderController reader(app);
+  reader.StartSearch(false,true);reader.StartSearch(true,false);
+  assert(app.search_logs==std::vector<std::string>{"cancel"});
+}
+int main(int argc,char **argv) {
+  struct Case { const char *name;void (*run)(); } cases[]={
+    {"existing",TestExistingSearchState},{"shoulders",TestMappedShoulders},
+    {"start-failure",TestStartFailure},{"keyboard-home",TestKeyboardDeferredByHome},
+    {"exclusive-end",TestExclusiveMatchEnd},{"continuation",TestContinuationMessage},
+    {"cancel-log",TestCancellationLogging}};
+  bool ran=false;
+  for(const auto &c:cases) if(argc==1 || (argc==2 && strcmp(argv[1],c.name)==0)) {
+    c.run();ran=true;
+  }
+  assert(ran);
+  puts("PASS: reader search state contracts");
 }
