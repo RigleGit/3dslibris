@@ -214,6 +214,16 @@ static void AppendChapters(
   }
 }
 
+static u32 CountValidPageReferences(
+    const std::unordered_map<std::string, u16> &references, u32 page_count) {
+  u32 count = 0;
+  for (const auto &kv : references) {
+    if (kv.second < page_count)
+      ++count;
+  }
+  return count;
+}
+
 } // namespace
 
 namespace epub_page_cache {
@@ -346,7 +356,8 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     if (ok) {
       for (u32 i = 0; i < hdr.doc_start_count; i++) {
         u16 doc_page = 0;
-        if (!reader.ReadRaw(&doc_page, sizeof(doc_page))) {
+        if (!reader.ReadRaw(&doc_page, sizeof(doc_page)) ||
+            doc_page >= hdr.page_count) {
           ok = false;
           break;
         }
@@ -366,7 +377,8 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     if (ok) {
       for (u32 i = 0; i < hdr.anchor_count; i++) {
         u16 anchor_page = 0;
-        if (!reader.ReadRaw(&anchor_page, sizeof(anchor_page))) {
+        if (!reader.ReadRaw(&anchor_page, sizeof(anchor_page)) ||
+            anchor_page >= hdr.page_count) {
           ok = false;
           break;
         }
@@ -424,9 +436,10 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
 
   if (use_stream_load) {
     std::vector<page_cache_utils::CachedChapter> chapters;
-    ok = page_cache_utils::ReadChapters(fp, hdr.chapter_count,
-                                        page_cache_limits::kChapterTitleMaxBytes,
-                                        &chapters);
+    if (ok)
+      ok = page_cache_utils::ReadChapters(fp, hdr.chapter_count,
+                                          page_cache_limits::kChapterTitleMaxBytes,
+                                          &chapters);
     if (ok)
       AppendChapters(book, chapters);
 #ifdef DSLIBRIS_DEBUG
@@ -436,7 +449,8 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     if (ok) {
       for (u32 i = 0; i < hdr.doc_start_count; i++) {
         u16 doc_page = 0;
-        if (fread(&doc_page, 1, sizeof(doc_page), fp) != sizeof(doc_page)) {
+        if (fread(&doc_page, 1, sizeof(doc_page), fp) != sizeof(doc_page) ||
+            doc_page >= hdr.page_count) {
           ok = false;
           break;
         }
@@ -457,7 +471,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
       for (u32 i = 0; i < hdr.anchor_count; i++) {
         u16 anchor_page = 0;
         if (fread(&anchor_page, 1, sizeof(anchor_page), fp) !=
-            sizeof(anchor_page)) {
+            sizeof(anchor_page) || anchor_page >= hdr.page_count) {
           ok = false;
           break;
         }
@@ -587,8 +601,8 @@ void Save(Book *book, const char *book_path, int pixel_size,
   hdr.title_len = (u16)title.size();
   hdr.page_count = (u32)page_count;
   hdr.chapter_count = (u32)cached_chapters.size();
-  hdr.doc_start_count = (u32)doc_starts.size();
-  hdr.anchor_count = (u32)anchors.size();
+  hdr.doc_start_count = CountValidPageReferences(doc_starts, page_count);
+  hdr.anchor_count = CountValidPageReferences(anchors, page_count);
   hdr.image_count = book->GetInlineImageCount();
   hdr.link_href_count = book->GetInlineLinkHrefCount();
 
@@ -628,6 +642,9 @@ void Save(Book *book, const char *book_path, int pixel_size,
 
   if (ok) {
     for (auto &kv : doc_starts) {
+      // Empty trailing documents can refer to a page never produced.
+      if (kv.second >= page_count)
+        continue;
       if (open_cancel_poll::Poll(closing ? nullptr : book, book->GetStatusReporter(),
                                   "epub-cache-docstarts")) {
         ok = false;
@@ -648,6 +665,8 @@ void Save(Book *book, const char *book_path, int pixel_size,
 
   if (ok) {
     for (auto &kv : anchors) {
+      if (kv.second >= page_count)
+        continue;
       if (open_cancel_poll::Poll(closing ? nullptr : book, book->GetStatusReporter(),
                                   "epub-cache-anchors")) {
         ok = false;
@@ -803,7 +822,7 @@ bool StreamWriter::Begin(Book *book, const char *book_path, int pixel_size,
 }
 
 bool StreamWriter::FlushPages(Book *book, u16 from_page) {
-  if (!fp_ || !book)
+  if (!fp_ || !book || from_page != pages_written_)
     return false;
 
   const u16 total = book->GetPageCount();
@@ -832,8 +851,12 @@ bool StreamWriter::FlushPages(Book *book, u16 from_page) {
 }
 
 bool StreamWriter::Finalize(Book *book) {
-  if (!fp_ || !book || pages_written_ == 0)
+  if (!fp_ || !book)
     return false;
+  if (pages_written_ == 0 || pages_written_ != book->GetPageCount()) {
+    Abort();
+    return false;
+  }
 
   const std::vector<ChapterEntry> &chapters = book->GetChapters();
   const std::vector<page_cache_utils::CachedChapter> cached_chapters =
@@ -849,6 +872,8 @@ bool StreamWriter::Finalize(Book *book) {
 
   if (ok) {
     for (auto &kv : doc_starts) {
+      if (kv.second >= pages_written_)
+        continue;
       if (open_cancel_poll::Poll(book, book->GetStatusReporter(),
                                  "epub-stream-docstarts")) {
         ok = false;
@@ -869,6 +894,8 @@ bool StreamWriter::Finalize(Book *book) {
 
   if (ok) {
     for (auto &kv : anchors) {
+      if (kv.second >= pages_written_)
+        continue;
       if (open_cancel_poll::Poll(book, book->GetStatusReporter(),
                                  "epub-stream-anchors")) {
         ok = false;
@@ -942,8 +969,8 @@ bool StreamWriter::Finalize(Book *book) {
     hdr.title_len = (u16)title.size();
     hdr.page_count = pages_written_;
     hdr.chapter_count = (u32)cached_chapters.size();
-    hdr.doc_start_count = (u32)doc_starts.size();
-    hdr.anchor_count = (u32)anchors.size();
+    hdr.doc_start_count = CountValidPageReferences(doc_starts, pages_written_);
+    hdr.anchor_count = CountValidPageReferences(anchors, pages_written_);
     hdr.image_count = book->GetInlineImageCount();
     hdr.link_href_count = book->GetInlineLinkHrefCount();
 
