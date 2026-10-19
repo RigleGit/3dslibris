@@ -323,6 +323,14 @@ void start(void *data, const char *el, const char **attr) {
     }
   }
 
+  if (p->book && !p->book->GetEbookImagesEnabled() &&
+      (XmlNameEquals(el, "img") || XmlNameEquals(el, "image"))) {
+    // Use the normal hidden-element lifecycle before image margins, probing
+    // or tokens can affect layout. Named anchors above remain available.
+    PushHiddenElement(p, el);
+    return;
+  }
+
   // One-shot CSS class resolution for this element — avoids 18+ separate
   // map lookups by resolving all CSS properties in a single pass.
   const char *el_class_raw = nullptr;

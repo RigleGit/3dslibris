@@ -369,6 +369,63 @@ void TestImageResourcesAcrossBookFormats() {
   }
 }
 
+void TestDisableEbookImages() {
+  struct Reporter : IStatusReporter {
+    void PrintStatus(const char *) override {}
+    void PrintStatus(std::string) override {}
+  } reporter;
+  const char *folder=getenv("TEST_IMAGE_VIEWER_DIR");
+  test::ExpectTrue("image fixture directory",folder!=nullptr);
+  const std::string cache=std::string(folder)+"/disabled-image-cache";
+  mkdir(cache.c_str(),0700);
+  epub_page_cache::SetCacheDirForTest(cache.c_str());
+  mobi_page_cache::SetCacheDirForTest(cache.c_str());
+  for (const char *name : {"images.epub","images.mobi","images.fb2"}) {
+    bool disabled=false;
+    Text text; text.display.width=240;
+    BookContext ctx;ctx.text=&text;ctx.disable_ebook_images=&disabled;
+    ctx.status_reporter=&reporter;
+    Book book(ctx);book.SetFolderName(folder);book.SetFileName(name);
+    const bool epub=std::string(name)=="images.epub";
+    const bool mobi=std::string(name)=="images.mobi";
+    int enabled_pages=0,disabled_pages=0;
+    // Change the live preference BEFORE closing: deferred saves must still use
+    // the mode that produced these pages. Both modes must remain cacheable.
+    for (int pass=0;pass<4;++pass) {
+      const bool off=(pass%2)!=0;
+      printf("Image toggle: %s mode=%s pass=%d\n",name,off?"disabled":"enabled",pass);
+      if(epub) book.format=FORMAT_EPUB;
+      test::ExpectEq("open image toggle book",book_parser::Open(&book),0);
+      test::ExpectTrue("surrounding text survives image toggle",
+          BookText(&book).find("Continuity")!=std::string::npos);
+      if(off) {
+        test::ExpectEq("disabled book registers no image resources",book.GetInlineImageCount(),0);
+        ExpectSearch(&book,"linked text after image");
+        test::ExpectTrue("FB2 binary payload never leaks into book text",
+            BookText(&book).find("iVBORw0KGgo")==std::string::npos);
+        if(pass==1) disabled_pages=book.GetPageCount();
+        else test::ExpectEq("disabled layout survives warm cache",book.GetPageCount(),disabled_pages);
+        test::ExpectTrue("disabled images reserve fewer pages",book.GetPageCount()<enabled_pages);
+        if(!epub && !mobi) {
+          const u16 id=book.RegisterInlineImage("fb2:tiny.png");
+          image_memory::Bytes bytes;
+          test::ExpectFalse("disabled FB2 does not retain decoded binary resources",
+              book.ReadInlineImageSource(id,&bytes));
+        }
+      } else {
+        test::ExpectTrue("enabled images remain selectable resources",book.GetInlineImageCount()>=3);
+        if(pass==0) enabled_pages=book.GetPageCount();
+        else test::ExpectEq("re-enabling restores original layout",book.GetPageCount(),enabled_pages);
+      }
+      if(pass>=2 && (epub||mobi))
+        test::ExpectFalse("both image modes reuse their own warm cache",
+            book.HasPendingEpubPageCacheSave()||book.HasPendingMobiPageCacheSave());
+      disabled=!disabled;
+      book.Close();
+    }
+  }
+}
+
 void TestOdtSearch() {
   Text text;
   BookContext ctx;
@@ -1067,6 +1124,7 @@ void TestNullAndEmptyInputHandling() {
 int main(int argc, char **argv) {
   if(argc==2) {
     if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
+    else if(std::string(argv[1])=="image-toggle") TestDisableEbookImages();
     else if(std::string(argv[1])=="image-cache") TestInlineImageCacheRetainsDistinctDimensions();
     else return 2;
     return 0;
@@ -1076,6 +1134,7 @@ int main(int argc, char **argv) {
   TestOriginalImageResourceAndDrawBounds();
   TestImageResourcesAcrossBookFormats();
   TestDispatchContentAndCloseBetweenFormats();
+  TestDisableEbookImages();
   TestOdtSearch();
   TestFb2NestedNavigation();
   TestOpenErrorMessages();

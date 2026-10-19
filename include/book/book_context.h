@@ -20,6 +20,7 @@ struct BookContext {
   const bool *publisher_text_indent;      //! Non-owning.
   const bool *publisher_block_margins;    //! Non-owning.
   const bool *publisher_horizontal_margins; //! Non-owning.
+  const bool *disable_ebook_images;        //! Non-owning.
   const unsigned char *orientation;       //! Non-owning.
   IStatusReporter *status_reporter;   //! Non-owning.
   void (*draw_background)(void *);    //! Non-owning callback (bottom screen).
@@ -37,6 +38,7 @@ struct BookContext {
         publisher_text_indent(nullptr),
         publisher_block_margins(nullptr),
         publisher_horizontal_margins(nullptr),
+        disable_ebook_images(nullptr),
         orientation(nullptr),
         status_reporter(nullptr),
         draw_background(nullptr),

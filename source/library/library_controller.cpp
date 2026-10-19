@@ -352,6 +352,7 @@ static void AppendBookFromFilename(App *app, LibraryGradientContext *gradient_ct
   BookContext ctx;
   ctx.text = app->ts.get();
   ctx.prefs = app->prefs.get();
+  ctx.disable_ebook_images = app->prefs ? &app->prefs->disable_ebook_images : nullptr;
   ctx.paragraph_spacing = &app->paraspacing;
   ctx.paragraph_indent = &app->paraindent;
   ctx.publisher_text_indent = &app->publisher_text_indent;
@@ -426,6 +427,7 @@ static void AppendFolderEntry(App *app, const std::string &source_dir,
   BookContext ctx;
   ctx.text = app->ts.get();
   ctx.prefs = app->prefs.get();
+  ctx.disable_ebook_images = app->prefs ? &app->prefs->disable_ebook_images : nullptr;
   ctx.paragraph_spacing = &app->paraspacing;
   ctx.paragraph_indent = &app->paraindent;
   ctx.publisher_text_indent = &app->publisher_text_indent;

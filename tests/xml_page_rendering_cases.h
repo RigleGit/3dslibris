@@ -44,6 +44,50 @@ void TestImageSelectionGeometry() {
   ResetBookInlineImageStubState();
 }
 
+// Omitting an image must also omit its CSS/layout side effects, while the
+// surrounding link and caption remain usable. Literal glyph spacing is the oracle.
+void TestDisabledImageLayout() {
+  const char *documents[]={
+      "<html><body><p><a href='#end'>A<img src='tiny.png' "
+      "style='display:block;font-size:300%;margin-top:10em;page-break-after:always'/>B</a></p>"
+      "<figure><image href='tiny.png'/><figcaption>Caption</figcaption></figure>"
+      "<p id='end'>C</p></body></html>",
+      "<html><body><img src='tiny.png' width='300' height='400'/></body></html>"};
+  for(int i=0;i<2;++i) {
+    bool disabled=true;
+    TestCtx tc;tc.ctx.disable_ebook_images=&disabled;
+    tc.paragraph_spacing=0;tc.text.SetPixelSize(14);
+    tc.text.capture_rendered_text=true;
+    u16 left=0,right=0;
+    tc.text.screenleft=&left;tc.text.screenright=&right;
+    Book book(tc.ctx);
+    parsedata_t p=MakeParseData(tc,book);
+    p.docpath="book.xhtml";
+    ExpectTrue("disabled image document parses",
+        xml_parse_utils::ParseXmlString(documents[i],MakeXmlOpts(&p)).ok);
+    ExpectIntEq("disabled image creates no extra image pages",book.GetPageCount(),1);
+    ExpectFalse("disabled image leaves no drawing token",
+        BufContains(book.GetPage()->GetBuffer(),book.GetPage()->GetLength(),TEXT_IMAGE));
+    book.GetPage()->Draw(&tc.text);
+    if(i==0) {
+      ExpectTrue("image omission preserves authored letters and caption",
+          tc.text.rendered_ascii=="ABCaptionC");
+      const auto &glyphs=tc.text.rendered_glyphs;
+      ExpectTrue("omitted styled image reserves no horizontal or vertical space",
+          glyphs.size()>=2 && glyphs[0].codepoint=='A' && glyphs[1].codepoint=='B' &&
+          glyphs[1].x-glyphs[0].x==8 && glyphs[1].y==glyphs[0].y);
+      const auto &items=book.GetPage()->GetRenderedSelectables();
+      ExpectTrue("text link remains usable after image omission",
+          !items.empty() && items[0].kind==Page::TEXT_LINK);
+      for(const auto &item:items)
+        ExpectTrue("disabled images have no selection target",item.kind!=Page::IMAGE);
+    } else {
+      ExpectTrue("image-only document remains a safe empty page",
+          tc.text.rendered_ascii.empty() && book.GetPage()->GetRenderedSelectables().empty());
+    }
+  }
+}
+
 void TestSearchHighlightGeometry() {
   TestCtx tc;
   Text &text = tc.text;

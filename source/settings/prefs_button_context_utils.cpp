@@ -35,6 +35,7 @@ static const int kGeneralStyleButtons[] = {
     PREFS_BUTTON_PUBLISHER_TEXT_INDENT,
     PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS,
     PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS,
+    PREFS_BUTTON_DISABLE_EBOOK_IMAGES,
 };
 
 static const int kBookPrefsButtons[] = {

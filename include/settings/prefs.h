@@ -67,6 +67,7 @@ public:
   BrowserViewMode browser_view_mode;
   bool fixed_layout_rtl;
   bool circle_pad_page_turn;
+  bool disable_ebook_images;
   LibrarySortMode library_sort_mode;
 
 private:

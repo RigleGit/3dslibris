@@ -254,7 +254,8 @@ static int ParseEpubSpineDocuments(
       text_layout_utils::GetPerfStats();
   const epub_parse_perf::Snapshot spine_parse_before = epub_parse_perf::Get();
 #endif
-  unzFile inline_probe_uf = unzOpen(archive_path.c_str());
+  unzFile inline_probe_uf = book->GetEbookImagesEnabled()
+      ? unzOpen(archive_path.c_str()) : NULL;
   book->SetInlineImageProbeZip(inline_probe_uf);
   // Open a shared handle for CSS stylesheet scanning so LoadCssClassMapForDoc
   // can reuse it across all spine documents instead of opening and closing the

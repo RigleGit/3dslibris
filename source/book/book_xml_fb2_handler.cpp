@@ -8,6 +8,7 @@
 #include "book/book_xml_fb2_handler.h"
 
 #include "book/book.h"
+#include "book/book_xml_parser_support.h"
 #include "parse.h"
 
 #include <string.h>
@@ -92,6 +93,13 @@ bool HandleFb2BinaryStart(parsedata_t *p, const char *el, const char **attr) {
   p->fb2_binary_too_large = false;
   p->fb2_binary_id.clear();
   p->fb2_binary_data.clear();
+
+  if (p->book && !p->book->GetEbookImagesEnabled()) {
+    // Consume binary markup without collecting/decoding it or exposing Base64
+    // as book text. Cover extraction uses its own independent parser.
+    book_xml_parser_support::SetCurrentStackHidden(p, true);
+    return true;
+  }
 
   const char *id = NULL;
   for (int i = 0; attr && attr[i]; i += 2) {

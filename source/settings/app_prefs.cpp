@@ -86,6 +86,15 @@ static void ToggleClockFormatSetting(Prefs *prefs) {
   prefs->RequestWrite();
 }
 
+static void ToggleEbookImagesSetting(App *app) {
+  if (!app || !app->prefs)
+    return;
+  app->prefs->disable_ebook_images =
+      settings::ToggleSetting(app->prefs->disable_ebook_images);
+  app->MarkBookLayoutDirty();
+  app->prefs->RequestWrite();
+}
+
 static void ToggleReopenLastBookSetting(App *app) {
   if (!app)
     return;
@@ -340,7 +349,7 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks",
       "reset settings",
       "clear cache",        "publisher indent", "publisher spacing",
-      "publisher sides", "search"};
+      "publisher sides", "search", "disable ebook images"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -398,6 +407,7 @@ void SettingsController::PrefsDraw() {
   PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_TEXT_INDENT);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS);
+  PrefsRefreshButton(PREFS_BUTTON_DISABLE_EBOOK_IMAGES);
   PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS);
 
   for (int slot = 0; slot < visibleCount; slot++) {
@@ -1005,6 +1015,12 @@ void SettingsController::PrefsRefreshButton(int index) {
         app_.prefs->circle_pad_page_turn ? std::string("on")
                                          : std::string("off"));
     break;
+  case PREFS_BUTTON_DISABLE_EBOOK_IMAGES:
+    app_.prefsButtons[PREFS_BUTTON_DISABLE_EBOOK_IMAGES].SetLabel1(
+        std::string("disable ebook images"));
+    app_.prefsButtons[PREFS_BUTTON_DISABLE_EBOOK_IMAGES].SetLabel2(
+        app_.prefs->disable_ebook_images ? std::string("on") : std::string("off"));
+    break;
   case PREFS_BUTTON_LIBRARY_SORT: {
     static const char *const kSortModeLabels[LIBRARY_SORT_COUNT] = {
         "by title", "by filename", "by author",
@@ -1162,6 +1178,7 @@ void SettingsController::ResetToDefaults() {
   app_.prefs->browser_view_mode = BROWSER_VIEW_GALLERY;
   app_.prefs->fixed_layout_rtl = false;
   app_.prefs->circle_pad_page_turn = true;
+  app_.prefs->disable_ebook_images = false;
   app_.prefs->show_time_remaining = false;
   app_.reopen = true;
   app_.MarkBookLayoutDirty();
@@ -1261,6 +1278,13 @@ void SettingsController::PrefsHandlePress() {
       PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
       app_.MarkPrefsDirty();
     }
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_DISABLE_EBOOK_IMAGES) {
+    ToggleEbookImagesSetting(&app_);
+    PrefsRefreshButton(PREFS_BUTTON_DISABLE_EBOOK_IMAGES);
+    app_.MarkPrefsDirty();
     return;
   }
 

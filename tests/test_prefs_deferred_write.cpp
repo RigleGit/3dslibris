@@ -204,6 +204,20 @@ static void TestReadContracts() {
   assert(remove(paths::GetPrefsBackupFile().c_str()) == 0);
   assert(backup.Read() == 255 && !backup.ApplyPendingCurrentBookRestore());
 }
+static void TestEbookImagesOption() {
+  App owner; owner.ts.reset(new Text());
+  const char *attrs[]={"", " disableEbookImages=\"1\"", " disableEbookImages=\"0\""};
+  const char *saved[]={"disableEbookImages=\"0\"", "disableEbookImages=\"1\"", "disableEbookImages=\"0\""};
+  for (int i=0;i<3;++i) {
+    WriteXml(std::string("<dslibris><option")+attrs[i]+"/></dslibris>");
+    Prefs prefs(&owner);
+    assert(prefs.Read()==0 && prefs.Write()==0);
+    assert(ReadCurrent().find(saved[i])!=std::string::npos);
+    Prefs restarted(&owner);
+    assert(restarted.Read()==0 && restarted.Write()==0);
+    assert(ReadCurrent().find(saved[i])!=std::string::npos);
+  }
+}
 int main() {
   const char *dir=getenv("PREFS_TEST_DIR"); assert(dir);
   paths::prefs_path=std::string(dir) + "/prefs.xml";
@@ -317,5 +331,6 @@ int main() {
   restored.ApplySavedBookState(&wrong_folder);
   assert(wrong_folder.position == 0 && wrong_folder.bookmarks.empty() && wrong_folder.FontSize == -1);
   TestReadContracts();
+  TestEbookImagesOption();
   puts("PASS: real preference save/read/restart, retry, migration and folder restoration");
 }

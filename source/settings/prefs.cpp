@@ -338,6 +338,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       if (!strcmp(attr[i], "circlePadPageTurn")) {
         p->prefs->circle_pad_page_turn = atoi(attr[i + 1]) != 0;
       }
+      if (!strcmp(attr[i], "disableEbookImages"))
+        p->prefs->disable_ebook_images = atoi(attr[i + 1]) != 0;
       if (!strcmp(attr[i], "librarySortMode")) {
         int m = atoi(attr[i + 1]);
         if (m >= 0 && m < LIBRARY_SORT_COUNT)
@@ -637,13 +639,14 @@ int Prefs::Write() {
 
   fprintf(fp, "<dslibris format=\"2\">\n");
   fprintf(fp,
-      "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" />\n",
+      "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" disableEbookImages=\"%d\" />\n",
           swapshoulder, time24h,
       show_time_remaining ? 1 : 0,
           browser_view_utils::ToPrefValue(browser_view_mode),
           fixed_layout_rtl ? 1 : 0,
           circle_pad_page_turn ? 1 : 0,
-          static_cast<int>(library_sort_mode));
+          static_cast<int>(library_sort_mode),
+          disable_ebook_images ? 1 : 0);
   fprintf(fp,
           "\t<screen colorMode=\"%d\" flip=\"%d\" landscape=\"%d\" />\n",
           ts ? ts->GetColorMode() : 0,
@@ -828,6 +831,7 @@ void Prefs::Init() {
   browser_view_mode = BROWSER_VIEW_GALLERY;
   fixed_layout_rtl = false;
   circle_pad_page_turn = true;
+  disable_ebook_images = false;
   library_sort_mode = LIBRARY_SORT_TITLE;
   last_opened_by_book_key.clear();
   saved_state_by_book_key.clear();

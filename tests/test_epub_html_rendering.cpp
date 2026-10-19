@@ -1242,6 +1242,7 @@ int main() {
   TestAdjacentDivsAfterBandImageStartSeparateLines();
   TestEmbeddedCssAlignedLines();
   TestXmlAlignedLines();
+  TestDisabledImageLayout();
   TestSearchHighlightGeometry();
   TestImageSelectionGeometry();
   TestSearchSurvivesPagination();

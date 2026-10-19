@@ -77,7 +77,7 @@ static void EnsureCacheDirs() {
   initialized = true;
 }
 
-static std::string BuildCachePath(const char *book_path,
+static std::string BuildCachePath(Book *book, const char *book_path,
                                   int pixel_size, int line_spacing,
                                   int paragraph_spacing, int paragraph_indent,
                                   int orientation, int margin_left,
@@ -104,6 +104,8 @@ static std::string BuildCachePath(const char *book_path,
   params.margin_bottom = margin_bottom;
   params.regular_font = regular_font ? regular_font : "";
   params.variant_token = line_wrap_fix_enabled ? "1" : "0";
+  if (book && !book->GetEbookImagesEnabled())
+    params.variant_token += ":no-images";
 
   return page_cache_utils::BuildPageCachePath(
       GetEffectiveCacheDir(), ".mpc", book_path, params);
@@ -228,7 +230,7 @@ bool TryLoad(Book *book, const char *book_path,
     return false;
   EnsureCacheDirs();
   std::string cache_path =
-      BuildCachePath(book_path, pixel_size, line_spacing,
+      BuildCachePath(book, book_path, pixel_size, line_spacing,
                      paragraph_spacing, paragraph_indent, orientation,
                      margin_left, margin_right, margin_top, margin_bottom,
                      regular_font, line_wrap_fix_enabled);
@@ -404,7 +406,7 @@ void Save(Book *book, const char *book_path,
 #endif
   EnsureCacheDirs();
   std::string cache_path =
-      BuildCachePath(book_path, pixel_size, line_spacing,
+      BuildCachePath(book, book_path, pixel_size, line_spacing,
                      paragraph_spacing, paragraph_indent, orientation,
                      margin_left, margin_right, margin_top, margin_bottom,
                      regular_font, line_wrap_fix_enabled);

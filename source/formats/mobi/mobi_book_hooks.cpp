@@ -267,7 +267,7 @@ static std::string ExtractMobiMarkupToText(
     DBG_LOG(deps.reporter, "MOBI: using safe markup extractor");
 #endif
   mobi_safe_markup_extract::InlineImageCallbacks img_callbacks;
-  if (book) {
+  if (book && book->GetEbookImagesEnabled()) {
     img_callbacks.register_inline_image = RegisterMobiInlineImage;
     img_callbacks.user_data = book;
   }

@@ -29,3 +29,11 @@ changes the book's page, bookmarks, preferences or stored search query.
 
 GIF images show their first frame. Very large or unsupported images may be
 omitted or report a loading error when they exceed memory limits.
+
+
+## Disable ebook images
+
+In general settings, open `style customization` and enable
+`disable ebook images` to omit content images in EPUB, MOBI and FB2.
+Captions and library covers remain. PDF/CBZ/XPS are unaffected.
+Changing this setting repaginates affected books; it is off by default.

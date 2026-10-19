@@ -118,6 +118,7 @@ Book::Book(const BookContext &c) : ctx(c) {
   mobi_page_cache_save_pending = false;
   mobi_line_wrap_fix = false;
   parsed_with_mobi_line_wrap_fix = false;
+  CaptureEbookImageSetting();
   style_font_size_override = -1;
   style_line_spacing_override = -1;
   style_paragraph_spacing_override = -1;
@@ -207,6 +208,15 @@ bool Book::GetPublisherHorizontalMarginsEnabled() const {
   return ctx.publisher_horizontal_margins
              ? *ctx.publisher_horizontal_margins
              : true;
+}
+
+bool Book::GetEbookImagesEnabled() const {
+  return ebook_images_enabled;
+}
+
+void Book::CaptureEbookImageSetting() {
+  // Keep deferred cache saves tied to the layout, even after globals change.
+  ebook_images_enabled = !ctx.disable_ebook_images || !*ctx.disable_ebook_images;
 }
 
 int Book::GetStyleParagraphSpacingOverride() const {

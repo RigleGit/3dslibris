@@ -5,7 +5,7 @@
 #include <cassert>
 #define DBG_LOGF(...) ((void)0)
 struct Prefs {
-  bool time24h=true; int writes=0;
+  bool time24h=true, disable_ebook_images=false; int writes=0;
   void RequestWrite() { ++writes; }
 };
 struct Text {
@@ -102,7 +102,13 @@ static void TestSettingsActions() {
         : action == TogglePublisherBlockMarginsSetting ? app.publisher_block_margins : app.publisher_horizontal_margins;
     assert(enabled);
   }
+  const int image_writes=prefs.writes, image_dirty=app.layout_dirty;
+  ToggleEbookImagesSetting(&app);
+  assert(prefs.disable_ebook_images && prefs.writes==image_writes+1 && app.layout_dirty==image_dirty+1);
+  ToggleEbookImagesSetting(&app);
+  assert(!prefs.disable_ebook_images && prefs.writes==image_writes+2 && app.layout_dirty==image_dirty+2);
   const int writes=prefs.writes;
+  ToggleEbookImagesSetting(nullptr);
   ToggleClockFormatSetting(nullptr); ToggleReopenLastBookSetting(nullptr);
   TogglePublisherTextIndentSetting(nullptr, &book, true);
   CycleColorMode(nullptr, &app);
@@ -157,6 +163,8 @@ int main() {
                         HasButton(page, PREFS_BUTTON_BOOK_INFO));
     }
     page.page = 1;
+    test::ExpectTrue("image toggle belongs to global style settings",
+                     HasButton(page, PREFS_BUTTON_DISABLE_EBOOK_IMAGES));
     test::ExpectTrue("global style controls keep font configuration",
                      HasButton(page, PREFS_BUTTON_FONT_CONFIG));
     test::ExpectTrue("global style controls keep side margins",
@@ -196,6 +204,8 @@ int main() {
       }
       page.page = 1;
       CheckDrawablePage(page);
+      test::ExpectFalse("book settings do not create a per-book image override",
+                        HasButton(page, PREFS_BUTTON_DISABLE_EBOOK_IMAGES));
         test::ExpectTrue("search only appears for reflow book actions",
             HasButton(page, PREFS_BUTTON_SEARCH) ==
             (page.from_book && !page.fixed_layout && page.page == 0));

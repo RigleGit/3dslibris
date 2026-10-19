@@ -132,6 +132,8 @@ static std::string BuildCachePath(Book *book, const char *book_path,
       book && book->GetPublisherBlockMarginsEnabled() ? ":m1" : ":m0";
   layout_params.variant_token +=
       book && book->GetPublisherHorizontalMarginsEnabled() ? ":h1" : ":h0";
+  if (book && !book->GetEbookImagesEnabled())
+    layout_params.variant_token += ":no-images";
   return page_cache_utils::BuildPageCachePath(
       GetEffectiveCacheDir(), ".epc", book_path, layout_params);
 }

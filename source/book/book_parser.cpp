@@ -144,6 +144,7 @@ uint8_t OpenPrepared(Book *book) {
                              "book-open-prepared"))
     return BOOK_ERR_CANCELLED;
 
+  book->CaptureEbookImageSetting();
   const std::string path = BuildPath(book);
   char logmsg[256];
   snprintf(logmsg, sizeof(logmsg), "Opening: %s", path.c_str());

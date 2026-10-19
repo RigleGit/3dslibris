@@ -142,6 +142,7 @@ private:
   unsigned int layout_revision;
   unsigned int open_session_id_;
   bool open_abort_requested_;
+  bool ebook_images_enabled;
   int focused_inline_link_index;
 
   void ClearInlineImageCache();
@@ -231,6 +232,8 @@ public:
   bool GetPublisherTextIndentEnabled() const;
   bool GetPublisherBlockMarginsEnabled() const;
   bool GetPublisherHorizontalMarginsEnabled() const;
+  bool GetEbookImagesEnabled() const;
+  void CaptureEbookImageSetting();
   int GetStyleParagraphSpacingOverride() const;
   void SetStyleParagraphSpacingOverride(int value);
   int GetStylePublisherTextIndentOverride() const;
