@@ -421,19 +421,20 @@ get_or_build_cache(int w, int h, UiButtonSkinState state, bool with_icon) {
   return entry;
 }
 
-static void fill_rect_clip(u16 *screen, int stride, int logicalHeight, int x0,
-                           int y0, int x1, int y1, u16 color, u8 alpha) {
+static void fill_rect_clip(u16 *screen, int stride, int logicalWidth,
+                           int logicalHeight, int x0, int y0, int x1, int y1,
+                           u16 color, u8 alpha) {
   if (!screen || stride <= 0 || alpha == 0)
     return;
   if (x0 > x1)
     std::swap(x0, x1);
   if (y0 > y1)
     std::swap(y0, y1);
-  if (x1 <= 0 || y1 <= 0 || x0 >= 240 || y0 >= logicalHeight)
+  if (x1 <= 0 || y1 <= 0 || x0 >= logicalWidth || y0 >= logicalHeight)
     return;
   x0 = std::max(0, x0);
   y0 = std::max(0, y0);
-  x1 = std::min(240, x1);
+  x1 = std::min(logicalWidth, x1);
   y1 = std::min(logicalHeight, y1);
   for (int y = y0; y < y1; y++) {
     for (int x = x0; x < x1; x++) {
@@ -443,9 +444,9 @@ static void fill_rect_clip(u16 *screen, int stride, int logicalHeight, int x0,
   }
 }
 
-static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight,
-                               int x, int y, int w, int h, UiButtonIconId icon,
-                               bool disabled) {
+static void draw_icon_fallback(u16 *screen, int stride, int logicalWidth,
+                               int logicalHeight, int x, int y, int w, int h,
+                               UiButtonIconId icon, bool disabled) {
   int iconBlock = UiButtonSkin_IconBlockWidth(h);
   int boxSize = iconBlock - 8;
   if (boxSize < 8)
@@ -467,21 +468,21 @@ static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight,
       shaft0 = ox + (boxSize * 2) / 5;
       shaft1 = ox + (boxSize * 4) / 5;
     }
-    fill_rect_clip(screen, stride, logicalHeight, shaft0, mid - stem, shaft1,
-                   mid + stem + 1, ink, alpha);
+    fill_rect_clip(screen, stride, logicalWidth, logicalHeight, shaft0,
+                   mid - stem, shaft1, mid + stem + 1, ink, alpha);
     for (int i = 0; i < boxSize / 2; i++) {
       int y0 = mid - i;
       int y1 = mid + i + 1;
       if (icon == UI_BUTTON_ICON_NEXT) {
         int x0 = ox + (boxSize * 2) / 5 + i / 2;
         int x1 = ox + boxSize - 1 - i / 3;
-        fill_rect_clip(screen, stride, logicalHeight, x0, y0, x1, y1, ink,
-                       alpha);
+        fill_rect_clip(screen, stride, logicalWidth, logicalHeight, x0, y0, x1,
+                       y1, ink, alpha);
       } else {
         int x0 = ox + i / 3;
         int x1 = ox + (boxSize * 3) / 5 - i / 2;
-        fill_rect_clip(screen, stride, logicalHeight, x0, y0, x1, y1, ink,
-                       alpha);
+        fill_rect_clip(screen, stride, logicalWidth, logicalHeight, x0, y0, x1,
+                       y1, ink, alpha);
       }
     }
     return;
@@ -492,18 +493,18 @@ static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight,
     int bh = boxSize / 2;
     int bx = ox + (boxSize - bw) / 2;
     int by = oy + boxSize / 2;
-    fill_rect_clip(screen, stride, logicalHeight, bx, by, bx + bw, by + bh, ink,
-                   alpha);
+    fill_rect_clip(screen, stride, logicalWidth, logicalHeight, bx, by, bx + bw,
+                   by + bh, ink, alpha);
     int roofH = boxSize / 2;
     int cx = ox + boxSize / 2;
     for (int i = 0; i < roofH; i++) {
       int hw = (roofH - i);
-      fill_rect_clip(screen, stride, logicalHeight, cx - hw, by - i - 1,
-                     cx + hw + 1, by - i, ink, alpha);
+      fill_rect_clip(screen, stride, logicalWidth, logicalHeight, cx - hw,
+                     by - i - 1, cx + hw + 1, by - i, ink, alpha);
     }
     int doorW = std::max(2, bw / 4);
-    fill_rect_clip(screen, stride, logicalHeight, cx - doorW / 2, by + bh / 2,
-                   cx + doorW / 2 + 1, by + bh,
+    fill_rect_clip(screen, stride, logicalWidth, logicalHeight, cx - doorW / 2,
+                   by + bh / 2, cx + doorW / 2 + 1, by + bh,
                    RGB565FromU8(palette.btnFillBotR, palette.btnFillBotG,
                                 palette.btnFillBotB),
                    alpha);
@@ -522,21 +523,22 @@ static void draw_icon_fallback(u16 *screen, int stride, int logicalHeight,
         int dy = yy - cy;
         int d2 = dx * dx + dy * dy;
         if (d2 <= rOut * rOut && d2 >= rIn * rIn) {
-          fill_rect_clip(screen, stride, logicalHeight, xx, yy, xx + 1, yy + 1,
-                         ink, alpha);
+          fill_rect_clip(screen, stride, logicalWidth, logicalHeight, xx, yy,
+                         xx + 1, yy + 1, ink, alpha);
         }
       }
     }
     int tooth = std::max(1, boxSize / 8);
-    fill_rect_clip(screen, stride, logicalHeight, cx - tooth, oy,
+    fill_rect_clip(screen, stride, logicalWidth, logicalHeight, cx - tooth, oy,
                    cx + tooth + 1, oy + tooth + 2, ink, alpha);
-    fill_rect_clip(screen, stride, logicalHeight, cx - tooth,
+    fill_rect_clip(screen, stride, logicalWidth, logicalHeight, cx - tooth,
                    oy + boxSize - tooth - 2, cx + tooth + 1, oy + boxSize, ink,
                    alpha);
-    fill_rect_clip(screen, stride, logicalHeight, ox, cy - tooth,
+    fill_rect_clip(screen, stride, logicalWidth, logicalHeight, ox, cy - tooth,
                    ox + tooth + 2, cy + tooth + 1, ink, alpha);
-    fill_rect_clip(screen, stride, logicalHeight, ox + boxSize - tooth - 2,
-                   cy - tooth, ox + boxSize, cy + tooth + 1, ink, alpha);
+    fill_rect_clip(screen, stride, logicalWidth, logicalHeight,
+                   ox + boxSize - tooth - 2, cy - tooth, ox + boxSize,
+                   cy + tooth + 1, ink, alpha);
   }
 }
 
@@ -605,8 +607,9 @@ int UiButtonSkin_IconBlockWidth(int buttonHeight) {
   return iconSide + 6;
 }
 
-void UiButtonSkin_Draw(u16 *screen, int stride, int logicalHeight, int x, int y,
-                       int w, int h, UiButtonSkinState state, bool withIcon) {
+void UiButtonSkin_Draw(u16 *screen, int stride, int logicalWidth,
+                       int logicalHeight, int x, int y, int w, int h,
+                       UiButtonSkinState state, bool withIcon) {
   if (!screen || stride <= 0 || w <= 0 || h <= 0)
     return;
   if (!g_inited)
@@ -623,7 +626,7 @@ void UiButtonSkin_Draw(u16 *screen, int stride, int logicalHeight, int x, int y,
       continue;
     for (int px = 0; px < w; px++) {
       int sx = x + px;
-      if (sx < 0 || sx >= 240)
+      if (sx < 0 || sx >= logicalWidth)
         continue;
       size_t sidx = (size_t)py * (size_t)w + (size_t)px;
       u8 a = entry->alpha[sidx];
@@ -639,9 +642,9 @@ void UiButtonSkin_Draw(u16 *screen, int stride, int logicalHeight, int x, int y,
   }
 }
 
-void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalHeight, int x,
-                           int y, int w, int h, UiButtonIconId icon,
-                           bool disabled) {
+void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalWidth,
+                           int logicalHeight, int x, int y, int w, int h,
+                           UiButtonIconId icon, bool disabled) {
   if (!screen || stride <= 0 || w <= 0 || h <= 0 || icon < 0 ||
       icon >= UI_BUTTON_ICON_COUNT)
     return;
@@ -652,8 +655,8 @@ void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalHeight, int x,
   // Prefer external icon assets; fall back to procedural primitives if missing.
   const IconBitmap &bmp = g_icons[(int)icon];
   if (!bmp.loaded || bmp.width <= 0 || bmp.height <= 0) {
-    draw_icon_fallback(screen, stride, logicalHeight, x, y, w, h, icon,
-                       disabled);
+    draw_icon_fallback(screen, stride, logicalWidth, logicalHeight, x, y, w, h,
+                       icon, disabled);
     return;
   }
 
@@ -672,7 +675,7 @@ void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalHeight, int x,
     int srcY = (dy * bmp.height) / boxSize;
     for (int dx = 0; dx < boxSize; dx++) {
       int sx = iconX + dx;
-      if (sx < 0 || sx >= 240)
+      if (sx < 0 || sx >= logicalWidth)
         continue;
       int srcX = (dx * bmp.width) / boxSize;
       size_t sidx = ((size_t)srcY * (size_t)bmp.width + (size_t)srcX) * 4u;

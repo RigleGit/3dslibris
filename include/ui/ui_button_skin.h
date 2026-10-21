@@ -36,8 +36,9 @@ void UiButtonSkin_SetColorMode(int mode);
 UiButtonIconId UiButtonSkin_IconFromLabel(const char *label);
 int UiButtonSkin_IconBlockWidth(int buttonHeight);
 
-void UiButtonSkin_Draw(u16 *screen, int stride, int logicalHeight, int x, int y,
-                       int w, int h, UiButtonSkinState state, bool withIcon);
-void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalHeight, int x,
-                           int y, int w, int h, UiButtonIconId icon,
-                           bool disabled);
+void UiButtonSkin_Draw(u16 *screen, int stride, int logicalWidth,
+                       int logicalHeight, int x, int y, int w, int h,
+                       UiButtonSkinState state, bool withIcon);
+void UiButtonSkin_DrawIcon(u16 *screen, int stride, int logicalWidth,
+                           int logicalHeight, int x, int y, int w, int h,
+                           UiButtonIconId icon, bool disabled);

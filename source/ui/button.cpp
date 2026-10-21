@@ -144,6 +144,7 @@ void Button::Draw(u16 *screen, bool highlight) {
   ts->SetScreen(screen);
   ts->SetStyle(text.style);
 
+  const int logicalWidth = ts->LogicalWidthFor(screen == ts->screenleft);
   const int logicalHeight = ScreenHeightPx(screen, ts);
   const int stride = ts->BufferStride();
 
@@ -160,8 +161,8 @@ void Button::Draw(u16 *screen, bool highlight) {
   const int bw = (int)extent.x;
   const int bh = (int)extent.y;
 
-  UiButtonSkin_Draw(screen, stride, logicalHeight, bx, by, bw, bh, state,
-                    hasIcon);
+  UiButtonSkin_Draw(screen, stride, logicalWidth, logicalHeight, bx, by, bw, bh,
+                    state, hasIcon);
 
   int line_height = ts->GetHeight();
   int text_x = bx + ((bw <= 90) ? 6 : 8);
@@ -236,8 +237,8 @@ void Button::Draw(u16 *screen, bool highlight) {
   }
 
   if (hasIcon) {
-    UiButtonSkin_DrawIcon(screen, stride, logicalHeight, bx, by, bw, bh,
-                          resolvedIcon, !enabled);
+    UiButtonSkin_DrawIcon(screen, stride, logicalWidth, logicalHeight, bx, by,
+                          bw, bh, resolvedIcon, !enabled);
   }
 
   ts->SetScreen(save_screen);
