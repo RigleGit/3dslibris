@@ -19,9 +19,14 @@ In the image viewer:
 - Circle Pad or D-Pad: pan in the reading orientation.
 - Stylus: move the visible region using the overview on the touch screen.
 - `X`: fit and center.
-- `Y` or touch `back (Y)`: return to the same page and selection.
+- `Y`: return to the same page and selection.
 - `START`: return to the library.
 - `SELECT`: close the viewer and open the book settings.
+
+All six actions (zoom in/out, fit, back, library and settings) also have touch
+buttons showing their function and shortcut. The overview sits above them; only
+gestures started inside it move the viewport. Button skins and icons clip to the
+actual screen width, including landscape.
 
 The image starts fitted and centered. When movement stops, including pad
 movement, a filtered frame replaces the fast movement frame. The viewer never
