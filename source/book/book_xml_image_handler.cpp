@@ -257,8 +257,6 @@ void HandleInlineImageStart(parsedata_t *p, Text *ts, const char **attr,
         book_xml_css_resolver::ParseImgWidthPx(img_width_attr, img_style,
                                                text_w, ts->GetHeight(),
                                                root_font_px, screen_width);
-    if (author_max_w > 0)
-      p->book->SetInlineImageAuthorMaxWidth(image_id, author_max_w);
     InlineImageLayoutPlan image_plan{};
     const bool leading_paragraph_image =
         p->in_paragraph && !p->paragraph_has_content;
@@ -273,7 +271,7 @@ void HandleInlineImageStart(parsedata_t *p, Text *ts, const char **attr,
                   : INLINE_IMAGE_CONTEXT_DEFAULT);
     p->book->PlanInlineImageLayout(ts, image_id, p->screen, p->pen.x,
                                    p->pen.y, p->linebegan,
-                                   image_context, &image_plan);
+                                   image_context, &image_plan, author_max_w);
 
     if (float_mode != book_xml_css_style_utils::FloatMode::None)
       ApplyFloatImageLayoutOverride(&image_plan, p->linebegan,
@@ -334,7 +332,6 @@ void HandleInlineImageStart(parsedata_t *p, Text *ts, const char **attr,
       author_max_w = book_xml_css_resolver::ParseImgWidthPx(
           img_width_attr, img_style, text_w, ts->GetHeight(), root_font_px,
           screen_width);
-      p->book->SetInlineImageAuthorMaxWidth(image_id, author_max_w);
       p->book->PlanInlineImageLayout(ts, image_id, p->screen, p->pen.x,
                                     p->pen.y, p->linebegan, image_context,
                                     &image_plan, author_max_w);

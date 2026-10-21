@@ -497,6 +497,64 @@ void TestInlineImageCacheRetainsDistinctDimensions() {
   }
 }
 
+void TestRepeatedImageWidthsRemainPerOccurrence() {
+  const char *folder = getenv("TEST_IMAGE_VIEWER_DIR");
+  test::ExpectTrue("image width fixture directory", folder != nullptr);
+  const std::string cache = std::string(folder) + "/width-cache";
+  test::ExpectEq("create image width cache directory", mkdir(cache.c_str(), 0700), 0);
+  epub_page_cache::SetCacheDirForTest(cache.c_str());
+  const char *names[] = {"widths-authored-first.epub", "widths-natural-first.epub"};
+  // The original is 240x60; the 240px reading panel has 12px side margins.
+  // No-width occurrences fill its 216px content area, independently of siblings.
+  const int widths[][3] = {{80, 216, 120}, {216, 80, 216}};
+  const int heights[][3] = {{20, 54, 30}, {54, 20, 54}};
+  for (int variant = 0; variant < 2; ++variant) {
+    Text text;
+    text.capture_rendered_text = true;
+    text.display.width = 240;
+    text.display.height = 400;
+    std::vector<u16> left(400 * 400), right(400 * 400);
+    text.screenleft = left.data();
+    text.screenright = right.data();
+    BookContext ctx;
+    ctx.text = &text;
+    Book book(ctx);
+    book.SetFolderName(folder);
+    book.SetFileName(names[variant]);
+    for (int reopen = 0; reopen < 2; ++reopen) {
+      book.format = FORMAT_EPUB;
+      test::ExpectEq("open repeated image widths EPUB", book_parser::Open(&book), 0);
+      test::ExpectEq("three image occurrences fit on one page", book.GetPageCount(), 1);
+      if (reopen)
+        test::ExpectFalse("warm image width open uses saved pages",
+                          book.HasPendingEpubPageCacheSave());
+      else
+        test::ExpectTrue("cold image width open schedules page cache save",
+                         book.HasPendingEpubPageCacheSave());
+      Page *page = book.GetPage(0);
+      page->Draw(&text);
+      int occurrence = 0;
+      for (const auto &entry : page->GetRenderedSelectables()) {
+        if (entry.kind != Page::IMAGE)
+          continue;
+        test::ExpectTrue("image occurrence count is bounded", occurrence < 3);
+        test::ExpectEq("rendered image keeps its own width",
+                       entry.bounds.x1 - entry.bounds.x0, widths[variant][occurrence]);
+        test::ExpectEq("rendered image preserves 4:1 aspect ratio",
+                       entry.bounds.y1 - entry.bounds.y0, heights[variant][occurrence]);
+        const std::vector<u16> &screen = entry.screen_index == 0 ? left : right;
+        for (int y = entry.bounds.y0; y < entry.bounds.y1; ++y)
+          for (int x = entry.bounds.x0; x < entry.bounds.x1; ++x)
+            test::ExpectEq("image bounds contain decoded red pixels", screen[y * 400 + x], 0xf800);
+        ++occurrence;
+      }
+      test::ExpectEq("all repeated image occurrences render", occurrence, 3);
+      book.Close();
+    }
+  }
+  epub_page_cache::SetCacheDirForTest(nullptr);
+}
+
 void TestImageResourcesAcrossBookFormats() {
   const char *folder = getenv("TEST_IMAGE_VIEWER_DIR");
   test::ExpectTrue("image fixture directory", folder != nullptr);
@@ -1342,12 +1400,14 @@ int main(int argc, char **argv) {
       TestLateFigureScreenTransition();
     else if(std::string(argv[1])=="reading-geometry") TestReadingGeometryParserBoundaries();
     else if(std::string(argv[1])=="image-cache") TestInlineImageCacheRetainsDistinctDimensions();
+    else if(std::string(argv[1])=="image-widths") TestRepeatedImageWidthsRemainPerOccurrence();
     else return 2;
     return 0;
   }
   TestReadingGeometryParserBoundaries();
   TestFb2ResourceStorageLimitsAndRecovery();
   TestInlineImageCacheRetainsDistinctDimensions();
+  TestRepeatedImageWidthsRemainPerOccurrence();
   TestLateFigureScreenTransition();
   TestOriginalImageResourceAndDrawBounds();
   TestImageResourcesAcrossBookFormats();

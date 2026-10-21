@@ -79,14 +79,35 @@ def generate(folder):
         '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' + ''.join(
             '<item id="image%d" href="%s" media-type="image/%s"/>' % (i,name,'gif' if name.endswith('.gif') else 'png')
             for i,name in enumerate(images)) + '</manifest><spine><itemref idref="book"/></spine></package>')
+    nav = '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="book.xhtml">Images</a></li></ol></nav></body></html>'
     with zipfile.ZipFile(folder/'images.epub','w',compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('mimetype','application/epub+zip',compress_type=zipfile.ZIP_STORED)
         archive.writestr('META-INF/container.xml',container)
         archive.writestr('OEBPS/content.opf',package)
-        archive.writestr('OEBPS/nav.xhtml','<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol><li><a href="book.xhtml">Images</a></li></ol></nav></body></html>')
+        archive.writestr('OEBPS/nav.xhtml',nav)
         archive.writestr('OEBPS/book.xhtml',document)
         for name, data in images.items(): archive.writestr('OEBPS/'+name,data)
         assert archive.testzip() is None
+    # One resource, three occurrences: widths belong to each img element.
+    width_image = png(240, 60, (b'\0' + bytes((255, 0, 0, 255)) * 240) * 60)
+    for variant, widths in [('authored-first', (80, None, 120)),
+                            ('natural-first', (None, 80, None))]:
+        body = ''.join('<p style="margin:0"><img src="tiny.png"%s/></p>' %
+                       ('' if width is None else ' width="%d"' % width)
+                       for width in widths)
+        with zipfile.ZipFile(folder / ('widths-' + variant + '.epub'), 'w',
+                             compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('mimetype', 'application/epub+zip',
+                             compress_type=zipfile.ZIP_STORED)
+            archive.writestr('META-INF/container.xml', container)
+            archive.writestr('OEBPS/content.opf', package)
+            archive.writestr('OEBPS/nav.xhtml', nav)
+            archive.writestr('OEBPS/book.xhtml',
+                             '<html xmlns="http://www.w3.org/1999/xhtml"><body>' +
+                             body + '</body></html>')
+            for name, data in images.items():
+                archive.writestr('OEBPS/' + name,
+                                 width_image if name == 'tiny.png' else data)
     mobile = document
     for index,name in enumerate(images,1): mobile = mobile.replace('src="'+name+'"','recindex="%d"' % index)
     (folder/'images.mobi').write_bytes(mobi(mobile,images))
