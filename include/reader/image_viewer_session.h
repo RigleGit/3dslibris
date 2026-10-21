@@ -19,5 +19,7 @@ struct ReaderImageViewerSession {
   std::string message;
   bool dirty = true, loading = true, wait_release = true, suspended = false;
   bool preview_ready = false;
-  Button back;
+  enum Control { ZoomIn, ZoomOut, Fit, Back, Library, Settings, ControlCount };
+  Button controls[ControlCount];
+  bool touch_panning = false;
 };

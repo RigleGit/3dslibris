@@ -11,6 +11,7 @@
 #include "shared/string_utils.h"
 #include "shared/orientation_utils.h"
 #include "shared/touch_map_utils.h"
+#include "shared/text_unicode_utils.h"
 #include "ui/text.h"
 #include <algorithm>
 #include <cmath>
@@ -43,6 +44,56 @@ void Blit(Text *ts, u16 *screen, int height, int x, int y, int w, int h,
   fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
       ts, screen, height, x, y, w, h, bitmap.pixels.get(), bitmap.PixelCount(),
       bitmap.width, bitmap.height, cx, cy, cw, ch, quality);
+}
+
+// Browser labels use a fixed 12px font with a 14px line height. Leave room
+// for two lines, descenders and padding inside the rounded button border,
+// regardless of the book's current font size.
+const int kControlHeight = 44;
+const int kControlGap = 4;
+const int kControlFooter = 6 + 2 * kControlHeight + kControlGap;
+
+// Reserve the same footer in the decoder's preview buffer and in the draw path.
+// Two rows of buttons fit both the 240px portrait and 320px landscape panel.
+pdf_view_utils::PreviewLayout OverviewLayout(const ReaderImageViewerSession &s,
+                                             int width, int height) {
+  return pdf_view_utils::ComputePreviewLayoutInBounds(
+      s.image.original_width, s.image.original_height, 6, 6, width - 12,
+      height - kControlFooter - 36);
+}
+
+void LayoutControls(ReaderImageViewerSession &s, int width, int height) {
+  const int button_width = (width - 20) / 3;
+  for (int i = 0; i < ReaderImageViewerSession::ControlCount; ++i) {
+    Button &button = s.controls[i];
+    button.Move(6 + (i % 3) * (button_width + kControlGap),
+                height - kControlFooter + (i / 3) * (kControlHeight + kControlGap));
+    button.Resize(button_width, kControlHeight);
+    button.SetEnabled(i >= ReaderImageViewerSession::Back ||
+                      (s.image.pixels && !s.loading && !s.suspended));
+  }
+  s.controls[ReaderImageViewerSession::ZoomIn].SetEnabled(
+      s.controls[ReaderImageViewerSession::ZoomIn].IsEnabled() &&
+      s.viewport.zoom_index < s.viewport.max_zoom_index);
+  s.controls[ReaderImageViewerSession::ZoomOut].SetEnabled(
+      s.controls[ReaderImageViewerSession::ZoomOut].IsEnabled() &&
+      s.viewport.zoom_index > 2);
+}
+
+void DrawViewerStatus(Text *ts, const char *message, int width, int height) {
+  // Status/error messages get two bounded lines above the controls. Button
+  // labels use Button's own UTF-8 clipping, like the other menus.
+  for (int line = 0; line < 2 && *message; ++line) {
+    const u8 count = ts->GetCharCountInsideWidth(message, TEXT_STYLE_BROWSER,
+                                                 (u8)std::min(255, width - 12));
+    const size_t bytes =
+        text_unicode_utils::Utf8BytesForDisplayChars(message, count);
+    if (!bytes)
+      break;
+    ts->SetPen(6, height - kControlFooter - 18 + line * 12);
+    ts->PrintString(std::string(message, bytes).c_str());
+    message += bytes;
+  }
 }
 } // namespace
 
@@ -90,6 +141,7 @@ void ReaderController::SuspendImageViewer() {
   s.dirty = true;
   s.wait_release = true;
   s.viewport.interaction_active = false;
+  s.touch_panning = false;
 }
 
 void ReaderController::OpenImageViewer() {
@@ -127,9 +179,17 @@ void ReaderController::OpenImageViewer() {
   s.token = target.token_offset;
   s.image_id = target.image_id;
   s.viewport.max_zoom_index = 6;
-  s.back.Init(app_.ts.get());
-  s.back.SetStyle(BUTTON_STYLE_SETTING);
-  s.back.Label("back (Y)");
+  static const char *labels[] = {"zoom +", "zoom -",  "fit",
+                                 "back",   "library", "settings"};
+  static const char *keys[] = {"(A)", "(B)",     "(X)",
+                               "(Y)", "(START)", "(SELECT)"};
+  for (int i = 0; i < ReaderImageViewerSession::ControlCount; ++i) {
+    s.controls[i].Init(app_.ts.get());
+    s.controls[i].SetStyle(BUTTON_STYLE_SETTING);
+    s.controls[i].SetIcon(UI_BUTTON_ICON_NONE);
+    s.controls[i].Label(labels[i]);
+    s.controls[i].SetLabel2(keys[i]);
+  }
   app_.ResetPageRepeat();
   app_.SetMode(AppMode::ImageViewer);
   // Loading starts on the next frame, after the indication is presented.
@@ -178,9 +238,7 @@ bool ReaderController::LoadImageViewer(int zoom) {
     if (!s.preview.pixels) {
       const auto bottom =
           fixed_layout_screen::TargetDims(app_.orientation, false);
-      const auto preview = pdf_view_utils::ComputePreviewLayout(
-          s.image.original_width, s.image.original_height, bottom.width - 12,
-          bottom.height - 54);
+      const auto preview = OverviewLayout(s, bottom.width, bottom.height);
       if (s.preview.Allocate(std::max(1, preview.width),
                              std::max(1, preview.height))) {
         // The first filtered overview draw populates this compact buffer.
@@ -234,8 +292,7 @@ void ReaderController::DrawImageViewer() {
   ts->ClearScreen();
   ts->SetScreen(ts->screenright);
   ts->ClearScreen();
-  s.back.Move(5, bottom.height - 28);
-  s.back.Resize(65, 24);
+  LayoutControls(s, bottom.width, bottom.height);
   if (s.image.pixels) {
     auto rect = image_view::Viewport(
         s.image.original_width, s.image.original_height, top.width, top.height,
@@ -259,9 +316,7 @@ void ReaderController::DrawImageViewer() {
     Blit(ts, ts->screenleft, top.height, placement.x, placement.y,
          placement.width, placement.height, s.image, cx, cy, cw, ch,
          !s.viewport.interaction_active);
-    s.overview = pdf_view_utils::ComputePreviewLayoutInBounds(
-        s.image.original_width, s.image.original_height, 6, 6,
-        bottom.width - 12, bottom.height - 54);
+    s.overview = OverviewLayout(s, bottom.width, bottom.height);
     if (s.preview.pixels && !s.preview_ready) {
       Blit(ts, ts->screenright, bottom.height, s.overview.x, s.overview.y,
            s.overview.width, s.overview.height, s.image, 0, 0, s.image.width,
@@ -291,13 +346,13 @@ void ReaderController::DrawImageViewer() {
         ts->GetFgColor());
   }
   ts->SetScreen(ts->screenright);
-  ts->SetPen(5, bottom.height - 40);
-  ts->PrintString(s.loading           ? "Loading image..."
-                  : s.message.empty() ? "A/B zoom  X fit  pad/stylus move"
-                                      : s.message.c_str());
-  s.back.Draw(false);
-  ts->SetPen(78, bottom.height - 12);
-  ts->PrintString("START library / SELECT settings");
+  DrawViewerStatus(ts,
+                   s.loading           ? "Loading image..."
+                   : s.message.empty() ? "move: D-pad, Circle Pad / stylus"
+                                       : s.message.c_str(),
+                   bottom.width, bottom.height);
+  for (int i = 0; i < ReaderImageViewerSession::ControlCount; ++i)
+    s.controls[i].Draw(false);
   ts->MarkAllScreensDirty();
   s.dirty = false;
   DBG_LOGF(&app_,
@@ -324,18 +379,35 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
   }
   const u32 keys = input.keys_down, held = input.keys_held;
   const auto touch = input.MapTouch(app_.orientation);
-  if ((keys & app_.key.y) ||
-      ((keys & KEY_TOUCH) && touch.x >= 5 && touch.x < 70 &&
-       touch.y >= app_.ts->LogicalHeightFor(false) - 28)) {
+  int control = -1;
+  if (keys & KEY_TOUCH) {
+    // A gesture belongs either to a button or to the overview from its start.
+    // Holding a button, or dragging into the overview from outside, cannot pan.
+    s.touch_panning = false;
+    for (int i = 0; i < ReaderImageViewerSession::ControlCount; ++i) {
+      if (s.controls[i].EnclosesPoint(touch.x, touch.y)) {
+        if (s.controls[i].IsEnabled())
+          control = i;
+        break;
+      }
+    }
+    if (control < 0 && s.image.pixels && touch.x >= s.overview.x &&
+        touch.x < s.overview.x + s.overview.width && touch.y >= s.overview.y &&
+        touch.y < s.overview.y + s.overview.height)
+      s.touch_panning = true;
+  } else if (!(held & KEY_TOUCH))
+    s.touch_panning = false;
+  if ((keys & app_.key.y) || control == ReaderImageViewerSession::Back) {
     CloseImageViewer();
     return;
   }
-  if (keys & app_.key.start) {
+  if ((keys & app_.key.start) || control == ReaderImageViewerSession::Library) {
     InvalidateImageViewer();
     app_.ShowLibraryView();
     return;
   }
-  if (keys & app_.key.select) {
+  if ((keys & app_.key.select) ||
+      control == ReaderImageViewerSession::Settings) {
     CloseImageViewer();
     app_.ShowSettingsView(true);
     return;
@@ -343,6 +415,8 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
   if (s.loading || s.suspended) {
     LoadImageViewer(s.viewport.zoom_index);
     s.dirty = true;
+    if (app_.ShouldAbortWork())
+      return;
   }
   if (!s.image.pixels) {
     if (s.dirty)
@@ -350,11 +424,11 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     return;
   }
   int zoom = s.viewport.zoom_index;
-  if (keys & app_.key.a)
-    zoom = std::min(6, zoom + 1);
-  if (keys & app_.key.b)
+  if ((keys & app_.key.a) || control == ReaderImageViewerSession::ZoomIn)
+    zoom = std::min(s.viewport.max_zoom_index, zoom + 1);
+  if ((keys & app_.key.b) || control == ReaderImageViewerSession::ZoomOut)
     zoom = std::max(2, zoom - 1);
-  if (keys & app_.key.x) {
+  if ((keys & app_.key.x) || control == ReaderImageViewerSession::Fit) {
     zoom = 2;
     s.viewport.center_x = s.viewport.center_y = 0.5f;
     s.dirty = true;
@@ -370,6 +444,8 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     } else
       LoadImageViewer(zoom);
     s.dirty = true;
+    if (app_.ShouldAbortWork())
+      return;
   }
   circlePosition circle{};
   hidCircleRead(&circle);
@@ -384,7 +460,7 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
   if (held & KEY_DDOWN)
     y += 0.025f;
   bool moving = x != 0 || y != 0;
-  if (held & KEY_TOUCH) {
+  if ((held & KEY_TOUCH) && s.touch_panning) {
     const auto top = fixed_layout_screen::TargetDims(app_.orientation, true);
     const auto rect = image_view::Viewport(
         s.image.original_width, s.image.original_height, top.width, top.height,
