@@ -477,5 +477,128 @@ int main() {
                plan.draw_width < (req.screen_width - req.margin_left - req.margin_right));
   }
 
+  // Large figures must not become postage stamps just to keep a caption on
+  // a nearly full screen. These dimensions match the reported chart resources.
+  for (int screen = 0; screen < 2; ++screen) {
+    for (bool landscape : {false, true}) {
+      InlineImageLayoutRequest req = BaseRequest();
+      req.current_screen = screen;
+      req.screen_width = landscape ? (screen == 0 ? 400 : 320) : 240;
+      req.screen_height = landscape ? 240 : (screen == 0 ? 400 : 320);
+      req.next_screen_height = landscape ? 240 : (screen == 0 ? 320 : 400);
+      req.next_screen_width = landscape ? (screen == 0 ? 320 : 400) : 240;
+      req.margin_bottom =
+          landscape ? (screen == 0 ? 0 : 22) : (screen == 0 ? 36 : 20);
+      req.next_margin_bottom =
+          landscape ? (screen == 0 ? 22 : 0) : (screen == 0 ? 20 : 36);
+      req.pen_x = req.margin_left;
+      req.pen_y =
+          landscape ? (screen == 0 ? 140 : 160) : (screen == 0 ? 260 : 235);
+      req.line_began = false;
+      req.image_context = INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION;
+      const InlineImageMetadata meta =
+          screen == 0 ? Metadata(1085, 737) : Metadata(552, 439);
+      const auto plan = PlanInlineImageLayout(req, meta);
+      ExpectMode("late chart remains a band", plan, INLINE_IMAGE_LAYOUT_BAND);
+      ExpectTrue("late chart moves instead of shrinking to a stamp",
+                 plan.advance_before);
+      ExpectTrue("late chart keeps readable height", plan.draw_height >= 60);
+      ExpectEq("late chart destination", plan.next_text_screen, 1 - screen);
+      ExpectEq("late chart page boundary", plan.page_breaks, screen);
+      // Planning after the move must produce the same dimensions/consumption,
+      // including the 400px -> 320px landscape screen transition.
+      req.current_screen = 1 - screen;
+      req.screen_width = req.next_screen_width;
+      req.screen_height = req.next_screen_height;
+      req.margin_bottom = req.next_margin_bottom;
+      req.pen_y = req.margin_top + req.line_height;
+      const auto fresh = PlanInlineImageLayout(req, meta);
+      ExpectEq("moved chart width matches fresh layout", plan.draw_width,
+               fresh.draw_width);
+      ExpectEq("moved chart height matches fresh layout", plan.draw_height,
+               fresh.draw_height);
+      ExpectFalse("fresh chart does not advance twice", fresh.advance_before);
+    }
+  }
+
+  // Advancing must preserve the destination's own image classification and
+  // consumed space, including PAGE heuristics and small block-height limits.
+  for (bool portrait : {false, true}) {
+    auto req = BaseRequest();
+    req.current_screen = portrait ? 1 : 0;
+    req.screen_width = portrait ? 240 : 400;
+    req.screen_height = portrait ? 320 : 240;
+    req.next_screen_width = portrait ? 240 : 320;
+    req.next_screen_height = portrait ? 400 : 240;
+    req.margin_bottom = portrait ? 16 : 0;
+    req.next_margin_bottom = portrait ? 36 : 22;
+    req.pen_x = req.margin_left;
+    req.pen_y = portrait ? 250 : 200;
+    req.line_began = false;
+    req.image_context = INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION;
+    const auto meta = portrait ? Metadata(800, 1200) : Metadata(80, 90);
+    const auto moved = PlanInlineImageLayout(req, meta);
+    ExpectTrue("figure advances before fresh classification",
+               moved.advance_before);
+    req.current_screen = 1 - req.current_screen;
+    req.screen_width = req.next_screen_width;
+    req.screen_height = req.next_screen_height;
+    req.margin_bottom = req.next_margin_bottom;
+    req.pen_y = req.margin_top + req.line_height;
+    const auto fresh = PlanInlineImageLayout(req, meta);
+    ExpectMode("advanced figure keeps destination mode", moved, fresh.mode);
+    ExpectEq("advanced figure keeps destination width", moved.draw_width,
+             fresh.draw_width);
+    ExpectEq("advanced figure keeps destination height", moved.draw_height,
+             fresh.draw_height);
+    ExpectEq("advanced figure keeps destination consumption",
+             moved.vertical_space_after_draw, fresh.vertical_space_after_draw);
+    ExpectEq("advanced figure keeps next text screen", moved.next_text_screen,
+             fresh.next_text_screen);
+    ExpectEq("advanced figure accounts for page boundary", moved.page_breaks,
+             fresh.page_breaks + (portrait ? 1 : 0));
+    ExpectFalse("fresh destination doesn't advance again",
+                fresh.advance_before);
+  }
+
+  // A band moved between native screens must consume the destination size.
+  for (int screen = 0; screen < 2; ++screen) {
+    auto req = BaseRequest();
+    req.current_screen = screen;
+    req.screen_width = screen == 0 ? 400 : 320;
+    req.screen_height = req.next_screen_height = 240;
+    req.next_screen_width = screen == 0 ? 320 : 400;
+    req.margin_bottom = screen == 0 ? 0 : 22;
+    req.next_margin_bottom = screen == 0 ? 22 : 0;
+    req.pen_y = 200;
+    req.line_began = false;
+    const auto moved = PlanInlineImageLayout(req, Metadata(600, 100));
+    ExpectTrue("late ordinary band advances", moved.advance_before);
+    ExpectMode("late ordinary band remains a band", moved,
+               INLINE_IMAGE_LAYOUT_BAND);
+    ExpectEq("moved ordinary band fits destination content width",
+             moved.draw_width, req.next_screen_width - 24);
+    // 600:100 aspect ratio, rounded upward by the wide-band planner.
+    const int destination_height = screen == 0 ? 50 : 63;
+    ExpectEq("moved ordinary band preserves destination aspect ratio",
+             moved.draw_height, destination_height);
+    ExpectEq("moved ordinary band consumes destination height",
+             moved.vertical_space_after_draw, destination_height + 1);
+  }
+
+  {
+    auto req = BaseRequest();
+    req.line_height = 32;
+    req.pen_y = 200;
+    req.line_began = false;
+    req.image_context = INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH;
+    const auto moved = PlanInlineImageLayout(req, Metadata(160, 160));
+    ExpectTrue("ordinary block moves to keep following text", moved.advance_before);
+    ExpectMode("moved ordinary block stays a band", moved, INLINE_IMAGE_LAYOUT_BAND);
+    ExpectEq("moved block uses compact-screen height cap", moved.draw_height, 106);
+    ExpectEq("moved block consumes compact-screen space",
+             moved.vertical_space_after_draw, 107);
+  }
+
   return 0;
 }

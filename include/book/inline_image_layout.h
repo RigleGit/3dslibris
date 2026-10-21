@@ -27,6 +27,7 @@ struct InlineImageLayoutRequest {
   int screen_width;
   int screen_height;
   int next_screen_height;
+  int next_screen_width; // 0 falls back to the current width
   int margin_left;
   int margin_right;
   int margin_top;

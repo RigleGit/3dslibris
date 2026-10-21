@@ -658,6 +658,7 @@ bool Book::PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
   req.screen_width = screen_layout.current_screen_width;
   req.screen_height = screen_layout.current_screen_height;
   req.next_screen_height = screen_layout.next_screen_height;
+  req.next_screen_width = screen_layout.next_screen_width;
   req.margin_left = ts->margin.left;
   req.margin_right = ts->margin.right;
   req.margin_top = ts->margin.top;

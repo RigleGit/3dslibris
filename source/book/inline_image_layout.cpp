@@ -190,6 +190,24 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
       NextScreenHeight(req, &next_page_break_probe);
   const int next_limit_y = next_screen_height - next_margin_bottom;
   const int fresh_baseline = req.margin_top + line_height;
+  auto plan_on_next_screen = [&]() {
+    InlineImageLayoutRequest next = req;
+    next.current_screen = 1 - req.current_screen;
+    next.screen_width =
+        req.next_screen_width > 0 ? req.next_screen_width : screen_width;
+    next.screen_height = next_screen_height;
+    next.margin_bottom = next_margin_bottom;
+    next.next_screen_width = screen_width;
+    next.next_screen_height = screen_height;
+    next.next_margin_bottom = req.margin_bottom;
+    next.pen_x = req.margin_left;
+    next.pen_y = fresh_baseline;
+    next.line_began = false;
+    InlineImageLayoutPlan destination = PlanInlineImageLayout(next, meta);
+    destination.advance_before = true;
+    destination.page_breaks += next_page_break_probe;
+    return destination;
+  };
   const int next_caption_band_max_height =
       next_limit_y - fresh_baseline - req.linespacing -
       min_caption_text_height;
@@ -199,7 +217,22 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
       next_limit_y - fresh_baseline - req.linespacing - min_follow_text_height;
   const int full_width_band_height =
       std::max(1, DivRoundUp(eff_meta.height * text_width, eff_meta.width));
-  const int min_figure_band_image_height = std::max(2 * line_height, 24);
+  // Compare with a fresh screen before squeezing a large figure into leftover
+  // space. Keep at least half that fitted height (or two text lines), bounded
+  // by the image's own size so authored small figures/ornaments stay small.
+  const int next_text_width = std::max(
+      1, (req.next_screen_width > 0 ? req.next_screen_width : screen_width) -
+             req.margin_left - req.margin_right);
+  int next_figure_width = 0, next_figure_height = 0;
+  if (figure_with_caption && next_caption_band_max_height > 0)
+    FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height, next_text_width,
+                          next_caption_band_max_height, &next_figure_width,
+                          &next_figure_height);
+  const int min_figure_band_image_height =
+      next_figure_height > 0
+          ? std::min(next_figure_height, std::max(std::max(2 * line_height, 24),
+                                                  (next_figure_height + 1) / 2))
+          : std::max(2 * line_height, 24);
 
   const bool current_figure_band_candidate =
       figure_with_caption &&
@@ -258,7 +291,15 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
   if (band_candidate) {
     int band_width = 0;
     int band_height = 0;
-    if (wide_band_candidate) {
+    const bool advance_for_figure =
+        figure_with_caption && !current_figure_band_candidate &&
+        next_figure_height > 0 && !IsAtScreenStart(req);
+    if (advance_for_figure) {
+      // Reuse the complete fresh-screen plan, including PAGE classification
+      // and small-block limits. Pagination and later drawing must consume the
+      // same space. This can recurse once: the destination is at screen start.
+      return plan_on_next_screen();
+    } else if (wide_band_candidate) {
       if (req.author_max_width_px > 0) {
         // Honor author's explicit small width; don't stretch to full text width.
         FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height,
@@ -311,7 +352,6 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
     plan.advance_before = false;
     plan.page_breaks = 0;
     plan.next_text_screen = req.current_screen;
-
     int baseline = req.pen_y;
     if (plan.line_break_before)
       baseline += line_height + req.linespacing;
@@ -321,7 +361,7 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
       // spread's left screen just to preserve a larger image. Try shrinking the
       // figure band to the current screen's available figure box first.
       if (figure_with_caption && req.current_screen == 1 &&
-          caption_band_max_height > 0) {
+          caption_band_max_height >= min_figure_band_image_height) {
         FitWithinBoxNoUpscale(eff_meta.width, eff_meta.height,
                               text_width, caption_band_max_height,
                               &band_width, &band_height);
@@ -335,17 +375,12 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
         }
       }
 
-      int page_breaks = 0;
-      int next_height = NextScreenHeight(req, &page_breaks);
+      int next_height = NextScreenHeight(req, NULL);
       int next_limit_y = next_height - next_margin_bottom;
       int fresh_baseline = req.margin_top + line_height;
 
       if (fresh_baseline + band_height + req.linespacing <= next_limit_y) {
-        plan.advance_before = true;
-        plan.page_breaks = page_breaks;
-        plan.next_text_screen = (req.current_screen == 1) ? 0 : 1;
-        plan.line_break_before = false;
-        return plan;
+        return plan_on_next_screen();
       }
 
       FillPageMode(req, &plan);
@@ -371,19 +406,14 @@ InlineImageLayoutPlan PlanInlineImageLayout(const InlineImageLayoutRequest &req,
           figure_with_caption ? min_caption_text_height : min_follow_text_height;
 
       if (remaining_after_band < min_remaining_after_band) {
-        int page_breaks = 0;
-        int next_height = NextScreenHeight(req, &page_breaks);
+        int next_height = NextScreenHeight(req, NULL);
         int next_limit_y = next_height - next_margin_bottom;
         int fresh_baseline = req.margin_top + line_height;
 
         if (fresh_baseline + band_height + req.linespacing +
                 min_remaining_after_band <=
             next_limit_y) {
-          plan.advance_before = true;
-          plan.page_breaks = page_breaks;
-          plan.next_text_screen = 1;
-          plan.line_break_before = false;
-          return plan;
+          return plan_on_next_screen();
         }
       }
     }
