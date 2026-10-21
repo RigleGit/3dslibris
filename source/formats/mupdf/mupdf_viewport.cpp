@@ -191,8 +191,8 @@ bool Book::MoveMuPdfViewportToPreview(int touch_x, int touch_y) {
       pdf_view_utils::ComputePreviewLayoutInBounds(
           preview_source_width, preview_source_height,
           kPdfPreviewPadding, kPdfPreviewPadding,
-          kPdfPreviewScreenWidth - 2 * kPdfPreviewPadding,
-          kPdfPreviewScreenHeight - 2 * kPdfPreviewPadding);
+          mupdf_state->target_bottom_width - 2 * kPdfPreviewPadding,
+          mupdf_state->target_bottom_height - 2 * kPdfPreviewPadding);
   const MuPdfNavigationBounds nav =
       GetMuPdfNavigationBounds(mupdf_state->current_preview.left,
                                mupdf_state->current_preview.top,

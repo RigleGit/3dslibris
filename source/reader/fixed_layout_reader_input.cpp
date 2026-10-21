@@ -44,14 +44,19 @@ static float BuildViewportStickAccel(int active_frames) {
   return 1.0f + ((float)capped / (float)kViewportStickAccelFrames);
 }
 
-static void MapViewportPanToReadingOrientation(bool turned_right,
+static void MapViewportPanToReadingOrientation(unsigned char orientation,
                                                float physical_x,
                                                float physical_y,
                                                float *screen_dx,
                                                float *screen_dy) {
   if (!screen_dx || !screen_dy)
     return;
-  if (!turned_right) {
+  if (orientation_utils::IsLandscape(orientation)) {
+    *screen_dx = physical_x;
+    *screen_dy = physical_y;
+    return;
+  }
+  if (!orientation_utils::IsTurnedRight(orientation)) {
     *screen_dx = physical_y;
     *screen_dy = -physical_x;
     return;
@@ -212,9 +217,8 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
     float viewport_dy = 0.0f;
     const float accel = BuildViewportStickAccel(s_viewport_stick_active_frames);
     MapViewportPanToReadingOrientation(
-        orientation_utils::IsTurnedRight(app.orientation), physical_x * accel,
-                                       physical_y * accel, &viewport_dx,
-                                       &viewport_dy);
+        app.orientation, physical_x * accel, physical_y * accel, &viewport_dx,
+        &viewport_dy);
 
     if (stick_active &&
         book_renderer::TranslateFixedLayoutViewport(book, viewport_dx, viewport_dy)) {

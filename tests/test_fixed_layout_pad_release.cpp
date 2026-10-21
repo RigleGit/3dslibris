@@ -4,6 +4,7 @@
 #include "shared/orientation_utils.h"
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
@@ -46,11 +47,14 @@ struct Book {
 struct Text {};
 static std::vector<bool> draw_interactions;
 static int pumps=0, pans=0, touch_moves=0;
+static float last_pan_x=0.0f, last_pan_y=0.0f;
 static uint32_t deferred_delay=20;
 static bool turn_succeeds=false, zoom_succeeds=false;
 static int turn_calls=0, turn_direction=0, zoom_step=0;
 namespace book_renderer {
-bool TranslateFixedLayoutViewport(Book *b, float, float) { ++pans; return b->can_move; }
+bool TranslateFixedLayoutViewport(Book *b, float x, float y) {
+  ++pans; last_pan_x=x; last_pan_y=y; return b->can_move;
+}
 void SetFixedLayoutViewportInteraction(Book *b, bool active) { b->interaction=active; }
 uint32_t GetFixedLayoutDeferredDelayMs(Book *) { return deferred_delay; }
 bool ChangeFixedLayoutZoom(Book *, int step) { zoom_step=step; return zoom_succeeds; }
@@ -124,8 +128,44 @@ static void TestControlRouting() {
   }
   turn_succeeds=false; draw_interactions.clear();
 }
+static void TestPadPanDirection() {
+  struct PanCase {
+    unsigned char orientation;
+    int raw_x, raw_y, want_x_sign, want_y_sign;
+  };
+  // Inputs are physical right/down. The resulting document movement must
+  // follow the device rotation, with no rotation in native landscape mode.
+  const PanCase cases[] = {
+      {orientation_utils::ORIENT_TURNED_LEFT, 60, 0, 0, -1},
+      {orientation_utils::ORIENT_TURNED_LEFT, 0, -60, 1, 0},
+      {orientation_utils::ORIENT_TURNED_RIGHT, 60, 0, 0, 1},
+      {orientation_utils::ORIENT_TURNED_RIGHT, 0, -60, -1, 0},
+      {orientation_utils::ORIENT_LANDSCAPE, 60, 0, 1, 0},
+      {orientation_utils::ORIENT_LANDSCAPE, 0, -60, 0, 1},
+  };
+  App app; Book book; Text text;
+  for (const PanCase &test : cases) {
+    app.orientation=test.orientation;
+    for (bool use_cstick : {false, true}) {
+      pad={0, 0}; stick={0, 0};
+      Frame(app, book, text); // Release the preceding gesture.
+      if (use_cstick) stick={test.raw_x, test.raw_y};
+      else pad={test.raw_x, test.raw_y};
+      const int before=pans;
+      assert(Frame(app, book, text) && pans == before + 1);
+      assert(test.want_x_sign ? last_pan_x * test.want_x_sign > 0.0f :
+                               std::abs(last_pan_x) < 0.00001f);
+      assert(test.want_y_sign ? last_pan_y * test.want_y_sign > 0.0f :
+                               std::abs(last_pan_y) < 0.00001f);
+    }
+  }
+  pad={0, 0}; stick={0, 0};
+  Frame(app, book, text);
+  draw_interactions.clear();
+}
 int main() {
   TestControlRouting();
+  TestPadPanDirection();
   App app; Book book; Text text;
   assert(!Frame(app, book, text));
   pad.dx=60;
