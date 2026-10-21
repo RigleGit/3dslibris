@@ -217,7 +217,8 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
 
   fz_try(ctx) {
     const uint64_t buffer_start = fixed_perf::Now();
-    buffer = fz_new_buffer_from_copied_data(ctx, bytes.data(), bytes.size());
+    // Borrow caller storage until the image, buffer and context are released below.
+    buffer = fz_new_buffer_from_shared_data(ctx, bytes.data(), bytes.size());
     fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_buffer",
                        fixed_perf::Now() - buffer_start, 1, bytes.size());
     const uint64_t header_start = fixed_perf::Now();
