@@ -20,6 +20,7 @@
 #include "menus/bookmark_menu.h"
 #include "menus/chapter_menu.h"
 #include "shared/string_utils.h"
+#include "shared/orientation_utils.h"
 #include "shared/text_unicode_utils.h"
 #include "settings/font.h"
 #include "shared/debug_log.h"
@@ -774,11 +775,16 @@ void App::RunBookInfoFrame(const FrameInput &input)
   if (nav_.book_info_page >= (u8)kBookInfoPageCount)
     nav_.book_info_page = (u8)(kBookInfoPageCount - 1);
 
-  if ((keys & (key.left | key.dleft | key.l)) && nav_.book_info_page > 0) {
+  const bool turned_right = orientation_utils::IsTurnedRight(render_orientation);
+  const u32 previous_page_keys = turned_right
+      ? key.down | key.ddown : key.up | key.dup;
+  const u32 next_page_keys = turned_right
+      ? key.up | key.dup : key.down | key.ddown;
+  if ((keys & (previous_page_keys | key.l)) && nav_.book_info_page > 0) {
     nav_.book_info_page--;
     ts->MarkScreenDirty(ts->screenright);
   }
-  if ((keys & (key.right | key.dright | key.r)) &&
+  if ((keys & (next_page_keys | key.r)) &&
       nav_.book_info_page + 1 < kBookInfoPageCount) {
     nav_.book_info_page++;
     ts->MarkScreenDirty(ts->screenright);

@@ -506,10 +506,17 @@ void SettingsController::PrefsDraw() {
 void SettingsController::PrefsHandleEvent(const FrameInput &input) {
   const u32 keys = input.keys_down;
   const u32 held = input.keys_held;
-  const u32 left_keys = app_.key.left | app_.key.dleft;
-  const u32 right_keys = app_.key.right | app_.key.dright;
-  const u32 up_keys = app_.key.up | app_.key.dup;
-  const u32 down_keys = app_.key.down | app_.key.ddown;
+  const bool turned_right =
+      orientation_utils::IsTurnedRight(app_.render_orientation);
+  // Keep the selection/value axes, reversing their sign with handedness.
+  const u32 left_keys = turned_right
+      ? app_.key.left | app_.key.dleft : app_.key.right | app_.key.dright;
+  const u32 right_keys = turned_right
+      ? app_.key.right | app_.key.dright : app_.key.left | app_.key.dleft;
+  const u32 up_keys = turned_right
+      ? app_.key.down | app_.key.ddown : app_.key.up | app_.key.dup;
+  const u32 down_keys = turned_right
+      ? app_.key.up | app_.key.dup : app_.key.down | app_.key.ddown;
 #ifdef DSLIBRIS_DEBUG
   static int s_prefs_keys_budget = 48;
   if (s_prefs_keys_budget > 0 && keys) {

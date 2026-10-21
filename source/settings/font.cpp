@@ -28,6 +28,7 @@
 #include "settings/font_config_utils.h"
 #include "settings/prefs_button_ids.h"
 #include "shared/bugfix_utils.h"
+#include "shared/orientation_utils.h"
 #include "shared/string_utils.h"
 #include "shared/text_unicode_utils.h"
 #include "ui/text.h"
@@ -315,15 +316,22 @@ void FontMenu::handleInput(const FrameInput &input) {
 void FontMenu::handleTargetInput(const FrameInput &input) {
   const u32 keys = input.keys_down;
   const KeyMap &key = context_.keys;
-  const u32 list_next_keys = key.ddown | key.dright | key.down | key.right;
-  const u32 list_prev_keys = key.dup | key.dleft | key.up | key.left;
+  const bool turned_right = orientation_utils::IsTurnedRight(ts->GetOrientation());
+  const u32 list_next_keys = turned_right
+      ? key.dup | key.dright | key.up | key.right
+      : key.ddown | key.dleft | key.down | key.left;
+  const u32 list_prev_keys = turned_right
+      ? key.ddown | key.dleft | key.down | key.left
+      : key.dup | key.dright | key.up | key.right;
+  const u32 next_page_key = turned_right ? key.l : key.r;
+  const u32 previous_page_key = turned_right ? key.r : key.l;
   if (keys & key.b) {
     context_.ShowSettingsView(context_.IsBookSettingsContext());
   } else if (keys & key.a) {
     enterFileView();
-  } else if (keys & key.r) {
+  } else if (keys & next_page_key) {
     nextTargetPage();
-  } else if (keys & key.l) {
+  } else if (keys & previous_page_key) {
     previousTargetPage();
   } else if (keys & list_next_keys) {
     selectNextTarget();
@@ -337,8 +345,15 @@ void FontMenu::handleTargetInput(const FrameInput &input) {
 void FontMenu::handleFileInput(const FrameInput &input) {
   const u32 keys = input.keys_down;
   const KeyMap &key = context_.keys;
-  const u32 list_next_keys = key.ddown | key.dright | key.down | key.right;
-  const u32 list_prev_keys = key.dup | key.dleft | key.up | key.left;
+  const bool turned_right = orientation_utils::IsTurnedRight(ts->GetOrientation());
+  const u32 list_next_keys = turned_right
+      ? key.dup | key.dright | key.up | key.right
+      : key.ddown | key.dleft | key.down | key.left;
+  const u32 list_prev_keys = turned_right
+      ? key.ddown | key.dleft | key.down | key.left
+      : key.dup | key.dright | key.up | key.right;
+  const u32 next_page_key = turned_right ? key.l : key.r;
+  const u32 previous_page_key = turned_right ? key.r : key.l;
   if (keys & key.b) {
     enterTargetView(targetSelected);
   } else if (keys & key.a) {
@@ -347,9 +362,9 @@ void FontMenu::handleFileInput(const FrameInput &input) {
     selectNext();
   } else if (keys & list_prev_keys) {
     selectPrevious();
-  } else if (keys & key.r) {
+  } else if (keys & next_page_key) {
     nextPage();
-  } else if (keys & key.l) {
+  } else if (keys & previous_page_key) {
     previousPage();
   } else if (keys & KEY_TOUCH) {
     handleFileTouchInput(input);

@@ -19,6 +19,7 @@
 #include "ui/gradient_utils.h"
 #include "shared/debug_log.h"
 #include "book/page.h"
+#include "shared/orientation_utils.h"
 #include "ui/touch_utils.h"
 
 namespace {
@@ -275,8 +276,16 @@ void PagedListMenu::HandleInput(const FrameInput &input) {
   }
 
   const u32 non_touch_keys = keys & ~KEY_TOUCH;
-  const u32 list_next_keys = key.ddown | key.dright | key.down | key.right;
-  const u32 list_prev_keys = key.dup | key.dleft | key.up | key.left;
+  const bool turned_right = orientation_utils::IsTurnedRight(ts->GetOrientation());
+  const u32 list_next_keys = turned_right
+      ? key.dup | key.dright | key.up | key.right
+      : key.ddown | key.dleft | key.down | key.left;
+  const u32 list_prev_keys = turned_right
+      ? key.ddown | key.dleft | key.down | key.left
+      : key.dup | key.dright | key.up | key.right;
+  // Context keys are captured before saved handedness is loaded.
+  const u32 next_page_key = turned_right ? key.l : key.r;
+  const u32 previous_page_key = turned_right ? key.r : key.l;
 #ifdef DSLIBRIS_DEBUG
   static int s_input_trace_budget = 128;
   if (status_reporter && s_input_trace_budget > 0 &&
@@ -300,9 +309,9 @@ void PagedListMenu::HandleInput(const FrameInput &input) {
     SelectNext();
   } else if (non_touch_keys & list_prev_keys) {
     SelectPrevious();
-  } else if (non_touch_keys & key.r) {
+  } else if (non_touch_keys & next_page_key) {
     NextPage();
-  } else if (non_touch_keys & key.l) {
+  } else if (non_touch_keys & previous_page_key) {
     PreviousPage();
   } else if (keys & KEY_TOUCH) {
     HandleTouchInput(input);
