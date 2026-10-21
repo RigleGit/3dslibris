@@ -1,6 +1,6 @@
 /*
     3dslibris - cover_decode_utils.cpp
-    Shared cover-thumbnail decoder for raster cover bytes (JPEG/PNG/GIF/BMP).
+    Shared cover-thumbnail decoder for raster cover bytes (JPEG/PNG/GIF).
     Replaces the previous DecodeAndScaleToCover copies in mobi_cover_extract,
     fb2, and similar format files.
 */
@@ -27,6 +27,13 @@ bool DecodeImageToCoverThumb(Book *book, const unsigned char *data,
   int img_w = 0;
   int img_h = 0;
   int channels = 0;
+  // Reject out-of-policy dimensions before allocating the expanded image.
+  // Keep the post-decode guard too, so the actual decoded result is checked.
+  if (!stbi_info_from_memory(data, (int)size, &img_w, &img_h, &channels) ||
+      img_w <= 0 || img_h <= 0 ||
+      (max_dimension > 0 && (img_w > max_dimension || img_h > max_dimension))) {
+    return false;
+  }
   unsigned char *pixels = stb_image_gif_utils::LoadFromMemory(
       data, (int)size, &img_w, &img_h, &channels, 3);
   if (!pixels)

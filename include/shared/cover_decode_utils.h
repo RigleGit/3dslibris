@@ -8,7 +8,7 @@ class Book;
 
 namespace cover_decode_utils {
 
-// Decode an image buffer (JPEG/PNG/GIF/BMP via stb_image), scale to fit
+// Decode an image buffer (JPEG/PNG/GIF via stb_image), scale to fit
 // inside the browser cover-thumbnail box preserving aspect, and assign the
 // resulting RGB565 pixels to book->coverPixels (replacing any prior buffer).
 //

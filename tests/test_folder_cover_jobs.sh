@@ -32,12 +32,35 @@ extracted+='\nvoid AppendTestFolder(App *app,const std::string &root,const std::
 def chunk(name,data): return struct.pack('>I',len(data))+name+data+struct.pack('>I',zlib.crc32(name+data))
 png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',85,115,8,2,0,0,0))+chunk(b'IDAT',zlib.compress((b'\x00'+b'\xaa\x55\x22'*85)*115))+chunk(b'IEND',b'')
 (tmp/'cover.png').write_bytes(png)
+png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',4097,64,8,2,0,0,0))+chunk(b'IDAT',zlib.compress((b'\x00'+b'\xaa\x55\x22'*4097)*64))+chunk(b'IEND',b'')
+(tmp/'oversized.png').write_bytes(png)
+(tmp/'decoder_allocator.h').write_text('''#include <stddef.h>
+void *CoverTestMalloc(size_t);
+void *CoverTestRealloc(void *, size_t);
+void CoverTestFree(void *);
+#define STBI_MALLOC(n) CoverTestMalloc(n)
+#define STBI_REALLOC(p,n) CoverTestRealloc(p,n)
+#define STBI_FREE(p) CoverTestFree(p)
+''')
 PYGEN
 export FOLDER_COVER_PNG="$TASK_TMP/cover.png"
+export FOLDER_COVER_OVERSIZED_PNG="$TASK_TMP/oversized.png"
+STBI_CXXFLAGS=()
+while IFS= read -r flag; do
+  [ -n "$flag" ] && STBI_CXXFLAGS+=("$flag")
+done <<EOFLAGS
+$(split_flags "${CXXFLAGS:-}")
+EOFLAGS
+"$CXX_BIN" -std=c++11 ${STBI_CXXFLAGS[@]+"${STBI_CXXFLAGS[@]}"} \
+  -include "$TASK_TMP/decoder_allocator.h" -I"$ROOT/include" \
+  -I"$ROOT/third_party/stb" -c "$ROOT/source/core/stb_image_impl.cpp" \
+  -o "$TASK_TMP/stb_image.o"
 build_test test_folder_cover_jobs -- -I"$TASK_TMP" -I"$ROOT/tests" -I"$ROOT/third_party/stb" \
   "$ROOT/tests/test_folder_cover_jobs.cpp" "$TASK_TMP/folders.cpp" \
   "$TASK_TMP/app_browser_covers.cpp" "$TASK_TMP/app_browser_jobs.cpp" \
   "$TASK_TMP/cover_cache.cpp" "$TASK_TMP/decode.cpp" \
-  "$ROOT/source/core/stb_image_impl.cpp" "$ROOT/source/shared/image_scale_utils.cpp" \
+  "$TASK_TMP/stb_image.o" "$ROOT/source/shared/image_scale_utils.cpp" \
   "$ROOT/source/formats/common/file_read_utils.cpp" "$ROOT/source/library/cover_override_utils.cpp" \
   "$ROOT/source/library/browser_view_utils.cpp"
+
+FOLDER_COVER_PREFLIGHT=1 "$TEST_OUTDIR/test_folder_cover_jobs"

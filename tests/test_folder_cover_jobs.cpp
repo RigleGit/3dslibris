@@ -2,6 +2,16 @@
 
 u64 test_now=10000, test_free_bytes=64u*1024u*1024u;
 size_t test_source_reads=0, test_decodes=0;
+static size_t largest_decoder_allocation=0;
+void *CoverTestMalloc(size_t bytes) {
+  largest_decoder_allocation=std::max(largest_decoder_allocation,bytes);
+  return std::malloc(bytes);
+}
+void *CoverTestRealloc(void *pointer,size_t bytes) {
+  largest_decoder_allocation=std::max(largest_decoder_allocation,bytes);
+  return std::realloc(pointer,bytes);
+}
+void CoverTestFree(void *pointer) { std::free(pointer); }
 namespace file_read_utils {
 bool CountedReadPathToStringLimited(const std::string &path,std::string *out,size_t limit) {
   ++test_source_reads;
@@ -29,7 +39,25 @@ static void Write(const std::string &path,const std::string &bytes) {
 static std::string Read(const std::string &path) {
   std::string bytes; Expect(file_read_utils::ReadPathToStringLimited(path,&bytes,4u*1024u*1024u),"fixture read"); return bytes;
 }
+static int CheckOversizedCoverPreflight() {
+  Book book;
+  book.coverPixels=new u16[1]; book.coverPixels[0]=0x1234;
+  book.coverWidth=book.coverHeight=1;
+  u16 *previous=book.coverPixels;
+  const std::string bytes=Read(std::getenv("FOLDER_COVER_OVERSIZED_PNG"));
+  largest_decoder_allocation=0;
+  const bool ok=cover_decode_utils::DecodeImageToCoverThumb(
+      &book,reinterpret_cast<const unsigned char *>(bytes.data()),bytes.size(),4096);
+  Expect(!ok,"out-of-policy cover rejected");
+  printf("oversized preflight: largest_decoder_allocation=%zu previous_cover=%04x\n",
+         largest_decoder_allocation,book.coverPixels[0]);
+  Expect(largest_decoder_allocation<128u*1024u,"oversized cover must not allocate its expanded pixels");
+  Expect(book.coverPixels==previous && book.coverPixels[0]==0x1234 &&
+         book.coverWidth==1 && book.coverHeight==1,"rejected cover preserves previous thumbnail");
+  return 0;
+}
 int main() {
+  if(std::getenv("FOLDER_COVER_PREFLIGHT")) return CheckOversizedCoverPreflight();
   const std::string root=std::getenv("FOLDER_COVER_TEST_ROOT");
   const std::string png=Read(std::getenv("FOLDER_COVER_PNG"));
   App app; LibraryController controller(app); std::set<std::string> seen;
