@@ -40,7 +40,7 @@ void DrawPage(const BrowserDrawContext &ctx, int page_start, int page_size) {
         browser_view_utils::ListTitleBoxHeight(ctx.ts->GetHeight());
     browser_presentation_utils::DrawWrappedTitleInsideCover(
         ctx.ts, display_name, row_x, row_y, title_width, title_height,
-        ctx.ts->GetStyle());
+        ctx.ts->GetStyle(), 6);
 
     if (!(*ctx.books)[i]->IsBrowserFolder()) {
       int pos = (*ctx.books)[i]->GetPosition();

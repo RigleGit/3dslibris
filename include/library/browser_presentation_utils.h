@@ -11,6 +11,6 @@ std::string BuildBrowserDisplayName(Book *book);
 size_t Utf8BytesForCharCount(const char *s, size_t char_count);
 void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
                                  int x, int y, int w, int h,
-                                 unsigned char style);
+                                 unsigned char style, int padding_y = 10);
 
 } // namespace browser_presentation_utils

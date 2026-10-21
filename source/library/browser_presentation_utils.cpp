@@ -199,12 +199,12 @@ size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
 
 void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
                                  int x, int y, int w, int h,
-                                 unsigned char style) {
+                                 unsigned char style, int padding_y) {
   if (!ts || title.empty() || w <= 8 || h <= 8)
     return;
 
   const int kPadX = 8;
-  const int kPadY = 10;
+  const int kPadY = padding_y;
   const int kMaxLines = 4;
   const int inner_w = w - kPadX * 2;
   const int inner_h = h - kPadY * 2;
