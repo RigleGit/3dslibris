@@ -21,13 +21,6 @@
 
 namespace {
 
-// Snaps an arbitrary logical height to one of the two valid 3DS screen heights.
-static inline int SnapToScreenHeight(int h) {
-  return h <= screen_layout::kBottomScreenHeightPx
-             ? screen_layout::kBottomScreenHeightPx
-             : screen_layout::kTopScreenHeightPx;
-}
-
 static inline u16 ThemeGradientPixel(int x, int y, int w, int h,
                                      const ThemePalette &p) {
   const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
@@ -86,52 +79,21 @@ static const u16 kTrueDarkTextColor = RGB565FromU8(180.0f, 180.0f, 180.0f);
 static const u16 kDarkSepiaTextColor = RGB565FromU8(180.0f, 150.0f, 110.0f);
 static const u16 kDarkSepiaBgMidColor = RGB565FromU8(65.0f, 45.0f, 30.0f);
 
-static std::vector<u16> grad320;
-static std::vector<u16> grad400;
-static int grad320w = 0;
-static int grad400w = 0;
+struct GradientCache {
+  std::vector<u16> pixels;
+  int width;
+  int height;
 
-static std::vector<u16> grad320_ds;
-static std::vector<u16> grad400_ds;
-static int grad320w_ds = 0;
-static int grad400w_ds = 0;
+  GradientCache() : pixels(), width(0), height(0) {}
+};
+
+// Keep two bounded slots per theme, replacing a slot when geometry changes.
+static GradientCache sepia_gradients[2];
+static GradientCache dark_sepia_gradients[2];
 #ifdef DSLIBRIS_DEBUG
 static int g_blit_geometry_diag_budget = 12;
 static int g_blit_page_diag_budget = 48;
 #endif
-
-static void FillSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
-  if (!dst || stride <= 0 || w <= 0 || logical_h <= 0)
-    return;
-
-  std::vector<u16> *grad = nullptr;
-  int *cached_w = nullptr;
-  const int h = SnapToScreenHeight(logical_h);
-  if (h == 320) {
-    grad = &grad320;
-    cached_w = &grad320w;
-  } else {
-    grad = &grad400;
-    cached_w = &grad400w;
-  }
-
-  if (grad->empty() || *cached_w != w) {
-    grad->resize((size_t)w * (size_t)h);
-    *cached_w = w;
-    for (int y = 0; y < h; y++) {
-      for (int x = 0; x < w; x++) {
-        (*grad)[(size_t)y * (size_t)w + (size_t)x] =
-            SepiaGradientPixel(x, y, w, h);
-      }
-    }
-  }
-
-  const int max_y = std::min(logical_h, h);
-  for (int y = 0; y < max_y; y++) {
-    memcpy(dst + (size_t)y * (size_t)stride,
-           grad->data() + (size_t)y * (size_t)w, (size_t)w * sizeof(u16));
-  }
-}
 
 static inline u16 DarkSepiaGradientPixel(int x, int y, int w, int h) {
   static const u8 kBayer4x4[4][4] = {
@@ -166,36 +128,32 @@ static inline u16 DarkSepiaGradientPixel(int x, int y, int w, int h) {
   return RGB565FromU8(r, g, b);
 }
 
-static void FillDarkSepiaGradient(u16 *dst, int stride, int w, int logical_h) {
-  if (!dst || stride <= 0 || w <= 0 || logical_h <= 0)
-    return;
-
-  std::vector<u16> *grad = nullptr;
-  int *cached_w = nullptr;
-  const int h = SnapToScreenHeight(logical_h);
-  if (h == 320) {
-    grad = &grad320_ds;
-    cached_w = &grad320w_ds;
-  } else {
-    grad = &grad400_ds;
-    cached_w = &grad400w_ds;
-  }
-
-  if (grad->empty() || *cached_w != w) {
-    grad->resize((size_t)w * (size_t)h);
-    *cached_w = w;
+static const std::vector<u16> &EnsureSepiaGradient(int w, int h, bool dark) {
+  const int slot = (std::max(w, h) <= 320) ? 0 : 1;
+  GradientCache &cache = dark ? dark_sepia_gradients[slot]
+                              : sepia_gradients[slot];
+  if (cache.pixels.empty() || cache.width != w || cache.height != h) {
+    cache.pixels.resize((size_t)w * (size_t)h);
+    cache.width = w;
+    cache.height = h;
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
-        (*grad)[(size_t)y * (size_t)w + (size_t)x] =
-            DarkSepiaGradientPixel(x, y, w, h);
+        cache.pixels[(size_t)y * (size_t)w + (size_t)x] =
+            dark ? DarkSepiaGradientPixel(x, y, w, h)
+                 : SepiaGradientPixel(x, y, w, h);
       }
     }
   }
+  return cache.pixels;
+}
 
-  const int max_y = std::min(logical_h, h);
-  for (int y = 0; y < max_y; y++) {
+static void FillSepiaGradient(u16 *dst, int stride, int w, int h, bool dark) {
+  if (!dst || stride <= 0 || w <= 0 || h <= 0)
+    return;
+  const std::vector<u16> &grad = EnsureSepiaGradient(w, h, dark);
+  for (int y = 0; y < h; y++) {
     memcpy(dst + (size_t)y * (size_t)stride,
-           grad->data() + (size_t)y * (size_t)w, (size_t)w * sizeof(u16));
+           grad.data() + (size_t)y * (size_t)w, (size_t)w * sizeof(u16));
   }
 }
 
@@ -213,14 +171,9 @@ void TextRenderer::ClearScreen() {
   const int logicalWidth = parent->LogicalWidthFor(is_left_screen);
   MarkCurrentScreenDirtyRect(0, 0, logicalWidth, logicalHeight);
 
-  if (colorMode == 2) {
+  if (colorMode == 2 || colorMode == 5) {
     FillSepiaGradient(parent->screen, parent->BufferStride(), logicalWidth,
-                      logicalHeight);
-    return;
-  }
-  if (colorMode == 5) {
-    FillDarkSepiaGradient(parent->screen, parent->BufferStride(), logicalWidth,
-                          logicalHeight);
+                      logicalHeight, colorMode == 5);
     return;
   }
 
@@ -238,30 +191,16 @@ void TextRenderer::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
   if (xl >= (u16)maxWidth || yl >= (u16)maxHeight) return;
   xh = std::min((int)xh, maxWidth);
   yh = std::min((int)yh, (int)maxHeight);
+  if (xh <= xl || yh <= yl) return;
   // Gradient modes: copy from cached gradient instead of per-pixel powf
   if (colorMode == 2 || colorMode == 5) {
-    std::vector<u16> *grad = nullptr;
-    int *cached_w = nullptr;
-    if (colorMode == 2) {
-      grad = (maxHeight <= 320) ? &grad320 : &grad400;
-      cached_w = (maxHeight <= 320) ? &grad320w : &grad400w;
-    } else {
-      grad = (maxHeight <= 320) ? &grad320_ds : &grad400_ds;
-      cached_w = (maxHeight <= 320) ? &grad320w_ds : &grad400w_ds;
-    }
-    if (grad->empty() || *cached_w != maxWidth) {
-      if (colorMode == 2)
-        FillSepiaGradient(parent->screen, parent->BufferStride(),
-                          maxWidth, maxHeight);
-      else
-        FillDarkSepiaGradient(parent->screen, parent->BufferStride(),
-                              maxWidth, maxHeight);
-    }
+    const std::vector<u16> &grad =
+        EnsureSepiaGradient(maxWidth, maxHeight, colorMode == 5);
     const int rw = (int)xh - (int)xl;
     const int rh = (int)yh - (int)yl;
     for (int y = 0; y < rh; y++) {
       memcpy(parent->screen + (size_t)(yl + y) * (size_t)parent->BufferStride() + (size_t)xl,
-             grad->data() + (size_t)(yl + y) * (size_t)*cached_w + (size_t)xl,
+             grad.data() + (size_t)(yl + y) * (size_t)maxWidth + (size_t)xl,
              (size_t)rw * sizeof(u16));
     }
     return;

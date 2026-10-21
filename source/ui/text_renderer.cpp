@@ -512,11 +512,25 @@ void TextRenderer::PrintSplash(u16 *screen) {
     bool dark = (colorMode == 1 || colorMode == 4 || colorMode == 5);
     if (EnsureSplashLoaded(dark)) {
       u16 *pixels = dark ? splash_dark_pixels : splash_light_pixels;
-      for (int y = 0; y < parent->display.height; y++) {
-        u16 *dst = screen + y * parent->display.height;
-        const u16 *src = pixels + y * parent->display.width;
-        for (int x = 0; x < parent->display.width; x++)
-          dst[x] = src[x];
+      // The decoded splash remains portrait-sized; contain it in the current
+      // logical screen without another bitmap cache or changing its aspect.
+      const int source_width = parent->display.width;
+      const int source_height = parent->display.height;
+      const int logical_width = parent->LogicalWidth();
+      const int logical_height = parent->LogicalHeight();
+      const float scale =
+          std::min((float)logical_width / source_width,
+                   (float)logical_height / source_height);
+      const int width = std::max(1, (int)(source_width * scale + 0.5f));
+      const int height = std::max(1, (int)(source_height * scale + 0.5f));
+      const int left = (logical_width - width) / 2;
+      const int top = (logical_height - height) / 2;
+      const int stride = parent->BufferStride();
+      for (int y = 0; y < height; y++) {
+        u16 *dst = screen + (size_t)(top + y) * stride + left;
+        const u16 *src = pixels + (size_t)(y * source_height / height) * source_width;
+        for (int x = 0; x < width; x++)
+          dst[x] = src[x * source_width / width];
       }
     } else {
       DrawFallbackSplash();
