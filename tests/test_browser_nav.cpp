@@ -20,6 +20,7 @@ struct Book {
   uint16_t *coverPixels=nullptr; int coverWidth=0, coverHeight=0;
   uint8_t coverAttempts=0; uint64_t coverRetryAfterMs=99;
   bool IsBrowserFolder() const { return is_folder; }
+  const std::string &GetBrowserFolderCoverPath() const { return folder; }
   const char *GetFolderName() const { return folder.c_str(); }
   const char *GetFileName() const { return missing_name ? nullptr : filename.c_str(); }
   ~Book() { delete[] coverPixels; }
@@ -39,7 +40,8 @@ struct App {
 static std::vector<int> loaded;
 namespace cover_cache {
 bool TryLoad(Book *book, const std::string &path) {
-  assert(path == book->folder + "/" + book->filename);
+  assert(path == (book->is_folder ? book->folder
+                                : book->folder + "/" + book->filename));
   loaded.push_back(book->id);
   book->coverPixels=new uint16_t[4]; book->coverWidth=book->coverHeight=2;
   return true;
@@ -86,15 +88,16 @@ static void TestBrowserPagesLoadOnlyVisibleCovers() {
   storage[2].is_folder=true; storage[3].missing_name=true; app.books[5]=nullptr;
   LibraryController controller(app);
   loaded.clear(); controller.LoadVisibleBrowserCoverCaches();
-  assert((loaded == std::vector<int>{0, 1}));
-  for (int i : {0, 1}) assert(storage[i].coverAttempts == 3 && storage[i].coverRetryAfterMs == 0);
+  assert((loaded == std::vector<int>{0, 1, 2}));
+  for (int i : {0, 1, 2}) assert(storage[i].coverAttempts == 3 && storage[i].coverRetryAfterMs == 0);
   controller.LoadVisibleBrowserCoverCaches();
-  assert(loaded.size() == 2); // Already loaded visible covers are reused.
+  assert(loaded.size() == 3); // Already loaded visible covers are reused.
   loaded.clear(); controller.browser_nextpage();
   assert(app.page_start == 4 && app.selected == &storage[4]);
   assert(controller.prioritized == app.selected && app.dirty && app.interaction_ms == 1234);
   assert((loaded == std::vector<int>{4, 6, 7}));
-  assert(!storage[0].coverPixels && !storage[1].coverPixels && storage[0].coverWidth == 0 && storage[0].coverHeight == 0);
+  assert(!storage[0].coverPixels && !storage[1].coverPixels &&
+         !storage[2].coverPixels && storage[0].coverWidth == 0 && storage[0].coverHeight == 0);
   loaded.clear(); controller.browser_nextpage();
   assert(app.page_start == 8 && app.selected == &storage[8]);
   assert((loaded == std::vector<int>{8, 9})); // Short last page stays bounded.

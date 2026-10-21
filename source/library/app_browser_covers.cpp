@@ -41,8 +41,11 @@ static bool ShouldCurrentBrowserLoadCovers(const App &app) {
 }
 
 static std::string BuildBookPath(Book *book) {
-  if (!book || book->IsBrowserFolder() || !book->GetFolderName() ||
-      !book->GetFileName())
+  if (!book)
+    return "";
+  if (book->IsBrowserFolder())
+    return book->GetBrowserFolderCoverPath();
+  if (!book->GetFolderName() || !book->GetFileName())
     return "";
   std::string path = book->GetFolderName();
   path.push_back('/');
@@ -59,7 +62,13 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
   if (!ShouldCurrentBrowserLoadCovers(app_)) {
     for (int i = 0; i < app_.BookCount(); i++) {
       Book *book = app_.books[i];
-      if (!book || book->IsBrowserFolder() || !book->coverPixels)
+      if (!book)
+        continue;
+      if (book->IsBrowserFolder()) {
+        book->coverAttempts = 0;
+        book->coverRetryAfterMs = 0;
+      }
+      if (!book->coverPixels)
         continue;
       delete[] book->coverPixels;
       book->coverPixels = nullptr;
@@ -78,7 +87,13 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
       continue;
 
     Book *book = app_.books[i];
-    if (!book || book->IsBrowserFolder() || !book->coverPixels)
+    if (!book)
+      continue;
+    if (book->IsBrowserFolder()) {
+      book->coverAttempts = 0;
+      book->coverRetryAfterMs = 0;
+    }
+    if (!book->coverPixels)
       continue;
     delete[] book->coverPixels;
     book->coverPixels = nullptr;
@@ -105,7 +120,7 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
   const int end = visible.end;
   for (int i = start; i < end; i++) {
     Book *book = app_.books[i];
-    if (!book || book->IsBrowserFolder() || book->coverPixels)
+    if (!book || book->coverPixels)
       continue;
 
     std::string path = BuildBookPath(book);

@@ -228,7 +228,8 @@ static std::string BuildCoverCachePath(Book *book,
   key += std::to_string(fmtime);
 
   std::string adjacent_cover;
-  if (FindAdjacentOverrideCoverPath(book_path, &adjacent_cover)) {
+  if ((!book || !book->IsBrowserFolder()) &&
+      FindAdjacentOverrideCoverPath(book_path, &adjacent_cover)) {
     struct stat cover_st;
     long long cover_size = 0;
     long long cover_mtime = 0;
@@ -274,8 +275,9 @@ bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
   if (!book || book_path.empty())
     return false;
 
-  const std::vector<std::string> candidates =
-      cover_override_utils::BuildBookCandidates(book_path);
+  const std::vector<std::string> candidates = book->IsBrowserFolder()
+      ? std::vector<std::string>(1, book_path)
+      : cover_override_utils::BuildBookCandidates(book_path);
 
   std::string chosen_path;
   for (size_t i = 0; i < candidates.size(); i++) {
@@ -369,6 +371,10 @@ bool TryLoad(Book *book, const std::string &book_path) {
   std::string cache_path = BuildCoverCachePath(book, book_path);
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp) {
+    // Folder sidecars are decoded by idle jobs; cache misses must stay cheap
+    // when browser navigation asks for the visible thumbnails.
+    if (book->IsBrowserFolder())
+      return false;
     if (!book_path.empty() && !book->coverPixels &&
         TryLoadAdjacentOverride(book, book_path)) {
       Save(book, book_path);
