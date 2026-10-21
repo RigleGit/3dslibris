@@ -385,8 +385,7 @@ void App::SetOrientation(u8 new_orientation)
   }
   orientation = landscape ? orientation_utils::ORIENT_LANDSCAPE
                           : portrait_orientation;
-  const bool reading_view =
-      nav_.mode == AppMode::Book || nav_.mode == AppMode::Opening;
+  const bool reading_view = nav_.mode == AppMode::Book;
   ApplyRenderOrientation(reading_view ? orientation : portrait_orientation);
 }
 
@@ -398,8 +397,7 @@ void App::SetHandedness(u8 portrait_orientation_value)
           : orientation_utils::ORIENT_TURNED_LEFT;
   if (!landscape)
     orientation = portrait_orientation;
-  const bool reading_view =
-      nav_.mode == AppMode::Book || nav_.mode == AppMode::Opening;
+  const bool reading_view = nav_.mode == AppMode::Book;
   ApplyRenderOrientation(reading_view ? orientation : portrait_orientation);
 }
 

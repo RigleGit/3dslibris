@@ -16,7 +16,7 @@ class Text;
 
 namespace reader_internal {
 
-constexpr int kOpeningTitleMaxWidth = 216;
+constexpr int kOpeningTitleMargin = 12;
 constexpr int kOpeningTitleMaxLines = 3;
 constexpr int kOpeningTitleLineHeight = 16;
 

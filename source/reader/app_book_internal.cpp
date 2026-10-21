@@ -12,6 +12,7 @@
 
 #include "app/app.h"
 
+#include <algorithm>
 #include <stdio.h>
 #include <string>
 #include <vector>
@@ -55,22 +56,34 @@ void ApplyRemappedBookmarks(Book *book, const std::list<int> &bookmarks) {
     dst.push_back((u16)bookmark);
 }
 
+// Filename lines may be wider than the legacy 8-bit GetStringWidth result.
+static int MeasureOpeningText(Text *ts, const std::string &text, u8 style) {
+  const int saved_style = ts->GetStyle();
+  ts->SetStyle(style);
+  const int width = ts->GetStringAdvance(text.c_str());
+  ts->SetStyle(saved_style);
+  return width;
+}
+
 std::string EllipsizeToWidth(Text *ts, const std::string &text, int max_width,
                              u8 style) {
   if (!ts)
     return text;
-  if ((int)ts->GetStringWidth(text.c_str(), style) <= max_width)
+  if (MeasureOpeningText(ts, text, style) <= max_width)
     return text;
 
   const char *ellipsis = "...";
-  if ((int)ts->GetStringWidth(ellipsis, style) > max_width)
+  if (MeasureOpeningText(ts, ellipsis, style) > max_width)
     return std::string();
 
-  for (size_t len = text.size(); len > 0; --len) {
+  for (size_t len = text.size(); len > 0;) {
     std::string candidate = text.substr(0, len);
     candidate += ellipsis;
-    if ((int)ts->GetStringWidth(candidate.c_str(), style) <= max_width)
+    if (MeasureOpeningText(ts, candidate, style) <= max_width)
       return candidate;
+    --len;
+    while (len > 0 && ((unsigned char)text[len] & 0xC0) == 0x80)
+      --len;
   }
   return std::string(ellipsis);
 }
@@ -104,7 +117,7 @@ std::vector<std::string> BuildOpeningTitleLines(Text *ts, const char *name,
   for (size_t i = 0; i < tokens.size(); ++i) {
     const std::string candidate =
         line.empty() ? tokens[i] : (line + " " + tokens[i]);
-    if ((int)ts->GetStringWidth(candidate.c_str(), style) <= max_width) {
+    if (MeasureOpeningText(ts, candidate, style) <= max_width) {
       line = candidate;
       continue;
     }
@@ -129,7 +142,7 @@ std::vector<std::string> BuildOpeningTitleLines(Text *ts, const char *name,
   }
 
   if (!line.empty() && (int)lines.size() < max_lines)
-    lines.push_back(line);
+    lines.push_back(EllipsizeToWidth(ts, line, max_width, style));
   if ((int)lines.size() > max_lines)
     lines.resize((size_t)max_lines);
   return lines;
@@ -189,6 +202,11 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
   if (!app || !app->ts || !selected)
     return;
 
+  // Controls artwork and opening progress use the portrait menu layout.
+  // Keep it active until the reader presents the completed book.
+  if (app->render_orientation != app->portrait_orientation)
+    app->ApplyRenderOrientation(app->portrait_orientation);
+
   int savedStyle = app->ts->GetStyle();
   int savedColorMode = app->ts->GetColorMode();
   u16 *savedScreen = app->ts->GetScreen();
@@ -207,8 +225,9 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
     name = selected->GetTitle();
   if (name && *name) {
     std::vector<std::string> lines = BuildOpeningTitleLines(
-        app->ts.get(), name, kOpeningTitleMaxWidth, kOpeningTitleMaxLines,
-        TEXT_STYLE_BROWSER);
+        app->ts.get(), name,
+        std::max(1, app->ts->LogicalWidth() - 2 * kOpeningTitleMargin),
+        kOpeningTitleMaxLines, TEXT_STYLE_BROWSER);
     for (size_t i = 0; i < lines.size(); ++i) {
       app->ts->SetPen(12, (u16)(50 + (int)i * kOpeningTitleLineHeight));
       app->ts->PrintString(lines[i].c_str());

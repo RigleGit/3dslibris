@@ -165,7 +165,7 @@ u8 ReaderController::OpenBook()
     app_.SetOpeningOldPosition(relayout_state.old_position);
     app_.MutableOpeningOldBookmarks() = relayout_state.old_bookmarks;
     app_.SetOpeningStartedAtMs(osGetTime());
-    app_.ApplyRenderOrientation(app_.orientation);
+    app_.ApplyRenderOrientation(app_.portrait_orientation);
     app_.SetMode(AppMode::Opening);
     if (selected_book->StartAsyncReflowOpen(session_id))
     {
@@ -288,6 +288,9 @@ u8 ReaderController::OpenBook()
 #endif
   }
 
+  // Cache-save progress keeps the portrait splash active until this point.
+  if (app_.render_orientation != app_.orientation)
+    app_.ApplyRenderOrientation(app_.orientation);
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   book_nav::DrawPage(bookcurrent_, ts);

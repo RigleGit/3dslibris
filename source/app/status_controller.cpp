@@ -172,9 +172,8 @@ void StatusController::UpdateStatus()
   app_.ts->SetStyle(TEXT_STYLE_BROWSER); // smaller, readable font
 
   const bool landscape_reflow_hud =
-      current_book &&
-      orientation_utils::IsLandscape(current_book->GetOrientation()) &&
-      !UsesFixedLayoutMinimalHud(current_book);
+      orientation_utils::IsLandscape(app_.ts->GetOrientation()) &&
+      (mode == AppMode::Opening || !UsesFixedLayoutMinimalHud(current_book));
 
   if (landscape_reflow_hud)
   {
