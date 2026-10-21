@@ -264,13 +264,14 @@ inline void RestoreParsedStyleMarkers(parsedata_t *p) {
 }
 
 inline int ResolveCssMarginLinefeeds(
-    const book_xml_css_style_utils::MarginTopResult &m, int line_h) {
+    const book_xml_css_style_utils::MarginTopResult &m, int line_h,
+    int reading_width = PAGE_WIDTH) {
   using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
   if (m.unit == Unit::None || line_h <= 0)
     return 0;
   int px = m.value;
   if (m.unit == Unit::Percent)
-    px = (m.value * PAGE_WIDTH) / 100;
+    px = (m.value * reading_width) / 100;
   else if (m.unit == Unit::Em)
     px = (m.value * line_h) / 120;  // approximate: line_h ≈ 1.2 * font_size
   if (m.negative || px <= 0)
@@ -285,25 +286,25 @@ inline int ClampResolvedBlockLinefeeds(int linefeeds) {
 
 inline int ResolveBlockTopLinefeeds(
     int default_lf, const book_xml_css_style_utils::MarginTopResult &m,
-    int line_h) {
+    int line_h, int reading_width = PAGE_WIDTH) {
   using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
   if (m.unit == Unit::None)
     return ClampResolvedBlockLinefeeds(default_lf);
   if (m.negative || (m.unit != Unit::None && m.value == 0))
     return 0;
-  const int css_lf = ResolveCssMarginLinefeeds(m, line_h);
+  const int css_lf = ResolveCssMarginLinefeeds(m, line_h, reading_width);
   return ClampResolvedBlockLinefeeds(std::max(css_lf, default_lf + 1));
 }
 
 inline int ResolveBlockBottomLinefeeds(
     int default_lf, const book_xml_css_style_utils::MarginTopResult &m,
-    int line_h) {
+    int line_h, int reading_width = PAGE_WIDTH) {
   using Unit = book_xml_css_style_utils::MarginTopResult::Unit;
   if (m.unit == Unit::None)
     return ClampResolvedBlockLinefeeds(default_lf);
   if (m.negative || (m.unit != Unit::None && m.value == 0))
     return 0;
-  const int css_lf = ResolveCssMarginLinefeeds(m, line_h);
+  const int css_lf = ResolveCssMarginLinefeeds(m, line_h, reading_width);
   return ClampResolvedBlockLinefeeds(std::max(css_lf, default_lf + 1));
 }
 

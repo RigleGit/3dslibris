@@ -27,8 +27,10 @@ std::string ExtractClassAttr(const char **attr);
 
 // Parse a CSS/HTML length value (px, %, em, rem, pt, cm, mm, in, vw, bare
 // integer) and return pixels (>0), or 0 if unconstrained or unrecognised.
-// text_width = available text area in pixels; font_px = current font height.
-int ParseCssLengthPx(const char *v, int text_width, int font_px);
+// text_width = available text area; viewport_width = full screen width for vw.
+// When omitted, viewport_width falls back to text_width.
+int ParseCssLengthPx(const char *v, int text_width, int font_px,
+                     int viewport_width = 0);
 
 // Return the author-specified max width in pixels for an img element.
 // Checks the HTML width attribute first, then the CSS width property in style.
@@ -36,7 +38,8 @@ int ParseCssLengthPx(const char *v, int text_width, int font_px);
 int ParseImgWidthPx(const char *width_attr, const char *style,
                     int text_width, int font_px);
 int ParseImgWidthPx(const char *width_attr, const char *style,
-                    int text_width, int font_px, int root_font_px);
+                    int text_width, int font_px, int root_font_px,
+                    int viewport_width = 0);
 
 // ---------------------------------------------------------------------------
 // Inline style flags (bold, italic, underline, …)

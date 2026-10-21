@@ -164,7 +164,8 @@ std::string ExtractClassAttr(const char **attr) {
   return {};
 }
 
-int ParseCssLengthPx(const char *v, int text_width, int font_px) {
+int ParseCssLengthPx(const char *v, int text_width, int font_px,
+                     int viewport_width) {
   if (!v || !*v)
     return 0;
   while (*v == ' ')
@@ -221,7 +222,8 @@ int ParseCssLengthPx(const char *v, int text_width, int font_px) {
   } else if (v[0] == 'v' && v[1] == 'w') {
     if (num1000 <= 0 || num1000 > 100 * 1000)
       return 0;
-    result_px = (240 * num1000 + 50000) / 100000;
+    result_px = ((viewport_width > 0 ? viewport_width : text_width) *
+                 num1000 + 50000) / 100000;
   } else {
     return 0;
   }
@@ -235,10 +237,10 @@ int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
 }
 
 int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
-                    int font_px, int root_font_px) {
+                    int font_px, int root_font_px, int viewport_width) {
   const int image_font_px = root_font_px > 0 ? root_font_px : font_px;
   if (width_attr && *width_attr) {
-    int px = ParseCssLengthPx(width_attr, text_width, image_font_px);
+    int px = ParseCssLengthPx(width_attr, text_width, image_font_px, viewport_width);
     if (px > 0)
       return px;
   }
@@ -249,7 +251,8 @@ int ParseImgWidthPx(const char *width_attr, const char *style, int text_width,
       pos += 6;
       while (pos < lc.size() && lc[pos] == ' ')
         pos++;
-      int px = ParseCssLengthPx(lc.c_str() + pos, text_width, image_font_px);
+      int px = ParseCssLengthPx(lc.c_str() + pos, text_width, image_font_px,
+                                viewport_width);
       if (px > 0)
         return px;
     }

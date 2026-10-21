@@ -38,6 +38,10 @@ void TestParseCssLengthPxUnits() {
   test::ExpectEq("bare int", book_xml_css_resolver::ParseCssLengthPx("20", 240, 14), 20);
   test::ExpectEq("50 percent of 240",
                  book_xml_css_resolver::ParseCssLengthPx("50%", 240, 14), 120);
+  test::ExpectEq("landscape vw uses full viewport rather than content width",
+                 book_xml_css_resolver::ParseCssLengthPx("50vw", 376, 14, 400), 200);
+  test::ExpectEq("compact landscape vw follows physical viewport",
+                 book_xml_css_resolver::ParseCssLengthPx("50vw", 296, 14, 320), 160);
   test::ExpectEq("1em at 14px", book_xml_css_resolver::ParseCssLengthPx("1em", 240, 14), 14);
   test::ExpectEq("2rem at 14px", book_xml_css_resolver::ParseCssLengthPx("2rem", 240, 14), 28);
   test::ExpectEq("empty string", book_xml_css_resolver::ParseCssLengthPx("", 240, 14), 0);

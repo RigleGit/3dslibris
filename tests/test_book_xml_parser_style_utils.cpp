@@ -128,6 +128,13 @@ void TestResolveCssMarginLinefeedsUsesCeilQuantization() {
   test::ExpectEq("10 percent of 240 at 20px line height -> 2 linefeeds",
                  book_xml_parser_style_utils::ResolveCssMarginLinefeeds(m, 20),
                  2);
+  m.value = 15;
+  test::ExpectEq("15 percent of top landscape width reserves three lines",
+                 book_xml_parser_style_utils::ResolveCssMarginLinefeeds(m, 20, 400), 3);
+  test::ExpectEq("15 percent of bottom landscape width reserves three lines",
+                 book_xml_parser_style_utils::ResolveCssMarginLinefeeds(m, 20, 320), 3);
+  test::ExpectEq("15 percent of portrait width reserves two lines",
+                 book_xml_parser_style_utils::ResolveCssMarginLinefeeds(m, 20, 240), 2);
 }
 
 void TestResolveBlockSpacingLinefeedsHonorsDefaultsAndZero() {

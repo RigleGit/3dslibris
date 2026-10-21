@@ -22,6 +22,7 @@
 #include "book/page.h"
 #include "book/page_buffer_utils.h"
 #include "parse.h"
+#include "shared/text_screen_geometry.h"
 #include "shared/debug_log.h"
 #include "shared/string_utils.h"
 #include "shared/text_token_constants.h"
@@ -294,7 +295,9 @@ bool HandleBlockElementStart(
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !book_xml_screen_advance::Blankline(p) ? 2 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
+          default_lf, mtr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, "h4", "top", p->last_h_style,
                              p->last_h_class, mtr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
@@ -322,7 +325,9 @@ bool HandleBlockElementStart(
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !book_xml_screen_advance::Blankline(p) ? 2 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
+          default_lf, mtr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, "h5", "top", p->last_h_style,
                              p->last_h_class, mtr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
@@ -350,7 +355,9 @@ bool HandleBlockElementStart(
       const int line_h = ts->GetHeight() + ts->linespacing;
       const int default_lf = !book_xml_screen_advance::Blankline(p) ? 2 : 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
+          default_lf, mtr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, "h6", "top", p->last_h_style,
                              p->last_h_class, mtr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
@@ -395,7 +402,9 @@ bool HandleBlockElementStart(
     if (can_apply_top_margin && !after_standalone_band_image) {
       const int default_lf = 0;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-          default_lf, mtr, line_h);
+          default_lf, mtr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, "p", "top", p->last_p_style,
                              p->last_p_class, mtr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
@@ -432,17 +441,24 @@ bool HandleBlockElementStart(
     const int default_lf =
         !book_xml_screen_advance::Blankline(p) ? 1 : 0;
     const int lf_count = book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
-        default_lf, mtr, line_h);
+        default_lf, mtr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
     LogResolvedBlockMargin(p, "hr", "top", p->last_hr_style,
                            p->last_hr_class, mtr, line_h, default_lf, lf_count);
     book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
         p, "hr", "hr-top", mtr, line_h, default_lf);
     if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
       book_xml_screen_advance::FlushPendingBlockSpacingBeforeContent(p, "hr");
+      const int screen_width =
+          p->book && orientation_utils::IsLandscape(p->book->GetOrientation())
+              ? text_screen_geometry::ResolveReadingScreenGeometry(
+                    p->book->GetOrientation(), p->screen).width
+              : ts->display.width;
       const int content_left =
           ts->margin.left + parse_current_block_margin_left(p);
       const int content_right =
-          ts->display.width - ts->margin.right -
+          screen_width - ts->margin.right -
           parse_current_block_margin_right(p);
       const int content_w = std::max(0, content_right - content_left);
 
@@ -481,8 +497,8 @@ bool HandleBlockElementStart(
         rule_x1 = std::max(rule_x0, std::min(content_right, rule_x1));
       }
 
-      const u32 x0_u = (u32)std::max(0, std::min(255, rule_x0));
-      const u32 x1_u = (u32)std::max(x0_u, (u32)std::min(255, rule_x1));
+      const u32 x0_u = (u32)std::max(0, std::min(screen_width, rule_x0));
+      const u32 x1_u = (u32)std::max(x0_u, (u32)std::min(screen_width, rule_x1));
 
       parse_append_page_byte(p, TEXT_HR_BOUNDS);
       parse_append_page_byte(p, x0_u);
@@ -646,7 +662,9 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
       }
       const int default_lf = 1 + p->book->GetParagraphSpacing();
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
+          default_lf, mbr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, "p", "bottom", p->last_p_style,
                              p->last_p_class, mbr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
@@ -710,7 +728,9 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
               p, p->last_h1_style, p->last_h1_class, p->css_class_map, "h1");
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
+          default_lf, mbr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, "h1", "bottom", p->last_h1_style,
                              p->last_h1_class, mbr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
@@ -731,7 +751,9 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
               p, p->last_h2_style, p->last_h2_class, p->css_class_map, "h2");
       const int default_lf = 1;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
+          default_lf, mbr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, "h2", "bottom", p->last_h2_style,
                              p->last_h2_class, mbr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(
@@ -753,7 +775,9 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
               p, p->last_hr_style, p->last_hr_class, p->css_class_map, "hr");
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
+          default_lf, mbr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, "hr", "bottom", p->last_hr_style,
                              p->last_hr_class, mbr, line_h, default_lf, lf_count);
       if (ShouldRenderHrRule(p->last_hr_style, p->last_hr_class)) {
@@ -772,7 +796,9 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
               p, p->last_h_style, p->last_h_class, p->css_class_map, el);
       const int default_lf = 2;
       const int lf_count = book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-          default_lf, mbr, line_h);
+          default_lf, mbr, line_h,
+          text_screen_geometry::ResolveReadingScreenGeometry(
+              p->book ? p->book->GetOrientation() : 0, p->screen).width);
       LogResolvedBlockMargin(p, el, "bottom", p->last_h_style,
                              p->last_h_class, mbr, line_h, default_lf, lf_count);
       book_xml_screen_advance::QueueBlockSpacingFromMarginResult(

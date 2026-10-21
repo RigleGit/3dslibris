@@ -17,6 +17,7 @@
 #include "book/inline_image_layout.h"
 #include "formats/common/epub_image_utils.h"
 #include "parse.h"
+#include "shared/text_screen_geometry.h"
 #include "shared/debug_log.h"
 #include "ui/text.h"
 
@@ -223,8 +224,10 @@ void HandleInlineImageStart(parsedata_t *p, Text *ts, const char **attr,
         book_xml_css_style_utils::ParseMarginTop(img_style);
     const int default_lf = 0;
     const int lf_count =
-        book_xml_parser_style_utils::ResolveBlockTopLinefeeds(default_lf,
-                                                              mtr, line_h);
+        book_xml_parser_style_utils::ResolveBlockTopLinefeeds(
+            default_lf, mtr, line_h,
+            text_screen_geometry::ResolveReadingScreenGeometry(
+                p->book ? p->book->GetOrientation() : 0, p->screen).width);
     for (int i = 0; i < lf_count; i++)
       fns.linefeed(p);
   }
@@ -241,14 +244,19 @@ void HandleInlineImageStart(parsedata_t *p, Text *ts, const char **attr,
 
   if (!resolved.empty() && p->book) {
     u16 image_id = p->book->RegisterInlineImage(resolved);
-    const int text_w = ts->display.width - ts->margin.left - ts->margin.right;
+    int screen_width =
+        p->book && orientation_utils::IsLandscape(p->book->GetOrientation())
+            ? text_screen_geometry::ResolveReadingScreenGeometry(
+                  p->book->GetOrientation(), p->screen).width
+            : ts->display.width;
+    int text_w = screen_width - ts->margin.left - ts->margin.right;
     const int root_font_px =
         (p->base_font_size_px != 0) ? (int)p->base_font_size_px
                                     : ts->GetPixelSize();
-    const int author_max_w =
+    int author_max_w =
         book_xml_css_resolver::ParseImgWidthPx(img_width_attr, img_style,
                                                text_w, ts->GetHeight(),
-                                               root_font_px);
+                                               root_font_px, screen_width);
     if (author_max_w > 0)
       p->book->SetInlineImageAuthorMaxWidth(image_id, author_max_w);
     InlineImageLayoutPlan image_plan{};
@@ -314,8 +322,26 @@ void HandleInlineImageStart(parsedata_t *p, Text *ts, const char **attr,
       return;
     }
 
-    if (image_plan.advance_before)
+    if (image_plan.advance_before) {
       fns.advance_screen(p);
+      // Width percentages and vw belong to the destination viewport. Replan
+      // there before emitting the per-instance width and consuming its space.
+      screen_width = orientation_utils::IsLandscape(p->book->GetOrientation())
+          ? text_screen_geometry::ResolveReadingScreenGeometry(
+                p->book->GetOrientation(), p->screen).width
+          : ts->display.width;
+      text_w = screen_width - ts->margin.left - ts->margin.right;
+      author_max_w = book_xml_css_resolver::ParseImgWidthPx(
+          img_width_attr, img_style, text_w, ts->GetHeight(), root_font_px,
+          screen_width);
+      p->book->SetInlineImageAuthorMaxWidth(image_id, author_max_w);
+      p->book->PlanInlineImageLayout(ts, image_id, p->screen, p->pen.x,
+                                    p->pen.y, p->linebegan, image_context,
+                                    &image_plan, author_max_w);
+      if (float_mode != book_xml_css_style_utils::FloatMode::None)
+        ApplyFloatImageLayoutOverride(&image_plan, p->linebegan,
+                                      ts->linespacing);
+    }
     if (image_plan.line_break_before && p->linebegan)
       fns.linefeed(p);
 
@@ -389,7 +415,9 @@ void HandleInlineImageStart(parsedata_t *p, Text *ts, const char **attr,
             book_xml_css_style_utils::ParseMarginBottom(img_style);
         const int lf_count =
             book_xml_parser_style_utils::ResolveBlockBottomLinefeeds(
-                0, mbr, line_h);
+                0, mbr, line_h,
+                text_screen_geometry::ResolveReadingScreenGeometry(
+                    p->book ? p->book->GetOrientation() : 0, p->screen).width);
     #if defined(DSLIBRIS_DEBUG) && EPUB_SPACING_TRACE
         DBG_LOGF_CAT(
           p->book->GetStatusReporter(), DBG_LEVEL_DEBUG, DBG_CAT_EPUB,

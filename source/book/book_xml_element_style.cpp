@@ -13,6 +13,7 @@
 #include "book/book_xml_screen_advance.h"
 #include "book/epub_css_class_map.h"
 #include "parse.h"
+#include "shared/text_screen_geometry.h"
 #include "shared/debug_log.h"
 #include "shared/orientation_utils.h"
 #include "shared/text_render_layout_utils.h"
@@ -142,6 +143,11 @@ void ApplyElementBlockMargins(
   if (!p || !ts)
     return;
   using book_xml_css_style_utils::MarginTopResult;
+  const int screen_width =
+      p->book && orientation_utils::IsLandscape(p->book->GetOrientation())
+          ? text_screen_geometry::ResolveReadingScreenGeometry(
+                p->book->GetOrientation(), p->screen).width
+          : ts->display.width;
   const int inherited_left = parse_current_block_margin_left(p);
   const int inherited_right = parse_current_block_margin_right(p);
   int effective_left = inherited_left;
@@ -172,10 +178,10 @@ void ApplyElementBlockMargins(
 
   if (ml.unit != MarginTopResult::Unit::None)
     effective_left +=
-        book_xml_css_style_utils::ResolveHorizontalMarginPx(ml, ts->display.width, (int)ts->GetPixelSize());
+        book_xml_css_style_utils::ResolveHorizontalMarginPx(ml, screen_width, (int)ts->GetPixelSize());
   if (mr.unit != MarginTopResult::Unit::None)
     effective_right +=
-        book_xml_css_style_utils::ResolveHorizontalMarginPx(mr, ts->display.width, (int)ts->GetPixelSize());
+        book_xml_css_style_utils::ResolveHorizontalMarginPx(mr, screen_width, (int)ts->GetPixelSize());
   parse_set_current_block_margins(p, effective_left, effective_right);
 }
 

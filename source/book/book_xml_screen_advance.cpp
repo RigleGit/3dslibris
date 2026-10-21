@@ -15,6 +15,7 @@
 #include "shared/debug_log.h"
 #include "shared/orientation_utils.h"
 #include "shared/text_render_layout_utils.h"
+#include "shared/text_screen_geometry.h"
 #include "ui/text.h"
 
 #include <cstring>
@@ -318,7 +319,9 @@ void QueueBlockSpacingFromMarginResult(
   // explicitly suppressed its bottom margin (via CSS margin: 0), we need to
   // restore one line of spacing after this element's CSS margin-top queues.
   const bool was_suppressed = p->pending_block_spacing_suppress_only;
-  const int css_lf = book_xml_parser_style_utils::ResolveCssMarginLinefeeds(mtr, line_h);
+  const int css_lf = book_xml_parser_style_utils::ResolveCssMarginLinefeeds(
+      mtr, line_h, text_screen_geometry::ResolveReadingScreenGeometry(
+          p->book ? p->book->GetOrientation() : 0, p->screen).width);
   // CSS measures blank space between blocks. The queue also counts the line
   // break ending the previous block, so include it separately; otherwise a
   // one-line margin is consumed by that mandatory break and becomes invisible.

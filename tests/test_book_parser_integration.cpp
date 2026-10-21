@@ -1,6 +1,9 @@
 #include "book/book_search_source.h"
 #include "book/book.h"
 #include "book/book_context.h"
+#include "book/book_xml.h"
+#include "formats/common/plain_parser.h"
+#include "parse.h"
 #include "book/book_parser.h"
 #include "book/book_renderer.h"
 #include "book/page.h"
@@ -217,6 +220,216 @@ void TestOriginalImageResourceAndDrawBounds() {
     test::ExpectTrue("reading original never changes pages", book.GetPageCount() == 0 && book.GetPosition() == 0);
     book.ClearInlineImages();
     test::ExpectFalse("closed resource cannot be reused", book.ReadInlineImageSource(image,&original));
+  }
+}
+
+void TestLateFigureScreenTransition() {
+  const char *folder = getenv("TEST_IMAGE_VIEWER_DIR");
+  test::ExpectTrue("figure fixture directory", folder != nullptr);
+  for (unsigned char orientation : {0, 1, 2}) {
+    Text text;
+    text.capture_rendered_text = true;
+    text.landscape = orientation == 2;
+    text.display.width = orientation == 2 ? 400 : 240;
+    text.display.height = 400;
+    std::vector<u16> left(400 * 400), right(400 * 400);
+    text.screenleft = left.data();
+    text.screenright = right.data();
+    BookContext ctx;
+    ctx.text = &text;
+    ctx.orientation = &orientation;
+    Book book(ctx);
+    book.SetFolderName(folder);
+    book.SetFileName("images.epub");
+    const u16 fine = book.RegisterInlineImage("OEBPS/fine.png");
+    // Owned wide raster makes destination width, rather than height, limit fit.
+    test::ExpectTrue(
+        "store wide reference chart",
+        book.StoreFb2InlineImage(
+            "wide",
+            "iVBORw0KGgoAAAANSUhEUgAABLAAAABkCAIAAAAZo16yAAACWUlEQVR4nO3OQQ0AMB"
+            "AEofVvupUx"
+            "jyNBAHsbAAAAB/UDAAAAEv0AAACARD8AAAAg0Q8AAABI9AMAAAAS/"
+            "QAAAIBEPwAAACDRDwAAAEj0"
+            "AwAAABL9AAAAgEQ/"
+            "AAAAINEPAAAASPQDAAAAEv0AAACARD8AAAAg0Q8AAABI9AMAAAAS/QAAAIBE"
+            "PwAAACDRDwAAAEj0AwAAABL9AAAAgEQ/"
+            "AAAAINEPAAAASPQDAAAAEv0AAACARD8AAAAg0Q8AAABI"
+            "9AMAAAAS/QAAAIBEPwAAACDRDwAAAEj0AwAAABL9AAAAgEQ/"
+            "AAAAINEPAAAASPQDAAAAEv0AAACA"
+            "RD8AAAAg0Q8AAABI9AMAAAAS/QAAAIBEPwAAACDRDwAAAEj0AwAAABL9AAAAgEQ/"
+            "AAAAINEPAAAA"
+            "SPQDAAAAEv0AAACARD8AAAAg0Q8AAABI9AMAAAAS/"
+            "QAAAIBEPwAAACDRDwAAAEj0AwAAABL9AAAA"
+            "gEQ/AAAAINEPAAAASPQDAAAAEv0AAACARD8AAAAg0Q8AAABI9AMAAAAS/"
+            "QAAAIBEPwAAACDRDwAA"
+            "AEj0AwAAABL9AAAAgEQ/"
+            "AAAAINEPAAAASPQDAAAAEv0AAACARD8AAAAg0Q8AAABI9AMAAAAS/QAA"
+            "AIBEPwAAACDRDwAAAEj0AwAAABL9AAAAgEQ/"
+            "AAAAINEPAAAASPQDAAAAEv0AAACARD8AAAAg0Q8A"
+            "AABI9AMAAAAS/QAAAIBEPwAAACDRDwAAAEj0AwAAABL9AAAAgEQ/"
+            "AAAAINEPAAAASPQDAAAAEv0A"
+            "AACARD8AAAAg8QHXagaeCasYRgAAAABJRU5ErkJggg=="));
+    const u16 wide = book.RegisterInlineImage("fb2:wide");
+    for (u16 image : {fine, wide})
+      for (int screen = 0; screen < 2; ++screen) {
+        const bool is_left = (orientation != 1) == (screen == 0);
+        text.SetScreen(is_left ? left.data() : right.data());
+        const int height = orientation == 2 ? 240 : (is_left ? 400 : 320);
+        InlineImageLayoutPlan moved{}, fresh{};
+        test::ExpectTrue("plan real late figure",
+                         book.PlanInlineImageLayout(
+                             &text, image, screen, text.margin.left,
+                             height - (image == fine ? 80 : 50), false,
+                             INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION, &moved));
+        test::ExpectTrue("late figure advances", moved.advance_before);
+        if (image == fine)
+          test::ExpectTrue("late figure remains readable",
+                           moved.draw_height >= 60);
+        text.SetScreen(is_left ? right.data() : left.data());
+        text.SetPen(text.margin.left, text.margin.top + text.GetHeight());
+        test::ExpectTrue("plan real figure after move",
+                         book.PlanInlineImageLayout(
+                             &text, image, 1 - screen, text.GetPenX(),
+                             text.GetPenY(), false,
+                             INLINE_IMAGE_CONTEXT_FIGURE_WITH_CAPTION, &fresh));
+        test::ExpectEq("moved figure uses destination width", moved.draw_width,
+                       fresh.draw_width);
+        test::ExpectEq("moved figure uses destination height",
+                       moved.draw_height, fresh.draw_height);
+        test::ExpectFalse("fresh figure does not advance again",
+                          fresh.advance_before);
+        InlineImageDrawBounds bounds{};
+        test::ExpectTrue(
+            "draw real moved figure",
+            book.DrawInlineImage(&text, image, &moved, 1 - screen, 0, &bounds));
+        test::ExpectEq("draw uses planned width", bounds.x1 - bounds.x0,
+                       moved.draw_width);
+        test::ExpectEq("draw uses planned height", bounds.y1 - bounds.y0,
+                       moved.draw_height);
+        const int destination_width =
+            orientation == 2 ? (is_left ? 320 : 400) : 240;
+        test::ExpectTrue("figure stays inside destination screen",
+                         bounds.x1 <= destination_width);
+        if (image == wide && orientation == 2) {
+          parsedata_t parsed;
+          parse_init(&parsed);
+          parsed.ts = &text;
+          parsed.book = &book;
+          parsed.screen = screen;
+          parsed.pen.x = text.margin.left;
+          parsed.pen.y = 235;
+          parse_append_page_byte(&parsed, 'x');
+          const char *attrs[] = {"src", "#wide", "width", "50%", nullptr};
+          xml::book::start(&parsed, "img", attrs);
+          test::ExpectEq("authored image moves to destination screen",
+                         parsed.screen, 1 - screen);
+          const int authored_width = (destination_width - 24) / 2;
+          bool found_width = false;
+          for (int i = 0; i + 1 < parsed.buflen; ++i) {
+            if (parsed.buf[i] == TEXT_IMAGE_AUTHOR_WIDTH) {
+              found_width = true;
+              test::ExpectEq("moved image resolves percentage in destination",
+                             (int)parsed.buf[i + 1], authored_width);
+            }
+          }
+          test::ExpectTrue("moved image emits destination author width", found_width);
+          const int image_height = (100 * authored_width) / 1200;
+          test::ExpectEq("moved image consumes newly resolved authored height",
+                         parsed.pen.y,
+                         text.margin.top + text.GetHeight() + image_height +
+                             text.linespacing);
+          book.SetInlineImageAuthorMaxWidth(image, 0);
+        }
+      }
+  }
+}
+
+void TestReadingGeometryParserBoundaries() {
+  for (unsigned char orientation : {0, 1, 2}) {
+    for (int reading_screen = 0; reading_screen < 2; ++reading_screen) {
+      Text text;
+      text.display.width = 240; // Legacy display stays portrait in production.
+      BookContext ctx;
+      ctx.text = &text;
+      ctx.orientation = &orientation;
+      Book book(ctx);
+      parsedata_t parsed;
+      parse_init(&parsed);
+      parsed.ts = &text;
+      parsed.book = &book;
+      parsed.screen = reading_screen;
+      parsed.pen.x = text.margin.left;
+      parsed.pen.y = text.margin.top + text.GetHeight();
+      const int width = orientation == 2 ? (reading_screen == 0 ? 400 : 320) : 240;
+      const char *rule_attrs[] = {"style", "width:50%;text-align:right", nullptr};
+      xml::book::start(&parsed, "hr", rule_attrs);
+      bool found_rule = false;
+      for (int i = 0; i + 2 < parsed.buflen; ++i) {
+        if (parsed.buf[i] != TEXT_HR_BOUNDS)
+          continue;
+        found_rule = true;
+        test::ExpectEq("HR reaches current screen's right margin",
+                       (int)parsed.buf[i + 2], width - text.margin.right);
+        test::ExpectEq("HR percentage uses current content width",
+                       (int)(parsed.buf[i + 2] - parsed.buf[i + 1]),
+                       (width - text.margin.left - text.margin.right) / 2);
+      }
+      test::ExpectTrue("XML emits a visible HR", found_rule);
+      xml::book::end(&parsed, "hr");
+      const char *block_attrs[] = {"style", "margin-left:10%;margin-top:0", nullptr};
+      xml::book::start(&parsed, "p", block_attrs);
+      test::ExpectEq("block percentage uses reading width",
+                     parsed.block_margin_left, width / 10);
+      xml::book::end(&parsed, "p");
+      const char *heading_attrs[] = {"style", "margin-left:10%;margin-top:0", nullptr};
+      xml::book::start(&parsed, "h2", heading_attrs);
+      test::ExpectEq("heading percentage uses reading width",
+                     parsed.block_margin_left, width / 10);
+      xml::book::end(&parsed, "h2");
+      // A real resource gives the image handler metadata without file fixtures.
+      test::ExpectTrue("store width-test resource", book.StoreFb2InlineImage("width",
+          "iVBORw0KGgoAAAANSUhEUgAAABAAAAAICAIAAAB/FOjAAAAAFElEQVR4nGP4z8BAEiJN9agGIhEAJMZ/gd5KfaIAAAAASUVORK5CYII="));
+      const char *image_attrs[] = {"src", "#width", "width", "50%", nullptr};
+      xml::book::start(&parsed, "img", image_attrs);
+      bool found_width = false;
+      for (int i = 0; i + 1 < parsed.buflen; ++i) {
+        if (parsed.buf[i] == TEXT_IMAGE_AUTHOR_WIDTH) {
+          found_width = true;
+          test::ExpectEq("image percentage uses current content width",
+                         (int)parsed.buf[i + 1],
+                         (width - text.margin.left - text.margin.right) / 2);
+        }
+      }
+      test::ExpectTrue("image preserves authored width in page tokens", found_width);
+    }
+  }
+  // Physical heights minus the established full/compact HUD+guard margins.
+  const int last_baseline[3][2] = {{356, 292}, {292, 356}, {232, 210}};
+  for (unsigned char orientation : {0, 1, 2}) {
+    for (int reading_screen = 0; reading_screen < 2; ++reading_screen) {
+      for (bool at_bottom : {false, true}) {
+        Text text;
+        text.display.width = 240;
+        BookContext ctx;
+        ctx.text = &text;
+        ctx.orientation = &orientation;
+        Book book(ctx);
+        parsedata_t parsed;
+        parse_init(&parsed);
+        parsed.ts = &text;
+        parsed.book = &book;
+        parsed.screen = reading_screen;
+        parsed.pen.y = last_baseline[orientation][reading_screen] -
+                       (at_bottom ? 30 : 60);
+        parse_append_page_byte(&parsed, 'x');
+        const auto callbacks = plain_parser::MakeContinueCallbacks();
+        test::ExpectEq("plain H1 uses actual space for following text",
+            callbacks.apply_heading_keep_with_next(&parsed, 1), at_bottom);
+        test::ExpectEq("plain H1 advances only at the actual screen bottom",
+            parsed.screen, at_bottom ? 1 - reading_screen : reading_screen);
+      }
+    }
   }
 }
 
@@ -1125,12 +1338,17 @@ int main(int argc, char **argv) {
   if(argc==2) {
     if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
     else if(std::string(argv[1])=="image-toggle") TestDisableEbookImages();
+    else if (std::string(argv[1]) == "figure-transition")
+      TestLateFigureScreenTransition();
+    else if(std::string(argv[1])=="reading-geometry") TestReadingGeometryParserBoundaries();
     else if(std::string(argv[1])=="image-cache") TestInlineImageCacheRetainsDistinctDimensions();
     else return 2;
     return 0;
   }
+  TestReadingGeometryParserBoundaries();
   TestFb2ResourceStorageLimitsAndRecovery();
   TestInlineImageCacheRetainsDistinctDimensions();
+  TestLateFigureScreenTransition();
   TestOriginalImageResourceAndDrawBounds();
   TestImageResourcesAcrossBookFormats();
   TestDispatchContentAndCloseBetweenFormats();

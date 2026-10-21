@@ -236,19 +236,20 @@ static void PlainLinefeed(parsedata_t *p) {
 }
 
 static bool ApplyPlainHeadingKeepWithNext(parsedata_t *p, int heading_level) {
-  if (!p || !p->ts)
+  if (!p || !p->ts || !p->book)
     return false;
   if (heading_level < 1 || heading_level > 3)
     return false;
 
   heading_layout::KeepWithNextRequest req{};
   req.pen_y = p->pen.y;
-  req.screen_height = text_render_layout_utils::ReadingScreenHeightPx(p->screen);
-  req.bottom_margin = (p->screen == 1)
-                          ? text_render_layout_utils::ResolveCompactReadingBottomMargin(
-                                p->ts->margin.bottom)
-                          : (p->ts->margin.bottom +
-                             text_render_layout_utils::kFullReadingScreenFooterGuardPx);
+  const text_render_layout_utils::ReadingScreenMetrics metrics =
+      text_render_layout_utils::ResolveReadingScreenMetricsForOrientation(
+          p->book->GetOrientation(), p->screen, p->ts->margin.bottom,
+          text_render_layout_utils::ResolveCompactReadingBottomMargin(
+              p->ts->margin.bottom));
+  req.screen_height = metrics.max_height;
+  req.bottom_margin = metrics.bottom_margin;
   req.line_height = p->ts->GetHeight();
   req.linespacing = p->ts->linespacing;
   req.heading_level = heading_level;
@@ -260,17 +261,15 @@ static bool ApplyPlainHeadingKeepWithNext(parsedata_t *p, int heading_level) {
 }
 
 static void PlainAdvanceScreenOnOverflow(parsedata_t *p) {
-  if (!p || !p->ts)
+  if (!p || !p->ts || !p->book)
     return;
-  const int screen_height = text_render_layout_utils::ReadingScreenHeightPx(p->screen);
-  const int bottom_margin =
-      (p->screen == 1)
-          ? text_render_layout_utils::ResolveCompactReadingBottomMargin(
-                p->ts->margin.bottom)
-          : (p->ts->margin.bottom +
-             text_render_layout_utils::kFullReadingScreenFooterGuardPx);
+  const text_render_layout_utils::ReadingScreenMetrics metrics =
+      text_render_layout_utils::ResolveReadingScreenMetricsForOrientation(
+          p->book->GetOrientation(), p->screen, p->ts->margin.bottom,
+          text_render_layout_utils::ResolveCompactReadingBottomMargin(
+              p->ts->margin.bottom));
   if (text_render_layout_utils::CurrentLineBeyondReadingScreen(
-          p->pen.y, screen_height, bottom_margin)) {
+          p->pen.y, metrics.max_height, metrics.bottom_margin)) {
     PlainAdvanceScreen(p);
   }
 }
