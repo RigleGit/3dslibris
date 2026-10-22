@@ -66,6 +66,7 @@ trap 'rm -rf "$CBZ_TMP"' EXIT
 export TEST_CBZ_READING_DIR="$CBZ_TMP"
 export TEST_MOBI_READING_DIR="$CBZ_TMP/mobi"
 export TEST_EPUB_RECOVERY_DIR="$CBZ_TMP/epub"
+export TEST_ODT_READING_DIR="$CBZ_TMP/odt"
 python3 "$TEST_ROOT/tests/fixtures/generate_epub_recovery.py" "$TEST_EPUB_RECOVERY_DIR"
 python3 "$TEST_ROOT/tests/fixtures/generate_mobi_reading.py" "$TEST_MOBI_READING_DIR"
 python3 - "$CBZ_TMP" <<'PYFIXTURE'
@@ -88,11 +89,22 @@ with zipfile.ZipFile(folder / 'first.cbz', 'w', compression=zipfile.ZIP_DEFLATED
     archive.writestr('ComicInfo.xml', '<ComicInfo><Pages><Page Image="1" Bookmark="Blue chapter"/></Pages></ComicInfo>')
 with zipfile.ZipFile(folder / 'second.cbz', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
     archive.writestr('green.png', png((0, 255, 0)))
+odt_folder = folder / 'odt'
+odt_folder.mkdir()
+with zipfile.ZipFile(odt_folder / 'basic.odt', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr('content.xml', '''<?xml version="1.0"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+<office:body><office:text><text:h text:outline-level="1">Chapter One</text:h>
+<text:p>ODT first paragraph &amp; decoded entity.</text:p>
+<text:h text:outline-level="2">Section Two</text:h>
+<text:p>ODT final paragraph.</text:p></office:text></office:body>
+</office:document-content>''')
 PYFIXTURE
 
 "$CXX_BIN" -std=c++11 \
   ${CXXFLAGS:-} \
-  -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST -DDSLIBRIS_REAL_MOBI_TEST \
+  -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST -DDSLIBRIS_REAL_MOBI_TEST -DDSLIBRIS_REAL_ODT_TEST \
   -include "$TEST_ROOT/tests/stubs/cbz_platform.h" \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \
@@ -175,6 +187,8 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/fb2/fb2.cpp" \
   "$TEST_ROOT/source/formats/rtf/rtf_parser.cpp" \
   "$TEST_ROOT/source/formats/rtf/rtf_loader.cpp" \
+  "$TEST_ROOT/source/formats/odt/odt_parser.cpp" \
+  "$TEST_ROOT/source/formats/odt/odt_loader.cpp" \
   "$TEST_ROOT/source/formats/common/plain_parser.cpp" \
   "$TEST_ROOT/source/formats/common/plain_text_stream.cpp" \
   "$TEST_ROOT/source/formats/common/plain_text_perf_utils.cpp" \

@@ -5,6 +5,7 @@
 #include "book/page.h"
 #include "formats/common/page_text_extract_utils.h"
 #include "formats/common/book_error.h"
+#include "formats/common/plain_parser.h"
 #include "expat.h"
 #include "formats/mobi/mobi_text_decode.h"
 #include "formats/mobi/mobi_page_cache.h"
@@ -148,6 +149,58 @@ void TestXmlAllocationFailureAndRecovery() {
   test::ExpectEq("FB2 recovery retains its chapter", (int)book.GetChapters().size(), 1);
   test::ExpectStrEq("FB2 recovery retains chapter label",
                    book.GetChapters()[0].title.c_str(), "Chapter 1");
+  book.Close();
+}
+
+void TestOdtAndPlainAllocationRecovery() {
+  const char *folder = getenv("TEST_ODT_READING_DIR");
+  test::ExpectTrue("ODT fixture directory exists", folder != nullptr);
+  Text text;
+  BookContext ctx;
+  ctx.text = &text;
+  Book book(ctx);
+  book.SetFolderName(folder);
+  book.SetFileName("basic.odt");
+  test::ExpectEq("real ODT opens", book_parser::Open(&book), 0);
+  test::ExpectEq("short ODT occupies one page", book.GetPageCount(), 1);
+  test::ExpectStrContains("ODT decodes entities", BookText(&book).c_str(),
+                         "ODT first paragraph & decoded entity.");
+  test::ExpectStrContains("ODT keeps final paragraph", BookText(&book).c_str(),
+                         "ODT final paragraph.");
+  test::ExpectEq("ODT retains both heading targets", (int)book.GetChapters().size(), 2);
+  test::ExpectStrEq("ODT first heading", book.GetChapters()[0].title.c_str(), "Chapter One");
+  test::ExpectStrEq("ODT nested heading", book.GetChapters()[1].title.c_str(), "Section Two");
+  test::ExpectEq("ODT first level", book.GetChapters()[0].level, 0);
+  test::ExpectEq("ODT nested level", book.GetChapters()[1].level, 1);
+  book.Close();
+
+  rejected_nothrow_allocations = 0;
+  reject_nothrow_allocations = true;
+  const int odt_rc = book_parser::Open(&book);
+  reject_nothrow_allocations = false;
+  test::ExpectEq("ODT state allocation failure propagates", odt_rc, XML_ERROR_NO_MEMORY);
+  test::ExpectEqU("ODT handles failed state allocation once", rejected_nothrow_allocations, 1);
+  test::ExpectEq("ODT allocation failure creates no pages", book.GetPageCount(), 0);
+  test::ExpectTrue("ODT allocation failure creates no chapters", book.GetChapters().empty());
+  book.Close();
+  test::ExpectEq("ODT reopens after allocation failure", book_parser::Open(&book), 0);
+  test::ExpectEq("ODT recovered chapter count", (int)book.GetChapters().size(), 2);
+  book.Close();
+
+  const std::string plain = "Plain recovery paragraph.\n";
+  rejected_nothrow_allocations = 0;
+  reject_nothrow_allocations = true;
+  const int plain_rc = plain_parser::ParseBuffer(&book, plain, false);
+  reject_nothrow_allocations = false;
+  test::ExpectEq("plain state allocation failure propagates", plain_rc, 1);
+  test::ExpectEqU("plain handles failed state allocation once", rejected_nothrow_allocations, 1);
+  test::ExpectEq("plain allocation failure creates no pages", book.GetPageCount(), 0);
+  test::ExpectTrue("plain allocation failure creates no chapters", book.GetChapters().empty());
+  test::ExpectEq("plain parses after allocation failure", plain_parser::ParseBuffer(&book, plain, false), 0);
+  test::ExpectStrContains("plain recovery preserves text", BookText(&book).c_str(),
+                         "Plain recovery paragraph.");
+  test::ExpectEq("plain recovery preserves short pagination", book.GetPageCount(), 1);
+  test::ExpectTrue("plain recovery keeps heuristic navigation disabled", book.GetChapters().empty());
   book.Close();
 }
 
@@ -758,6 +811,7 @@ void TestNullAndEmptyInputHandling() {
 } // namespace
 
 int main() {
+  TestOdtAndPlainAllocationRecovery();
   TestXmlAllocationFailureAndRecovery();
   TestDispatchContentAndCloseBetweenFormats();
   TestFb2NestedNavigation();

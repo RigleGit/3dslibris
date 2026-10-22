@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <ctype.h>
 #include <memory>
+#include <new>
 #include <string.h>
 #include <sys/param.h>
 
@@ -569,9 +570,11 @@ bool InitState(Book *book, const std::string &text_utf8,
   if (!book || !deps.ts || !out)
     return false;
 
-  parsedata_t base;
-  InitParsedataWithDeps(&base, book, deps);
-  plain_text_stream::InitState(out, base, text_utf8, detect_heuristic_headings);
+  // Initialize the existing destination, as in the MOBI stream path, without
+  // copying a second parser state through the main thread's limited stack.
+  InitParsedataWithDeps(&out->parsedata, book, deps);
+  plain_text_stream::InitState(out, out->parsedata, text_utf8,
+                              detect_heuristic_headings);
   return true;
 }
 
@@ -608,7 +611,9 @@ u8 ParseBuffer(Book *book, const std::string &text_utf8,
   // Allocate State on the heap: parsedata_t contains a 16 KB u32 buf[4096]
   // which, combined with the rest of State, would overflow the 3DS stack (~32 KB)
   // when reached from a deep call chain (e.g. chapter menu → FindApproxTitlePage).
-  std::unique_ptr<State> state_heap(new State());
+  std::unique_ptr<State> state_heap(new (std::nothrow) State());
+  if (!state_heap)
+    return 1;
   State &state = *state_heap;
   if (!InitState(book, text_utf8, deps, detect_heuristic_headings, &state))
     return 1;

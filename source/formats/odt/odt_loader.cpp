@@ -8,6 +8,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <memory>
+#include <new>
 
 #include "book/book_parse_deps.h"
 #include "book/page.h"
@@ -291,7 +293,10 @@ u8 ParseOdtFile(Book *book, const char *path) {
     return 253;
 
   const BookParseDeps deps = BuildBookParseDeps(book);
-  parsedata_t parsedata;
+  std::unique_ptr<parsedata_t> parsedata_owner(new (std::nothrow) parsedata_t);
+  if (!parsedata_owner)
+    return XML_ERROR_NO_MEMORY;
+  parsedata_t &parsedata = *parsedata_owner;
   parse_init(&parsedata);
   parsedata.reporter = deps.reporter;
   parsedata.ts = deps.ts;
