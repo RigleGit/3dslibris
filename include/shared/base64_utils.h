@@ -40,7 +40,7 @@ inline bool DecodeBase64Bytes(const std::string &in, std::vector<u8> *out,
     return false;
 
   out->reserve((in.size() * 3) / 4);
-  int accum = 0;
+  uint32_t accum = 0;
   int bits = -8;
   for (size_t i = 0; i < in.size(); i++) {
     unsigned char c = (unsigned char)in[i];
