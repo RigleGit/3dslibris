@@ -44,7 +44,7 @@ std::string GetPrefsBackupFile() { return prefs_path + ".bak"; }
 struct Text {
   struct { int top=0, left=0, bottom=0, right=0; } margin;
   int color=0, size=12, linespacing=0;
-  std::string fonts[7], fallbacks[4], fontdir;
+  std::string fonts[TEXT_STYLE_MONO_BOLDITALIC + 1], fallbacks[4], fontdir;
   int GetColorMode() const { return color; }
   void SetColorMode(int value) { color=value; }
   int GetPixelSize() const { return size; }
