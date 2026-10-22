@@ -4,7 +4,6 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)"
 COVERAGE_ROOT="${ROOT}/build/coverage-host"
 TMP_ROOT="${COVERAGE_ROOT}/tmp"
-TEST_OUTDIR="${TMP_ROOT}/3dslibris-tests"
 PROFILE_DIR="${COVERAGE_ROOT}/profiles"
 REPORT_DIR="${COVERAGE_ROOT}/report"
 SUMMARY_TXT="${REPORT_DIR}/llvm-cov-report.txt"
@@ -14,7 +13,7 @@ DIAGNOSTICS="${REPORT_DIR}/llvm-cov-diagnostics.txt"
 
 # Rebuild objects and fixtures so removed tests and old flags cannot skew coverage.
 rm -rf "$TMP_ROOT" "$PROFILE_DIR"
-mkdir -p "$TMP_ROOT" "$TEST_OUTDIR" "$PROFILE_DIR" "$REPORT_DIR"
+mkdir -p "$TMP_ROOT" "$PROFILE_DIR" "$REPORT_DIR"
 rm -f "$PROFILE_DIR"/*.profraw "$PROFDATA" "$SUMMARY_TXT" "$SUMMARY_JSON"
 
 if command -v xcrun >/dev/null 2>&1; then
@@ -45,14 +44,15 @@ export LDFLAGS="${LDFLAGS:-} -fprofile-instr-generate -fcoverage-mapping"
 export LLVM_PROFILE_FILE="${PROFILE_DIR}/%p-%m.profraw"
 
 cd "$ROOT/tests"
-./run_all_tests.sh
+# Retain the isolated suite outputs until llvm-cov has read their binaries.
+DSLIBRIS_TEST_KEEP_OUTPUT=1 ./run_all_tests.sh
 
 find "$PROFILE_DIR" -name '*.profraw' -print0 | xargs -0 "$LLVM_PROFDATA_BIN" merge -sparse -o "$PROFDATA"
 
 objects=()
 while IFS= read -r -d '' obj; do
   objects+=("$obj")
-done < <(find "$TEST_OUTDIR" -type f -perm -111 -print0 | sort -z)
+done < <(find "$TMP_ROOT" -type f -perm -111 -print0 | sort -z)
 
 if [ ${#objects[@]} -eq 0 ]; then
   echo "No coverage objects found."
