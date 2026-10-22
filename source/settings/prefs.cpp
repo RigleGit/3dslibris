@@ -32,6 +32,8 @@
 #include "ui/text_limits.h"
 #include <stdio.h>
 #include <sys/param.h>
+#include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -410,6 +412,7 @@ Prefs::~Prefs() {}
 
 //! \return 0: success, 255: file open failure, 254: no bytes read, 253: parse
 //! failure.
+//! Returns XML_ERROR_NO_MEMORY if the parser state cannot be allocated.
 int Prefs::Read() {
   int err = 0;
   ClearPendingCurrentBookRestore();
@@ -423,7 +426,12 @@ int Prefs::Read() {
     return err;
   }
 
-  parsedata_t pdata;
+  std::unique_ptr<parsedata_t> pdata_owner(new (std::nothrow) parsedata_t);
+  if (!pdata_owner) {
+    fclose(fp);
+    return XML_ERROR_NO_MEMORY;
+  }
+  parsedata_t &pdata = *pdata_owner;
   parse_init(&pdata);
   pdata.prefs = this;
   pdata.reporter = app;

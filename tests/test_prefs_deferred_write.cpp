@@ -15,8 +15,18 @@
 #include <cstring>
 #include <list>
 #include <memory>
+#include <new>
 #include <sys/stat.h>
 #include <unistd.h>
+static bool reject_nothrow_allocations=false;
+static unsigned rejected_nothrow_allocations=0;
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  if (reject_nothrow_allocations) {
+    ++rejected_nothrow_allocations;
+    return nullptr;
+  }
+  return ::operator new(size);
+}
 typedef uint8_t u8;
 typedef uint16_t u16;
 #include "shared/text_token_constants.h"
@@ -161,6 +171,21 @@ static void WriteXml(const std::string &xml) {
   assert(fwrite(xml.data(), 1, xml.size(), f) == xml.size() && fclose(f) == 0);
 }
 static void TestReadContracts() {
+  // Failure before parsing must leave settings and the file available for retry.
+  const std::string retry_xml="<dslibris><option time24h=\"0\"/><font size=\"18\"/></dslibris>";
+  WriteXml(retry_xml);
+  App retry_app; retry_app.ts.reset(new Text()); Prefs retry_prefs(&retry_app);
+  rejected_nothrow_allocations=0;
+  reject_nothrow_allocations=true;
+  const int failed_read=retry_prefs.Read();
+  reject_nothrow_allocations=false;
+  assert(failed_read == XML_ERROR_NO_MEMORY);
+  assert(rejected_nothrow_allocations == 1);
+  assert(retry_prefs.time24h && retry_app.reader_font_size == 12);
+  assert(ReadCurrent() == retry_xml);
+  assert(retry_prefs.Read() == 0 && !retry_prefs.time24h);
+  assert(retry_app.reader_font_size == 18);
+
   const int inputs[]={0, 7, 8, 12, 20, 21, 255};
   const int expected[]={8, 8, 8, 12, 20, 20, 20};
   for (size_t i=0; i<sizeof(inputs)/sizeof(inputs[0]); ++i) {
