@@ -67,10 +67,12 @@ export TEST_CBZ_READING_DIR="$CBZ_TMP"
 export TEST_MOBI_READING_DIR="$CBZ_TMP/mobi"
 export TEST_EPUB_RECOVERY_DIR="$CBZ_TMP/epub"
 export TEST_ODT_READING_DIR="$CBZ_TMP/odt"
+export TEST_COVER_READING_DIR="$CBZ_TMP/covers"
 python3 "$TEST_ROOT/tests/fixtures/generate_epub_recovery.py" "$TEST_EPUB_RECOVERY_DIR"
 python3 "$TEST_ROOT/tests/fixtures/generate_mobi_reading.py" "$TEST_MOBI_READING_DIR"
 python3 - "$CBZ_TMP" <<'PYFIXTURE'
 import pathlib
+import base64
 import struct
 import sys
 import zipfile
@@ -78,9 +80,9 @@ import zlib
 folder = pathlib.Path(sys.argv[1])
 def chunk(kind, data):
     return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
-def png(rgb):
-    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 2, 2, 8, 2, 0, 0, 0)) +
-            chunk(b'IDAT', zlib.compress((b'\0' + bytes(rgb) * 2) * 2)) + chunk(b'IEND', b''))
+def png(rgb, width=2, height=2):
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)) +
+            chunk(b'IDAT', zlib.compress((b'\0' + bytes(rgb) * width) * height)) + chunk(b'IEND', b''))
 with zipfile.ZipFile(folder / 'first.cbz', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
     archive.writestr('10-blue.png', png((0, 0, 255)))
     archive.writestr('2-red.png', png((255, 0, 0)))
@@ -100,7 +102,30 @@ with zipfile.ZipFile(odt_folder / 'basic.odt', 'w', compression=zipfile.ZIP_DEFL
 <text:h text:outline-level="2">Section Two</text:h>
 <text:p>ODT final paragraph.</text:p></office:text></office:body>
 </office:document-content>''')
+cover_folder = folder / 'covers'
+cover_folder.mkdir()
+red = png((255, 0, 0))
+(cover_folder / 'red.png').write_bytes(red)
+(cover_folder / 'boundary.png').write_bytes(png((255, 0, 0), 2048, 1))
+(cover_folder / 'over-width.png').write_bytes(png((255, 0, 0), 2049, 1))
+(cover_folder / 'over-height.png').write_bytes(png((255, 0, 0), 1, 2049))
+(cover_folder / 'corrupt-body.png').write_bytes(red[:41])
+(cover_folder / 'corrupt-header').write_bytes(b'broken image header')
+gif = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==')
+(cover_folder / 'black.gif').write_bytes(gif)
+(cover_folder / 'zero-width.gif').write_bytes(gif[:6] + b'\0\0' + gif[8:])
+(cover_folder / 'zero-height.gif').write_bytes(gif[:8] + b'\0\0' + gif[10:])
+# Fixed 1x1 green JPEG fixture; tests require no image-generation dependency.
+(cover_folder / 'green.jpg').write_bytes(base64.b64decode(
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDAREAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAK/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AWAr4U7//2Q=='))
 PYFIXTURE
+
+# Count decode calls in the test executable while using the real implementation.
+"$CXX_BIN" -std=c++11 ${CXXFLAGS:-} \
+  -I"$TEST_ROOT/include" -I"$TEST_ROOT/third_party/stb" \
+  -DLoadFromMemory=LoadFromMemoryForCoverTest \
+  -c "$TEST_ROOT/source/core/stb_image_impl.cpp" \
+  -o "$TEST_OUTDIR/cover_stb_image_impl.o"
 
 "$CXX_BIN" -std=c++11 \
   ${CXXFLAGS:-} \
@@ -158,7 +183,7 @@ PYFIXTURE
   "$TEST_ROOT/source/book/book_renderer.cpp" \
   "$TEST_ROOT/source/book/layout_reflow.cpp" \
   "$TEST_ROOT/source/core/parse.cpp" \
-  "$TEST_ROOT/source/core/stb_image_impl.cpp" \
+  "$TEST_OUTDIR/cover_stb_image_impl.o" \
   "$TEST_ROOT/source/formats/epub/epub_parser.cpp" \
   "$TEST_ROOT/source/formats/epub/epub.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_stylesheet_utils.cpp" \

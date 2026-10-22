@@ -14,6 +14,8 @@
 #include "shared/app_flow_utils.h"
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
+#include "shared/cover_decode_utils.h"
+#include "shared/stb_image_gif_utils.h"
 #include "ui/text.h"
 #include "test_assert.h"
 
@@ -35,6 +37,7 @@
 namespace {
 bool reject_nothrow_allocations = false;
 unsigned rejected_nothrow_allocations = 0;
+unsigned cover_decode_calls = 0;
 }
 
 void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
@@ -43,6 +46,16 @@ void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
     return nullptr;
   }
   return ::operator new(size);
+}
+
+namespace stb_image_gif_utils {
+unsigned char *LoadFromMemoryForCoverTest(const unsigned char *, int, int *, int *, int *, int);
+unsigned char *LoadFromMemory(const unsigned char *data, int size, int *width,
+                              int *height, int *channels, int requested_channels) {
+  ++cover_decode_calls;
+  return LoadFromMemoryForCoverTest(data, size, width, height, channels,
+                                    requested_channels);
+}
 }
 
 namespace {
@@ -202,6 +215,68 @@ void TestOdtAndPlainAllocationRecovery() {
   test::ExpectEq("plain recovery preserves short pagination", book.GetPageCount(), 1);
   test::ExpectTrue("plain recovery keeps heuristic navigation disabled", book.GetChapters().empty());
   book.Close();
+}
+
+void TestCoverHeaderPreflight() {
+  const char *folder = getenv("TEST_COVER_READING_DIR");
+  test::ExpectTrue("cover fixtures exist", folder != nullptr);
+  BookContext ctx;
+  Book book(ctx);
+  struct ValidCase {
+    const char *name;
+    int limit, width, height;
+    u16 pixel;
+  };
+  const ValidCase valid[] = {
+      {"red.png", 2048, 2, 2, 0xf800},
+      {"black.gif", 2048, 1, 1, 0x0000},
+      {"green.jpg", 2048, 1, 1, 0x07e0},
+      {"boundary.png", 2048, 85, 1, 0xf800},
+      {"over-width.png", 0, 85, 1, 0xf800},
+      {"over-height.png", -1, 1, 115, 0xf800},
+  };
+  auto read_image = [folder](const char *name) {
+    const std::string path = std::string(folder) + "/" + name;
+    FILE *fp = fopen(path.c_str(), "rb");
+    test::ExpectTrue("image fixture opens", fp != nullptr);
+    std::vector<unsigned char> data;
+    int byte;
+    while ((byte = fgetc(fp)) != EOF)
+      data.push_back(static_cast<unsigned char>(byte));
+    test::ExpectTrue("image fixture reads", !ferror(fp));
+    test::ExpectEq("image fixture closes", fclose(fp), 0);
+    return data;
+  };
+  for (const auto &row : valid) {
+    const std::vector<unsigned char> data = read_image(row.name);
+    cover_decode_calls = 0;
+    test::ExpectTrue("accepted cover decodes", cover_decode_utils::DecodeImageToCoverThumb(
+        &book, data.data(), data.size(), row.limit));
+    test::ExpectEqU("accepted cover invokes actual decoder", cover_decode_calls, 1);
+    test::ExpectEq("cover width preserved", book.coverWidth, row.width);
+    test::ExpectEq("cover height preserved", book.coverHeight, row.height);
+    for (int i = 0; i < book.coverWidth * book.coverHeight; ++i)
+      test::ExpectEq("cover RGB565 pixels preserved", book.coverPixels[i], row.pixel);
+  }
+  u16 *const previous = book.coverPixels;
+  const int previous_width = book.coverWidth;
+  const int previous_height = book.coverHeight;
+  const std::vector<u16> previous_pixels(previous, previous + previous_width * previous_height);
+  const char *rejected[] = {"corrupt-header", "zero-width.gif", "zero-height.gif",
+                            "over-width.png", "over-height.png", "corrupt-body.png"};
+  for (const char *name : rejected) {
+    const std::vector<unsigned char> data = read_image(name);
+    cover_decode_calls = 0;
+    test::ExpectFalse("rejected image leaves existing cover", cover_decode_utils::DecodeImageToCoverThumb(
+        &book, data.data(), data.size()));
+    test::ExpectTrue("rejection preserves cover ownership", book.coverPixels == previous);
+    test::ExpectEq("rejection preserves width", book.coverWidth, previous_width);
+    test::ExpectEq("rejection preserves height", book.coverHeight, previous_height);
+    test::ExpectTrue("rejection preserves every previous pixel",
+                    std::equal(previous_pixels.begin(), previous_pixels.end(), book.coverPixels));
+    test::ExpectEqU("rejected header never enters decode; bad body still does",
+                    cover_decode_calls, !strcmp(name, "corrupt-body.png") ? 1 : 0);
+  }
 }
 
 void TestFb2NestedNavigation() {
@@ -811,6 +886,7 @@ void TestNullAndEmptyInputHandling() {
 } // namespace
 
 int main() {
+  TestCoverHeaderPreflight();
   TestOdtAndPlainAllocationRecovery();
   TestXmlAllocationFailureAndRecovery();
   TestDispatchContentAndCloseBetweenFormats();

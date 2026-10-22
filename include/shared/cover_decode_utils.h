@@ -13,9 +13,9 @@ namespace cover_decode_utils {
 // resulting RGB565 pixels to book->coverPixels (replacing any prior buffer).
 //
 // Returns true on success, false on decode failure or out-of-policy
-// dimensions. max_dimension caps the source image size before decode so a
-// malformed or oversized image cannot exhaust the heap; pass 0 to skip the
-// cap. Used by every reflowable format with embedded raster covers (MOBI,
+// dimensions. max_dimension caps the source image size before pixel decode;
+// pass 0 to skip the cap. Failures preserve the previous cover.
+// Used by every reflowable format with embedded raster covers (MOBI,
 // FB2, EPUB raster fallback). PDF/CBZ have their own pipelines because they
 // already work in RGB565.
 bool DecodeImageToCoverThumb(Book *book, const unsigned char *data,
