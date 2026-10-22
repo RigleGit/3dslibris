@@ -68,6 +68,7 @@ export TEST_MOBI_READING_DIR="$CBZ_TMP/mobi"
 export TEST_EPUB_RECOVERY_DIR="$CBZ_TMP/epub"
 export TEST_ODT_READING_DIR="$CBZ_TMP/odt"
 export TEST_COVER_READING_DIR="$CBZ_TMP/covers"
+export TEST_INLINE_IMAGE_READING_DIR="$CBZ_TMP/inline-images"
 python3 "$TEST_ROOT/tests/fixtures/generate_epub_recovery.py" "$TEST_EPUB_RECOVERY_DIR"
 python3 "$TEST_ROOT/tests/fixtures/generate_mobi_reading.py" "$TEST_MOBI_READING_DIR"
 python3 - "$CBZ_TMP" <<'PYFIXTURE'
@@ -77,6 +78,7 @@ import struct
 import sys
 import zipfile
 import zlib
+import xml.parsers.expat
 folder = pathlib.Path(sys.argv[1])
 def chunk(kind, data):
     return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
@@ -118,6 +120,45 @@ gif = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEA
 # Fixed 1x1 green JPEG fixture; tests require no image-generation dependency.
 (cover_folder / 'green.jpg').write_bytes(base64.b64decode(
     '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDAREAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAK/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AWAr4U7//2Q=='))
+image_folder = folder / 'inline-images'
+image_folder.mkdir()
+container = ('<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+             '<rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>'
+             '</rootfiles></container>')
+package = ('<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">'
+           '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">images</dc:identifier>'
+           '<dc:title>Repeated images</dc:title><dc:language>en</dc:language></metadata><manifest>'
+           '<item id="body" href="content.xhtml" media-type="application/xhtml+xml"/>'
+           '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' +
+           ''.join('<item id="%s" href="%s.png" media-type="image/png"/>' % (name, name) for name in 'abc') +
+           '</manifest><spine><itemref idref="body"/></spine></package>')
+nav = ('<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+       '<body><nav epub:type="toc"><ol>' + ''.join(
+           '<li><a href="content.xhtml#g%d">Group %d</a></li>' % (i, i) for i in range(3)) +
+       '</ol></nav></body></html>')
+for shared in (True, False):
+    groups = []
+    for group in range(3):
+        images = ''.join('<p style="margin:0"><img src="%s.png"%s/></p>' %
+                         ('a' if shared else name, width) for name, width in
+                         zip('abc', (' width="40"', ' style="width:80px"', '')))
+        groups.append('<div id="g%d"%s><h2>Group %d</h2>%s<p>AFTER%d</p></div>' %
+                      (group, ' style="page-break-after:always"' if group < 2 else '', group, images, group))
+    content = '<html xmlns="http://www.w3.org/1999/xhtml"><body>' + ''.join(groups) + '</body></html>'
+    entries = {'META-INF/container.xml': container, 'content.opf': package,
+               'nav.xhtml': nav, 'content.xhtml': content}
+    for value in entries.values():
+        xml.parsers.expat.ParserCreate().Parse(value, True)
+    path = image_folder / ('shared.epub' if shared else 'separate.epub')
+    with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
+        for name, data in entries.items():
+            archive.writestr(name, data)
+        for name in 'abc':
+            archive.writestr(name + '.png', png((255, 0, 0), 160, 32))
+    with zipfile.ZipFile(path) as archive:
+        assert archive.testzip() is None
+(image_folder / 'cache').mkdir()
 PYFIXTURE
 
 # Count decode calls in the test executable while using the real implementation.
@@ -143,7 +184,7 @@ PYFIXTURE
   "$TEST_ROOT/tests/stubs/book_reflow_worker_stub.cpp" \
   "$TEST_ROOT/tests/stubs/book_worker_lifecycle_stub.cpp" \
   "$TEST_ROOT/tests/stubs/book_fixed_layout_stubs.cpp" \
-  "$TEST_ROOT/tests/stubs/book_inline_image_stub.cpp" \
+  "$TEST_ROOT/source/book/book_inline_image.cpp" \
   "$TEST_ROOT/tests/stubs/epub_cover_stub.cpp" \
   "$TEST_ROOT/tests/stubs/fixed_format_parser_stubs.cpp" \
   "$TEST_ROOT/tests/stubs/mupdf_bidi_stub.cpp" \

@@ -34,7 +34,6 @@ u16 Book::RegisterInlineImage(const std::string &) { return 0; }
 u32 Book::GetInlineImageCount() const { return 0; }
 void Book::SetInlineImageFollowTextLines(u16, u8) {}
 u8 Book::GetInlineImageFollowTextLines(u16) const { return 0; }
-void Book::SetInlineImageAuthorMaxWidth(u16, int) {}
 void Book::ClearInlineImageCache() {}
 void Book::ClearInlineImages() {
   inline_image_probe_uf = nullptr;

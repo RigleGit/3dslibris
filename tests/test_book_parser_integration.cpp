@@ -2,6 +2,7 @@
 #include "book/book_context.h"
 #include "book/book_parser.h"
 #include "book/book_renderer.h"
+#include "book/book_parse_deps.h"
 #include "book/page.h"
 #include "formats/common/page_text_extract_utils.h"
 #include "formats/common/book_error.h"
@@ -16,6 +17,7 @@
 #include "shared/status_reporter.h"
 #include "shared/cover_decode_utils.h"
 #include "shared/stb_image_gif_utils.h"
+#include "shared/text_token_constants.h"
 #include "ui/text.h"
 #include "test_assert.h"
 
@@ -25,6 +27,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include <map>
 #include <string>
 #include <sys/stat.h>
 #include <utime.h>
@@ -508,6 +511,153 @@ PageData CapturePageData(Book *book) {
   return data;
 }
 
+PageData ImagePagesWithoutResourceIds(Book *book) {
+  PageData data = CapturePageData(book);
+  for (auto &page : data) {
+    for (size_t i = 0; i + 1 < page.size(); ++i) {
+      if (page[i] == TEXT_IMAGE)
+        page[++i] = 0;
+    }
+  }
+  return data;
+}
+
+struct ImageRenderSnapshot {
+  std::vector<std::vector<u16>> frames;
+  std::vector<std::string> glyphs;
+};
+
+ImageRenderSnapshot RenderImagePages(Book *book, Text *text) {
+  ImageRenderSnapshot result;
+  std::vector<u16> left(400 * 400 + 2), right(400 * 400 + 2);
+  text->screenleft = left.data() + 1;
+  text->screenright = right.data() + 1;
+  std::map<int, int> red_rows;
+  int painted_screens[2] = {0, 0};
+  for (int page = 0; page < book->GetPageCount(); ++page) {
+    std::fill(left.begin(), left.end(), 0);
+    std::fill(right.begin(), right.end(), 0);
+    left.front() = left.back() = right.front() = right.back() = 0xbeef;
+    text->screen = text->screenleft;
+    text->rendered_glyphs.clear();
+    book->GetPage(page)->Draw(text);
+    test::ExpectTrue("inline draw respects framebuffer guards",
+        left.front() == 0xbeef && left.back() == 0xbeef &&
+        right.front() == 0xbeef && right.back() == 0xbeef);
+    for (int screen = 0; screen < 2; ++screen) {
+      const u16 *pixels = screen == 0 ? text->screenleft : text->screenright;
+      result.frames.emplace_back(pixels, pixels + 400 * 400);
+      for (int y = 0; y < 400; ++y) {
+        int red = 0;
+        for (int x = 0; x < 400; ++x)
+          if (pixels[y * 400 + x] == 0xf800) ++red;
+        if (red) { ++red_rows[red]; ++painted_screens[screen]; }
+      }
+    }
+    for (const auto &glyph : text->rendered_glyphs) {
+      char position[96];
+      snprintf(position, sizeof(position), "%d:%d:%d:%d:%u", page,
+          glyph.screen == text->screenleft ? 0 : 1, glyph.x, glyph.y,
+          (unsigned)glyph.codepoint);
+      result.glyphs.push_back(position);
+    }
+  }
+  // Three occurrences of each 160x32 red image: native, 40x8, and 80x16.
+  // These literal pixel counts are independent of layout/planning helpers.
+  test::ExpectEq("40px occurrences retain eight red rows each", red_rows[40], 24);
+  test::ExpectEq("80px occurrences retain sixteen red rows each", red_rows[80], 48);
+  test::ExpectEq("unconstrained occurrences retain native width", red_rows[160], 96);
+  test::ExpectEq("no unexpected scaled image width", (int)red_rows.size(), 3);
+  test::ExpectTrue("actual images reach both physical screens", painted_screens[0] && painted_screens[1]);
+  test::ExpectFalse("following text is drawn", result.glyphs.empty());
+  text->screen = text->screenleft = text->screenright = nullptr;
+  return result;
+}
+
+bool LoadImagePageCache(Book *book, const std::string &path) {
+  const BookParseDeps deps = BuildBookParseDeps(book);
+  return epub_page_cache::TryLoad(book, path.c_str(), deps.layout.pixel_size,
+      deps.layout.linespacing, deps.paragraph_spacing, deps.paragraph_indent,
+      deps.orientation, deps.layout.margin_left, deps.layout.margin_right,
+      deps.layout.margin_top, deps.layout.margin_bottom,
+      deps.regular_font_path.c_str());
+}
+
+void TestRepeatedInlineImageWidthsAndCachedDraw() {
+  const char *folder = getenv("TEST_INLINE_IMAGE_READING_DIR");
+  test::ExpectTrue("inline-image fixture directory configured", folder != nullptr);
+  for (unsigned char orientation = 0; orientation < 3; ++orientation) {
+    Text text;
+    text.capture_rendered_text = true;
+    text.landscape = orientation == 2;
+    text.display.width = text.landscape ? 400 : 240;
+    text.display.height = 400; // The stub's buffer stride; actual logical height comes from orientation.
+    BookContext ctx; ctx.text = &text; ctx.orientation = &orientation;
+    const std::string cache_dir = std::string(folder) + "/cache/" + std::to_string(orientation);
+    test::ExpectEq("create isolated image cache", mkdir(cache_dir.c_str(), 0700), 0);
+    epub_page_cache::SetCacheDirForTest(cache_dir.c_str());
+    Book separate(ctx); separate.SetFolderName(folder); separate.SetFileName("separate.epub");
+    separate.format = FORMAT_EPUB; // LibraryController supplies the format before dispatch.
+    test::ExpectEq("open independent-image control", book_parser::Open(&separate), 0);
+    test::ExpectEqU("control has three identical-byte resources", separate.GetInlineImageCount(), 3);
+    const PageData expected_pages = ImagePagesWithoutResourceIds(&separate);
+    const std::vector<ChapterEntry> chapters = separate.GetChapters();
+    const ImageRenderSnapshot expected = RenderImagePages(&separate, &text);
+    Book shared(ctx); shared.SetFolderName(folder); shared.SetFileName("shared.epub");
+    shared.format = FORMAT_EPUB;
+    test::ExpectEq("open repeated-image fixture", book_parser::Open(&shared), 0);
+    test::ExpectEqU("repeated src still deduplicates resource", shared.GetInlineImageCount(), 1);
+    for (int screen = 0; screen < 2; ++screen) {
+      const int authored[] = {40, 80, 0};
+      const int expected_width[] = {40, 80, 160};
+      const int expected_height[] = {8, 16, 32};
+      for (int i = 0; i < 3; ++i) {
+        InlineImageLayoutPlan plan{};
+        test::ExpectTrue("plan real metadata for this occurrence",
+            shared.PlanInlineImageLayout(&text, 0, screen, text.margin.left,
+                text.margin.top + text.GetHeight(), false,
+                INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH, &plan, authored[i]));
+        test::ExpectEq("occurrence width does not inherit resource history", plan.draw_width, expected_width[i]);
+        test::ExpectEq("occurrence preserves aspect ratio", plan.draw_height, expected_height[i]);
+      }
+    }
+    test::ExpectTrue("resource aliasing cannot change pagination", ImagePagesWithoutResourceIds(&shared) == expected_pages);
+    const ImageRenderSnapshot cold = RenderImagePages(&shared, &text);
+    test::ExpectTrue("aliasing cannot change image pixels or positions", cold.frames == expected.frames);
+    test::ExpectTrue("aliasing cannot move following text", cold.glyphs == expected.glyphs);
+    test::ExpectEq("all fixture TOC targets survive", (int)shared.GetChapters().size(), 3);
+    for (size_t i = 0; i < chapters.size(); ++i) {
+      test::ExpectEq("TOC pages independent of resource sharing", shared.GetChapters()[i].page, chapters[i].page);
+      test::ExpectStrEq("TOC labels preserved", shared.GetChapters()[i].title.c_str(), chapters[i].title.c_str());
+    }
+    const PageData cold_pages = CapturePageData(&shared);
+    shared.Close();
+    const std::vector<std::string> caches = CacheFiles(cache_dir);
+    test::ExpectEq("close saves one real image page cache", (int)caches.size(), 1);
+    const std::string path = std::string(folder) + "/shared.epub";
+    Book warm(ctx); warm.SetFolderName(folder); warm.SetFileName("shared.epub"); warm.format = FORMAT_EPUB;
+    test::ExpectTrue("load actual image page cache without parsing", LoadImagePageCache(&warm, path));
+    test::ExpectTrue("cache preserves per-occurrence tokens", CapturePageData(&warm) == cold_pages);
+    test::ExpectEqU("cache restores deduplicated image registry", warm.GetInlineImageCount(), 1);
+    const ImageRenderSnapshot loaded = RenderImagePages(&warm, &text);
+    test::ExpectTrue("warm cache draws identical image pixels", loaded.frames == cold.frames);
+    test::ExpectTrue("warm cache retains following text positions", loaded.glyphs == cold.glyphs);
+    warm.Close();
+    std::string obsolete = ReadFileBytes(caches[0]);
+    obsolete[4] = 17; obsolete[5] = 0; // Previous pagination could inherit another occurrence's width.
+    WriteFileBytes(caches[0], obsolete);
+    test::ExpectFalse("reject old EPUB pagination after width correction", LoadImagePageCache(&warm, path));
+    test::ExpectTrue("obsolete image pagination cache is evicted", CacheFiles(cache_dir).empty());
+    test::ExpectEq("reopen reparses obsolete pagination", book_parser::Open(&warm), 0);
+    test::ExpectTrue("reparse recreates corrected tokens", CapturePageData(&warm) == cold_pages);
+    warm.Close(); separate.Close();
+    for (const std::string &cache : CacheFiles(cache_dir))
+      test::ExpectEq("remove isolated image cache", remove(cache.c_str()), 0);
+    epub_page_cache::SetCacheDirForTest(nullptr);
+    printf("PASS: repeated inline image widths, both screens, orientation %u and cache\n", (unsigned)orientation);
+  }
+}
+
 void ExpectMobiContent(Book *book) {
   const std::string content = BookText(book);
   size_t cursor = 0;
@@ -886,6 +1036,7 @@ void TestNullAndEmptyInputHandling() {
 } // namespace
 
 int main() {
+  TestRepeatedInlineImageWidthsAndCachedDraw();
   TestCoverHeaderPreflight();
   TestOdtAndPlainAllocationRecovery();
   TestXmlAllocationFailureAndRecovery();

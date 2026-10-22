@@ -66,6 +66,10 @@ public:
   int GetColorMode() { return color_mode; }
   void SetColorMode(int value) { color_mode = value; }
   u16 GetFgColor() { return fgcolor; }
+  u16 GetBgColor() {
+    return ((u16)(bgcolor.r >> 3) << 11) |
+           ((u16)(bgcolor.g >> 2) << 5) | (u16)(bgcolor.b >> 3);
+  }
   void SetTextColorOverride(u16) {}
   void ClearTextColorOverride() {}
 
