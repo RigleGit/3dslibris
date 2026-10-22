@@ -2,6 +2,7 @@
 #include "book/book_context.h"
 #include "book/page.h"
 #include "formats/epub/epub_parser.h"
+#include "expat.h"
 #include "formats/epub/epub_page_cache.h"
 #include "formats/common/page_text_extract_utils.h"
 #include "shared/text_token_constants.h"
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 #include <unistd.h>
 #include <dirent.h>
@@ -19,6 +21,19 @@
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
 #endif
+
+namespace {
+bool g_reject_nothrow_allocations = false;
+unsigned g_rejected_nothrow_allocations = 0;
+}
+
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  if (g_reject_nothrow_allocations) {
+    ++g_rejected_nothrow_allocations;
+    return nullptr;
+  }
+  return ::operator new(size);
+}
 
 namespace {
 
@@ -519,9 +534,58 @@ void TestNavSpineOrderAndAnchors() {
   delete book;
 }
 
+void TestEpubContentAllocationFailureAndRecovery() {
+  char cache_dir[] = "/tmp/3dslibris-epub-allocation-XXXXXX";
+  ExpectTrue("allocation failure cache directory", mkdtemp(cache_dir) != nullptr);
+  epub_page_cache::SetCacheDirForTest(cache_dir);
+  TestCtx tc;
+  bool fail_after_first_document = true;
+  tc.ctx.on_spine_progress = [](unsigned done, unsigned, void *user_data) {
+    if (done == 1 && *static_cast<bool *>(user_data))
+      g_reject_nothrow_allocations = true;
+  };
+  tc.ctx.on_spine_progress_user_data = &fail_after_first_document;
+  Book book(tc.ctx);
+  book.SetFolderName(TEST_FIXTURES_DIR "/books");
+  book.SetFileName("basic.epub");
+  book.format = FORMAT_EPUB;
+  const std::string path = TEST_FIXTURES_DIR "/books/basic.epub";
+
+  g_rejected_nothrow_allocations = 0;
+  g_reject_nothrow_allocations = true;
+  const int index_rc = epub_parser::Index(&book, path);
+  g_reject_nothrow_allocations = false;
+  ExpectTrue("metadata works without allocating content layout state", index_rc == 0);
+  ExpectTrue("metadata does not attempt a content allocation",
+             g_rejected_nothrow_allocations == 0);
+  ExpectTrue("metadata does not paginate", book.GetPageCount() == 0);
+
+  const int open_rc = EpubOpen(&book);
+  g_reject_nothrow_allocations = false;
+  ExpectTrue("content allocation failure is fatal to EPUB open",
+             open_rc == XML_ERROR_NO_MEMORY);
+  ExpectTrue("failure follows actual first-document parsing", book.GetPageCount() > 0);
+  ExpectTrue("failed allocation is handled once", g_rejected_nothrow_allocations == 1);
+  ExpectFalse("incomplete EPUB cannot schedule a page cache",
+              book.HasPendingEpubPageCacheSave());
+  book.Close();
+
+  fail_after_first_document = false;
+  ExpectTrue("same EPUB recovers after allocation failure", EpubOpen(&book) == 0);
+  ExpectTrue("recovery parses both chapter targets", book.GetChapters().size() == 2);
+  ExpectTrue("recovery preserves chapter titles",
+             book.GetChapters()[0].title == "Chapter One");
+  book.Close();
+  const std::string cache_file = CacheFilePath(cache_dir);
+  ExpectTrue("remove recovery cache", remove(cache_file.c_str()) == 0);
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  ExpectTrue("remove allocation failure cache directory", rmdir(cache_dir) == 0);
+}
+
 } // namespace
 
 int main() {
+  TestEpubContentAllocationFailureAndRecovery();
   TestEmbeddedStylesFromReportedEpub();
   TestNavSpineOrderAndAnchors();
   TestEpubOpen();

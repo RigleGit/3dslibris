@@ -54,6 +54,8 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include <deque>
 #include <limits.h>
 #include <map>
+#include <memory>
+#include <new>
 #include <set>
 #include <sys/stat.h>
 #include <ctype.h>
@@ -513,7 +515,7 @@ static void InitParsedataWithEpubDeps(parsedata_t *parsedata, Book *book,
 int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
                            unzFile css_scan_uf) {
   int rc = 0;
-  parsedata_t pd;
+  std::unique_ptr<parsedata_t> content_data;
 #if defined(DSLIBRIS_DEBUG) && EPUB_LAYOUT_PROFILE
   bool log_content_layout = false;
   u64 t_content_begin = 0;
@@ -568,6 +570,12 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
     options.character_data = epub_rootfile_char;
   } else if (epd->type == PARSE_CONTENT) {
     epd->parsed_doc_title.clear();
+    // Keep the 16 KiB page buffer off the main thread's limited stack.
+    // The state must outlive XML callbacks and post-parse title/profiling reads.
+    content_data.reset(new (std::nothrow) parsedata_t);
+    if (!content_data)
+      return XML_ERROR_NO_MEMORY;
+    parsedata_t &pd = *content_data;
     InitParsedataWithEpubDeps(&pd, epd->book, deps);
     pd.docpath = epd->docpath;
     if (!epd->archive_path.empty())
@@ -648,6 +656,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
   }
 #if defined(DSLIBRIS_DEBUG) && EPUB_LAYOUT_PROFILE
   if (log_content_layout) {
+    const parsedata_t &pd = *content_data;
     const text_layout_utils::PerfStats layout_after =
         text_layout_utils::GetPerfStats();
     DBG_LOGF(deps.reporter,
@@ -684,7 +693,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
 #endif
 #ifdef DSLIBRIS_DEBUG
   if (epd->type == PARSE_CONTENT)
-    epub_parse_perf::Add(pd, perf_before_doc);
+    epub_parse_perf::Add(*content_data, perf_before_doc);
 #endif
   if (!parse_result.ok)
     rc = (parse_result.error_code == XML_ERROR_ABORTED)
@@ -694,6 +703,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
                     : BOOK_ERR_CANCELLED)
              : (int)parse_result.error_code;
   if (epd->type == PARSE_CONTENT) {
+    const parsedata_t &pd = *content_data;
     epd->parsed_doc_title = Trim(pd.doc_heading);
     if (epd->parsed_doc_title.empty())
       epd->parsed_doc_title = Trim(pd.doc_title);
