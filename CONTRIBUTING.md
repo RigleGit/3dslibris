@@ -34,8 +34,6 @@ docker run --rm -v "$(pwd):/project" -w /project \
 - Add concise comments only where behavior is non-obvious.
 
 ## Testing expectations (smoke)
-Optional duplication, unused-function and coverage checks are described in
-[Code quality checks](docs/CODE_QUALITY.md).
 
 Before opening a PR, verify:
 1. App boots and library loads.
