@@ -5,6 +5,7 @@
 #include "book/page.h"
 #include "formats/common/page_text_extract_utils.h"
 #include "formats/common/book_error.h"
+#include "expat.h"
 #include "formats/mobi/mobi_text_decode.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/epub/epub_page_cache.h"
@@ -20,6 +21,7 @@
 #include <dirent.h>
 #include <cstdio>
 #include <cstdlib>
+#include <new>
 #include <string>
 #include <sys/stat.h>
 #include <utime.h>
@@ -28,6 +30,19 @@
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
 #endif
+
+namespace {
+bool reject_nothrow_allocations = false;
+unsigned rejected_nothrow_allocations = 0;
+}
+
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  if (reject_nothrow_allocations) {
+    ++rejected_nothrow_allocations;
+    return nullptr;
+  }
+  return ::operator new(size);
+}
 
 namespace {
 
@@ -103,6 +118,36 @@ void TestDispatchContentAndCloseBetweenFormats() {
   book.SetFileName("basic.txt");
   test::ExpectEq("open recovers after missing file", book_parser::Open(&book), 0);
   test::ExpectStrContains("recovery uses requested TXT", BookText(&book).c_str(), "tiny TXT fixture");
+  book.Close();
+}
+
+void TestXmlAllocationFailureAndRecovery() {
+  Text text;
+  BookContext ctx;
+  ctx.text = &text;
+  Book book(ctx);
+  book.SetFolderName(TEST_FIXTURES_DIR "/books");
+  book.SetFileName("basic.fb2");
+  const bool modes[] = {false, true};
+  for (bool fulltext : modes) {
+    rejected_nothrow_allocations = 0;
+    reject_nothrow_allocations = true;
+    const int rc = book_parser::Parse(&book, fulltext);
+    reject_nothrow_allocations = false;
+    test::ExpectEq("XML state allocation failure propagates", rc,
+                   XML_ERROR_NO_MEMORY);
+    test::ExpectEqU("XML handles the failed allocation once",
+                    rejected_nothrow_allocations, 1);
+    test::ExpectEq("XML failure creates no pages", book.GetPageCount(), 0);
+    test::ExpectTrue("XML failure creates no chapters", book.GetChapters().empty());
+    book.Close();
+  }
+  test::ExpectEq("XML retry succeeds", book_parser::Parse(&book, true), 0);
+  test::ExpectStrContains("FB2 recovery preserves text", BookText(&book).c_str(),
+                         "tiny FB2 fixture");
+  test::ExpectEq("FB2 recovery retains its chapter", (int)book.GetChapters().size(), 1);
+  test::ExpectStrEq("FB2 recovery retains chapter label",
+                   book.GetChapters()[0].title.c_str(), "Chapter 1");
   book.Close();
 }
 
@@ -713,6 +758,7 @@ void TestNullAndEmptyInputHandling() {
 } // namespace
 
 int main() {
+  TestXmlAllocationFailureAndRecovery();
   TestDispatchContentAndCloseBetweenFormats();
   TestFb2NestedNavigation();
   TestOpenErrorMessages();

@@ -11,6 +11,8 @@
 #include "shared/string_utils.h"
 
 #include <stdio.h>
+#include <memory>
+#include <new>
 
 namespace xml_book_parser {
 namespace {
@@ -51,7 +53,12 @@ u8 ParseXmlBookFile(Book *book, const char *path, bool fulltext,
     return 255;
 
   u8 rc = 0;
-  parsedata_t parsedata;
+  std::unique_ptr<parsedata_t> parsedata_owner(new (std::nothrow) parsedata_t);
+  if (!parsedata_owner) {
+    fclose(fp);
+    return XML_ERROR_NO_MEMORY;
+  }
+  parsedata_t &parsedata = *parsedata_owner;
   InitParsedataWithDeps(&parsedata, book, deps);
   parsedata.fb2_mode = fulltext && HasExtCI(book->GetFileName(), ".fb2");
 #ifdef DSLIBRIS_DEBUG
