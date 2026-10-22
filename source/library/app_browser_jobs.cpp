@@ -69,6 +69,15 @@ static bool ShouldCurrentBrowserLoadCovers(const App &app) {
   return browser_view_utils::ShouldLoadCovers(CurrentBrowserViewMode(app));
 }
 
+static bool IsVisibleFolderCover(App &app, Book *book) {
+  if (app.GetMode() != AppMode::Browser || !ShouldCurrentBrowserLoadCovers(app))
+    return false;
+  const browser_cover_cache_utils::VisibleRange visible =
+      browser_cover_cache_utils::ComputeVisibleRange(
+          app.GetBrowserPageStart(), app.BookCount(), CurrentBrowserPageSize(app));
+  return browser_cover_cache_utils::RangeContains(visible, app.GetBookIndex(book));
+}
+
 static bool SupportsBrowserCoverWarmup(const App &app, format_t format,
                                        const char *filename) {
   if (format == FORMAT_EPUB || format == FORMAT_CBZ)
@@ -96,8 +105,11 @@ static size_t CountQueuedHeavyJobs(const std::deque<app_job_t> &jobs) {
 }
 
 static std::string BuildBookPath(Book *book) {
-  if (!book || book->IsBrowserFolder() || !book->GetFolderName() ||
-      !book->GetFileName())
+  if (!book || !book->GetFolderName())
+    return "";
+  if (book->IsBrowserFolder())
+    return book->GetFolderName();
+  if (!book->GetFileName())
     return "";
   std::string path = book->GetFolderName();
   path.push_back('/');
@@ -116,7 +128,7 @@ bool LibraryController::HasQueuedJob(app_job_type_t type, Book *book) const {
 }
 
 void LibraryController::PrioritizeSelectedBookJobs(Book *selected_book) {
-  if (!selected_book || selected_book->IsBrowserFolder() || job_queue_.empty())
+  if (!selected_book || job_queue_.empty())
     return;
 
   // Move the selected book's pending jobs to the front so they run first,
@@ -148,7 +160,7 @@ void LibraryController::PrioritizeSelectedBookJobs(Book *selected_book) {
 }
 
 void LibraryController::EnqueueJob(app_job_type_t type, Book *book) {
-  if (!book || book->IsBrowserFolder())
+  if (!book || (book->IsBrowserFolder() && type != APP_JOB_EXTRACT_COVER))
     return;
   if (HasQueuedJob(type, book))
     return;
@@ -159,13 +171,14 @@ void LibraryController::EnqueueJob(app_job_type_t type, Book *book) {
 }
 
 void LibraryController::QueueBookWarmup(Book *book) {
-  if (!book || book->IsBrowserFolder())
+  if (!book || (book->IsBrowserFolder() && !IsVisibleFolderCover(app_, book)))
     return;
   const format_t format =
       app_flow_utils::DetectBookFormat(book->GetFileName());
   const bool supports_metadata =
-      app_flow_utils::SupportsMetadataIndexing(format);
+      !book->IsBrowserFolder() && app_flow_utils::SupportsMetadataIndexing(format);
   const bool supports_cover =
+      book->IsBrowserFolder() ||
       SupportsBrowserCoverWarmup(app_, book->format, book->GetFileName());
   const bool metadata_done =
       browser_warmup_utils::MetadataWarmupDone(supports_metadata,
@@ -200,7 +213,10 @@ void LibraryController::QueueBookWarmup(Book *book) {
           queued_heavy_jobs);
   const bool should_load_covers = ShouldCurrentBrowserLoadCovers(app_);
 
-  if (book->format == FORMAT_EPUB) {
+  if (book->IsBrowserFolder()) {
+    if (should_load_covers && should_queue_cover)
+      EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+  } else if (book->format == FORMAT_EPUB) {
     if (!book->metadataIndexTried &&
         app_flow_utils::SupportsMetadataIndexing(format))
       EnqueueJob(APP_JOB_INDEX_METADATA, book);
@@ -246,7 +262,9 @@ void LibraryController::TickBrowserWarmup() {
     return;
   }
   Book *selected = app_.GetSelectedBook();
-  if (selected && !selected->IsBrowserFolder()) {
+  if (selected && selected->IsBrowserFolder()) {
+    QueueBookWarmup(selected);
+  } else if (selected) {
     const format_t selected_format =
         app_flow_utils::DetectBookFormat(selected->GetFileName());
     const bool selected_supports_metadata =
@@ -268,12 +286,13 @@ void LibraryController::TickBrowserWarmup() {
        i < page_start + visible_count;
        i++) {
     Book *book = app_.books[i];
-    if (!book || book->IsBrowserFolder() || book == app_.GetSelectedBook())
+    if (!book || book == app_.GetSelectedBook())
       continue;
     const format_t format = app_flow_utils::DetectBookFormat(book->GetFileName());
     const bool supports_metadata =
-        app_flow_utils::SupportsMetadataIndexing(format);
+        !book->IsBrowserFolder() && app_flow_utils::SupportsMetadataIndexing(format);
     const bool supports_cover =
+        book->IsBrowserFolder() ||
         SupportsBrowserCoverWarmup(app_, book->format, book->GetFileName());
     if (browser_warmup_utils::BookWarmupDone(
             supports_metadata, book->metadataIndexTried, supports_cover,
@@ -338,8 +357,14 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
     app_job_t job = {};
     const bool got_job = browser_job_queue_utils::TakeFirstAllowedJob(
         &job_queue_, &job, [&](const app_job_t &candidate) {
-          if (!candidate.book || candidate.book->IsBrowserFolder())
+          if (!candidate.book)
             return false;
+          // Take stale folder requests so they can be discarded below, even
+          // while the idle gate is closed. A deferred request must not later
+          // decode a folder that has left the screen.
+          if (candidate.book->IsBrowserFolder() &&
+              !IsVisibleFolderCover(app_, candidate.book))
+            return true;
           if (!browser_job_queue_utils::IsHeavyBrowserJobType(
                   candidate.type, APP_JOB_INDEX_METADATA,
                   APP_JOB_EXTRACT_COVER)) {
@@ -356,7 +381,9 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
 
 
     Book *book = job.book;
-    if (!book || book->IsBrowserFolder())
+    if (!book || (book->IsBrowserFolder() &&
+                  (job.type != APP_JOB_EXTRACT_COVER ||
+                   !IsVisibleFolderCover(app_, book))))
       continue;
     int rc = 0;
 #if defined(DSLIBRIS_DEBUG) && BROWSER_JOB_TRACE
@@ -425,10 +452,14 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         }
 
         if (cover_cache::TryLoadAdjacentOverride(book, path)) {
-          cover_cache::Save(book, path);
+          if (!book->IsBrowserFolder())
+            cover_cache::Save(book, path);
           book->coverAttempts = kCoverMaxAttempts;
           book->coverRetryAfterMs = 0;
           rc = 0;
+        } else if (book->IsBrowserFolder()) {
+          // No embedded cover on folders; retry after leaving this page.
+          book->coverAttempts = kCoverMaxAttempts;
         } else
         if (book->format == FORMAT_EPUB) {
           if (!book->metadataIndexTried) {

@@ -53,37 +53,39 @@ static std::string BuildBookPath(Book *book) {
 } // namespace
 
 void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
-  if (app_.BookCount() <= 0)
-    return;
-
-  if (!ShouldCurrentBrowserLoadCovers(app_)) {
-    for (int i = 0; i < app_.BookCount(); i++) {
-      Book *book = app_.books[i];
-      if (!book || book->IsBrowserFolder() || !book->coverPixels)
-        continue;
-      delete[] book->coverPixels;
-      book->coverPixels = nullptr;
-      book->coverWidth = 0;
-      book->coverHeight = 0;
-    }
-    return;
-  }
-
   const browser_cover_cache_utils::VisibleRange visible =
       browser_cover_cache_utils::ComputeVisibleRange(
           app_.GetBrowserPageStart(), app_.BookCount(),
-          CurrentBrowserPageSize(app_));
+          ShouldCurrentBrowserLoadCovers(app_) ? CurrentBrowserPageSize(app_) : 0);
+  // Folder jobs are useful only for the current page. Do not keep stale
+  // requests while paging through a large library; ordinary book jobs retain
+  // their existing policy.
+  for (auto it = job_queue_.begin(); it != job_queue_.end();) {
+    if (it->book && it->book->IsBrowserFolder() &&
+        !browser_cover_cache_utils::RangeContains(
+            visible, app_.GetBookIndex(it->book))) {
+      it = job_queue_.erase(it);
+    } else {
+      ++it;
+    }
+  }
   for (int i = 0; i < app_.BookCount(); i++) {
     if (browser_cover_cache_utils::RangeContains(visible, i))
       continue;
 
     Book *book = app_.books[i];
-    if (!book || book->IsBrowserFolder() || !book->coverPixels)
+    if (!book)
       continue;
     delete[] book->coverPixels;
     book->coverPixels = nullptr;
     book->coverWidth = 0;
     book->coverHeight = 0;
+    if (book->IsBrowserFolder()) {
+      // Folder sidecars have no disk thumbnail cache. Revisit the filesystem
+      // on re-entry, including after a missing or failed sidecar.
+      book->coverAttempts = 0;
+      book->coverRetryAfterMs = 0;
+    }
   }
 }
 
@@ -105,8 +107,12 @@ void LibraryController::LoadVisibleBrowserCoverCaches() {
   const int end = visible.end;
   for (int i = start; i < end; i++) {
     Book *book = app_.books[i];
-    if (!book || book->IsBrowserFolder() || book->coverPixels)
+    if (!book || book->coverPixels)
       continue;
+    if (book->IsBrowserFolder()) {
+      QueueBookWarmup(book);
+      continue;
+    }
 
     std::string path = BuildBookPath(book);
     if (path.empty())

@@ -275,7 +275,9 @@ bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
     return false;
 
   const std::vector<std::string> candidates =
-      cover_override_utils::BuildBookCandidates(book_path);
+      book->IsBrowserFolder()
+          ? cover_override_utils::BuildStemCandidates(book_path)
+          : cover_override_utils::BuildBookCandidates(book_path);
 
   std::string chosen_path;
   for (size_t i = 0; i < candidates.size(); i++) {

@@ -25,8 +25,6 @@ void DrawOpeningSplashWithProgress(unsigned done, unsigned total,
 #include "book/book_context.h"
 #include "shared/debug_log.h"
 
-#include "shared/cover_decode_utils.h"
-#include "formats/common/file_read_utils.h"
 #include "shared/path_constants.h"
 #include "shared/app_flow_utils.h"
 #include "shared/utf8_utils.h"
@@ -399,18 +397,6 @@ static bool DirectoryHasDirectSupportedBook(const std::string &dir) {
   return found;
 }
 
-static void TryLoadFolderCover(Book *book) {
-  if (!book || book->GetBrowserFolderCoverPath().empty())
-    return;
-  std::string bytes;
-  if (file_read_utils::ReadPathToStringLimited(
-          book->GetBrowserFolderCoverPath(), &bytes, 4u * 1024u * 1024u) &&
-      cover_decode_utils::DecodeImageToCoverThumb(
-          book, (const unsigned char *)bytes.data(), bytes.size(), 4096)) {
-    book->coverAttempts = 3;
-  }
-}
-
 static void AppendFolderEntry(App *app, const std::string &source_dir,
                               const std::string &folder_name,
                               std::set<std::string> *seen_keys) {
@@ -451,7 +437,6 @@ static void AppendFolderEntry(App *app, const std::string &source_dir,
   }
   Book *folder = new Book(ctx);
   folder->SetBrowserFolderEntry(folder_path, folder_name, cover_path);
-  TryLoadFolderCover(folder);
   app->books.push_back(folder);
 }
 

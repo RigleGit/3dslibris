@@ -6,6 +6,9 @@
 #include "library/browser_grid_view.h"
 #include "library/browser_list_view.h"
 #include "library/cover_cache.h"
+#include "library/library_job.h"
+#include <algorithm>
+#include <deque>
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
@@ -35,6 +38,10 @@ struct App {
   void SetSelectedBook(Book *v) { selected=v; }
   void SetBrowserLastInteractionMs(uint64_t v) { interaction_ms=v; }
   void SetBrowserDirty(bool v) { dirty=v; }
+  int GetBookIndex(Book *book) const {
+    const auto it=std::find(books.begin(), books.end(), book);
+    return it == books.end() ? -1 : (int)(it-books.begin());
+  }
 };
 static std::vector<int> loaded;
 namespace cover_cache {
@@ -50,8 +57,10 @@ static const uint8_t kCoverMaxAttempts=cover_cache::kMaxAttempts;
 static struct Marquee { int resets=0; void Reset() { ++resets; } } g_marquee;
 struct LibraryController {
   App &app_; Book *prioritized=nullptr;
+  std::deque<app_job_t> job_queue_;
   explicit LibraryController(App &app): app_(app) {}
   void PrioritizeSelectedBookJobs(Book *book) { prioritized=book; }
+  void QueueBookWarmup(Book *) {} // Deferred covers are exercised by the folder integration test.
   void LoadVisibleBrowserCoverCaches();
   void UnloadNonVisibleBrowserCoverCaches();
   void browser_nextpage(); void browser_prevpage();
