@@ -9,6 +9,9 @@ void Document(const void *doc, const char *format, const char *file);
 void Record(const void *doc, int page, int zoom, const char *stage,
             uint64_t elapsed_us, int ok, size_t bytes = 0, int width = 0,
             int height = 0);
+// Captures counters now, using the existing bounded queue. sample must be a
+// string literal; snapshots do not measure peaks inside a phase.
+void SampleMemory(const void *doc, int page, int zoom, const char *sample);
 void BeginView(const void *doc, const char *format, const char *file, int page,
                int zoom, int width, int height);
 // Main-thread only; detailed stages stop after the first presentation.
@@ -25,6 +28,7 @@ inline uint64_t Now() {
 inline void Document(const void *, const char *, const char *) {}
 inline void Record(const void *, int, int, const char *, uint64_t, int,
                    size_t = 0, int = 0, int = 0) {}
+inline void SampleMemory(const void *, int, int, const char *) {}
 inline void BeginView(const void *, const char *, const char *, int, int, int,
                       int) {}
 inline void ViewStage(const char *, uint64_t, int = 1) {}

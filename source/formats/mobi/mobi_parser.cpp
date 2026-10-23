@@ -4,6 +4,7 @@
 #include "formats/common/buffered_status_log.h"
 #include "formats/common/book_error.h"
 #include "formats/common/plain_text_perf_utils.h"
+#include "shared/fixed_layout_perf.h"
 #include "formats/common/text_helpers.h"
 #include "formats/mobi/mobi_decode_plan.h"
 #include "formats/mobi/mobi_cleanup_policy.h"
@@ -402,6 +403,7 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
   decoded->utf8 = DecodeMobiBytesToUtf8(merged, header.encoding,
                                         &decoded->used_utf8_guess,
                                         &decoded->used_legacy_guess);
+  fixed_perf::SampleMemory(book, -1, -1, "mobi.utf8_decoded");
   if (t_after_decode)
     *t_after_decode = osGetTime();
 
@@ -429,6 +431,7 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
                                    collect_toc_metadata
                                        ? &decoded->html_to_text_map
                                        : NULL);
+  fixed_perf::SampleMemory(book, -1, -1, "mobi.markup_extracted");
   if (t_after_markup_scan)
     *t_after_markup_scan = osGetTime();
 
@@ -450,6 +453,7 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
                          collect_toc_metadata ? &decoded->html_to_text_map
                                              : NULL,
                          book->GetMobiLineWrapFix());
+  fixed_perf::SampleMemory(book, -1, -1, "mobi.cleaned");
 
 #ifdef DSLIBRIS_DEBUG
   if (reporter)
@@ -736,8 +740,10 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   auto log_stage = [&](const char *stage) {
     if (!reporter || !stage)
       return;
+    fixed_perf::SampleMemory(book, -1, -1, stage);
     DBG_LOGF(reporter, "MOBI: stage=%s", stage);
   };
+  fixed_perf::Document(book, "MOBI_OPEN", path);
 #else
   auto append_debug_log = [&](const std::string &) {};
   auto log_stage = [&](const char *) {};
@@ -890,6 +896,7 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   log_stage("toc-prepared");
 
   { std::string().swap(raw); }
+  log_stage("source-released");
 
   // --- Phase: initial pagination ---
   bool pages_done_initial = false;

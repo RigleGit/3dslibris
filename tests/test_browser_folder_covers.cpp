@@ -20,6 +20,7 @@
 #include "shared/aspect_fit_utils.h"
 #include "shared/cover_decode_utils.h"
 #include "shared/debug_runtime_mode.h"
+#include "shared/fixed_layout_perf.h"
 #include "shared/home_button_guard.h"
 #include "shared/image_scale_utils.h"
 #include "shared/status_reporter.h"

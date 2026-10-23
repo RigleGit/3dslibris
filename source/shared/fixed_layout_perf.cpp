@@ -4,9 +4,7 @@
 #include <3ds.h>
 #include <cstdio>
 #include <cstring>
-#ifndef FIXED_PERF_HOST_TEST
 #include <malloc.h>
-#endif
 
 namespace fixed_perf {
 namespace {
@@ -14,6 +12,7 @@ namespace {
 struct Event {
   const void *doc;
   const char *stage;
+  const char *sample;
   uint64_t at, duration;
   size_t bytes;
   int page, zoom, width, height, ok;
@@ -143,17 +142,19 @@ void Presented() {
          : quality == 2 ? "interactive_present"
                         : "preview_present",
          Now() - view.start, 1);
+  SampleMemory(view.doc, view.page, view.zoom, "present");
+}
+void SampleMemory(const void *doc, int page, int zoom, const char *sample) {
   Event e = {};
-  e.doc = view.doc;
-  e.page = view.page;
-  e.zoom = view.zoom;
+  e.doc = doc;
+  e.page = page;
+  e.zoom = zoom;
   e.stage = "memory";
+  e.sample = sample;
   e.at = Now();
-#ifndef FIXED_PERF_HOST_TEST
   const struct mallinfo mi = mallinfo();
   e.heap_used = (unsigned)mi.uordblks;
   e.heap_free = (unsigned)mi.fordblks;
-#endif
   e.linear_free = linearSpaceFree();
   e.region_free = osGetMemRegionFree(MEMREGION_ALL);
   Push(e);
@@ -183,9 +184,11 @@ void Flush(IStatusReporter *reporter) {
     else if (std::strcmp(e.stage, "memory") == 0)
       std::snprintf(line, sizeof(line),
                     "PERF doc=%p page=%d zoom=%d stage=memory at_us=%llu "
-                    "heap_used=%u heap_free=%u linear_free=%u region_free=%u",
+                    "heap_used=%u heap_free=%u linear_free=%u region_free=%u "
+                    "sample=%s",
                     e.doc, e.page + 1, e.zoom, (unsigned long long)e.at,
-                    e.heap_used, e.heap_free, e.linear_free, e.region_free);
+                    e.heap_used, e.heap_free, e.linear_free, e.region_free,
+                    e.sample ? e.sample : "unknown");
     else
       std::snprintf(line, sizeof(line),
                     "PERF doc=%p page=%d zoom=%d stage=%s us=%llu at_us=%llu "
