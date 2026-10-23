@@ -117,6 +117,20 @@ static std::string BuildBookPath(Book *book) {
   return path;
 }
 
+static void ApplyEmbeddedCoverResult(Book *book, const std::string &path,
+                                     int rc) {
+  if (rc == 0 && book->coverPixels) {
+    cover_cache::Save(book, path);
+    book->coverAttempts = kCoverMaxAttempts;
+    book->coverRetryAfterMs = 0;
+  } else if (rc == BOOK_ERR_CANCELLED) {
+  } else if (rc != 0) {
+    book->coverAttempts++;
+  } else {
+    book->coverAttempts = kCoverMaxAttempts;
+  }
+}
+
 } // namespace
 
 bool LibraryController::HasQueuedJob(app_job_type_t type, Book *book) const {
@@ -470,16 +484,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
             if (!book->coverImagePath.empty()) {
               HomeButtonGuard home_guard;
               rc = epub_parser::ExtractCover(book, path);
-              if (rc == 0 && book->coverPixels) {
-                cover_cache::Save(book, path);
-                book->coverAttempts = kCoverMaxAttempts;
-                book->coverRetryAfterMs = 0;
-              } else if (rc == BOOK_ERR_CANCELLED) {
-              } else if (rc != 0) {
-                book->coverAttempts++;
-              } else {
-                book->coverAttempts = kCoverMaxAttempts;
-              }
+              ApplyEmbeddedCoverResult(book, path, rc);
             } else {
               book->coverAttempts = kCoverMaxAttempts;
             }
@@ -488,30 +493,12 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
                    HasExtCI(book->GetFileName(), ".fb2")) {
           HomeButtonGuard home_guard;
           rc = fb2_parser::ExtractCover(book, path);
-          if (rc == 0 && book->coverPixels) {
-            cover_cache::Save(book, path);
-            book->coverAttempts = kCoverMaxAttempts;
-            book->coverRetryAfterMs = 0;
-          } else if (rc == BOOK_ERR_CANCELLED) {
-          } else if (rc != 0) {
-            book->coverAttempts++;
-          } else {
-            book->coverAttempts = kCoverMaxAttempts;
-          }
+          ApplyEmbeddedCoverResult(book, path, rc);
         } else if (book->format == FORMAT_XHTML &&
                    HasExtCI(book->GetFileName(), ".mobi")) {
           HomeButtonGuard home_guard;
           rc = mobi_parser::ExtractCover(book, path);
-          if (rc == 0 && book->coverPixels) {
-            cover_cache::Save(book, path);
-            book->coverAttempts = kCoverMaxAttempts;
-            book->coverRetryAfterMs = 0;
-          } else if (rc == BOOK_ERR_CANCELLED) {
-          } else if (rc != 0) {
-            book->coverAttempts++;
-          } else {
-            book->coverAttempts = kCoverMaxAttempts;
-          }
+          ApplyEmbeddedCoverResult(book, path, rc);
         } else if (book->format == FORMAT_PDF) {
           HomeButtonGuard home_guard;
           rc = pdf_parser::ExtractCover(book, path);
@@ -531,16 +518,7 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         } else if (book->format == FORMAT_CBZ) {
           HomeButtonGuard home_guard;
           rc = cbz_parser::ExtractCover(book, path);
-          if (rc == 0 && book->coverPixels) {
-            cover_cache::Save(book, path);
-            book->coverAttempts = kCoverMaxAttempts;
-            book->coverRetryAfterMs = 0;
-          } else if (rc == BOOK_ERR_CANCELLED) {
-          } else if (rc != 0) {
-            book->coverAttempts++;
-          } else {
-            book->coverAttempts = kCoverMaxAttempts;
-          }
+          ApplyEmbeddedCoverResult(book, path, rc);
         } else {
           // Formats like TXT/MD/RTF/ODT have no embedded-cover extractor.
           // If no adjacent override was found, stop retrying.

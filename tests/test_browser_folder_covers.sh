@@ -32,7 +32,7 @@ for signature in 'static bool PathIsDirectory(' 'static bool PathIsRegularFile('
 done
 extract source/library/library_controller.cpp 'static void AppendFolderEntry(' folder_index
 extract source/book/book.cpp 'void Book::SetBrowserFolderEntry(' folder_book
-for signature in 'static BrowserViewMode CurrentBrowserViewMode(' 'static int CurrentBrowserPageSize(' 'static bool ShouldCurrentBrowserLoadCovers(' 'static bool IsVisibleFolderCover(' 'static bool SupportsBrowserCoverWarmup(' 'static size_t CountQueuedHeavyJobs(' 'static std::string BuildBookPath('; do
+for signature in 'static BrowserViewMode CurrentBrowserViewMode(' 'static int CurrentBrowserPageSize(' 'static bool ShouldCurrentBrowserLoadCovers(' 'static bool IsVisibleFolderCover(' 'static bool SupportsBrowserCoverWarmup(' 'static void ApplyEmbeddedCoverResult(' 'static size_t CountQueuedHeavyJobs(' 'static std::string BuildBookPath('; do
   extract source/library/app_browser_jobs.cpp "$signature" folder_jobs
 done
 for signature in 'bool LibraryController::HasQueuedJob(' 'void LibraryController::PrioritizeSelectedBookJobs(' 'void LibraryController::EnqueueJob(' 'void LibraryController::QueueBookWarmup(' 'void LibraryController::TickBrowserWarmup(' 'void LibraryController::ProcessJobs(' 'size_t LibraryController::PauseBrowserJobs('; do
