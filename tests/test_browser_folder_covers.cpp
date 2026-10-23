@@ -106,19 +106,41 @@ static void DrawOpeningSplashWithProgress(unsigned, unsigned, void *) {}
 LibraryController::LibraryController(App &app) : app_(app), inside_folder_(false) {}
 void LibraryController::ResetBrowserMarquee() {}
 
-// None of these book-only backends may be reached by a folder cover job.
+// Folder jobs must never reach book backends. Ordinary-book scenarios below
+// control extractor outcomes to exercise the real job owner's result handling.
+static int extraction_rc = 0, extraction_backend = -1, extraction_calls = 0;
+static bool extraction_pixels = false;
+static int cover_saves = 0;
+static Book *expected_extraction_book = nullptr;
+static std::string expected_extraction_path;
+static int ExtractOutcome(int backend, Book *book, const std::string &path) {
+  assert(book == expected_extraction_book && !book->IsBrowserFolder());
+  assert(path == expected_extraction_path);
+  extraction_backend = backend;
+  ++extraction_calls;
+  if (extraction_pixels) {
+    book->coverPixels = new u16[1]{0xf800};
+    book->coverWidth = book->coverHeight = 1;
+  }
+  return extraction_rc;
+}
 namespace book_parser { uint8_t Index(Book *) { std::abort(); } }
-#define UNUSED_BACKEND(name) namespace name { \
-  int ExtractCover(Book *, const std::string &) { std::abort(); } }
-UNUSED_BACKEND(epub_parser)
-UNUSED_BACKEND(fb2_parser)
-UNUSED_BACKEND(mobi_parser)
-UNUSED_BACKEND(pdf_parser)
-UNUSED_BACKEND(cbz_parser)
+#define OUTCOME_BACKEND(name, id) namespace name { \
+  int ExtractCover(Book *book, const std::string &path) { return ExtractOutcome(id, book, path); } }
+OUTCOME_BACKEND(epub_parser, 0)
+OUTCOME_BACKEND(fb2_parser, 1)
+OUTCOME_BACKEND(mobi_parser, 2)
+OUTCOME_BACKEND(pdf_parser, 3)
+OUTCOME_BACKEND(cbz_parser, 4)
 namespace epub_parser { int ResolveToc(Book *, const std::string &) { std::abort(); } }
 namespace cover_cache {
 bool TryLoad(Book *, const std::string &) { std::abort(); }
-bool Save(Book *, const std::string &) { std::abort(); }
+bool Save(Book *book, const std::string &path) {
+  assert(book == expected_extraction_book && !book->IsBrowserFolder());
+  assert(path == expected_extraction_path && book->coverPixels);
+  ++cover_saves;
+  return false; // An unavailable disk cache must not undo a usable thumbnail.
+}
 #include "folder_sidecar.inc"
 }
 static int decode_calls = 0;
@@ -159,6 +181,65 @@ static void LoadPage(LibraryController &controller, App &app) {
   }
   Expect(LoadedCount(app) == 4, "only the four visible folder covers are resident");
 }
+static void TestEmbeddedCoverResults(const std::string &root) {
+  const char *names[] = {"outcome.epub", "outcome.fb2", "outcome.mobi", "outcome.pdf", "outcome.cbz"};
+  const format_t formats[] = {FORMAT_EPUB, FORMAT_XHTML, FORMAT_XHTML, FORMAT_PDF, FORMAT_CBZ};
+  struct Outcome { int rc; bool pixels; int attempts; int pdf_attempts; bool old_retry; int saves; };
+  const Outcome cases[] = {
+      {0, true, 3, 3, false, 1}, {0, false, 3, 3, false, 0},
+      {BOOK_ERR_CANCELLED, false, 1, 1, false, 0},
+      {4, false, 2, 2, true, 0}, {1, false, 2, 2, true, 0},
+      {-1, false, 2, 2, true, 0}, {3, false, 2, 3, true, 0},
+      {8, false, 2, 3, true, 0}, {4, true, 2, 2, true, 0},
+      {1, true, 2, 2, false, 0}};
+  for (int backend = 0; backend < 5; ++backend) {
+    for (bool new_device : {false, true}) {
+      for (const Outcome &outcome : cases) {
+        App app;
+        app.new_3ds = new_device;
+        Book *book = new Book(BookContext());
+        app.books.push_back(book);
+        app.selected = book;
+        book->foldername = root;
+        book->filename = names[backend];
+        book->format = formats[backend];
+        book->metadataIndexTried = true;
+        book->coverImagePath = "embedded.png";
+        book->coverAttempts = 1;
+        book->coverRetryAfterMs = 99;
+        now_ms = 10000;
+        free_bytes = 32u * 1024u * 1024u;
+        extraction_rc = outcome.rc;
+        extraction_pixels = outcome.pixels;
+        extraction_backend = -1;
+        extraction_calls = cover_saves = 0;
+        expected_extraction_book = book;
+        expected_extraction_path = root + "/" + names[backend];
+        LibraryController controller(app);
+        controller.EnqueueJob(APP_JOB_EXTRACT_COVER, book);
+        controller.ProcessJobs(3);
+        Expect(extraction_calls == 1 && extraction_backend == backend,
+               "cover job dispatches exactly one matching extractor");
+        const int attempts = backend == 3 ? outcome.pdf_attempts : outcome.attempts;
+        Expect(book->coverAttempts == attempts, "cover result preserves attempt policy");
+        const bool retry = !new_device && outcome.old_retry && attempts < 3;
+        const u64 expected_retry = outcome.rc == 0 && outcome.pixels
+            ? 0 : (retry ? 12000u : 99u);
+        Expect(book->coverRetryAfterMs == expected_retry,
+               "success clears delay; errors/cancellation preserve existing backoff");
+        Expect(cover_saves == outcome.saves, "only successful thumbnails reach the disk cache");
+        Expect((book->coverPixels != nullptr) == outcome.pixels,
+               "result handling preserves extractor-owned pixels");
+        Expect(app.dirty, "visible completed cover job requests redraw");
+        Expect(!controller.HasQueuedJob(APP_JOB_EXTRACT_COVER, book),
+               "result handler does not invent another queued attempt");
+      }
+    }
+  }
+  expected_extraction_book = nullptr;
+  puts("PASS: embedded cover outcomes, cancellation, PDF permanent failures and cache-save failure");
+}
+
 int main() {
   const std::string root = std::getenv("TEST_FOLDER_COVERS_DIR");
   App app;
@@ -287,4 +368,5 @@ int main() {
   Expect(decode_calls == before_mode && !controller.HasQueuedJob(APP_JOB_EXTRACT_COVER, app.books[12]),
          "leaving browser discards pending folder work");
   puts("PASS: folder indexing, deferred visible covers, eviction and sidecar refresh");
+  TestEmbeddedCoverResults(root);
 }
