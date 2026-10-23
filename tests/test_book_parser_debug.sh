@@ -8,6 +8,8 @@ PARSER_DEBUG_FLAGS="-DDSLIBRIS_DEBUG -I$TEST_ROOT/tests/stubs/parser_debug"
   -c "$TEST_ROOT/source/shared/fixed_layout_perf.cpp" -o "$TEST_OUTDIR/parser_debug_perf.o"
 "$CXX_BIN" -std=c++11 ${CXXFLAGS:-} -I"$TEST_ROOT/include" \
   -c "$TEST_ROOT/source/formats/common/buffered_status_log.cpp" -o "$TEST_OUTDIR/parser_debug_log.o"
+"$CXX_BIN" -std=c++11 ${CXXFLAGS:-} $PARSER_DEBUG_FLAGS -I"$TEST_ROOT/include" \
+  -c "$TEST_ROOT/source/shared/boot_trace.cpp" -o "$TEST_OUTDIR/parser_debug_boot_trace.o"
 CXXFLAGS="${CXXFLAGS:-} $PARSER_DEBUG_FLAGS" \
-LDFLAGS="${LDFLAGS:-} $TEST_OUTDIR/parser_debug_perf.o $TEST_OUTDIR/parser_debug_log.o -pthread" \
+LDFLAGS="${LDFLAGS:-} $TEST_OUTDIR/parser_debug_perf.o $TEST_OUTDIR/parser_debug_log.o $TEST_OUTDIR/parser_debug_boot_trace.o -pthread" \
   bash "$TEST_ROOT/tests/test_book_parser_integration.sh"
