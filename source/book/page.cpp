@@ -137,22 +137,13 @@ bool ApplyFontFaceToken(Text *ts, u32 token, bool *mono) {
 }
 
 void PrintStyledGlyph(Text *ts, u32 c, bool mono) {
-  if (mono && ts->bold && ts->italic)
-    ts->PrintChar(c, TEXT_STYLE_MONO_BOLDITALIC);
-  else if (mono && ts->bold)
-    ts->PrintChar(c, TEXT_STYLE_MONO_BOLD);
-  else if (mono && ts->italic)
-    ts->PrintChar(c, TEXT_STYLE_MONO_ITALIC);
-  else if (mono)
-    ts->PrintChar(c, TEXT_STYLE_MONO);
-  else if (ts->bold && ts->italic)
-    ts->PrintChar(c, TEXT_STYLE_BOLDITALIC);
-  else if (ts->italic)
-    ts->PrintChar(c, TEXT_STYLE_ITALIC);
-  else if (ts->bold)
-    ts->PrintChar(c, TEXT_STYLE_BOLD);
-  else
-    ts->PrintChar(c, TEXT_STYLE_REGULAR);
+  // Index by mono/bold/italic without relying on numeric spacing of style IDs.
+  static const u8 styles[2][2][2] = {
+      {{TEXT_STYLE_REGULAR, TEXT_STYLE_ITALIC},
+       {TEXT_STYLE_BOLD, TEXT_STYLE_BOLDITALIC}},
+      {{TEXT_STYLE_MONO, TEXT_STYLE_MONO_ITALIC},
+       {TEXT_STYLE_MONO_BOLD, TEXT_STYLE_MONO_BOLDITALIC}}};
+  ts->PrintChar(c, styles[mono][ts->bold][ts->italic]);
 }
 
 } // namespace
