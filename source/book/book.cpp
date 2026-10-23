@@ -14,6 +14,8 @@
 #include "book/book.h"
 
 #include "book/book_context.h"
+#include "formats/cbz/cbz_state.h"
+#include "formats/mupdf/mupdf_state.h"
 #include "shared/debug_log.h"
 #include "book/heading_layout.h"
 #include "formats/common/href_normalization.h"

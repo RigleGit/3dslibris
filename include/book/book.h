@@ -470,6 +470,3 @@ public:
   void RequestAbortOpen();
   void ClearOpenAbortRequest();
 };
-
-#include "formats/cbz/cbz_state.h"
-#include "formats/mupdf/mupdf_state.h"

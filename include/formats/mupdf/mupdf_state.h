@@ -1,5 +1,6 @@
 #pragma once
 
+#include "book/book.h"
 #include "formats/common/fixed_layout_bitmap_cache.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "shared/app_flow_utils.h"

@@ -2,6 +2,7 @@
 #include "formats/cbz/cbz_document.h"
 
 #include "book/book.h"
+#include "formats/cbz/cbz_state.h"
 #include "book/cover_layout_constants.h"
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
