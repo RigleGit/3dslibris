@@ -217,6 +217,8 @@ public:
 
   Book(const BookContext &ctx);
   ~Book();
+  Book(const Book &) = delete;
+  Book &operator=(const Book &) = delete;
   format_t format;
   IStatusReporter *GetStatusReporter();
   Text *GetText();

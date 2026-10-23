@@ -75,6 +75,8 @@ public:
 
   Text();
   ~Text();
+  Text(const Text &) = delete;
+  Text &operator=(const Text &) = delete;
 
   //! Row stride of the square software buffers; orientation-independent.
   int BufferStride() const { return text_screen_geometry::kBufferStridePx; }
