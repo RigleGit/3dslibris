@@ -522,6 +522,56 @@ PageData ImagePagesWithoutResourceIds(Book *book) {
   return data;
 }
 
+// Exercise the real token consumer; the Text spy records the selected face,
+// not a second implementation of the style-token state machine.
+void TestPageFontFaceTransitions() {
+  const u32 tokens[] = {
+      'A', TEXT_BOLD_ON, TEXT_BOLD_ON, 'B', TEXT_ITALIC_ON, 'C',
+      TEXT_BOLD_OFF, TEXT_BOLD_OFF, 'D', TEXT_MONO_ON, 'E',
+      TEXT_BOLD_ON, 'F', TEXT_ITALIC_OFF, 'G', TEXT_BOLD_OFF, 'H',
+      TEXT_MONO_OFF, TEXT_ITALIC_OFF, 'I', TEXT_BOLD_ON, 'J',
+      TEXT_SCREEN_BREAK, 'K', TEXT_BOLD_OFF, 'L',
+      TEXT_MONO_ON, TEXT_ITALIC_ON, 'M'};
+  const u8 styles[] = {
+      TEXT_STYLE_REGULAR, TEXT_STYLE_BOLD, TEXT_STYLE_BOLDITALIC,
+      TEXT_STYLE_ITALIC, TEXT_STYLE_MONO_ITALIC, TEXT_STYLE_MONO_BOLDITALIC,
+      TEXT_STYLE_MONO_BOLD, TEXT_STYLE_MONO, TEXT_STYLE_REGULAR,
+      TEXT_STYLE_BOLD, TEXT_STYLE_BOLD, TEXT_STYLE_REGULAR,
+      TEXT_STYLE_MONO_ITALIC};
+  for (unsigned char orientation = 0; orientation < 3; ++orientation) {
+    Text text;
+    text.capture_rendered_text = true;
+    text.landscape = orientation == 2;
+    std::vector<u16> left(400 * 400), right(400 * 400);
+    text.screenleft = left.data();
+    text.screenright = right.data();
+    BookContext ctx;
+    ctx.text = &text;
+    ctx.orientation = &orientation;
+    Book book(ctx);
+    Page page(&book);
+    page.SetBuffer(tokens, sizeof(tokens) / sizeof(tokens[0]));
+    page.Draw(&text);
+    test::ExpectEqU("style tokens are consumed, not printed", text.rendered_glyphs.size(), 13);
+    u16 *first = orientation == 1 ? text.screenright : text.screenleft;
+    u16 *second = orientation == 1 ? text.screenleft : text.screenright;
+    for (size_t i = 0; i < 13; ++i) {
+      const auto &glyph = text.rendered_glyphs[i];
+      test::ExpectEqU("style changes preserve glyph order", glyph.codepoint, 'A' + i);
+      test::ExpectEq("all eight font faces and resets", glyph.style, styles[i]);
+      test::ExpectTrue("font face survives a forced screen break", glyph.screen == (i < 10 ? first : second));
+      test::ExpectEq("tokens do not advance the pen", glyph.x, 12 + 8 * (i < 10 ? i : i - 10));
+      test::ExpectEq("font face tokens preserve baseline", glyph.y, 24);
+    }
+    text.rendered_glyphs.clear();
+    const u32 fresh[] = {'Z'};
+    page.SetBuffer(fresh, 1);
+    page.Draw(&text);
+    test::ExpectEqU("second draw prints one glyph", text.rendered_glyphs.size(), 1);
+    test::ExpectEq("font face state resets on every page draw", text.rendered_glyphs[0].style, TEXT_STYLE_REGULAR);
+  }
+}
+
 struct ImageRenderSnapshot {
   std::vector<std::vector<u16>> frames;
   std::vector<std::string> glyphs;
@@ -1082,6 +1132,7 @@ void TestNullAndEmptyInputHandling() {
 } // namespace
 
 int main() {
+  TestPageFontFaceTransitions();
   TestRepeatedInlineImageWidthsAndCachedDraw();
   TestCoverHeaderPreflight();
   TestOdtAndPlainAllocationRecovery();
