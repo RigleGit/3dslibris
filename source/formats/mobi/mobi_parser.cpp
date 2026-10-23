@@ -236,6 +236,15 @@ struct MobiDecodedText {
         used_legacy_guess(false) {}
 };
 
+#ifdef DSLIBRIS_DEBUG
+static void LogMobiBuffer(IStatusReporter *reporter, const char *phase,
+                          const char *name, const std::string &buffer) {
+  DBG_LOGF(reporter, "MOBI buffer: phase=%s name=%s size=%lu capacity=%lu",
+           phase, name, (unsigned long)buffer.size(),
+           (unsigned long)buffer.capacity());
+}
+#endif
+
 static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
                                    std::vector<std::pair<u32, u32>> *html_map,
                                    bool line_wrap_fix_applied) {
@@ -249,6 +258,8 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
     text_before_cleanup = *text;
 
 #ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "cleanup_begin", "text", *text);
+  LogMobiBuffer(reporter, "cleanup_begin", "remap_copy", text_before_cleanup);
   if (reporter)
     DBG_LOGF(reporter,
              "MOBI cleanup: step=normalize-begin bytes=%u have_map=%d wrap=%d mem=%u",
@@ -285,6 +296,7 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
   }
 
 #ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "cleanup_moved", "image_backup", text_before_mobi_cleanup);
   if (reporter)
     DBG_LOGF(reporter, "MOBI cleanup: step=mojibake-begin track=%d mem=%u",
              track_image_tokens ? 1 : 0,
@@ -408,6 +420,7 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
     *t_after_decode = osGetTime();
 
 #ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "utf8", "utf8", decoded->utf8);
   if (reporter)
     DBG_LOGF(reporter,
              "MOBI decode: step=utf8-done utf8_bytes=%u mem_free=%u",
@@ -436,6 +449,7 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
     *t_after_markup_scan = osGetTime();
 
 #ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "markup", "text", decoded->text);
   if (reporter)
     DBG_LOGF(reporter,
              "MOBI decode: step=markup-extract-done text_bytes=%u mem_free=%u",
@@ -456,6 +470,7 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
   fixed_perf::SampleMemory(book, -1, -1, "mobi.cleaned");
 
 #ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "cleaned", "text", decoded->text);
   if (reporter)
     DBG_LOGF(reporter, "MOBI decode: step=cleanup-call-returned mem_free=%u",
              (unsigned)osGetMemRegionFree(MEMREGION_ALL));
@@ -782,6 +797,9 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   if (rc != 0)
     return rc;
   log_stage("source-loaded");
+#ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "source", "raw", raw);
+#endif
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
   if (open_cancel_poll::Poll(book, reporter, "mobi-source"))
@@ -842,6 +860,9 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
     return 255;
   }
   log_stage("text-merged");
+#ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "merged", "merged", merged);
+#endif
   const u64 t_after_decompress = osGetTime();
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
@@ -870,6 +891,9 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       &t_after_decode, &t_after_markup_scan, &t_after_cleanup, &t_after_markup,
       hooks);
   { std::string().swap(merged); }
+#ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "merged_released", "merged", merged);
+#endif
   log_stage("text-decoded");
   if (ShouldAbortMobiOpen(book))
     return BOOK_ERR_CANCELLED;
@@ -896,6 +920,9 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   log_stage("toc-prepared");
 
   { std::string().swap(raw); }
+#ifdef DSLIBRIS_DEBUG
+  LogMobiBuffer(reporter, "raw_released", "raw", raw);
+#endif
   log_stage("source-released");
 
   // --- Phase: initial pagination ---

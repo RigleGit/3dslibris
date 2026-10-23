@@ -686,6 +686,33 @@ void ExpectMobiContent(Book *book) {
   }
 }
 
+struct MobiBufferReporter : CancelReporter {
+  std::vector<std::string> buffers;
+  void PrintStatus(const char *line) override {
+    if (line && std::string(line).find("MOBI buffer:") != std::string::npos)
+      buffers.push_back(line);
+  }
+  void PrintStatus(std::string line) override { PrintStatus(line.c_str()); }
+#ifdef DSLIBRIS_DEBUG
+  size_t Size(const char *phase, const char *name) const {
+    const std::string prefix = std::string("MOBI buffer: phase=") + phase + " name=" + name + " ";
+    for (const auto &line : buffers) {
+      const size_t pos = line.find(prefix);
+      if (pos == std::string::npos) continue;
+      unsigned long size = 0, capacity = 0;
+      test::ExpectEq("diagnostic supplies size and capacity",
+          std::sscanf(line.c_str() + pos + prefix.size(), "size=%lu capacity=%lu", &size, &capacity), 2);
+      test::ExpectTrue("buffer capacity covers its live bytes", capacity >= size);
+      if (std::string(phase).find("released") != std::string::npos)
+        test::ExpectEqU("released capacity matches an empty string", capacity, std::string().capacity());
+      return size;
+    }
+    test::ExpectTrue(prefix.c_str(), false);
+    return 0;
+  }
+#endif
+};
+
 void TestMobiParseCloseCachedReopenAndRecovery() {
   const char *folder = getenv("TEST_MOBI_READING_DIR");
   test::ExpectTrue("MOBI fixture folder supplied", folder != nullptr);
@@ -694,10 +721,12 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
   const char *names[] = {"raw.mobi", "palmdoc.mobi"};
   for (const char *name : names) {
     Text text;
-    CancelReporter reporter;
+    MobiBufferReporter reporter;
     BookContext ctx;
     ctx.text = &text;
     ctx.status_reporter = &reporter;
+    const std::string path = std::string(folder) + "/" + name;
+    const std::string source = ReadFileBytes(path);
     PageData pages;
     std::vector<ChapterEntry> chapters;
     {
@@ -706,6 +735,25 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
       book.SetFileName(name);
       test::ExpectEq(name, book_parser::Open(&book), 0);
       ExpectMobiContent(&book);
+#ifdef DSLIBRIS_DEBUG
+      // Independent PalmDOC header oracle: first record offset, then text length.
+      auto be32 = [&source](size_t offset) {
+        test::ExpectTrue("fixture header bounds", offset + 4 <= source.size());
+        unsigned value = 0;
+        for (size_t i = 0; i < 4; ++i) value = (value << 8) | (unsigned char)source[offset + i];
+        return value;
+      };
+      const size_t text_bytes = be32(be32(78) + 4);
+      test::ExpectEqU("raw diagnostic matches file bytes", reporter.Size("source", "raw"), source.size());
+      test::ExpectEqU("merged diagnostic matches declared text", reporter.Size("merged", "merged"), text_bytes);
+      test::ExpectEqU("UTF-8 fixture is not transcoded", reporter.Size("utf8", "utf8"), text_bytes);
+      const size_t cleaned = reporter.Size("cleaned", "text");
+      test::ExpectTrue("markup extraction produces smaller live text", cleaned > 0 && cleaned < text_bytes);
+      test::ExpectEqU("merged storage released", reporter.Size("merged_released", "merged"), 0);
+      test::ExpectEqU("raw storage released after TOC", reporter.Size("raw_released", "raw"), 0);
+#else
+      test::ExpectTrue("release has no buffer diagnostics", reporter.buffers.empty());
+#endif
       pages = CapturePageData(&book);
       chapters = book.GetChapters();
       test::ExpectTrue("cold MOBI open schedules a real cache save", book.HasPendingMobiPageCacheSave());
@@ -716,8 +764,6 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
     }
     const std::vector<std::string> caches = CacheFiles(cache_dir);
     test::ExpectEq("Close saves one MOBI cache artifact", (int)caches.size(), 1);
-    const std::string path = std::string(folder) + "/" + name;
-    const std::string source = ReadFileBytes(path);
     struct stat original;
     test::ExpectEq("source attributes readable", stat(path.c_str(), &original), 0);
     // Preserve the source identity used by the cache key but make decoding
