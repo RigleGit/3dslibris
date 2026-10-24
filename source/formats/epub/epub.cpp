@@ -234,6 +234,8 @@ static int ParseEpubSpineDocuments(
   IStatusReporter *reporter = deps.reporter;
   epub_zip_utils::ZipEntryIndex zip_index;
   int rc = 0;
+  for (auto *ctx : parsedata->ctx)
+    delete ctx;
   parsedata->ctx.clear();
   parsedata->book = book;
   parsedata->type = PARSE_CONTENT;
