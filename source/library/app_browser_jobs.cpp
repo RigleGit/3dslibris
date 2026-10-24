@@ -118,14 +118,17 @@ static std::string BuildBookPath(Book *book) {
 }
 
 static void ApplyEmbeddedCoverResult(Book *book, const std::string &path,
-                                     int rc) {
+                                     int rc, bool permanent_failure = false) {
   if (rc == 0 && book->coverPixels) {
     cover_cache::Save(book, path);
     book->coverAttempts = kCoverMaxAttempts;
     book->coverRetryAfterMs = 0;
   } else if (rc == BOOK_ERR_CANCELLED) {
   } else if (rc != 0) {
-    book->coverAttempts++;
+    if (permanent_failure)
+      book->coverAttempts = kCoverMaxAttempts;
+    else
+      book->coverAttempts++;
   } else {
     book->coverAttempts = kCoverMaxAttempts;
   }
@@ -502,19 +505,8 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         } else if (book->format == FORMAT_PDF) {
           HomeButtonGuard home_guard;
           rc = pdf_parser::ExtractCover(book, path);
-          if (rc == 0 && book->coverPixels) {
-            cover_cache::Save(book, path);
-            book->coverAttempts = kCoverMaxAttempts;
-            book->coverRetryAfterMs = 0;
-          } else if (rc == BOOK_ERR_CANCELLED) {
-          } else if (rc != 0) {
-            if (browser_warmup_utils::IsPermanentCoverFailure(rc))
-              book->coverAttempts = kCoverMaxAttempts;
-            else
-              book->coverAttempts++;
-          } else {
-            book->coverAttempts = kCoverMaxAttempts;
-          }
+          ApplyEmbeddedCoverResult(
+              book, path, rc, browser_warmup_utils::IsPermanentCoverFailure(rc));
         } else if (book->format == FORMAT_CBZ) {
           HomeButtonGuard home_guard;
           rc = cbz_parser::ExtractCover(book, path);
