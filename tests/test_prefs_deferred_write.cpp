@@ -238,6 +238,7 @@ static void TestParagraphPreferenceContracts() {
     bool text_indent, block_margins, horizontal_margins;
   };
   const Case cases[] = {
+    {nullptr, 2, 3, 5, 11, true, false, true},
     {"", 2, 3, 5, 11, true, false, false},
     {"lineSpacing=\"-4\"", 2, 3, 0, 0, true, false, false},
     {"lineSpacing=\"99\"", 2, 3, 16, 16, true, false, false},
@@ -253,7 +254,8 @@ static void TestParagraphPreferenceContracts() {
     {"spacing=\"\" indent=\"junk\" lineSpacing=\" +4suffix\"", 0, 0, 4, 4, true, false, false},
   };
   for (const auto &row : cases) {
-    WriteXml(std::string("<dslibris><paragraph ") + row.attrs + "/></dslibris>");
+    WriteXml(row.attrs ? std::string("<dslibris><paragraph ") + row.attrs + "/></dslibris>"
+                       : "<dslibris/>");
     App app; app.ts.reset(new Text()); Prefs prefs(&app);
     app.paraspacing=2; app.paraindent=3; app.reader_line_spacing=5;
     app.ts->linespacing=11; app.publisher_text_indent=true;

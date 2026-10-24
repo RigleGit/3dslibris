@@ -27,6 +27,31 @@ int ReadPublisherHorizontalMargins(const char *const *attributes,
   return legacy_margins;
 }
 
+ParagraphPreferences ParseParagraphPreferences(
+    const char *const *attributes, ParagraphPreferences current) {
+  current.line_spacing_specified = false;
+  for (int i = 0; attributes[i]; i += 2) {
+    if (!strcmp(attributes[i], "spacing"))
+      current.spacing = atoi(attributes[i + 1]);
+    if (!strcmp(attributes[i], "lineSpacing")) {
+      current.line_spacing = ClampLineSpacingSetting(atoi(attributes[i + 1]));
+      current.line_spacing_specified = true;
+    }
+    if (!strcmp(attributes[i], "indent"))
+      current.indent = atoi(attributes[i + 1]);
+    if (!strcmp(attributes[i], "publisherTextIndent"))
+      current.publisher_text_indent = atoi(attributes[i + 1]) != 0;
+    if (!strcmp(attributes[i], "publisherBlockMargins"))
+      current.publisher_block_margins = atoi(attributes[i + 1]) != 0;
+  }
+  // Old configs used block margins for both axes. Explicit -1 continues to
+  // convert to true for the global boolean, as the existing reader did.
+  current.publisher_horizontal_margins =
+      ReadPublisherHorizontalMargins(
+          attributes, current.publisher_block_margins ? 1 : 0) != 0;
+  return current;
+}
+
 int EffectiveStyleValue(const StyleValueContext &context) {
   if (context.from_book && context.override_value >= 0)
     return context.override_value;

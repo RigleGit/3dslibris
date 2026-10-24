@@ -47,25 +47,16 @@ namespace {
 
 using settings::ClampLineSpacingSetting;
 
-static void ReadParagraphPreferences(App *app, Text *ts,
-                                     const XML_Char **attr) {
-  for (int i = 0; attr[i]; i += 2) {
-    if (!strcmp(attr[i], "spacing"))
-      app->paraspacing = atoi(attr[i + 1]);
-    if (!strcmp(attr[i], "lineSpacing")) {
-      app->reader_line_spacing = ClampLineSpacingSetting(atoi(attr[i + 1]));
-      ts->linespacing = app->reader_line_spacing;
-    }
-    if (!strcmp(attr[i], "indent"))
-      app->paraindent = atoi(attr[i + 1]);
-    if (!strcmp(attr[i], "publisherTextIndent"))
-      app->publisher_text_indent = atoi(attr[i + 1]) != 0;
-    if (!strcmp(attr[i], "publisherBlockMargins"))
-      app->publisher_block_margins = atoi(attr[i + 1]) != 0;
-  }
-  app->publisher_horizontal_margins =
-      settings::ReadPublisherHorizontalMargins(
-          attr, app->publisher_block_margins ? 1 : 0) != 0;
+static void ApplyParagraphPreferences(
+    App *app, Text *ts, const settings::ParagraphPreferences &values) {
+  app->paraspacing = values.spacing;
+  app->paraindent = values.indent;
+  app->reader_line_spacing = values.line_spacing;
+  if (values.line_spacing_specified)
+    ts->linespacing = values.line_spacing;
+  app->publisher_text_indent = values.publisher_text_indent;
+  app->publisher_block_margins = values.publisher_block_margins;
+  app->publisher_horizontal_margins = values.publisher_horizontal_margins;
 }
 
 }
@@ -132,7 +123,13 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     app->orientation = landscape ? orientation_utils::ORIENT_LANDSCAPE
                                  : app->portrait_orientation;
   } else if (!strcmp(name, "paragraph")) {
-    ReadParagraphPreferences(app, ts, attr);
+    const settings::ParagraphPreferences current = {
+        app->paraspacing, app->paraindent, app->reader_line_spacing,
+        app->publisher_text_indent, app->publisher_block_margins,
+        app->publisher_horizontal_margins, false};
+    const settings::ParagraphPreferences values =
+        settings::ParseParagraphPreferences(attr, current);
+    ApplyParagraphPreferences(app, ts, values);
   } else if (!strcmp(name, "font")) {
     bool has_fallback_attrs = false;
     for (i = 0; attr[i]; i += 2) {
