@@ -303,10 +303,10 @@ static int ParseEpubSpineDocuments(
       // recoverable: real-world EPUBs routinely have malformed XHTML (mismatched
       // tags, bare ampersands, unclosed void elements). Skip the bad document
       // and continue with the rest of the spine rather than failing the whole
-      // book. Only propagate fatal conditions: user cancel (BOOK_ERR_CANCELLED)
+      // book. Propagate fatal conditions: cancellation, allocation failure,
       // and ZIP-level errors from minizip (negative codes).
-      if (parse_rc == BOOK_ERR_CANCELLED) {
-        rc = BOOK_ERR_CANCELLED;
+      if (parse_rc == BOOK_ERR_CANCELLED || parse_rc == XML_ERROR_NO_MEMORY) {
+        rc = parse_rc;
         break;
       }
       if (parse_rc > 0) {

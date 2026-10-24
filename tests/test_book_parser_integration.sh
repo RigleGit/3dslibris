@@ -76,20 +76,25 @@ export TEST_MOBI_READING_DIR="$CBZ_TMP/mobi"
 export TEST_IMAGE_VIEWER_DIR="$CBZ_TMP/images"
 python3 "$TEST_ROOT/tests/fixtures/generate_image_viewer_books.py" "$TEST_IMAGE_VIEWER_DIR"
 export TEST_EPUB_RECOVERY_DIR="$CBZ_TMP/epub"
+export TEST_ODT_READING_DIR="$CBZ_TMP/odt"
+export TEST_COVER_READING_DIR="$CBZ_TMP/covers"
+export TEST_INLINE_IMAGE_READING_DIR="$CBZ_TMP/inline-images"
 python3 "$TEST_ROOT/tests/fixtures/generate_epub_recovery.py" "$TEST_EPUB_RECOVERY_DIR"
 python3 "$TEST_ROOT/tests/fixtures/generate_mobi_reading.py" "$TEST_MOBI_READING_DIR"
 python3 - "$CBZ_TMP" <<'PYFIXTURE'
 import pathlib
+import base64
 import struct
 import sys
 import zipfile
 import zlib
+import xml.parsers.expat
 folder = pathlib.Path(sys.argv[1])
 def chunk(kind, data):
     return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
-def png(rgb):
-    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 2, 2, 8, 2, 0, 0, 0)) +
-            chunk(b'IDAT', zlib.compress((b'\0' + bytes(rgb) * 2) * 2)) + chunk(b'IEND', b''))
+def png(rgb, width=2, height=2):
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)) +
+            chunk(b'IDAT', zlib.compress((b'\0' + bytes(rgb) * width) * height)) + chunk(b'IEND', b''))
 with zipfile.ZipFile(folder / 'first.cbz', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
     archive.writestr('10-blue.png', png((0, 0, 255)))
     archive.writestr('2-red.png', png((255, 0, 0)))
@@ -101,7 +106,80 @@ with zipfile.ZipFile(folder / 'second.cbz', 'w', compression=zipfile.ZIP_DEFLATE
 with zipfile.ZipFile(folder / 'search.odt', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
     archive.writestr('mimetype', 'application/vnd.oasis.opendocument.text')
     archive.writestr('content.xml', '<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"><office:body><office:text><text:p>tiny <text:span>ODT</text:span> fixture café año.</text:p></office:text></office:body></office:document-content>')
+odt_folder = folder / 'odt'
+odt_folder.mkdir()
+with zipfile.ZipFile(odt_folder / 'basic.odt', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+    archive.writestr('content.xml', '''<?xml version="1.0"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+<office:body><office:text><text:h text:outline-level="1">Chapter One</text:h>
+<text:p>ODT first paragraph &amp; decoded entity.</text:p>
+<text:h text:outline-level="2">Section Two</text:h>
+<text:p>ODT final paragraph.</text:p></office:text></office:body>
+</office:document-content>''')
+cover_folder = folder / 'covers'
+cover_folder.mkdir()
+red = png((255, 0, 0))
+(cover_folder / 'red.png').write_bytes(red)
+(cover_folder / 'boundary.png').write_bytes(png((255, 0, 0), 2048, 1))
+(cover_folder / 'over-width.png').write_bytes(png((255, 0, 0), 2049, 1))
+(cover_folder / 'over-height.png').write_bytes(png((255, 0, 0), 1, 2049))
+(cover_folder / 'corrupt-body.png').write_bytes(red[:41])
+(cover_folder / 'corrupt-header').write_bytes(b'broken image header')
+gif = base64.b64decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==')
+(cover_folder / 'black.gif').write_bytes(gif)
+(cover_folder / 'zero-width.gif').write_bytes(gif[:6] + b'\0\0' + gif[8:])
+(cover_folder / 'zero-height.gif').write_bytes(gif[:8] + b'\0\0' + gif[10:])
+# Fixed 1x1 green JPEG fixture; tests require no image-generation dependency.
+(cover_folder / 'green.jpg').write_bytes(base64.b64decode(
+    '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDAREAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAK/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AWAr4U7//2Q=='))
+image_folder = folder / 'inline-images'
+image_folder.mkdir()
+container = ('<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+             '<rootfiles><rootfile full-path="content.opf" media-type="application/oebps-package+xml"/>'
+             '</rootfiles></container>')
+package = ('<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">'
+           '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">images</dc:identifier>'
+           '<dc:title>Repeated images</dc:title><dc:language>en</dc:language></metadata><manifest>'
+           '<item id="body" href="content.xhtml" media-type="application/xhtml+xml"/>'
+           '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' +
+           ''.join('<item id="%s" href="%s.png" media-type="image/png"/>' % (name, name) for name in 'abc') +
+           '</manifest><spine><itemref idref="body"/></spine></package>')
+nav = ('<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+       '<body><nav epub:type="toc"><ol>' + ''.join(
+           '<li><a href="content.xhtml#g%d">Group %d</a></li>' % (i, i) for i in range(3)) +
+       '</ol></nav></body></html>')
+for shared in (True, False):
+    groups = []
+    for group in range(3):
+        images = ''.join('<p style="margin:0"><img src="%s.png"%s/></p>' %
+                         ('a' if shared else name, width) for name, width in
+                         zip('abc', (' width="40"', ' style="width:80px"', '')))
+        groups.append('<div id="g%d"%s><h2>Group %d</h2>%s<p>AFTER%d</p></div>' %
+                      (group, ' style="page-break-after:always"' if group < 2 else '', group, images, group))
+    content = '<html xmlns="http://www.w3.org/1999/xhtml"><body>' + ''.join(groups) + '</body></html>'
+    entries = {'META-INF/container.xml': container, 'content.opf': package,
+               'nav.xhtml': nav, 'content.xhtml': content}
+    for value in entries.values():
+        xml.parsers.expat.ParserCreate().Parse(value, True)
+    path = image_folder / ('shared.epub' if shared else 'separate.epub')
+    with zipfile.ZipFile(path, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
+        for name, data in entries.items():
+            archive.writestr(name, data)
+        for name in 'abc':
+            archive.writestr(name + '.png', png((255, 0, 0), 160, 32))
+    with zipfile.ZipFile(path) as archive:
+        assert archive.testzip() is None
+(image_folder / 'cache').mkdir()
 PYFIXTURE
+
+# Count decode calls in the test executable while using the real implementation.
+"$CXX_BIN" -std=c++11 ${IMAGE_ALLOC_FLAGS[@]+"${IMAGE_ALLOC_FLAGS[@]}"} ${CXXFLAGS:-} \
+  -I"$TEST_ROOT/include" -I"$TEST_ROOT/third_party/stb" \
+  -DLoadFromMemory=LoadFromMemoryForCoverTest \
+  -c "$TEST_ROOT/source/core/stb_image_impl.cpp" \
+  -o "$TEST_OUTDIR/cover_stb_image_impl.o"
 
 "$CXX_BIN" -std=c++11 ${IMAGE_ALLOC_FLAGS[@]+"${IMAGE_ALLOC_FLAGS[@]}"} \
   ${CXXFLAGS:-} \
@@ -161,7 +239,7 @@ PYFIXTURE
   "$TEST_ROOT/source/book/book_renderer.cpp" \
   "$TEST_ROOT/source/book/layout_reflow.cpp" \
   "$TEST_ROOT/source/core/parse.cpp" \
-  "$TEST_ROOT/source/core/stb_image_impl.cpp" \
+  "$TEST_OUTDIR/cover_stb_image_impl.o" \
   "$TEST_ROOT/source/formats/epub/epub_parser.cpp" \
   "$TEST_ROOT/source/formats/epub/epub.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_stylesheet_utils.cpp" \

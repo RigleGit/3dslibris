@@ -4,6 +4,23 @@
 
 namespace settings {
 
+int ClampLineSpacingSetting(int value);
+
+// Value snapshot for one <paragraph> tag. Presence matters: an omitted
+// lineSpacing must not synchronize an independently configured renderer.
+struct ParagraphPreferences {
+  int spacing;
+  int indent;
+  int line_spacing;
+  bool publisher_text_indent;
+  bool publisher_block_margins;
+  bool publisher_horizontal_margins;
+  bool line_spacing_specified;
+};
+
+ParagraphPreferences ParseParagraphPreferences(
+    const char *const *attributes, ParagraphPreferences current);
+
 struct StyleValueContext {
   bool from_book;
   bool uses_text_layout;

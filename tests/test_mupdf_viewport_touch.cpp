@@ -9,8 +9,9 @@
 #include <cmath>
 #include <cstdio>
 
-// Only platform handles are replaced; the viewport state and geometry helpers
-// below are the production definitions, with no MuPDF document rendering.
+// Platform handles and the Book format/state adapter are supplied by the test.
+// Viewport state and geometry helpers below are production definitions;
+// no MuPDF document rendering is involved.
 typedef unsigned char u8;
 struct fz_context;
 struct fz_document;
@@ -18,13 +19,7 @@ struct fz_outline;
 struct fz_display_list;
 struct LightEvent {};
 typedef void *Thread;
-class Book {
-public:
-  struct MuPdfState;
-  MuPdfState *mupdf_state;
-  bool IsPdf() const { return true; }
-  bool MoveMuPdfViewportToPreview(int touch_x, int touch_y);
-};
+#include "book/book.h"
 #include "formats/mupdf/mupdf_state.h"
 static const int kPdfPreviewPadding=fixed_layout_preview::kPadding;
 static const int kPdfPreviewScreenWidth=fixed_layout_screen::kBottomScreenWidth;

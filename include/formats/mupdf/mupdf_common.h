@@ -1,6 +1,7 @@
 #pragma once
 
 #include "book/book.h"
+#include "formats/mupdf/mupdf_state.h"
 
 #include <algorithm>
 #include <cmath>

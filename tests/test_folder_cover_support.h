@@ -1,4 +1,5 @@
 #pragma once
+#include "shared/fixed_layout_perf.h"
 // Platform/UI substitutes only. Directory I/O, job admission, disk cache,
 // thumbnail decode and resampling below are production implementations.
 #include <algorithm>

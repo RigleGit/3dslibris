@@ -56,3 +56,26 @@ with open(sys.argv[2], "wb") as f:
 PY
 
 "$OUTDIR/test_cbz_decode" "$PNG_PATH" "$JPG_PATH"
+
+# Optional integration of the actual production MuPDF branch on the host.
+# Provide native libraries built from this repository's vendored version.
+if [ -n "${MUPDF_HOST_LIB_DIR:-}" ]; then
+  case "$(uname -s)" in
+    Darwin) MUPDF_GC_FLAG="-Wl,-dead_strip" ;;
+    *) MUPDF_GC_FLAG="-Wl,--gc-sections" ;;
+  esac
+  "${CXX:-c++}" -std=c++11 ${CXXFLAGS:-} -fno-exceptions -fno-rtti \
+    -D__3DS__ -I"$ROOT/third_party/mupdf/include" \
+    -I"$ROOT/tests/stubs" -I"$ROOT/include" -I"$ROOT/third_party/stb" \
+    -Dfz_new_buffer_from_copied_data=TestMuPdfCopiedBuffer \
+    -Dfz_new_buffer_from_shared_data=TestMuPdfSharedBuffer \
+    -Dfz_drop_context=TestMuPdfDropContext \
+    -c "$ROOT/source/formats/cbz/cbz_decode.cpp" -o "$WORKDIR/cbz_decode_mupdf.o"
+  "${CXX:-c++}" -std=c++11 ${CXXFLAGS:-} -fno-exceptions -fno-rtti \
+    -I"$ROOT/tests" -I"$ROOT/include" -I"$ROOT/third_party/mupdf/include" \
+    "$ROOT/tests/test_cbz_mupdf_decode.cpp" "$WORKDIR/cbz_decode_mupdf.o" \
+    "$ROOT/source/formats/common/pdf_view_utils.cpp" \
+    "$MUPDF_HOST_LIB_DIR/libmupdf.a" "$MUPDF_HOST_LIB_DIR/libmupdf-third.a" \
+    ${LDFLAGS:-} "$MUPDF_GC_FLAG" -lm -o "$OUTDIR/test_cbz_mupdf_decode"
+  "$OUTDIR/test_cbz_mupdf_decode" "$PNG_PATH" "$JPG_PATH"
+fi

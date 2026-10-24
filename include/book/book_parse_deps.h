@@ -44,8 +44,8 @@ struct BookParseDeps {
   int orientation;
 
   BookParseDeps()
-      : reporter(NULL), ts(NULL), layout(), regular_font_path(""), paragraph_spacing(0),
-        paragraph_indent(0), orientation(0) {}
+      : reporter(NULL), ts(NULL), layout(), prefs(NULL), regular_font_path(""),
+        paragraph_spacing(0), paragraph_indent(0), orientation(0) {}
 };
 
 inline BookParseDeps BuildBookParseDeps(Book *book) {

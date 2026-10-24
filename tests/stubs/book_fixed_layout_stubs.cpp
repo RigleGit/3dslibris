@@ -4,6 +4,8 @@
  * All return safe defaults; the TXT/FB2 parser paths never call these.
  */
 #include "book/book.h"
+#include "formats/cbz/cbz_state.h"
+#include "formats/mupdf/mupdf_state.h"
 #include "formats/cbz/cbz_types.h"
 #include <cassert>
 

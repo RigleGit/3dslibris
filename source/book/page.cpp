@@ -117,6 +117,35 @@ u16 LinkTextColor(Text *ts) {
   }
 }
 
+// Consume only font-face transitions; decorations and layout stay in Draw.
+bool ApplyFontFaceToken(Text *ts, u32 token, bool *mono) {
+  if (token == TEXT_BOLD_ON)
+    ts->bold = true;
+  else if (token == TEXT_BOLD_OFF)
+    ts->bold = false;
+  else if (token == TEXT_ITALIC_ON)
+    ts->italic = true;
+  else if (token == TEXT_ITALIC_OFF)
+    ts->italic = false;
+  else if (token == TEXT_MONO_ON)
+    *mono = true;
+  else if (token == TEXT_MONO_OFF)
+    *mono = false;
+  else
+    return false;
+  return true;
+}
+
+void PrintStyledGlyph(Text *ts, u32 c, bool mono) {
+  // Index by mono/bold/italic without relying on numeric spacing of style IDs.
+  static const u8 styles[2][2][2] = {
+      {{TEXT_STYLE_REGULAR, TEXT_STYLE_ITALIC},
+       {TEXT_STYLE_BOLD, TEXT_STYLE_BOLDITALIC}},
+      {{TEXT_STYLE_MONO, TEXT_STYLE_MONO_ITALIC},
+       {TEXT_STYLE_MONO_BOLD, TEXT_STYLE_MONO_BOLDITALIC}}};
+  ts->PrintChar(c, styles[mono][ts->bold][ts->italic]);
+}
+
 } // namespace
 
 Page::Page(Book *b) {
@@ -388,7 +417,7 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
   u16 i = 0;
   InlineImageContext next_image_context = INLINE_IMAGE_CONTEXT_DEFAULT;
   u8 next_image_align = 0;  // 0=center/default, 1=left, 2=right
-  int next_image_author_width = 0; // per-instance override; 0=use entry default
+  int next_image_author_width = 0; // per-instance override; 0=use intrinsic dimensions
   bool rtl_paragraph = false;
   u32 rtl_line_px = 0;  // parse-time line width stashed by TEXT_RTL_LINE_PX
   bool in_preformatted_block = false;
@@ -564,18 +593,8 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
       ts->linebegan = false;
       i += (i + 1 < length) ? 2 : 1;
       continue;
-    } else if (c == TEXT_BOLD_ON) {
+    } else if (ApplyFontFaceToken(ts, c, &mono)) {
       i++;
-      ts->bold = true;
-    } else if (c == TEXT_BOLD_OFF) {
-      i++;
-      ts->bold = false;
-    } else if (c == TEXT_ITALIC_ON) {
-      i++;
-      ts->italic = true;
-    } else if (c == TEXT_ITALIC_OFF) {
-      i++;
-      ts->italic = false;
     } else if (c == TEXT_UNDERLINE_ON) {
       i++;
       underline = true;
@@ -630,12 +649,6 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
       ts->SetPixelSize(script_saved_pixelsize);
       script_normal_height = 0;
       script_saved_pixelsize = 0;
-    } else if (c == TEXT_MONO_ON) {
-      i++;
-      mono = true;
-    } else if (c == TEXT_MONO_OFF) {
-      i++;
-      mono = false;
     } else if (c == TEXT_PRE_ON) {
       i++;
       in_preformatted_block = true;
@@ -906,22 +919,7 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
         const int shifted_y = std::max(0, base_pen_y + y_offset);
         ts->SetPen((u16)glyph_x0, (u16)shifted_y);
       }
-      if (mono && ts->bold && ts->italic)
-        ts->PrintChar(c, TEXT_STYLE_MONO_BOLDITALIC);
-      else if (mono && ts->bold)
-        ts->PrintChar(c, TEXT_STYLE_MONO_BOLD);
-      else if (mono && ts->italic)
-        ts->PrintChar(c, TEXT_STYLE_MONO_ITALIC);
-      else if (mono)
-        ts->PrintChar(c, TEXT_STYLE_MONO);
-      else if (ts->bold && ts->italic)
-        ts->PrintChar(c, TEXT_STYLE_BOLDITALIC);
-      else if (ts->italic)
-        ts->PrintChar(c, TEXT_STYLE_ITALIC);
-      else if (ts->bold)
-        ts->PrintChar(c, TEXT_STYLE_BOLD);
-      else
-        ts->PrintChar(c, TEXT_STYLE_REGULAR);
+      PrintStyledGlyph(ts, c, mono);
 
       const int glyph_x1 = (int)ts->GetPenX();
       if (highlight && (uint32_t)(i - 1) >= highlight->begin &&

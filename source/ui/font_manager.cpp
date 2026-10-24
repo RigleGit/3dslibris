@@ -16,6 +16,12 @@
 #include "ui/text_cache_utils.h"
 #include "ui/text_limits.h"
 
+#ifdef DSLIBRIS_DEBUG
+#define FONT_ADVANCE_COUNT(field) (++advance_perf_.field)
+#else
+#define FONT_ADVANCE_COUNT(field) ((void)0)
+#endif
+
 namespace {
 
 static bool FileReadable(const char *path) {
@@ -384,12 +390,53 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
   return face->glyph;
 }
 
+#ifdef DSLIBRIS_DEBUG
+void FontManager::LogAdvancePerf() {
+  IStatusReporter *reporter = parent ? parent->reporter_ : nullptr;
+  if (!reporter || !DBG_SHOULD_LOG(DBG_LEVEL_INFO, DBG_CAT_PERF))
+    return;
+  DBG_LOGF_CAT(reporter, DBG_LEVEL_INFO, DBG_CAT_PERF,
+               "ADVANCE calls=%llu hits=%llu misses=%llu loads=%llu",
+               (unsigned long long)advance_perf_.calls,
+               (unsigned long long)advance_perf_.hits,
+               (unsigned long long)advance_perf_.misses,
+               (unsigned long long)advance_perf_.loads);
+  DBG_LOGF_CAT(reporter, DBG_LEVEL_INFO, DBG_CAT_PERF,
+               "ADVANCE fallback searches=%llu hits=%llu unresolved=%llu ftc=%d",
+               (unsigned long long)advance_perf_.fallback_searches,
+               (unsigned long long)advance_perf_.fallback_hits,
+               (unsigned long long)advance_perf_.unresolved, ftc ? 1 : 0);
+  for (const auto &face : advanceCache) {
+    size_t per_size[256] = {};
+    for (const auto &entry : face.second)
+      ++per_size[entry.first >> 24];
+    DBG_LOGF_CAT(reporter, DBG_LEVEL_INFO, DBG_CAT_PERF,
+                 "ADVANCE face=%p entries=%lu value_bytes=%lu bucket_slots=%lu",
+                 (void *)face.first, (unsigned long)face.second.size(),
+                 (unsigned long)(face.second.size() * sizeof(decltype(face.second)::value_type)),
+                 (unsigned long)face.second.bucket_count());
+    for (unsigned px = 0; px < 256; ++px) {
+      if (per_size[px])
+        DBG_LOGF_CAT(reporter, DBG_LEVEL_INFO, DBG_CAT_PERF,
+                     "ADVANCE face=%p px=%u entries=%lu", (void *)face.first,
+                     px, (unsigned long)per_size[px]);
+    }
+  }
+}
+#endif
+
 void FontManager::ClearCache() {
+#ifdef DSLIBRIS_DEBUG
+  LogAdvancePerf();
+#endif
   for (std::map<u8, FT_Face>::iterator iter = faces.begin(); iter != faces.end();
        iter++) {
     ClearCache(iter->second);
   }
   advanceCache.clear();
+#ifdef DSLIBRIS_DEBUG
+  advance_perf_ = AdvancePerf();
+#endif
 }
 
 void FontManager::ClearCache(u8 style) { ClearCache(GetFace(style)); }
@@ -413,6 +460,7 @@ void FontManager::ClearCache(FT_Face face) {
 }
 
 u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
+  FONT_ADVANCE_COUNT(calls);
   if (ftc) {
     auto gindex = GetGlyphIndex(ucs);
 
@@ -428,10 +476,12 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
   } else {
     bool needs_fallback = false;
 #ifdef ADVANCE_NO_CACHE
+    FONT_ADVANCE_COUNT(misses);
     auto gindex = FT_Get_Char_Index(face, ucs);
     if (!gindex) {
       needs_fallback = true;
     } else {
+      FONT_ADVANCE_COUNT(loads);
       error = FT_Load_Glyph(face, gindex, FT_LOAD_DEFAULT);
       if (!error) {
         bool ghost = face->glyph->advance.x != 0 &&
@@ -446,12 +496,16 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
     const u32 cache_key = ((u32)pixelsize << 24) | (ucs & 0x00FFFFFFu);
     auto &faceAdvanceCache = advanceCache[face];
     auto iter = faceAdvanceCache.find(cache_key);
-    if (iter != faceAdvanceCache.end())
+    if (iter != faceAdvanceCache.end()) {
+      FONT_ADVANCE_COUNT(hits);
       return iter->second;
+    }
+    FONT_ADVANCE_COUNT(misses);
 
     if (!FT_Get_Char_Index(face, ucs)) {
       needs_fallback = true;
     } else {
+      FONT_ADVANCE_COUNT(loads);
       error = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
       if (!error) {
         bool ghost = face->glyph->advance.x != 0 &&
@@ -468,9 +522,11 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
 #endif
 
     if (needs_fallback && fallback_count_ > 0) {
+      FONT_ADVANCE_COUNT(fallback_searches);
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
 #ifdef ADVANCE_NO_CACHE
+        FONT_ADVANCE_COUNT(loads);
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
         if (!error)
           return fb->glyph->advance.x >> 6;
@@ -478,10 +534,12 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
         auto &fbAdvanceCache = advanceCache[fb];
         auto fb_iter = fbAdvanceCache.find(cache_key);
         if (fb_iter != fbAdvanceCache.end()) {
+          FONT_ADVANCE_COUNT(fallback_hits);
           faceAdvanceCache.insert(std::make_pair(cache_key, fb_iter->second));
           return fb_iter->second;
         }
 
+        FONT_ADVANCE_COUNT(loads);
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
         if (!error) {
           u8 advance = fb->glyph->advance.x >> 6;
@@ -494,6 +552,7 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
     }
   }
 
+  FONT_ADVANCE_COUNT(unresolved);
   return 0;
 }
 
@@ -774,3 +833,5 @@ void FontManager::AutoLoadCjkFallbackFonts() {
 
 void FontManager::SetFontDir(const std::string &dir) { fontdir_ = dir; }
 const std::string &FontManager::GetFontDir() const { return fontdir_; }
+
+#undef FONT_ADVANCE_COUNT

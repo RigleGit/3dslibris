@@ -2,6 +2,7 @@
 #include "formats/cbz/cbz_worker.h"
 
 #include "book/book.h"
+#include "formats/cbz/cbz_state.h"
 #include "formats/cbz/cbz_archive.h"
 #include "formats/cbz/cbz_decode.h"
 #include "formats/common/format_limits.h"

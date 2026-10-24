@@ -5,6 +5,7 @@
 #include "formats/common/xml_parse_utils.h"
 #include "library/browser_view_utils.h"
 #include "settings/prefs_style_value_utils.h"
+using settings::ClampLineSpacingSetting;
 #include "shared/utf8_utils.h"
 #include "ui/text_limits.h"
 #include <sys/param.h>
@@ -15,8 +16,18 @@
 #include <cstring>
 #include <list>
 #include <memory>
+#include <new>
 #include <sys/stat.h>
 #include <unistd.h>
+static bool reject_nothrow_allocations=false;
+static unsigned rejected_nothrow_allocations=0;
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  if (reject_nothrow_allocations) {
+    ++rejected_nothrow_allocations;
+    return nullptr;
+  }
+  return ::operator new(size);
+}
 typedef uint8_t u8;
 typedef uint16_t u16;
 #include "shared/text_token_constants.h"
@@ -34,7 +45,7 @@ std::string GetPrefsBackupFile() { return prefs_path + ".bak"; }
 struct Text {
   struct { int top=0, left=0, bottom=0, right=0; } margin;
   int color=0, size=12, linespacing=0;
-  std::string fonts[7], fallbacks[4], fontdir;
+  std::string fonts[TEXT_STYLE_MONO_BOLDITALIC + 1], fallbacks[4], fontdir;
   int GetColorMode() const { return color; }
   void SetColorMode(int value) { color=value; }
   int GetPixelSize() const { return size; }
@@ -80,7 +91,8 @@ struct App {
   std::unique_ptr<Text> ts;
   unsigned char portrait_orientation=0, orientation=0;
   bool landscape=false, publisher_text_indent=false, publisher_block_margins=false, publisher_horizontal_margins=false;
-  int colorMode=0, reader_font_size=12, paraindent=0, paraspacing=0, reader_line_spacing=0, reopen=0;
+  u8 paraindent=0, paraspacing=0; // Match the real App byte-valued layout fields.
+  int colorMode=0, reader_font_size=12, reader_line_spacing=0, reopen=0;
   std::string fontdir, bookdir, requested_folder, requested_file;
   std::vector<Book *> books;
   Book *current=nullptr, *selected=nullptr, *restore_result=nullptr;
@@ -161,6 +173,21 @@ static void WriteXml(const std::string &xml) {
   assert(fwrite(xml.data(), 1, xml.size(), f) == xml.size() && fclose(f) == 0);
 }
 static void TestReadContracts() {
+  // Failure before parsing must leave settings and the file available for retry.
+  const std::string retry_xml="<dslibris><option time24h=\"0\"/><font size=\"18\"/></dslibris>";
+  WriteXml(retry_xml);
+  App retry_app; retry_app.ts.reset(new Text()); Prefs retry_prefs(&retry_app);
+  rejected_nothrow_allocations=0;
+  reject_nothrow_allocations=true;
+  const int failed_read=retry_prefs.Read();
+  reject_nothrow_allocations=false;
+  assert(failed_read == XML_ERROR_NO_MEMORY);
+  assert(rejected_nothrow_allocations == 1);
+  assert(retry_prefs.time24h && retry_app.reader_font_size == 12);
+  assert(ReadCurrent() == retry_xml);
+  assert(retry_prefs.Read() == 0 && !retry_prefs.time24h);
+  assert(retry_app.reader_font_size == 18);
+
   const int inputs[]={0, 7, 8, 12, 20, 21, 255};
   const int expected[]={8, 8, 8, 12, 20, 20, 20};
   for (size_t i=0; i<sizeof(inputs)/sizeof(inputs[0]); ++i) {
@@ -218,6 +245,61 @@ static void TestEbookImagesOption() {
     assert(ReadCurrent().find(saved[i])!=std::string::npos);
   }
 }
+static void TestParagraphPreferenceContracts() {
+  struct Case {
+    const char *attrs;
+    int spacing, indent, line_spacing, renderer_spacing;
+    bool text_indent, block_margins, horizontal_margins;
+  };
+  const Case cases[] = {
+    {nullptr, 2, 3, 5, 11, true, false, true},
+    {"", 2, 3, 5, 11, true, false, false},
+    {"lineSpacing=\"-4\"", 2, 3, 0, 0, true, false, false},
+    {"lineSpacing=\"99\"", 2, 3, 16, 16, true, false, false},
+    {"lineSpacing=\"7\"", 2, 3, 7, 7, true, false, false},
+    {"lineSpacing=\"noise\"", 2, 3, 0, 0, true, false, false},
+    {"spacing=\"-1\" indent=\"258\"", 255, 2, 5, 11, true, false, false},
+    {"spacing=\"260\" indent=\"-2\" lineSpacing=\"16\"", 4, 254, 16, 16, true, false, false},
+    {"publisherBlockMargins=\"1\"", 2, 3, 5, 11, true, true, true},
+    {"publisherHorizontalMargins=\"0\" publisherBlockMargins=\"1\"", 2, 3, 5, 11, true, true, false},
+    {"publisherBlockMargins=\"1\" publisherHorizontalMargins=\"0\"", 2, 3, 5, 11, true, true, false},
+    {"publisherTextIndent=\"0\" publisherBlockMargins=\"0\" publisherHorizontalMargins=\"-1\"", 2, 3, 5, 11, false, false, true},
+    {"ignored=\"x\" publisherTextIndent=\"text\"", 2, 3, 5, 11, false, false, false},
+    {"spacing=\"\" indent=\"junk\" lineSpacing=\" +4suffix\"", 0, 0, 4, 4, true, false, false},
+  };
+  for (const auto &row : cases) {
+    WriteXml(row.attrs ? std::string("<dslibris><paragraph ") + row.attrs + "/></dslibris>"
+                       : "<dslibris/>");
+    App app; app.ts.reset(new Text()); Prefs prefs(&app);
+    app.paraspacing=2; app.paraindent=3; app.reader_line_spacing=5;
+    app.ts->linespacing=11; app.publisher_text_indent=true;
+    app.publisher_block_margins=false; app.publisher_horizontal_margins=true;
+    assert(prefs.Read() == 0);
+    assert(app.paraspacing == row.spacing && app.paraindent == row.indent);
+    assert(app.reader_line_spacing == row.line_spacing && app.ts->linespacing == row.renderer_spacing);
+    assert(app.publisher_text_indent == row.text_indent && app.publisher_block_margins == row.block_margins);
+    assert(app.publisher_horizontal_margins == row.horizontal_margins);
+    assert(prefs.Write() == 0);
+    App restarted; restarted.ts.reset(new Text()); Prefs loaded(&restarted);
+    assert(loaded.Read() == 0);
+    assert(restarted.paraspacing == row.spacing && restarted.paraindent == row.indent);
+    // Writer always emits lineSpacing, so a fresh session receives the App value.
+    assert(restarted.reader_line_spacing == row.line_spacing && restarted.ts->linespacing == row.line_spacing);
+    assert(restarted.publisher_text_indent == row.text_indent && restarted.publisher_block_margins == row.block_margins);
+    assert(restarted.publisher_horizontal_margins == row.horizontal_margins);
+  }
+  WriteXml("<dslibris><paragraph lineSpacing=\"17\" publisherBlockMargins=\"1\"/><paragraph spacing=\"4\"/></dslibris>");
+  App app; app.ts.reset(new Text()); Prefs prefs(&app);
+  assert(prefs.Read() == 0 && app.paraspacing == 4);
+  assert(app.reader_line_spacing == 16 && app.ts->linespacing == 16);
+  assert(app.publisher_block_margins && app.publisher_horizontal_margins);
+  // Read has always applied completed tags even if a later XML tag is broken.
+  WriteXml("<dslibris><paragraph spacing=\"9\" lineSpacing=\"8\"/><broken></dslibris>");
+  assert(prefs.Read() != 0 && app.paraspacing == 9);
+  assert(app.reader_line_spacing == 8 && app.ts->linespacing == 8);
+  puts("PASS: paragraph defaults, byte conversion, limits, legacy migration and save/read");
+}
+
 int main() {
   const char *dir=getenv("PREFS_TEST_DIR"); assert(dir);
   paths::prefs_path=std::string(dir) + "/prefs.xml";
@@ -332,5 +414,6 @@ int main() {
   assert(wrong_folder.position == 0 && wrong_folder.bookmarks.empty() && wrong_folder.FontSize == -1);
   TestReadContracts();
   TestEbookImagesOption();
+  TestParagraphPreferenceContracts();
   puts("PASS: real preference save/read/restart, retry, migration and folder restoration");
 }

@@ -2,6 +2,7 @@
 #include "book/book_context.h"
 #include "book/page.h"
 #include "formats/epub/epub_parser.h"
+#include "expat.h"
 #include "formats/epub/epub_page_cache.h"
 #include "formats/common/page_text_extract_utils.h"
 #include "shared/text_token_constants.h"
@@ -11,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 #include <string>
 #include <unistd.h>
 #include <dirent.h>
@@ -19,6 +21,19 @@
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
 #endif
+
+namespace {
+bool g_reject_nothrow_allocations = false;
+unsigned g_rejected_nothrow_allocations = 0;
+}
+
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  if (g_reject_nothrow_allocations) {
+    ++g_rejected_nothrow_allocations;
+    return nullptr;
+  }
+  return ::operator new(size);
+}
 
 namespace {
 
@@ -523,11 +538,115 @@ void TestNavSpineOrderAndAnchors() {
   delete book;
 }
 
+void TestDeferredTocProxyTargets() {
+  const char *fixture = getenv("TEST_EPUB_PROXY_PATH");
+  ExpectTrue("proxy fixture supplied", fixture != nullptr);
+  const std::string path(fixture);
+  const size_t slash = path.find_last_of('/');
+  Book *book = MakeEpubBook(path.substr(0, slash).c_str(), path.substr(slash + 1).c_str());
+  ExpectTrue("proxy EPUB parses actual content", EpubOpen(book) == 0);
+  auto page_with_text = [book](const char *text) -> u16 {
+    for (int i = 0; i < book->GetPageCount(); ++i)
+      for (const auto &line : page_text_extract_utils::ExtractTextLinesFromPage(book->GetPage(i)))
+        if (line.find(text) != std::string::npos) return (u16)i;
+    Fail(text, "fixture text not found in actual pages");
+  };
+  const u16 first = page_with_text("Body heading A");
+  const u16 deep = page_with_text("Body heading B");
+  const u16 second = page_with_text("Body heading C");
+  ExpectTrue("anchor target differs from both document starts", first < deep && deep < second);
+  std::vector<std::vector<u32>> pages;
+  for (int i = 0; i < book->GetPageCount(); ++i) {
+    Page *page = book->GetPage(i);
+    pages.emplace_back();
+    if (page->GetLength() > 0)
+      pages.back().assign(page->GetBuffer(), page->GetBuffer() + page->GetLength());
+  }
+  // Exercise deferred recovery with incomplete anchors but intact document
+  // starts and parsed headings. No parser or ZIP lookup is mocked.
+  book->ClearChapterAnchors();
+  book->SetChapterAnchorPage("OEBPS/chapter1.xhtml#later", deep);
+  book->ClearChapters();
+  book->AddChapter(first, "Body heading A");
+  book->AddChapter(deep, "Body heading B");
+  book->AddChapter(second, "Body heading C");
+  const char *titles[] = {"Proxy anchor label", "Proxy document label", "Proxy fragment label"};
+  const u16 targets[] = {deep, second, first};
+  for (int run = 0; run < 2; ++run) {
+    ExpectTrue("deferred proxy resolution succeeds", epub_parser::ResolveToc(book, path) == 0);
+    const auto &chapters = book->GetChapters();
+    ExpectTrue("unmatched index proxy is excluded", chapters.size() == 3);
+    for (size_t i = 0; i < 3; ++i) {
+      ExpectTrue("proxy preserves NAV label and order", chapters[i].title == titles[i]);
+      ExpectTrue("proxy chooses anchor then exact then no-fragment target", chapters[i].page == targets[i]);
+    }
+    ExpectTrue("TOC resolution does not repaginate", (size_t)book->GetPageCount() == pages.size());
+    for (size_t i = 0; i < pages.size(); ++i) {
+      Page *page = book->GetPage((int)i);
+      ExpectTrue("TOC resolution preserves page length", (size_t)page->GetLength() == pages[i].size());
+      for (int j = 0; j < page->GetLength(); ++j)
+        ExpectTrue("TOC resolution preserves every page token", page->GetBuffer()[j] == pages[i][j]);
+    }
+  }
+  book->Close();
+  delete book;
+}
+
+void TestEpubContentAllocationFailureAndRecovery() {
+  char cache_dir[] = "/tmp/3dslibris-epub-allocation-XXXXXX";
+  ExpectTrue("allocation failure cache directory", mkdtemp(cache_dir) != nullptr);
+  epub_page_cache::SetCacheDirForTest(cache_dir);
+  TestCtx tc;
+  bool fail_after_first_document = true;
+  tc.ctx.on_spine_progress = [](unsigned done, unsigned, void *user_data) {
+    if (done == 1 && *static_cast<bool *>(user_data))
+      g_reject_nothrow_allocations = true;
+  };
+  tc.ctx.on_spine_progress_user_data = &fail_after_first_document;
+  Book book(tc.ctx);
+  book.SetFolderName(TEST_FIXTURES_DIR "/books");
+  book.SetFileName("basic.epub");
+  book.format = FORMAT_EPUB;
+  const std::string path = TEST_FIXTURES_DIR "/books/basic.epub";
+
+  g_rejected_nothrow_allocations = 0;
+  g_reject_nothrow_allocations = true;
+  const int index_rc = epub_parser::Index(&book, path);
+  g_reject_nothrow_allocations = false;
+  ExpectTrue("metadata works without allocating content layout state", index_rc == 0);
+  ExpectTrue("metadata does not attempt a content allocation",
+             g_rejected_nothrow_allocations == 0);
+  ExpectTrue("metadata does not paginate", book.GetPageCount() == 0);
+
+  const int open_rc = EpubOpen(&book);
+  g_reject_nothrow_allocations = false;
+  ExpectTrue("content allocation failure is fatal to EPUB open",
+             open_rc == XML_ERROR_NO_MEMORY);
+  ExpectTrue("failure follows actual first-document parsing", book.GetPageCount() > 0);
+  ExpectTrue("failed allocation is handled once", g_rejected_nothrow_allocations == 1);
+  ExpectFalse("incomplete EPUB cannot schedule a page cache",
+              book.HasPendingEpubPageCacheSave());
+  book.Close();
+
+  fail_after_first_document = false;
+  ExpectTrue("same EPUB recovers after allocation failure", EpubOpen(&book) == 0);
+  ExpectTrue("recovery parses both chapter targets", book.GetChapters().size() == 2);
+  ExpectTrue("recovery preserves chapter titles",
+             book.GetChapters()[0].title == "Chapter One");
+  book.Close();
+  const std::string cache_file = CacheFilePath(cache_dir);
+  ExpectTrue("remove recovery cache", remove(cache_file.c_str()) == 0);
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  ExpectTrue("remove allocation failure cache directory", rmdir(cache_dir) == 0);
+}
+
 } // namespace
 
 int main() {
+  TestEpubContentAllocationFailureAndRecovery();
   TestEmbeddedStylesFromReportedEpub();
   TestNavSpineOrderAndAnchors();
+  TestDeferredTocProxyTargets();
   TestEpubOpen();
   TestRealEpubOpenFromEnv();
   TestEpubReopen();

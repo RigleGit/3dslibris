@@ -69,11 +69,10 @@ public:
     int source_width;
     int source_height;
     u8 follow_text_lines;
-    int author_max_width_px;
 
     InlineImageEntry()
         : metadata_probed(false), metadata_ok(false), source_width(0),
-          source_height(0), follow_text_lines(0), author_max_width_px(0) {}
+          source_height(0), follow_text_lines(0) {}
   };
 
   struct InlineImageCacheEntry
@@ -219,6 +218,8 @@ public:
 
   Book(const BookContext &ctx);
   ~Book();
+  Book(const Book &) = delete;
+  Book &operator=(const Book &) = delete;
   format_t format;
   IStatusReporter *GetStatusReporter();
   Text *GetText();
@@ -336,11 +337,11 @@ public:
   bool GetInlineImageMetadata(u16 id, InlineImageMetadata *out);
   void SetInlineImageFollowTextLines(u16 id, u8 lines);
   u8 GetInlineImageFollowTextLines(u16 id) const;
-  void SetInlineImageAuthorMaxWidth(u16 id, int px);
   void ClearInlineImages();
   void SetInlineImageProbeZip(void *uf);
   bool StoreFb2InlineImage(const std::string &id,
                            const std::string &base64_data);
+  // Authored width belongs to this occurrence; 0 is unconstrained.
   bool PlanInlineImageLayout(Text *ts, u16 image_id, int current_screen,
                              int pen_x, int pen_y, bool line_began,
                              InlineImageContext image_context,
@@ -479,6 +480,3 @@ public:
   void RequestAbortOpen();
   void ClearOpenAbortRequest();
 };
-
-#include "formats/cbz/cbz_state.h"
-#include "formats/mupdf/mupdf_state.h"

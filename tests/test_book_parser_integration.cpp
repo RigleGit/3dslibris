@@ -6,9 +6,12 @@
 #include "parse.h"
 #include "book/book_parser.h"
 #include "book/book_renderer.h"
+#include "book/book_parse_deps.h"
 #include "book/page.h"
 #include "formats/common/page_text_extract_utils.h"
 #include "formats/common/book_error.h"
+#include "formats/common/plain_parser.h"
+#include "expat.h"
 #include "formats/mobi/mobi_text_decode.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/epub/epub_page_cache.h"
@@ -16,6 +19,9 @@
 #include "shared/app_flow_utils.h"
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
+#include "shared/cover_decode_utils.h"
+#include "shared/stb_image_gif_utils.h"
+#include "shared/text_token_constants.h"
 #include "ui/text.h"
 #include "test_assert.h"
 
@@ -24,6 +30,8 @@
 #include <dirent.h>
 #include <cstdio>
 #include <cstdlib>
+#include <new>
+#include <map>
 #include <string>
 #include <sys/stat.h>
 #include <utime.h>
@@ -45,6 +53,30 @@ extern "C" void *__wrap_malloc(size_t size) {
   return __real_malloc(size);
 }
 #endif
+
+namespace {
+bool reject_nothrow_allocations = false;
+unsigned rejected_nothrow_allocations = 0;
+unsigned cover_decode_calls = 0;
+}
+
+void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
+  if (reject_nothrow_allocations) {
+    ++rejected_nothrow_allocations;
+    return nullptr;
+  }
+  return ::operator new(size);
+}
+
+namespace stb_image_gif_utils {
+unsigned char *LoadFromMemoryForCoverTest(const unsigned char *, int, int *, int *, int *, int);
+unsigned char *LoadFromMemory(const unsigned char *data, int size, int *width,
+                              int *height, int *channels, int requested_channels) {
+  ++cover_decode_calls;
+  return LoadFromMemoryForCoverTest(data, size, width, height, channels,
+                                    requested_channels);
+}
+}
 
 namespace {
 
@@ -339,7 +371,6 @@ void TestLateFigureScreenTransition() {
                          parsed.pen.y,
                          text.margin.top + text.GetHeight() + image_height +
                              text.linespacing);
-          book.SetInlineImageAuthorMaxWidth(image, 0);
         }
       }
   }
@@ -774,6 +805,150 @@ void TestDispatchContentAndCloseBetweenFormats() {
   book.Close();
 }
 
+void TestXmlAllocationFailureAndRecovery() {
+  Text text;
+  BookContext ctx;
+  ctx.text = &text;
+  Book book(ctx);
+  book.SetFolderName(TEST_FIXTURES_DIR "/books");
+  book.SetFileName("basic.fb2");
+  const bool modes[] = {false, true};
+  for (bool fulltext : modes) {
+    rejected_nothrow_allocations = 0;
+    reject_nothrow_allocations = true;
+    const int rc = book_parser::Parse(&book, fulltext);
+    reject_nothrow_allocations = false;
+    test::ExpectEq("XML state allocation failure propagates", rc,
+                   XML_ERROR_NO_MEMORY);
+    test::ExpectEqU("XML handles the failed allocation once",
+                    rejected_nothrow_allocations, 1);
+    test::ExpectEq("XML failure creates no pages", book.GetPageCount(), 0);
+    test::ExpectTrue("XML failure creates no chapters", book.GetChapters().empty());
+    book.Close();
+  }
+  test::ExpectEq("XML retry succeeds", book_parser::Parse(&book, true), 0);
+  test::ExpectStrContains("FB2 recovery preserves text", BookText(&book).c_str(),
+                         "tiny FB2 fixture");
+  test::ExpectEq("FB2 recovery retains its chapter", (int)book.GetChapters().size(), 1);
+  test::ExpectStrEq("FB2 recovery retains chapter label",
+                   book.GetChapters()[0].title.c_str(), "Chapter 1");
+  book.Close();
+}
+
+void TestOdtAndPlainAllocationRecovery() {
+  const char *folder = getenv("TEST_ODT_READING_DIR");
+  test::ExpectTrue("ODT fixture directory exists", folder != nullptr);
+  Text text;
+  BookContext ctx;
+  ctx.text = &text;
+  Book book(ctx);
+  book.SetFolderName(folder);
+  book.SetFileName("basic.odt");
+  test::ExpectEq("real ODT opens", book_parser::Open(&book), 0);
+  test::ExpectEq("short ODT occupies one page", book.GetPageCount(), 1);
+  test::ExpectStrContains("ODT decodes entities", BookText(&book).c_str(),
+                         "ODT first paragraph & decoded entity.");
+  test::ExpectStrContains("ODT keeps final paragraph", BookText(&book).c_str(),
+                         "ODT final paragraph.");
+  test::ExpectEq("ODT retains both heading targets", (int)book.GetChapters().size(), 2);
+  test::ExpectStrEq("ODT first heading", book.GetChapters()[0].title.c_str(), "Chapter One");
+  test::ExpectStrEq("ODT nested heading", book.GetChapters()[1].title.c_str(), "Section Two");
+  test::ExpectEq("ODT first level", book.GetChapters()[0].level, 0);
+  test::ExpectEq("ODT nested level", book.GetChapters()[1].level, 1);
+  book.Close();
+
+  rejected_nothrow_allocations = 0;
+  reject_nothrow_allocations = true;
+  const int odt_rc = book_parser::Open(&book);
+  reject_nothrow_allocations = false;
+  test::ExpectEq("ODT state allocation failure propagates", odt_rc, XML_ERROR_NO_MEMORY);
+  test::ExpectEqU("ODT handles failed state allocation once", rejected_nothrow_allocations, 1);
+  test::ExpectEq("ODT allocation failure creates no pages", book.GetPageCount(), 0);
+  test::ExpectTrue("ODT allocation failure creates no chapters", book.GetChapters().empty());
+  book.Close();
+  test::ExpectEq("ODT reopens after allocation failure", book_parser::Open(&book), 0);
+  test::ExpectEq("ODT recovered chapter count", (int)book.GetChapters().size(), 2);
+  book.Close();
+
+  const std::string plain = "Plain recovery paragraph.\n";
+  rejected_nothrow_allocations = 0;
+  reject_nothrow_allocations = true;
+  const int plain_rc = plain_parser::ParseBuffer(&book, plain, false);
+  reject_nothrow_allocations = false;
+  test::ExpectEq("plain state allocation failure propagates", plain_rc, 1);
+  test::ExpectEqU("plain handles failed state allocation once", rejected_nothrow_allocations, 1);
+  test::ExpectEq("plain allocation failure creates no pages", book.GetPageCount(), 0);
+  test::ExpectTrue("plain allocation failure creates no chapters", book.GetChapters().empty());
+  test::ExpectEq("plain parses after allocation failure", plain_parser::ParseBuffer(&book, plain, false), 0);
+  test::ExpectStrContains("plain recovery preserves text", BookText(&book).c_str(),
+                         "Plain recovery paragraph.");
+  test::ExpectEq("plain recovery preserves short pagination", book.GetPageCount(), 1);
+  test::ExpectTrue("plain recovery keeps heuristic navigation disabled", book.GetChapters().empty());
+  book.Close();
+}
+
+void TestCoverHeaderPreflight() {
+  const char *folder = getenv("TEST_COVER_READING_DIR");
+  test::ExpectTrue("cover fixtures exist", folder != nullptr);
+  BookContext ctx;
+  Book book(ctx);
+  struct ValidCase {
+    const char *name;
+    int limit, width, height;
+    u16 pixel;
+  };
+  const ValidCase valid[] = {
+      {"red.png", 2048, 2, 2, 0xf800},
+      {"black.gif", 2048, 1, 1, 0x0000},
+      {"green.jpg", 2048, 1, 1, 0x07e0},
+      {"boundary.png", 2048, 85, 1, 0xf800},
+      {"over-width.png", 0, 85, 1, 0xf800},
+      {"over-height.png", -1, 1, 115, 0xf800},
+  };
+  auto read_image = [folder](const char *name) {
+    const std::string path = std::string(folder) + "/" + name;
+    FILE *fp = fopen(path.c_str(), "rb");
+    test::ExpectTrue("image fixture opens", fp != nullptr);
+    std::vector<unsigned char> data;
+    int byte;
+    while ((byte = fgetc(fp)) != EOF)
+      data.push_back(static_cast<unsigned char>(byte));
+    test::ExpectTrue("image fixture reads", !ferror(fp));
+    test::ExpectEq("image fixture closes", fclose(fp), 0);
+    return data;
+  };
+  for (const auto &row : valid) {
+    const std::vector<unsigned char> data = read_image(row.name);
+    cover_decode_calls = 0;
+    test::ExpectTrue("accepted cover decodes", cover_decode_utils::DecodeImageToCoverThumb(
+        &book, data.data(), data.size(), row.limit));
+    test::ExpectEqU("accepted cover invokes actual decoder", cover_decode_calls, 1);
+    test::ExpectEq("cover width preserved", book.coverWidth, row.width);
+    test::ExpectEq("cover height preserved", book.coverHeight, row.height);
+    for (int i = 0; i < book.coverWidth * book.coverHeight; ++i)
+      test::ExpectEq("cover RGB565 pixels preserved", book.coverPixels[i], row.pixel);
+  }
+  u16 *const previous = book.coverPixels;
+  const int previous_width = book.coverWidth;
+  const int previous_height = book.coverHeight;
+  const std::vector<u16> previous_pixels(previous, previous + previous_width * previous_height);
+  const char *rejected[] = {"corrupt-header", "zero-width.gif", "zero-height.gif",
+                            "over-width.png", "over-height.png", "corrupt-body.png"};
+  for (const char *name : rejected) {
+    const std::vector<unsigned char> data = read_image(name);
+    cover_decode_calls = 0;
+    test::ExpectFalse("rejected image leaves existing cover", cover_decode_utils::DecodeImageToCoverThumb(
+        &book, data.data(), data.size()));
+    test::ExpectTrue("rejection preserves cover ownership", book.coverPixels == previous);
+    test::ExpectEq("rejection preserves width", book.coverWidth, previous_width);
+    test::ExpectEq("rejection preserves height", book.coverHeight, previous_height);
+    test::ExpectTrue("rejection preserves every previous pixel",
+                    std::equal(previous_pixels.begin(), previous_pixels.end(), book.coverPixels));
+    test::ExpectEqU("rejected header never enters decode; bad body still does",
+                    cover_decode_calls, !strcmp(name, "corrupt-body.png") ? 1 : 0);
+  }
+}
+
 void TestFb2NestedNavigation() {
   Text text;
   BookContext ctx;
@@ -1003,6 +1178,203 @@ PageData CapturePageData(Book *book) {
   return data;
 }
 
+PageData ImagePagesWithoutResourceIds(Book *book) {
+  PageData data = CapturePageData(book);
+  for (auto &page : data) {
+    for (size_t i = 0; i + 1 < page.size(); ++i) {
+      if (page[i] == TEXT_IMAGE)
+        page[++i] = 0;
+    }
+  }
+  return data;
+}
+
+// Exercise the real token consumer; the Text spy records the selected face,
+// not a second implementation of the style-token state machine.
+void TestPageFontFaceTransitions() {
+  const u32 tokens[] = {
+      'A', TEXT_BOLD_ON, TEXT_BOLD_ON, 'B', TEXT_ITALIC_ON, 'C',
+      TEXT_BOLD_OFF, TEXT_BOLD_OFF, 'D', TEXT_MONO_ON, 'E',
+      TEXT_BOLD_ON, 'F', TEXT_ITALIC_OFF, 'G', TEXT_BOLD_OFF, 'H',
+      TEXT_MONO_OFF, TEXT_ITALIC_OFF, 'I', TEXT_BOLD_ON, 'J',
+      TEXT_SCREEN_BREAK, 'K', TEXT_BOLD_OFF, 'L',
+      TEXT_MONO_ON, TEXT_ITALIC_ON, 'M'};
+  const u8 styles[] = {
+      TEXT_STYLE_REGULAR, TEXT_STYLE_BOLD, TEXT_STYLE_BOLDITALIC,
+      TEXT_STYLE_ITALIC, TEXT_STYLE_MONO_ITALIC, TEXT_STYLE_MONO_BOLDITALIC,
+      TEXT_STYLE_MONO_BOLD, TEXT_STYLE_MONO, TEXT_STYLE_REGULAR,
+      TEXT_STYLE_BOLD, TEXT_STYLE_BOLD, TEXT_STYLE_REGULAR,
+      TEXT_STYLE_MONO_ITALIC};
+  for (unsigned char orientation = 0; orientation < 3; ++orientation) {
+    Text text;
+    text.capture_rendered_text = true;
+    text.landscape = orientation == 2;
+    std::vector<u16> left(400 * 400), right(400 * 400);
+    text.screenleft = left.data();
+    text.screenright = right.data();
+    BookContext ctx;
+    ctx.text = &text;
+    ctx.orientation = &orientation;
+    Book book(ctx);
+    Page page(&book);
+    page.SetBuffer(tokens, sizeof(tokens) / sizeof(tokens[0]));
+    page.Draw(&text);
+    test::ExpectEqU("style tokens are consumed, not printed", text.rendered_glyphs.size(), 13);
+    u16 *first = orientation == 1 ? text.screenright : text.screenleft;
+    u16 *second = orientation == 1 ? text.screenleft : text.screenright;
+    for (size_t i = 0; i < 13; ++i) {
+      const auto &glyph = text.rendered_glyphs[i];
+      test::ExpectEqU("style changes preserve glyph order", glyph.codepoint, 'A' + i);
+      test::ExpectEq("all eight font faces and resets", glyph.style, styles[i]);
+      test::ExpectTrue("font face survives a forced screen break", glyph.screen == (i < 10 ? first : second));
+      test::ExpectEq("tokens do not advance the pen", glyph.x, 12 + 8 * (i < 10 ? i : i - 10));
+      test::ExpectEq("font face tokens preserve baseline", glyph.y, 24);
+    }
+    text.rendered_glyphs.clear();
+    const u32 fresh[] = {'Z'};
+    page.SetBuffer(fresh, 1);
+    page.Draw(&text);
+    test::ExpectEqU("second draw prints one glyph", text.rendered_glyphs.size(), 1);
+    test::ExpectEq("font face state resets on every page draw", text.rendered_glyphs[0].style, TEXT_STYLE_REGULAR);
+  }
+}
+
+struct ImageRenderSnapshot {
+  std::vector<std::vector<u16>> frames;
+  std::vector<std::string> glyphs;
+};
+
+ImageRenderSnapshot RenderImagePages(Book *book, Text *text) {
+  ImageRenderSnapshot result;
+  std::vector<u16> left(400 * 400 + 2), right(400 * 400 + 2);
+  text->screenleft = left.data() + 1;
+  text->screenright = right.data() + 1;
+  std::map<int, int> red_rows;
+  int painted_screens[2] = {0, 0};
+  for (int page = 0; page < book->GetPageCount(); ++page) {
+    std::fill(left.begin(), left.end(), 0);
+    std::fill(right.begin(), right.end(), 0);
+    left.front() = left.back() = right.front() = right.back() = 0xbeef;
+    text->screen = text->screenleft;
+    text->rendered_glyphs.clear();
+    book->GetPage(page)->Draw(text);
+    test::ExpectTrue("inline draw respects framebuffer guards",
+        left.front() == 0xbeef && left.back() == 0xbeef &&
+        right.front() == 0xbeef && right.back() == 0xbeef);
+    for (int screen = 0; screen < 2; ++screen) {
+      const u16 *pixels = screen == 0 ? text->screenleft : text->screenright;
+      result.frames.emplace_back(pixels, pixels + 400 * 400);
+      for (int y = 0; y < 400; ++y) {
+        int red = 0;
+        for (int x = 0; x < 400; ++x)
+          if (pixels[y * 400 + x] == 0xf800) ++red;
+        if (red) { ++red_rows[red]; ++painted_screens[screen]; }
+      }
+    }
+    for (const auto &glyph : text->rendered_glyphs) {
+      char position[96];
+      snprintf(position, sizeof(position), "%d:%d:%d:%d:%u", page,
+          glyph.screen == text->screenleft ? 0 : 1, glyph.x, glyph.y,
+          (unsigned)glyph.codepoint);
+      result.glyphs.push_back(position);
+    }
+  }
+  // Three occurrences of each 160x32 red image: native, 40x8, and 80x16.
+  // These literal pixel counts are independent of layout/planning helpers.
+  test::ExpectEq("40px occurrences retain eight red rows each", red_rows[40], 24);
+  test::ExpectEq("80px occurrences retain sixteen red rows each", red_rows[80], 48);
+  test::ExpectEq("unconstrained occurrences retain native width", red_rows[160], 96);
+  test::ExpectEq("no unexpected scaled image width", (int)red_rows.size(), 3);
+  test::ExpectTrue("actual images reach both physical screens", painted_screens[0] && painted_screens[1]);
+  test::ExpectFalse("following text is drawn", result.glyphs.empty());
+  text->screen = text->screenleft = text->screenright = nullptr;
+  return result;
+}
+
+bool LoadImagePageCache(Book *book, const std::string &path) {
+  const BookParseDeps deps = BuildBookParseDeps(book);
+  return epub_page_cache::TryLoad(book, path.c_str(), deps.layout.pixel_size,
+      deps.layout.linespacing, deps.paragraph_spacing, deps.paragraph_indent,
+      deps.orientation, deps.layout.margin_left, deps.layout.margin_right,
+      deps.layout.margin_top, deps.layout.margin_bottom,
+      deps.regular_font_path.c_str());
+}
+
+void TestRepeatedInlineImageWidthsAndCachedDraw() {
+  const char *folder = getenv("TEST_INLINE_IMAGE_READING_DIR");
+  test::ExpectTrue("inline-image fixture directory configured", folder != nullptr);
+  for (unsigned char orientation = 0; orientation < 3; ++orientation) {
+    Text text;
+    text.capture_rendered_text = true;
+    text.landscape = orientation == 2;
+    text.display.width = text.landscape ? 400 : 240;
+    text.display.height = 400; // The stub's buffer stride; actual logical height comes from orientation.
+    BookContext ctx; ctx.text = &text; ctx.orientation = &orientation;
+    const std::string cache_dir = std::string(folder) + "/cache/" + std::to_string(orientation);
+    test::ExpectEq("create isolated image cache", mkdir(cache_dir.c_str(), 0700), 0);
+    epub_page_cache::SetCacheDirForTest(cache_dir.c_str());
+    Book separate(ctx); separate.SetFolderName(folder); separate.SetFileName("separate.epub");
+    separate.format = FORMAT_EPUB; // LibraryController supplies the format before dispatch.
+    test::ExpectEq("open independent-image control", book_parser::Open(&separate), 0);
+    test::ExpectEqU("control has three identical-byte resources", separate.GetInlineImageCount(), 3);
+    const PageData expected_pages = ImagePagesWithoutResourceIds(&separate);
+    const std::vector<ChapterEntry> chapters = separate.GetChapters();
+    const ImageRenderSnapshot expected = RenderImagePages(&separate, &text);
+    Book shared(ctx); shared.SetFolderName(folder); shared.SetFileName("shared.epub");
+    shared.format = FORMAT_EPUB;
+    test::ExpectEq("open repeated-image fixture", book_parser::Open(&shared), 0);
+    test::ExpectEqU("repeated src still deduplicates resource", shared.GetInlineImageCount(), 1);
+    for (int screen = 0; screen < 2; ++screen) {
+      const int authored[] = {40, 80, 0};
+      const int expected_width[] = {40, 80, 160};
+      const int expected_height[] = {8, 16, 32};
+      for (int i = 0; i < 3; ++i) {
+        InlineImageLayoutPlan plan{};
+        test::ExpectTrue("plan real metadata for this occurrence",
+            shared.PlanInlineImageLayout(&text, 0, screen, text.margin.left,
+                text.margin.top + text.GetHeight(), false,
+                INLINE_IMAGE_CONTEXT_LEADING_PARAGRAPH, &plan, authored[i]));
+        test::ExpectEq("occurrence width does not inherit resource history", plan.draw_width, expected_width[i]);
+        test::ExpectEq("occurrence preserves aspect ratio", plan.draw_height, expected_height[i]);
+      }
+    }
+    test::ExpectTrue("resource aliasing cannot change pagination", ImagePagesWithoutResourceIds(&shared) == expected_pages);
+    const ImageRenderSnapshot cold = RenderImagePages(&shared, &text);
+    test::ExpectTrue("aliasing cannot change image pixels or positions", cold.frames == expected.frames);
+    test::ExpectTrue("aliasing cannot move following text", cold.glyphs == expected.glyphs);
+    test::ExpectEq("all fixture TOC targets survive", (int)shared.GetChapters().size(), 3);
+    for (size_t i = 0; i < chapters.size(); ++i) {
+      test::ExpectEq("TOC pages independent of resource sharing", shared.GetChapters()[i].page, chapters[i].page);
+      test::ExpectStrEq("TOC labels preserved", shared.GetChapters()[i].title.c_str(), chapters[i].title.c_str());
+    }
+    const PageData cold_pages = CapturePageData(&shared);
+    shared.Close();
+    const std::vector<std::string> caches = CacheFiles(cache_dir);
+    test::ExpectEq("close saves one real image page cache", (int)caches.size(), 1);
+    const std::string path = std::string(folder) + "/shared.epub";
+    Book warm(ctx); warm.SetFolderName(folder); warm.SetFileName("shared.epub"); warm.format = FORMAT_EPUB;
+    test::ExpectTrue("load actual image page cache without parsing", LoadImagePageCache(&warm, path));
+    test::ExpectTrue("cache preserves per-occurrence tokens", CapturePageData(&warm) == cold_pages);
+    test::ExpectEqU("cache restores deduplicated image registry", warm.GetInlineImageCount(), 1);
+    const ImageRenderSnapshot loaded = RenderImagePages(&warm, &text);
+    test::ExpectTrue("warm cache draws identical image pixels", loaded.frames == cold.frames);
+    test::ExpectTrue("warm cache retains following text positions", loaded.glyphs == cold.glyphs);
+    warm.Close();
+    std::string obsolete = ReadFileBytes(caches[0]);
+    obsolete[4] = 17; obsolete[5] = 0; // Previous pagination could inherit another occurrence's width.
+    WriteFileBytes(caches[0], obsolete);
+    test::ExpectFalse("reject old EPUB pagination after width correction", LoadImagePageCache(&warm, path));
+    test::ExpectTrue("obsolete image pagination cache is evicted", CacheFiles(cache_dir).empty());
+    test::ExpectEq("reopen reparses obsolete pagination", book_parser::Open(&warm), 0);
+    test::ExpectTrue("reparse recreates corrected tokens", CapturePageData(&warm) == cold_pages);
+    warm.Close(); separate.Close();
+    for (const std::string &cache : CacheFiles(cache_dir))
+      test::ExpectEq("remove isolated image cache", remove(cache.c_str()), 0);
+    epub_page_cache::SetCacheDirForTest(nullptr);
+    printf("PASS: repeated inline image widths, both screens, orientation %u and cache\n", (unsigned)orientation);
+  }
+}
+
 void ExpectMobiContent(Book *book) {
   ExpectSearch(book, "café & tea");
   ExpectSearch(book, "TOKEN1999 TOKEN2000");
@@ -1034,6 +1406,33 @@ void ExpectMobiContent(Book *book) {
   }
 }
 
+struct MobiBufferReporter : CancelReporter {
+  std::vector<std::string> buffers;
+  void PrintStatus(const char *line) override {
+    if (line && std::string(line).find("MOBI buffer:") != std::string::npos)
+      buffers.push_back(line);
+  }
+  void PrintStatus(std::string line) override { PrintStatus(line.c_str()); }
+#ifdef DSLIBRIS_DEBUG
+  size_t Size(const char *phase, const char *name) const {
+    const std::string prefix = std::string("MOBI buffer: phase=") + phase + " name=" + name + " ";
+    for (const auto &line : buffers) {
+      const size_t pos = line.find(prefix);
+      if (pos == std::string::npos) continue;
+      unsigned long size = 0, capacity = 0;
+      test::ExpectEq("diagnostic supplies size and capacity",
+          std::sscanf(line.c_str() + pos + prefix.size(), "size=%lu capacity=%lu", &size, &capacity), 2);
+      test::ExpectTrue("buffer capacity covers its live bytes", capacity >= size);
+      if (std::string(phase).find("released") != std::string::npos)
+        test::ExpectEqU("released capacity matches an empty string", capacity, std::string().capacity());
+      return size;
+    }
+    test::ExpectTrue(prefix.c_str(), false);
+    return 0;
+  }
+#endif
+};
+
 void TestMobiParseCloseCachedReopenAndRecovery() {
   const char *folder = getenv("TEST_MOBI_READING_DIR");
   test::ExpectTrue("MOBI fixture folder supplied", folder != nullptr);
@@ -1042,10 +1441,12 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
   const char *names[] = {"raw.mobi", "palmdoc.mobi"};
   for (const char *name : names) {
     Text text;
-    CancelReporter reporter;
+    MobiBufferReporter reporter;
     BookContext ctx;
     ctx.text = &text;
     ctx.status_reporter = &reporter;
+    const std::string path = std::string(folder) + "/" + name;
+    const std::string source = ReadFileBytes(path);
     PageData pages;
     std::vector<ChapterEntry> chapters;
     {
@@ -1054,6 +1455,25 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
       book.SetFileName(name);
       test::ExpectEq(name, book_parser::Open(&book), 0);
       ExpectMobiContent(&book);
+#ifdef DSLIBRIS_DEBUG
+      // Independent PalmDOC header oracle: first record offset, then text length.
+      auto be32 = [&source](size_t offset) {
+        test::ExpectTrue("fixture header bounds", offset + 4 <= source.size());
+        unsigned value = 0;
+        for (size_t i = 0; i < 4; ++i) value = (value << 8) | (unsigned char)source[offset + i];
+        return value;
+      };
+      const size_t text_bytes = be32(be32(78) + 4);
+      test::ExpectEqU("raw diagnostic matches file bytes", reporter.Size("source", "raw"), source.size());
+      test::ExpectEqU("merged diagnostic matches declared text", reporter.Size("merged", "merged"), text_bytes);
+      test::ExpectEqU("UTF-8 fixture is not transcoded", reporter.Size("utf8", "utf8"), text_bytes);
+      const size_t cleaned = reporter.Size("cleaned", "text");
+      test::ExpectTrue("markup extraction produces smaller live text", cleaned > 0 && cleaned < text_bytes);
+      test::ExpectEqU("merged storage released", reporter.Size("merged_released", "merged"), 0);
+      test::ExpectEqU("raw storage released after TOC", reporter.Size("raw_released", "raw"), 0);
+#else
+      test::ExpectTrue("release has no buffer diagnostics", reporter.buffers.empty());
+#endif
       pages = CapturePageData(&book);
       chapters = book.GetChapters();
       test::ExpectTrue("cold MOBI open schedules a real cache save", book.HasPendingMobiPageCacheSave());
@@ -1064,8 +1484,6 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
     }
     const std::vector<std::string> caches = CacheFiles(cache_dir);
     test::ExpectEq("Close saves one MOBI cache artifact", (int)caches.size(), 1);
-    const std::string path = std::string(folder) + "/" + name;
-    const std::string source = ReadFileBytes(path);
     struct stat original;
     test::ExpectEq("source attributes readable", stat(path.c_str(), &original), 0);
     // Preserve the source identity used by the cache key but make decoding
@@ -1404,6 +1822,11 @@ int main(int argc, char **argv) {
     else return 2;
     return 0;
   }
+  TestPageFontFaceTransitions();
+  TestRepeatedInlineImageWidthsAndCachedDraw();
+  TestCoverHeaderPreflight();
+  TestOdtAndPlainAllocationRecovery();
+  TestXmlAllocationFailureAndRecovery();
   TestReadingGeometryParserBoundaries();
   TestFb2ResourceStorageLimitsAndRecovery();
   TestInlineImageCacheRetainsDistinctDimensions();

@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/tests/test_build.sh"
 TASK_TMP="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMP"' EXIT
-python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/settings/prefs.cpp" 'static int ClampLineSpacingSetting(' > "$TASK_TMP/prefs_read_callbacks.inc"
+python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/settings/prefs.cpp" 'static void ApplyParagraphPreferences(' > "$TASK_TMP/prefs_read_callbacks.inc"
 printf '%s\n' 'namespace xml { namespace prefs {' >> "$TASK_TMP/prefs_read_callbacks.inc"
 for signature in 'static bool MatchesBookFilename(' 'void start(' 'void end('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/settings/prefs.cpp" "$signature" >> "$TASK_TMP/prefs_read_callbacks.inc"

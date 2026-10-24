@@ -1,16 +1,18 @@
 #pragma once
 #include <cstdint>
 extern uint64_t fake_tick;
+extern unsigned fake_region_free;
+extern unsigned fake_linear_free;
 inline uint64_t svcGetSystemTick() {
   return fake_tick;
 }
 #define SYSCLOCK_ARM11 1000000ULL
 #define MEMREGION_ALL 0
 inline unsigned osGetMemRegionFree(int) {
-  return 1234;
+  return fake_region_free;
 }
 inline unsigned linearSpaceFree() {
-  return 5678;
+  return fake_linear_free;
 }
 
 #include <mutex>

@@ -182,20 +182,29 @@ int main() {
   test::ExpectTrue("default mono bold italic font entry", hasMonoBoldItalicFont);
 
   {
-    std::string decoded = UrlDecode("chapter%2Etxt");
-    test::ExpectStrEq("UrlDecode decodes percent escapes", decoded.c_str(), "chapter.txt");
-  }
-  {
-    std::string decoded = UrlDecode("folder%20name/file.txt");
-    test::ExpectStrEq("UrlDecode decodes spaces", decoded.c_str(), "folder name/file.txt");
-  }
-  {
-    std::string decoded = UrlDecode("bad%zzvalue");
-    test::ExpectStrEq("UrlDecode preserves invalid escapes", decoded.c_str(), "bad%zzvalue");
-  }
-  {
-    std::string decoded = UrlDecode("mixed%2fCASE%3aok");
-    test::ExpectStrEq("UrlDecode keeps decoded bytes", decoded.c_str(), "mixed/CASE:ok");
+    const struct {
+      const char *input;
+      std::string expected;
+    } cases[] = {
+        {"", ""},
+        {"chapter%2Etxt", "chapter.txt"},
+        {"folder%20name/file.txt", "folder name/file.txt"},
+        {"bad%zzvalue", "bad%zzvalue"},
+        {"mixed%2fCASE%3aok", "mixed/CASE:ok"},
+        {"tail%", "tail%"},
+        {"tail%0", "tail%0"},
+        {"%00x", std::string("\0x", 2)},
+        {"%FF", "\xff"},
+        {"%c3%B1", "\xc3\xb1"},
+        {"%A?", "\x0a"},
+        {"% 1", "\x01"},
+        {"%-1", "\xff"},
+        {"%1gX", "\x01X"},
+        {"a+b", "a+b"},
+        {"%2520", "%20"},
+    };
+    for (const auto &entry : cases)
+      test::ExpectTrue(entry.input, UrlDecode(entry.input) == entry.expected);
   }
 
   {

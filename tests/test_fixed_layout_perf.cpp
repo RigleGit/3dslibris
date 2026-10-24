@@ -6,6 +6,10 @@
 #include <thread>
 #include <cstdio>
 uint64_t fake_tick = 1000;
+unsigned fake_region_free = 1234;
+unsigned fake_linear_free = 5678;
+int fake_heap_used = 345;
+int fake_heap_free = 678;
 struct Reporter : IStatusReporter {
   std::vector<std::string> lines;
   void PrintStatus(const char *s) {
@@ -18,6 +22,23 @@ struct Reporter : IStatusReporter {
 int main() {
   Reporter r;
   int doc;
+  fixed_perf::SampleMemory(&doc, -1, -1, "mobi.after_read");
+  assert(r.lines.empty());
+  fake_tick = 2000;
+  fake_heap_used = 901;
+  fake_heap_free = 234;
+  fake_region_free = 4567;
+  fake_linear_free = 8901;
+  fixed_perf::SampleMemory(&doc, -1, -1, "mobi.after_decode");
+  fixed_perf::Flush(&r);
+  assert(r.lines.size() == 2);
+  assert(r.lines[0].find("stage=memory at_us=1000 ") != std::string::npos);
+  assert(r.lines[0].find("heap_used=345 heap_free=678 linear_free=5678 region_free=1234") != std::string::npos);
+  assert(r.lines[0].find("sample=mobi.after_read") != std::string::npos);
+  assert(r.lines[1].find("stage=memory at_us=2000 ") != std::string::npos);
+  assert(r.lines[1].find("heap_used=901 heap_free=234 linear_free=8901 region_free=4567") != std::string::npos);
+  assert(r.lines[1].find("sample=mobi.after_decode") != std::string::npos);
+  r.lines.clear();
   fixed_perf::BeginView(&doc, "CBZ", "book.cbz", 0, 1, 400, 240);
   assert(!fixed_perf::NeedsPresentationTiming());
   fixed_perf::ViewStage("pdf.blit_main", 123);

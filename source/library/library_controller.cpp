@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <dirent.h>
 #include <errno.h>
+#include <memory>
+#include <new>
 #include <set>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -89,12 +91,6 @@ static time_t BookFileMtime(Book *b) {
   path.append(b->GetFileName());
   struct stat st;
   return stat(path.c_str(), &st) == 0 ? st.st_mtime : 0;
-}
-
-static bool BookDateModifiedLessThan(Book *a, Book *b) {
-  if (a && b && a->IsBrowserFolder() != b->IsBrowserFolder())
-    return a->IsBrowserFolder();
-  return BookFileMtime(a) > BookFileMtime(b); // newer first
 }
 
 static bool BookRecentLessThan(Book *a, Book *b) {
@@ -687,9 +683,34 @@ void LibraryController::SortBooks() {
   case LIBRARY_SORT_FILETYPE:
     std::sort(app_.books.begin(), app_.books.end(), &BookFiletypeLessThan);
     break;
-  case LIBRARY_SORT_DATE_MODIFIED:
-    std::sort(app_.books.begin(), app_.books.end(), &BookDateModifiedLessThan);
+  case LIBRARY_SORT_DATE_MODIFIED: {
+    const size_t count = app_.books.size();
+    if (count == 0)
+      break;
+    struct DatedBook {
+      Book *book;
+      time_t mtime;
+    };
+    // Keep one short-lived entry per book. If it cannot be allocated, retain
+    // the current order rather than do filesystem I/O inside the comparator.
+    std::unique_ptr<DatedBook[]> dated(new (std::nothrow) DatedBook[count]);
+    if (!dated)
+      break;
+    for (size_t i = 0; i < count; ++i) {
+      dated[i].book = app_.books[i];
+      dated[i].mtime = BookFileMtime(app_.books[i]);
+    }
+    std::sort(dated.get(), dated.get() + count,
+              [](const DatedBook &a, const DatedBook &b) {
+                if (a.book && b.book &&
+                    a.book->IsBrowserFolder() != b.book->IsBrowserFolder())
+                  return a.book->IsBrowserFolder();
+                return a.mtime > b.mtime; // newer first; no secondary tie key
+              });
+    for (size_t i = 0; i < count; ++i)
+      app_.books[i] = dated[i].book;
     break;
+  }
   case LIBRARY_SORT_RECENT:
 #if RECENT_BOOKS_TRACE
     for (auto &book : app_.books) {

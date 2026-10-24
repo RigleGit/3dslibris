@@ -217,7 +217,9 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
 
   fz_try(ctx) {
     const uint64_t buffer_start = fixed_perf::Now();
-    // Borrow caller storage until the image, buffer and context are released below.
+    // All MuPDF references, including the context's store, are dropped below
+    // before this synchronous call returns. Borrow the caller's immutable
+    // entry bytes; the shared buffer never frees the vector's storage.
     buffer = fz_new_buffer_from_shared_data(ctx, bytes.data(), bytes.size());
     fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_buffer",
                        fixed_perf::Now() - buffer_start, 1, bytes.size());
@@ -298,7 +300,7 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
     ok = true;
   }
   fz_catch(ctx) {
-    SetLastCbzDecodeError(fz_caught_message(ctx));
+    SetLastCbzDecodeError(fz_convert_error(ctx, NULL));
     ClearDecodedPage(out);
     ok = false;
   }

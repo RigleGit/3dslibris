@@ -16,6 +16,10 @@ mkdir -p "$TEST_OUTDIR"
 CC_BIN="${CC:-cc}"
 CXX_BIN="${CXX:-c++}"
 
+# Keep assert-based test contracts active, including direct compiler invocations
+# in integration runners that source this helper.
+export CXXFLAGS="${CXXFLAGS:-} -UNDEBUG"
+
 split_flags() {
   if [ -n "${1:-}" ]; then
     # Intentionally split on shell whitespace for compiler flag env vars.

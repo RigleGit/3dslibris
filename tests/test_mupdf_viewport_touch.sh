@@ -14,4 +14,4 @@ python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf
 for signature in 'MuPdfNavigationBounds GetMuPdfNavigationBounds(' 'static pdf_view_utils::NormalizedPoint RecenterMuPdfViewportFromPreview(' 'static void GetMuPdfPreviewContentBounds(' 'pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport(' 'bool Book::MoveMuPdfViewportToPreview('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_viewport.cpp" "$signature" >> "$TASK_TMP/mupdf_viewport_touch_under_test.inc"
 done
-build_test test_mupdf_viewport_touch -- -I"$TASK_TMP" -I"$ROOT/include" "$ROOT/tests/test_mupdf_viewport_touch.cpp" "$ROOT/source/formats/common/pdf_view_utils.cpp"
+build_test test_mupdf_viewport_touch -- -I"$TASK_TMP" -I"$ROOT/tests/stubs/mupdf_viewport" -I"$ROOT/include" "$ROOT/tests/test_mupdf_viewport_touch.cpp" "$ROOT/source/formats/common/pdf_view_utils.cpp"
