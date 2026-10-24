@@ -27,6 +27,28 @@ void ExpectEq(const char *label, int actual, int expected) {
   }
 }
 
+void TestParserResetDropsPendingSpacing() {
+  parsedata_t p{};
+  parse_init(&p);
+  p.pending_block_break = true;
+  p.pending_block_spacing_lf = 2;
+  p.pending_block_spacing_from_css = true;
+  p.pending_block_spacing_advance_ok = true;
+  p.pending_block_spacing_suppress_only = true;
+  p.current_screen_has_drawable_content = true;
+  p.totalbytes = 1234;
+
+  parse_init(&p);
+  ExpectEq("reset block break", p.pending_block_break, false);
+  ExpectEq("reset spacing lines", p.pending_block_spacing_lf, 0);
+  ExpectEq("reset CSS spacing", p.pending_block_spacing_from_css, false);
+  ExpectEq("reset spacing advance", p.pending_block_spacing_advance_ok, false);
+  ExpectEq("reset suppress-only spacing", p.pending_block_spacing_suppress_only,
+           false);
+  ExpectEq("reset drawable content", p.current_screen_has_drawable_content, false);
+  ExpectEq("reset input size", p.totalbytes, 0);
+}
+
 void TestBlockMarginStateInheritsAndRestores() {
   parsedata_t p{};
   parse_init(&p);
@@ -65,6 +87,7 @@ void TestBlockMarginStateInheritsAndRestores() {
 } // namespace
 
 int main() {
+  TestParserResetDropsPendingSpacing();
   TestBlockMarginStateInheritsAndRestores();
   return 0;
 }

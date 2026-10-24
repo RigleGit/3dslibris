@@ -172,6 +172,7 @@ void parse_init(parsedata_t *data) {
   data->block_margin_left = 0;
   data->block_margin_right = 0;
   for (int i = 0; i < 32; i++) {
+    data->stack[i] = TAG_NONE;
     data->style_bold_stack[i] = false;
     data->style_italic_stack[i] = false;
     data->style_underline_stack[i] = false;
@@ -265,9 +266,12 @@ void parse_init(parsedata_t *data) {
   data->pending_block_spacing_lf = 0;
   data->pending_block_spacing_reason = NULL;
   data->pending_block_spacing_from_css = false;
+  data->pending_block_spacing_advance_ok = false;
+  data->pending_block_spacing_suppress_only = false;
   data->current_screen_has_drawable_content = false;
   parse_reset_page_buffer(data);
   data->status = 0;
+  data->totalbytes = 0;
   data->pagecount = 0;
 }
 
