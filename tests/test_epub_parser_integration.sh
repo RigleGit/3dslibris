@@ -168,7 +168,8 @@ fi
   -o "$TEST_OUTDIR/test_epub_parser_integration"
 
 export TEST_EPUB_NAV_PATH="$TEST_OUTDIR/nav-spine-anchors.epub"
-python3 - "$TEST_ROOT/tests/fixtures/books/basic.epub" "$TEST_EPUB_NAV_PATH" <<'PYFIXTURE'
+export TEST_EPUB_PROXY_PATH="$TEST_OUTDIR/toc-proxy-targets.epub"
+python3 - "$TEST_ROOT/tests/fixtures/books/basic.epub" "$TEST_EPUB_NAV_PATH" "$TEST_EPUB_PROXY_PATH" <<'PYFIXTURE'
 import sys
 import zipfile
 
@@ -193,6 +194,32 @@ files['OEBPS/chapter2.xhtml'] = b'<html xmlns="http://www.w3.org/1999/xhtml"><he
 with zipfile.ZipFile(sys.argv[2], 'w', compression=zipfile.ZIP_DEFLATED) as generated:
     for name, contents in files.items():
         generated.writestr(name, contents)
+# Reuse the same real content but route NAV through an index document.
+proxy_opf = files['OEBPS/content.opf'].decode().replace('</manifest>',
+    '<item id="proxy" href="index.xhtml" media-type="application/xhtml+xml"/></manifest>')
+assert '<spine toc="ncx">' in proxy_opf
+proxy_opf = proxy_opf.replace('<spine toc="ncx">', '<spine toc="ncx"><itemref idref="proxy"/>')
+files['OEBPS/content.opf'] = proxy_opf.encode()
+links = [('proxy-anchor', 'chapter1.xhtml#later', 'Proxy anchor label'),
+         ('proxy-document', 'chapter2.xhtml', 'Proxy document label'),
+         ('proxy-fragment', 'chapter1.xhtml#zz-absent-fragment', 'Proxy fragment label'),
+         ('proxy-unmatched', 'missing.xhtml#never-seen', 'Proxy unmatched label')]
+files['OEBPS/nav.xhtml'] = ('<html xmlns="http://www.w3.org/1999/xhtml" '
+    'xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><ol>' +
+    ''.join('<li><a href="index.xhtml#%s">%s</a></li>' % (key, label)
+            for key, target, label in links) + '</ol></nav></body></html>').encode()
+files['OEBPS/index.xhtml'] = ('<html xmlns="http://www.w3.org/1999/xhtml"><body>' +
+    ''.join('<p><a id="%s" href="%s">%s</a></p>' % (key, target, label)
+            for key, target, label in links) + '</body></html>').encode()
+import xml.parsers.expat
+for name, content in files.items():
+    if name.endswith(('.xhtml', '.opf')):
+        xml.parsers.expat.ParserCreate().Parse(content, True)
+with zipfile.ZipFile(sys.argv[3], 'w', compression=zipfile.ZIP_DEFLATED) as generated:
+    for name, contents in files.items():
+        generated.writestr(name, contents)
+with zipfile.ZipFile(sys.argv[3]) as generated:
+    assert generated.testzip() is None
 PYFIXTURE
 
 "$TEST_OUTDIR/test_epub_parser_integration"
