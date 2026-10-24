@@ -66,7 +66,8 @@ def main():
                     continue
                 fields = record.split('\t')
                 location = re.fullmatch(r'(.*?):(\d+):(\d+):(.+)', fields[0])
-                if len(fields) != 3 or not location or not fields[1].isdigit():
+                if (len(fields) != 3 or not location or not fields[1].isdigit()
+                        or fields[2] not in ('static', 'dynamic', 'dynamic,bounded')):
                     parser.error('%s:%d: malformed stack usage record' % (usage, number))
                 source, line, column, function = location.groups()
                 source = own_source(source)

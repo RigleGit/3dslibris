@@ -67,6 +67,29 @@ class StackReportTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('app.su:1', result.stderr)
 
+    def test_supported_qualifiers_are_preserved(self):
+        for qualifier in ('static', 'dynamic', 'dynamic,bounded'):
+            with self.subTest(qualifier=qualifier):
+                (self.release / 'app.su').write_text(
+                    f'source/app.cpp:10:4:open_book()\t32\t{qualifier}\n')
+                result = self.run_report('--format', 'json')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                frame, = json.loads(result.stdout)['frames']
+                self.assertEqual((frame['bytes'], frame['qualifier']), (32, qualifier))
+
+    def test_invalid_qualifiers_fail_without_a_report(self):
+        for qualifier in ('', 'unknown', 'bounded', 'static,bounded',
+                          'static,dynamic', 'dynamic,unknown', 'dynamic,',
+                          'dynamic,dynamic', ' static', 'static '):
+            for output in ('json', 'markdown'):
+                with self.subTest(qualifier=qualifier, output=output):
+                    (self.release / 'app.su').write_text(
+                        f'source/app.cpp:10:4:open_book()\t32\t{qualifier}\n')
+                    result = self.run_report('--format', output)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertEqual(result.stdout, '')
+                    self.assertIn('app.su:1: malformed stack usage record', result.stderr)
+
 
 unittest.main()
 PY
