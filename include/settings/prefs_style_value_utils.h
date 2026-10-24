@@ -4,6 +4,8 @@
 
 namespace settings {
 
+int ClampLineSpacingSetting(int value);
+
 struct StyleValueContext {
   bool from_book;
   bool uses_text_layout;

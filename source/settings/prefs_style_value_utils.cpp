@@ -6,6 +6,14 @@
 
 namespace settings {
 
+int ClampLineSpacingSetting(int value) {
+  if (value < 0)
+    return 0;
+  if (value > 16)
+    return 16;
+  return value;
+}
+
 int ReadPublisherHorizontalMargins(const char *const *attributes,
                                    int legacy_margins) {
   if (attributes) {

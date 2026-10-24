@@ -5,6 +5,7 @@
 #include "formats/common/xml_parse_utils.h"
 #include "library/browser_view_utils.h"
 #include "settings/prefs_style_value_utils.h"
+using settings::ClampLineSpacingSetting;
 #include "shared/utf8_utils.h"
 #include "ui/text_limits.h"
 #include <sys/param.h>

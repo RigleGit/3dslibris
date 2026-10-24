@@ -45,12 +45,27 @@
 
 namespace {
 
-static int ClampLineSpacingSetting(int value) {
-  if (value < 0)
-    return 0;
-  if (value > 16)
-    return 16;
-  return value;
+using settings::ClampLineSpacingSetting;
+
+static void ReadParagraphPreferences(App *app, Text *ts,
+                                     const XML_Char **attr) {
+  for (int i = 0; attr[i]; i += 2) {
+    if (!strcmp(attr[i], "spacing"))
+      app->paraspacing = atoi(attr[i + 1]);
+    if (!strcmp(attr[i], "lineSpacing")) {
+      app->reader_line_spacing = ClampLineSpacingSetting(atoi(attr[i + 1]));
+      ts->linespacing = app->reader_line_spacing;
+    }
+    if (!strcmp(attr[i], "indent"))
+      app->paraindent = atoi(attr[i + 1]);
+    if (!strcmp(attr[i], "publisherTextIndent"))
+      app->publisher_text_indent = atoi(attr[i + 1]) != 0;
+    if (!strcmp(attr[i], "publisherBlockMargins"))
+      app->publisher_block_margins = atoi(attr[i + 1]) != 0;
+  }
+  app->publisher_horizontal_margins =
+      settings::ReadPublisherHorizontalMargins(
+          attr, app->publisher_block_margins ? 1 : 0) != 0;
 }
 
 }
@@ -117,23 +132,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     app->orientation = landscape ? orientation_utils::ORIENT_LANDSCAPE
                                  : app->portrait_orientation;
   } else if (!strcmp(name, "paragraph")) {
-    for (i = 0; attr[i]; i += 2) {
-      if (!strcmp(attr[i], "spacing"))
-        app->paraspacing = atoi(attr[i + 1]);
-      if (!strcmp(attr[i], "lineSpacing")) {
-        app->reader_line_spacing = ClampLineSpacingSetting(atoi(attr[i + 1]));
-        ts->linespacing = app->reader_line_spacing;
-      }
-      if (!strcmp(attr[i], "indent"))
-        app->paraindent = atoi(attr[i + 1]);
-      if (!strcmp(attr[i], "publisherTextIndent"))
-        app->publisher_text_indent = atoi(attr[i + 1]) != 0;
-      if (!strcmp(attr[i], "publisherBlockMargins"))
-        app->publisher_block_margins = atoi(attr[i + 1]) != 0;
-    }
-    app->publisher_horizontal_margins =
-        settings::ReadPublisherHorizontalMargins(
-            attr, app->publisher_block_margins ? 1 : 0) != 0;
+    ReadParagraphPreferences(app, ts, attr);
   } else if (!strcmp(name, "font")) {
     bool has_fallback_attrs = false;
     for (i = 0; attr[i]; i += 2) {
