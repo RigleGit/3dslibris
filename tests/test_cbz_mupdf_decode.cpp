@@ -14,8 +14,12 @@ namespace {
 bool input_is_borrowed = false;
 size_t buffer_bytes = 0;
 unsigned buffer_calls = 0;
+unsigned context_drop_calls = 0;
+unsigned teardown_errors = 0;
 
 void NoLock(void *, int) {}
+
+void RecordTeardownError(void *, const char *) { ++teardown_errors; }
 
 fz_buffer *RecordStorage(fz_context *ctx, fz_buffer *buffer,
                          const unsigned char *input, size_t size) {
@@ -39,8 +43,14 @@ void DecodeAndCheckInput(std::vector<unsigned char> &bytes, bool expected_ok,
   buffer_calls = 0;
   buffer_bytes = 0;
   input_is_borrowed = false;
+  context_drop_calls = 0;
+  teardown_errors = 0;
   test::ExpectTrue("MuPDF decode result", DecodeCbzPageImage(bytes, 5, 240, 400, page) == expected_ok);
   test::ExpectTrue("MuPDF cleanup leaves caller bytes intact", bytes == before);
+  test::ExpectEqU("MuPDF context is released once when created", context_drop_calls,
+                  bytes.empty() ? 0 : 1);
+  test::ExpectEqU("handled decode errors are consumed before context teardown",
+                  teardown_errors, 0);
   if (!bytes.empty()) {
     test::ExpectEqU("one compressed buffer header per decode", buffer_calls, 1);
     test::ExpectEqU64("buffer spans original compressed entry", buffer_bytes, bytes.size());
@@ -67,13 +77,19 @@ void DecodeAndCheckInput(std::vector<unsigned char> &bytes, bool expected_ok,
 fz_locks_context g_mupdf_locks_ctx = {nullptr, NoLock, NoLock};
 void InitMuPdfLocks() {}
 
-// The runner interposes only these application calls, delegates to real MuPDF,
-// and observes its returned storage. No decoder behavior is simulated.
+// The runner interposes only application calls and delegates to real MuPDF.
+// Observe storage and errors reported by real context teardown, without
+// consuming any error in the interceptor. No decoder behavior is simulated.
 extern "C" fz_buffer *TestMuPdfCopiedBuffer(fz_context *ctx, const unsigned char *data, size_t size) {
   return RecordStorage(ctx, fz_new_buffer_from_copied_data(ctx, data, size), data, size);
 }
 extern "C" fz_buffer *TestMuPdfSharedBuffer(fz_context *ctx, const unsigned char *data, size_t size) {
   return RecordStorage(ctx, fz_new_buffer_from_shared_data(ctx, data, size), data, size);
+}
+extern "C" void TestMuPdfDropContext(fz_context *ctx) {
+  ++context_drop_calls;
+  fz_set_error_callback(ctx, RecordTeardownError, nullptr);
+  fz_drop_context(ctx);
 }
 
 int main(int argc, char **argv) {

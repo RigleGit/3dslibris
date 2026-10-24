@@ -69,6 +69,7 @@ if [ -n "${MUPDF_HOST_LIB_DIR:-}" ]; then
     -I"$ROOT/tests/stubs" -I"$ROOT/include" -I"$ROOT/third_party/stb" \
     -Dfz_new_buffer_from_copied_data=TestMuPdfCopiedBuffer \
     -Dfz_new_buffer_from_shared_data=TestMuPdfSharedBuffer \
+    -Dfz_drop_context=TestMuPdfDropContext \
     -c "$ROOT/source/formats/cbz/cbz_decode.cpp" -o "$WORKDIR/cbz_decode_mupdf.o"
   "${CXX:-c++}" -std=c++11 ${CXXFLAGS:-} -fno-exceptions -fno-rtti \
     -I"$ROOT/tests" -I"$ROOT/include" -I"$ROOT/third_party/mupdf/include" \

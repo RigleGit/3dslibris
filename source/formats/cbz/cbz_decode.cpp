@@ -302,7 +302,7 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
     ok = true;
   }
   fz_catch(ctx) {
-    SetLastCbzDecodeError(fz_caught_message(ctx));
+    SetLastCbzDecodeError(fz_convert_error(ctx, NULL));
     ClearDecodedPage(out);
     ok = false;
   }
