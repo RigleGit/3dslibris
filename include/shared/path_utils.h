@@ -19,7 +19,7 @@ inline std::string UrlDecode(const std::string &input) {
   out.reserve(input.size());
   for (size_t i = 0; i < input.size(); i++) {
     if (input[i] == '%' && i + 2 < input.size()) {
-      int value = 0;
+      unsigned int value = 0;
       if (sscanf(input.substr(i + 1, 2).c_str(), "%x", &value) == 1) {
         out.push_back((char)value);
         i += 2;
