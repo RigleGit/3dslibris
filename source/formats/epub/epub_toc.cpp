@@ -68,36 +68,31 @@ using epub_toc_title_match_utils::FindTocTitlePageGlobal;
 using epub_toc_title_match_utils::FindTocTitlePageInDocRange;
 using epub_toc_title_match_utils::PathLooksLikeTocDocForFallback;
 
-static bool ResolveTocProxyTarget(Book *book, const std::string &proxy_href,
-                                  const std::map<std::string, u16> &page_start_by_href,
-                                  u16 *page_out) {
-  u16 proxy_page = 0;
-  bool proxy_ok = false;
-  if (book->FindChapterAnchorPage(proxy_href, &proxy_page)) {
-    proxy_ok = true;
-  } else {
-    std::string proxy_key = NormalizePath(proxy_href);
-    if (!proxy_key.empty()) {
-      auto hit_exact = page_start_by_href.find(proxy_key);
-      if (hit_exact != page_start_by_href.end()) {
-        proxy_page = hit_exact->second;
-        proxy_ok = true;
-      }
-    }
-    if (!proxy_ok) {
-      std::string proxy_nofrag =
-          NormalizePath(StripFragmentAndQuery(proxy_href));
-      if (!proxy_nofrag.empty()) {
-        auto hit_nofrag = page_start_by_href.find(proxy_nofrag);
-        if (hit_nofrag != page_start_by_href.end()) {
-          proxy_page = hit_nofrag->second;
-          proxy_ok = true;
-        }
-      }
+// A proxy target keeps the same priority as the inline resolver: a live
+// anchor, an exact document key, then that document without fragment/query.
+static bool ResolveTocProxyTarget(
+    Book *book, const std::string &proxy_href,
+    const std::map<std::string, u16> &page_start_by_href, u16 *page_out) {
+  if (book->FindChapterAnchorPage(proxy_href, page_out))
+    return true;
+
+  std::string proxy_key = NormalizePath(proxy_href);
+  if (!proxy_key.empty()) {
+    auto hit_exact = page_start_by_href.find(proxy_key);
+    if (hit_exact != page_start_by_href.end()) {
+      *page_out = hit_exact->second;
+      return true;
     }
   }
-  *page_out = proxy_page;
-  return proxy_ok;
+
+  std::string proxy_nofrag = NormalizePath(StripFragmentAndQuery(proxy_href));
+  if (proxy_nofrag.empty())
+    return false;
+  auto hit_nofrag = page_start_by_href.find(proxy_nofrag);
+  if (hit_nofrag == page_start_by_href.end())
+    return false;
+  *page_out = hit_nofrag->second;
+  return true;
 }
 
 void ResolveEpubTocFromPackageData(
@@ -450,7 +445,6 @@ int epub_resolve_toc(Book *book, std::string filepath) {
       if (LookupTocProxyHref(uf, mapped_doc_key, fragment, &toc_proxy_cache,
                              &toc_proxy_attempted, &proxy_href, reporter)) {
         u16 proxy_page = 0;
-
         if (ResolveTocProxyTarget(book, proxy_href, page_start_by_href,
                                   &proxy_page)) {
           page = proxy_page;
