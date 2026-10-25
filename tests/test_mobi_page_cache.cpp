@@ -3,6 +3,7 @@
 #include "book/page.h"
 #include "formats/common/page_cache_utils.h"
 #include "formats/mobi/mobi_page_cache.h"
+#include "file_write_failure_utils.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -316,9 +317,35 @@ void TestTruncatedCaches() {
   printf("MOBI cache: %d truncation/complete cases passed\n", cases);
 }
 
+void TestBufferedWriteFailureRemovesCache() {
+  char cache_dir[] = "/tmp/3dslibris-mobi-write-failure-XXXXXX";
+  ExpectTrue("create write-failure cache directory", mkdtemp(cache_dir) != nullptr);
+  mobi_page_cache::SetCacheDirForTest(cache_dir);
+  Book *book = MakeMobiBook();
+  book->SetTitle("MOBI Cache Title");
+  AddPages(book);
+  book->AddChapter(1, "Cached Chapter", 0);
+  book->SetTocConfidence(TOC_QUALITY_MIXED, 2, 1, 0);
+  ExpectTrue("run save with a real file-size limit",
+             file_write_failure::Run([&]() { InvokeSave(book); }));
+  const std::string path = CacheFilePath(cache_dir);
+  ExpectFalse("failed final buffered flush removes incomplete MOBI cache",
+              access(path.c_str(), F_OK) == 0);
+  InvokeSave(book);
+  Book *loaded = MakeMobiBook();
+  ExpectTrue("MOBI cache can be reopened after a write failure", InvokeTryLoad(loaded));
+  AssertLoadedBook(loaded);
+  delete loaded;
+  delete book;
+  remove(path.c_str());
+  rmdir(cache_dir);
+  mobi_page_cache::SetCacheDirForTest(nullptr);
+}
+
 } // namespace
 
 int main() {
+  TestBufferedWriteFailureRemovesCache();
   RunRoundtrip(false);
   RunRoundtrip(true);
   RunLargeRoundtrip(4090);
