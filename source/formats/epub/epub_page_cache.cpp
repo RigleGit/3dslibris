@@ -730,7 +730,8 @@ void Save(Book *book, const char *book_path, int pixel_size,
     }
   }
 
-  fclose(fp);
+  if (fclose(fp) != 0)
+    ok = false;
   if (!ok)
     remove(cache_path.c_str());
 #ifdef DSLIBRIS_DEBUG

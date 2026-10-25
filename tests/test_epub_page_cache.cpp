@@ -2,6 +2,7 @@
 #include "book/book_context.h"
 #include "book/page.h"
 #include "formats/epub/epub_page_cache.h"
+#include "file_write_failure_utils.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -130,6 +131,23 @@ void TestPreviousLayoutCacheIsRejected() {
   CheckRejected(fixture, "previous image pagination is rebuilt");
 }
 
+void TestBufferedWriteFailureRemovesCache() {
+  Fixture fixture;
+  fixture.AddPages(2);
+  fixture.Save();
+  Require(remove(fixture.CacheFile().c_str()) == 0, "remove initial cache");
+  Require(file_write_failure::Run([&]() {
+    epub_page_cache::Save(&fixture.source, kBookPath, 14, 2, 0, 0, 0,
+                          12, 12, 10, 36, NULL);
+  }), "run save with a real file-size limit");
+  Check(fixture.CacheFile().empty(),
+        "failed final buffered flush removes incomplete EPUB cache");
+  fixture.Save();
+  Book loaded(fixture.ctx);
+  Check(fixture.Load(&loaded) && loaded.GetPageCount() == 2,
+        "EPUB cache can be saved and reopened after a write failure");
+}
+
 void TestNavigationIndicesAreValidated() {
   // Both readers own validation separately; exercise the actual size cutoff.
   for (bool large : {false, true}) {
@@ -248,13 +266,15 @@ int main(int argc, char **argv) {
   if (argc > 2 || (selected != "all" && selected != "maps" &&
       selected != "maps-load" && selected != "maps-save" &&
       selected != "load-large-pages" && selected != "load-large-search" &&
-      selected != "stream-counts")) {
+      selected != "stream-counts" && selected != "write-failure")) {
     fprintf(stderr, "usage: %s [all|maps|maps-load|maps-save|load-large-pages|"
-                    "load-large-search|stream-counts]\n", argv[0]);
+                    "load-large-search|stream-counts|write-failure]\n", argv[0]);
     return 2;
   }
   if (selected == "all")
     TestPreviousLayoutCacheIsRejected();
+  if (selected == "all" || selected == "write-failure")
+    TestBufferedWriteFailureRemovesCache();
   if (selected == "all" || selected == "maps" || selected == "maps-load")
     TestNavigationIndicesAreValidated();
   if (selected == "all" || selected == "maps" || selected == "maps-save")
