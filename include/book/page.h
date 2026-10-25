@@ -54,6 +54,7 @@ class Page {
 	};
 
  private:
+	struct DrawState;
 	class Book *book;
 	std::vector<u32> storage;
 	page_search::Events search_events_;
