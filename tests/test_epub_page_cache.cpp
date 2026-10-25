@@ -135,6 +135,8 @@ void TestPreviousLayoutCacheIsRejected() {
   Fixture fixture;
   fixture.AddPages(1);
   fixture.Save();
+  Check(fixture.CacheFile() == fixture.directory + "/e1978dc2cc1b3c11.epc",
+        "existing EPUB layout keeps its persistent cache identity");
   fixture.PatchPageIndex(sizeof(u32), 21);
   CheckRejected(fixture, "previous image pagination is rebuilt");
 }

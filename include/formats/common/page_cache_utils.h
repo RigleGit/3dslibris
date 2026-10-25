@@ -29,6 +29,14 @@ struct PageCacheLayoutParams {
         margin_left(0), margin_right(0), margin_top(0), margin_bottom(0) {}
 };
 
+// Capture the Book's effective layout and source-file identity. Each format
+// adds its own variant token before building the persistent path.
+PageCacheLayoutParams BuildLayoutParams(
+    const char *book_path, int pixel_size, int line_spacing,
+    int paragraph_spacing, int paragraph_indent, int orientation,
+    int margin_left, int margin_right, int margin_top, int margin_bottom,
+    const char *regular_font);
+
 typedef std::vector<uint32_t> CachedPage;
 
 struct CachedChapter {

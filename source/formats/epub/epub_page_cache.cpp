@@ -59,20 +59,6 @@ struct EpubPageCacheHeader {
   u32 link_href_count;
 };
 
-struct EpubCacheLayoutParams {
-  long long file_size;
-  long long file_mtime;
-  int pixel_size;
-  int line_spacing;
-  int paragraph_spacing;
-  int paragraph_indent;
-  int orientation;
-  int margin_left;
-  int margin_right;
-  int margin_top;
-  int margin_bottom;
-  std::string regular_font;
-};
 
 static bool IsValidHeader(const EpubPageCacheHeader &hdr) {
   return hdr.magic == kEpubPageCacheMagic &&
@@ -83,51 +69,12 @@ static bool IsValidHeader(const EpubPageCacheHeader &hdr) {
          hdr.link_href_count <= 65535;
 }
 
-static EpubCacheLayoutParams
-BuildLayoutParams(const char *book_path, int pixel_size, int line_spacing,
-                  int paragraph_spacing, int paragraph_indent, int orientation,
-                  int margin_left, int margin_right, int margin_top,
-                  int margin_bottom, const char *regular_font) {
-  EpubCacheLayoutParams params = {};
-  if (!book_path)
-    return params;
-
-  struct stat st;
-  if (stat(book_path, &st) == 0) {
-    params.file_size = (long long)st.st_size;
-    params.file_mtime = (long long)st.st_mtime;
-  }
-
-  params.pixel_size = pixel_size;
-  params.line_spacing = line_spacing;
-  params.paragraph_spacing = paragraph_spacing;
-  params.paragraph_indent = paragraph_indent;
-  params.orientation = orientation;
-  params.margin_left = margin_left;
-  params.margin_right = margin_right;
-  params.margin_top = margin_top;
-  params.margin_bottom = margin_bottom;
-  params.regular_font = regular_font ? regular_font : "";
-  return params;
-}
 
 static std::string BuildCachePath(Book *book, const char *book_path,
-                                  const EpubCacheLayoutParams &params) {
+                                  const page_cache_utils::PageCacheLayoutParams &params) {
   if (!book_path)
     return std::string();
-  page_cache_utils::PageCacheLayoutParams layout_params;
-  layout_params.file_size = params.file_size;
-  layout_params.file_mtime = params.file_mtime;
-  layout_params.pixel_size = params.pixel_size;
-  layout_params.line_spacing = params.line_spacing;
-  layout_params.paragraph_spacing = params.paragraph_spacing;
-  layout_params.paragraph_indent = params.paragraph_indent;
-  layout_params.orientation = params.orientation;
-  layout_params.margin_left = params.margin_left;
-  layout_params.margin_right = params.margin_right;
-  layout_params.margin_top = params.margin_top;
-  layout_params.margin_bottom = params.margin_bottom;
-  layout_params.regular_font = params.regular_font;
+  page_cache_utils::PageCacheLayoutParams layout_params = params;
   layout_params.variant_token = "pub3:";
   layout_params.variant_token +=
       book && book->GetPublisherTextIndentEnabled() ? "i1" : "i0";
@@ -221,7 +168,8 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
 
   EnsureCacheDirs();
 
-  EpubCacheLayoutParams params = BuildLayoutParams(
+  page_cache_utils::PageCacheLayoutParams params =
+      page_cache_utils::BuildLayoutParams(
       book_path, pixel_size, line_spacing, paragraph_spacing, paragraph_indent,
       orientation, margin_left, margin_right, margin_top, margin_bottom,
       regular_font);
@@ -805,7 +753,8 @@ bool StreamWriter::Begin(Book *book, const char *book_path, int pixel_size,
     return false;
   State &s = *state_;
   s.owner = book;
-  const EpubCacheLayoutParams params = BuildLayoutParams(
+  const page_cache_utils::PageCacheLayoutParams params =
+      page_cache_utils::BuildLayoutParams(
       book_path, pixel_size, line_spacing, paragraph_spacing, paragraph_indent,
       orientation, margin_left, margin_right, margin_top, margin_bottom, regular_font);
   s.path = BuildCachePath(book, book_path, params);

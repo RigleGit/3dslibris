@@ -87,22 +87,11 @@ static std::string BuildCachePath(Book *book, const char *book_path,
   if (!book_path)
     return std::string();
 
-  page_cache_utils::PageCacheLayoutParams params;
-  struct stat st;
-  if (stat(book_path, &st) == 0) {
-    params.file_size = (long long)st.st_size;
-    params.file_mtime = (long long)st.st_mtime;
-  }
-  params.pixel_size = pixel_size;
-  params.line_spacing = line_spacing;
-  params.paragraph_spacing = paragraph_spacing;
-  params.paragraph_indent = paragraph_indent;
-  params.orientation = orientation;
-  params.margin_left = margin_left;
-  params.margin_right = margin_right;
-  params.margin_top = margin_top;
-  params.margin_bottom = margin_bottom;
-  params.regular_font = regular_font ? regular_font : "";
+  page_cache_utils::PageCacheLayoutParams params =
+      page_cache_utils::BuildLayoutParams(
+          book_path, pixel_size, line_spacing, paragraph_spacing,
+          paragraph_indent, orientation, margin_left, margin_right, margin_top,
+          margin_bottom, regular_font);
   params.variant_token = line_wrap_fix_enabled ? "1" : "0";
   if (book && !book->GetEbookImagesEnabled())
     params.variant_token += ":no-images";

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <zlib.h>
 
 namespace page_cache_utils {
@@ -15,6 +16,32 @@ CachedChapter::CachedChapter() : page(0), level(0), title() {}
 CachedChapter::CachedChapter(uint16_t page, uint8_t level,
                              const std::string &title)
     : page(page), level(level), title(title) {}
+
+PageCacheLayoutParams BuildLayoutParams(
+    const char *book_path, int pixel_size, int line_spacing,
+    int paragraph_spacing, int paragraph_indent, int orientation,
+    int margin_left, int margin_right, int margin_top, int margin_bottom,
+    const char *regular_font) {
+  PageCacheLayoutParams params;
+  if (!book_path)
+    return params;
+  struct stat st;
+  if (stat(book_path, &st) == 0) {
+    params.file_size = (long long)st.st_size;
+    params.file_mtime = (long long)st.st_mtime;
+  }
+  params.pixel_size = pixel_size;
+  params.line_spacing = line_spacing;
+  params.paragraph_spacing = paragraph_spacing;
+  params.paragraph_indent = paragraph_indent;
+  params.orientation = orientation;
+  params.margin_left = margin_left;
+  params.margin_right = margin_right;
+  params.margin_top = margin_top;
+  params.margin_bottom = margin_bottom;
+  params.regular_font = regular_font ? regular_font : "";
+  return params;
+}
 
 std::string BuildPageCachePath(const std::string &cache_dir,
                                const std::string &extension,

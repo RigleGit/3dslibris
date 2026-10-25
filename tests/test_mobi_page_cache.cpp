@@ -1,7 +1,6 @@
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/page.h"
-#include "formats/common/page_cache_utils.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "file_write_failure_utils.h"
 
@@ -67,22 +66,9 @@ Book *MakeMobiBook() {
 }
 
 std::string CacheFilePath(const char *cache_dir) {
-  page_cache_utils::PageCacheLayoutParams lp;
-  lp.file_size = 0;
-  lp.file_mtime = 0;
-  lp.pixel_size = kCachePx;
-  lp.line_spacing = kCacheLS;
-  lp.paragraph_spacing = kCachePS;
-  lp.paragraph_indent = kCachePI;
-  lp.orientation = kCacheOri;
-  lp.margin_left = kCacheMl;
-  lp.margin_right = kCacheMr;
-  lp.margin_top = kCacheMt;
-  lp.margin_bottom = kCacheMb;
-  lp.regular_font = "";
-  lp.variant_token = kLineWrapFix ? "1" : "0";
-  return page_cache_utils::BuildPageCachePath(cache_dir, ".mpc",
-                                              kCacheBookPath, lp);
+  // Persistent identity of the fixture's existing layout, independent of the
+  // builder used by production. A key change would miss the saved file.
+  return std::string(cache_dir) + "/9c9f9955a86d1c83.mpc";
 }
 
 void AddPages(Book *book) {

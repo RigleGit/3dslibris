@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <string>
 #include <unistd.h>
+#include <utime.h>
 #include <vector>
 
 namespace {
@@ -87,6 +88,25 @@ void TestBuildPathStable() {
   const std::string path3 = page_cache_utils::BuildPageCachePath(
       "sdmc:/3ds/3dslibris/cache/epub", ".epc", "/books/sample.epub", params);
   ExpectFalse("path should change when params change", path1 == path3);
+}
+
+void TestEffectiveLayoutKeepsExistingCacheKey() {
+  char book_path[] = "/tmp/3dslibris-layout-key-XXXXXX";
+  FILE *fp = OpenTempFile(book_path);
+  const std::vector<char> contents(1111, 'a');
+  ExpectTrue("write book identity fixture",
+             fwrite(contents.data(), 1, contents.size(), fp) == contents.size());
+  ExpectTrue("close book identity fixture", fclose(fp) == 0);
+  struct utimbuf timestamps = {2222, 2222};
+  ExpectTrue("set stable book timestamp", utime(book_path, &timestamps) == 0);
+  const page_cache_utils::PageCacheLayoutParams params =
+      page_cache_utils::BuildLayoutParams(book_path, 15, 4, 2, 1, 2,
+                                          8, 9, 10, 11, "fonts/regular.bcfnt");
+  std::remove(book_path);
+  ExpectEq("effective values keep the persistent cache identity",
+           page_cache_utils::BuildPageCachePath("/cache/epub", ".epc",
+                                                "/books/sample.epub", params),
+           std::string("/cache/epub/a388b7e801746340.epc"));
 }
 
 void TestBuildPathVariantToken() {
@@ -277,6 +297,7 @@ void TestBuildPathDifferentBookPaths() {
 
 int main() {
   TestBuildPathStable();
+  TestEffectiveLayoutKeepsExistingCacheKey();
   TestBuildPathVariantToken();
   TestBoundedStringRoundTrip();
   TestPagesRoundTrip();
