@@ -67,17 +67,15 @@ static void FillPageMode(const InlineImageLayoutRequest &req,
   plan->consume_rest_of_screen = true;
   plan->vertical_space_after_draw = 0;
   plan->line_break_before = false;
-  // Only advance when on screen=0 mid-content: image moves to the right screen
-  // of the current spread. When on screen=1, the PAGE switch already commits the
-  // page, so advance_before would create a blank right screen and push the image
-  // to the next page's left screen instead.
-  plan->advance_before = (req.current_screen == 0) && !IsAtScreenStart(req);
-  plan->page_breaks = 0;
+  // PAGE placement uses the whole screen. Move past existing text on either
+  // screen before emitting the image; committing afterwards would paint over it.
+  plan->advance_before = !IsAtScreenStart(req);
+  plan->page_breaks =
+      (plan->advance_before && req.current_screen == 1) ? 1 : 0;
 
   int image_screen = req.current_screen;
-  if (plan->advance_before) {
-    image_screen = 1;  // advance_before only fires from screen=0
-  }
+  if (plan->advance_before)
+    image_screen = 1 - req.current_screen;
 
   if (image_screen == 1) {
     plan->next_text_screen = 0;

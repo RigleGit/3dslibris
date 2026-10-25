@@ -671,6 +671,94 @@ void TestImageResourcesAcrossBookFormats() {
   }
 }
 
+void TestImagePagesDoNotCoverText() {
+  const char *folder = getenv("TEST_IMAGE_VIEWER_DIR");
+  test::ExpectTrue("overlap fixture directory", folder != nullptr);
+  unsigned overlaps = 0;
+  for (unsigned char orientation : {0, 1, 2}) {
+    for (int font_size : {12, 16}) {
+      const std::string cache = std::string(folder) + "/overlap-" +
+          std::to_string(orientation) + "-" + std::to_string(font_size);
+      mkdir(cache.c_str(), 0700);
+      epub_page_cache::SetCacheDirForTest(cache.c_str());
+      mobi_page_cache::SetCacheDirForTest(cache.c_str());
+      for (const char *name : {"page-image-after-text.fb2", "images.fb2", "images.epub", "images.mobi"}) {
+        Text text;
+        text.capture_rendered_text = true;
+        text.landscape = orientation == 2;
+        text.display.width = orientation == 2 ? 400 : 240;
+        text.display.height = 400;
+        text.SetPixelSize(font_size);
+        std::vector<u16> left(400 * 400), right(400 * 400);
+        text.screenleft = left.data();
+        text.screenright = right.data();
+        BookContext ctx;
+        ctx.text = &text;
+        ctx.orientation = &orientation;
+        Book book(ctx);
+        book.SetFolderName(folder);
+        book.SetFileName(name);
+        for (int pass = 0; pass < 2; ++pass) {
+          book.format = app_flow_utils::DetectBookFormat(name);
+          const int open_result = book_parser::Open(&book);
+          if (open_result != 0)
+            fprintf(stderr, "open %s orientation=%u font=%d pass=%d rc=%d\n",
+                name, orientation, font_size, pass, open_result);
+          test::ExpectEq("overlap book opens", open_result, 0);
+          unsigned images = 0, glyphs = 0;
+          for (u16 page = 0; page < book.GetPageCount(); ++page) {
+            text.rendered_glyphs.clear();
+            Page *current = book.GetPage(page);
+            current->Draw(&text);
+            glyphs += text.rendered_glyphs.size();
+            for (const auto &entry : current->GetRenderedSelectables()) {
+              if (entry.kind != Page::IMAGE) continue;
+              const bool physical_left =
+                  (orientation != 1) == (entry.screen_index == 0);
+              const int screen_width = text.LogicalWidthFor(physical_left);
+              // PAGE images can use the full screen, beyond the text margins.
+              // Inline and band spacing have their own integration cases.
+              if (entry.bounds.x0 >= text.margin.left &&
+                  entry.bounds.x1 <= screen_width - text.margin.right &&
+                  entry.bounds.y0 >= text.margin.top)
+                continue;
+              ++images;
+              u16 *screen = ((orientation != 1) == (entry.screen_index == 0))
+                  ? text.screenleft : text.screenright;
+              for (const auto &glyph : text.rendered_glyphs) {
+                if (glyph.screen != screen || glyph.codepoint <= 32) continue;
+                const bool intersects =
+                    glyph.x < entry.bounds.x1 &&
+                    glyph.x + glyph.width > entry.bounds.x0 &&
+                    glyph.y - glyph.height < entry.bounds.y1 &&
+                    glyph.y > entry.bounds.y0;
+                if (intersects && overlaps < 5) {
+                  fprintf(stderr, "overlap %s orientation=%u font=%d pass=%d page=%u screen=%d glyph=%u at=%d,%d image=%d,%d..%d,%d\n",
+                      name, orientation, font_size, pass, page,
+                      entry.screen_index, glyph.codepoint, glyph.x, glyph.y,
+                      entry.bounds.x0, entry.bounds.y0,
+                      entry.bounds.x1, entry.bounds.y1);
+                }
+                if (intersects) ++overlaps;
+              }
+            }
+          }
+          if (std::string(name).find(".fb2") != std::string::npos && images == 0)
+            fprintf(stderr, "no full-page images %s orientation=%u font=%d pass=%d\n",
+                name, orientation, font_size, pass);
+          if (std::string(name).find(".fb2") != std::string::npos)
+            test::ExpectGt("overlap check renders full-page FB2 images", images, 0);
+          test::ExpectGt("overlap check renders prose", glyphs, 100);
+          book.Close();
+        }
+      }
+    }
+  }
+  test::ExpectEqU("full-page images never cover drawn text", overlaps, 0);
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  mobi_page_cache::SetCacheDirForTest(nullptr);
+}
+
 void TestDisableEbookImages() {
   struct Reporter : IStatusReporter {
     void PrintStatus(const char *) override {}
@@ -1813,6 +1901,7 @@ void TestNullAndEmptyInputHandling() {
 int main(int argc, char **argv) {
   if(argc==2) {
     if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
+    else if(std::string(argv[1])=="image-overlap") TestImagePagesDoNotCoverText();
     else if(std::string(argv[1])=="image-toggle") TestDisableEbookImages();
     else if (std::string(argv[1]) == "figure-transition")
       TestLateFigureScreenTransition();
@@ -1834,6 +1923,7 @@ int main(int argc, char **argv) {
   TestLateFigureScreenTransition();
   TestOriginalImageResourceAndDrawBounds();
   TestImageResourcesAcrossBookFormats();
+  TestImagePagesDoNotCoverText();
   TestDispatchContentAndCloseBetweenFormats();
   TestDisableEbookImages();
   TestOdtSearch();

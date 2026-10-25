@@ -36,7 +36,7 @@ public:
   std::string rendered_ascii;
   std::vector<std::string> printed_strings;
   int clipped_glyphs = 0;
-  struct RenderedGlyph { u32 codepoint; int x, y; u16 *screen; u8 style; };
+  struct RenderedGlyph { u32 codepoint; int x, y; u16 *screen; u8 style; int width, height; };
   std::vector<RenderedGlyph> rendered_glyphs;
   struct RenderedRect { int x0, y0, x1, y1; u16 *screen; };
   std::vector<RenderedRect> rendered_rects;
@@ -141,7 +141,7 @@ public:
   void PrintChar(u32 c, u8 style) {
     if (!capture_rendered_text) return;
     if (c >= 32)
-      rendered_glyphs.push_back({c, pen_x, pen_y, screen, style});
+      rendered_glyphs.push_back({c, pen_x, pen_y, screen, style, GetAdvance(c), GetHeight()});
     if (c > 32 && c < 127) {
       if (pen_y <= LogicalHeight() - margin.bottom &&
           pen_x + GetAdvance(c) <= LogicalWidth() - margin.right)

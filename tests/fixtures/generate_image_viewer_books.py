@@ -119,6 +119,13 @@ def generate(folder):
     (folder/'images.fb2').write_text('<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink"><description><title-info><genre>reference</genre><book-title>Image viewer fixture</book-title><lang>en</lang></title-info></description><body>'+fb2body+'</body>'+''.join(
         '<binary id="%s" content-type="image/%s">%s</binary>' % (name,'gif' if name.endswith('.gif') else 'png',base64.b64encode(data).decode()) for name,data in images.items())+'</FictionBook>')
 
+    # A PAGE image after prose on the second screen must start on a fresh one.
+    original = (folder/'images.fb2').read_text()
+    overlap_body = ('<section>' + '<p>Continuity across pages.</p>' * 30 +
+                    '<image l:href="#fine.png"/><p>AFTER-PAGE-IMAGE</p></section>')
+    (folder/'page-image-after-text.fb2').write_text(
+        original.replace(fb2body, overlap_body))
+
 
 if __name__ == '__main__':
     generate(sys.argv[1])

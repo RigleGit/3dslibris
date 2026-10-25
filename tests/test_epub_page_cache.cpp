@@ -122,6 +122,14 @@ void CheckRejected(Fixture &fixture, const char *label) {
   Check(fixture.CacheFile().empty(), "invalid cache is removed for rebuild");
 }
 
+void TestPreviousLayoutCacheIsRejected() {
+  Fixture fixture;
+  fixture.AddPages(1);
+  fixture.Save();
+  fixture.PatchPageIndex(sizeof(u32), 21);
+  CheckRejected(fixture, "previous image pagination is rebuilt");
+}
+
 void TestNavigationIndicesAreValidated() {
   // Both readers own validation separately; exercise the actual size cutoff.
   for (bool large : {false, true}) {
@@ -245,6 +253,8 @@ int main(int argc, char **argv) {
                     "load-large-search|stream-counts]\n", argv[0]);
     return 2;
   }
+  if (selected == "all")
+    TestPreviousLayoutCacheIsRejected();
   if (selected == "all" || selected == "maps" || selected == "maps-load")
     TestNavigationIndicesAreValidated();
   if (selected == "all" || selected == "maps" || selected == "maps-save")

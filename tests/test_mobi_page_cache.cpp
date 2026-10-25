@@ -297,7 +297,7 @@ void TestTruncatedCaches() {
       if (fault == 1) corrupt[event] = 32; // Offset one without any event flag.
       if (fault == 3) corrupt[event] = 32 | 8; // Unclosed RTL range.
       if (fault == 4) corrupt[event] = 32 | 16; // RTL end without a start.
-      if (fault == 2) corrupt[4] = 21; // Previous cache version lacks this section.
+      if (fault == 2) corrupt[4] = 25; // Previous image pagination must be rebuilt.
       fp = fopen(cache_file.c_str(), "wb");
       ExpectTrue("open corrupt metadata fixture", fp != nullptr);
       ExpectTrue("write corrupt metadata fixture", fwrite(corrupt.data(), 1, corrupt.size(), fp) == corrupt.size());
