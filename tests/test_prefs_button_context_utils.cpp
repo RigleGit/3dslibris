@@ -1,3 +1,4 @@
+#include "reader/reader_layout_state.h"
 #include "settings/prefs_button_context_utils.h"
 #include "test_assert.h"
 #include "settings/prefs_action_utils.h"
@@ -16,7 +17,7 @@ struct Text {
 };
 struct App {
   Prefs *prefs=nullptr; bool reopen=false; int colorMode=0, layout_dirty=0;
-  bool publisher_text_indent=false, publisher_block_margins=false, publisher_horizontal_margins=false;
+  reader::ReaderLayoutState reader_layout;
   void MarkBookLayoutDirty() { ++layout_dirty; }
 };
 struct Book {
@@ -90,7 +91,7 @@ static void TestSettingsActions() {
       TogglePublisherTextIndentSetting, TogglePublisherBlockMarginsSetting,
       TogglePublisherHorizontalMarginsSetting};
   for (auto action : actions) {
-    app.publisher_text_indent=app.publisher_block_margins=app.publisher_horizontal_margins=false;
+    app.reader_layout.publisher_text_indent=app.reader_layout.publisher_block_margins=app.reader_layout.publisher_horizontal_margins=false;
     for (int value : {-1, 0, 1, 4}) {
       book.indent=book.block=book.horizontal=value;
       const int writes=prefs.writes, dirty=app.layout_dirty;
@@ -98,12 +99,12 @@ static void TestSettingsActions() {
       const int changed=action == TogglePublisherTextIndentSetting ? book.indent
           : action == TogglePublisherBlockMarginsSetting ? book.block : book.horizontal;
       assert(changed == (value < 0 ? 0 : value == 0 ? 1 : -1));
-      assert(!app.publisher_text_indent && !app.publisher_block_margins && !app.publisher_horizontal_margins);
+      assert(!app.reader_layout.publisher_text_indent && !app.reader_layout.publisher_block_margins && !app.reader_layout.publisher_horizontal_margins);
       assert(prefs.writes == writes + 1 && app.layout_dirty == dirty + 1);
     }
     action(&app, nullptr, false);
-    const bool enabled=action == TogglePublisherTextIndentSetting ? app.publisher_text_indent
-        : action == TogglePublisherBlockMarginsSetting ? app.publisher_block_margins : app.publisher_horizontal_margins;
+    const bool enabled=action == TogglePublisherTextIndentSetting ? app.reader_layout.publisher_text_indent
+        : action == TogglePublisherBlockMarginsSetting ? app.reader_layout.publisher_block_margins : app.reader_layout.publisher_horizontal_margins;
     assert(enabled);
   }
   const int image_writes=prefs.writes, image_dirty=app.layout_dirty;

@@ -329,7 +329,7 @@ int StartupController::RunBootSequence()
   UiButtonSkin_SetColorMode(app_.colorMode);
   NormalizeRuntimeAssetPaths(&app_);
   DrawBootStatus("Booting", {"Preparing library..."}, false);
-  app_.SetOrientation(app_.orientation);
+  app_.SetOrientation(app_.reader_layout.orientation);
   DBG_LOG(&app_, "Preparing library...");
 #ifdef DSLIBRIS_DEBUG
   u64 t_prepare_ms = osGetTime();

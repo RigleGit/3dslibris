@@ -1,3 +1,4 @@
+#include "reader/reader_layout_state.h"
 #include "reader/app_book_internal.h"
 #include "app/app_mode.h"
 #include "shared/orientation_utils.h"
@@ -92,7 +93,8 @@ struct Book {
 struct App {
   std::unique_ptr<Text> ts{new Text};
   Book book;
-  u8 orientation = orientation_utils::ORIENT_LANDSCAPE;
+  reader::ReaderLayoutState reader_layout;
+  App() { reader_layout.orientation = orientation_utils::ORIENT_LANDSCAPE; }
   u8 portrait_orientation = orientation_utils::ORIENT_TURNED_LEFT;
   u8 render_orientation = orientation_utils::ORIENT_LANDSCAPE;
   bool landscape = true;
@@ -130,7 +132,7 @@ void TestLoadingForHand(u8 handedness) {
   reader_internal::DrawOpeningSplashImpl(&app, 1, 17, "opening book ...");
   assert(app.render_orientation == handedness);
   assert(text.splash_orientation == handedness);
-  assert(app.orientation == orientation_utils::ORIENT_LANDSCAPE);
+  assert(app.reader_layout.orientation == orientation_utils::ORIENT_LANDSCAPE);
   assert(text.printed[1].value == "Alpha Beta Gamma Delta Epsilon");
   std::string reconstructed;
   for (const auto &p : text.printed)
@@ -182,10 +184,10 @@ void TestOpeningToReaderTransition() {
     app.portrait_orientation = hand;
     app.SetOrientation(orientation_utils::ORIENT_LANDSCAPE);
     assert(app.render_orientation == hand);
-    assert(app.orientation == orientation_utils::ORIENT_LANDSCAPE);
+    assert(app.reader_layout.orientation == orientation_utils::ORIENT_LANDSCAPE);
     app.SetHandedness(u8(1 - hand));
     assert(app.render_orientation == 1 - hand);
-    assert(app.orientation == orientation_utils::ORIENT_LANDSCAPE);
+    assert(app.reader_layout.orientation == orientation_utils::ORIENT_LANDSCAPE);
     app.reader_state_.bookcurrent = &app.book;
     app.ShowCurrentBookView();
     assert(app.nav_.mode == AppMode::Book);

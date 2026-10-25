@@ -210,7 +210,7 @@ bool ReaderController::LoadImageViewer(int zoom) {
   image_memory::Bytes bytes;
   const bool read = s.book->ReadInlineImageSource(s.image_id, &bytes);
   const uint64_t read_ms = osGetTime() - started;
-  const auto target = fixed_layout_screen::TargetDims(app_.orientation, true);
+  const auto target = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
   int width = s.image.original_width, height = s.image.original_height;
   InlineImageMetadata metadata{};
   if ((width <= 0 || height <= 0) &&
@@ -237,7 +237,7 @@ bool ReaderController::LoadImageViewer(int zoom) {
     s.message.clear();
     if (!s.preview.pixels) {
       const auto bottom =
-          fixed_layout_screen::TargetDims(app_.orientation, false);
+          fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
       const auto preview = OverviewLayout(s, bottom.width, bottom.height);
       if (s.preview.Allocate(std::max(1, preview.width),
                              std::max(1, preview.height))) {
@@ -284,10 +284,10 @@ void ReaderController::DrawImageViewer() {
   ReaderImageViewerSession &s = *image_viewer_;
   Text *ts = app_.ts.get();
   const uint64_t started = osGetTime();
-  app_.ApplyRenderOrientation(app_.orientation);
+  app_.ApplyRenderOrientation(app_.reader_layout.orientation);
   TextState saved(ts);
-  const auto top = fixed_layout_screen::TargetDims(app_.orientation, true);
-  const auto bottom = fixed_layout_screen::TargetDims(app_.orientation, false);
+  const auto top = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
+  const auto bottom = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
   ts->SetScreen(ts->screenright);
@@ -378,7 +378,7 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     return;
   }
   const u32 keys = input.keys_down, held = input.keys_held;
-  const auto touch = input.MapTouch(app_.orientation);
+  const auto touch = input.MapTouch(app_.reader_layout.orientation);
   int control = -1;
   if (keys & KEY_TOUCH) {
     // A gesture belongs either to a button or to the overview from its start.
@@ -434,7 +434,7 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     s.dirty = true;
   }
   if (zoom != s.viewport.zoom_index) {
-    const auto top = fixed_layout_screen::TargetDims(app_.orientation, true);
+    const auto top = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
     const auto required = image_view::RequiredSize(s.image.original_width,
                                                    s.image.original_height,
                                                    top.width, top.height, zoom);
@@ -461,7 +461,7 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     y += 0.025f;
   bool moving = x != 0 || y != 0;
   if ((held & KEY_TOUCH) && s.touch_panning) {
-    const auto top = fixed_layout_screen::TargetDims(app_.orientation, true);
+    const auto top = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
     const auto rect = image_view::Viewport(
         s.image.original_width, s.image.original_height, top.width, top.height,
         s.viewport.zoom_index, s.viewport.center_x, s.viewport.center_y);
@@ -473,7 +473,7 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     moving = true;
   } else if (moving) {
     float dx, dy;
-    image_view::MapPan(app_.orientation, x, y, &dx, &dy);
+    image_view::MapPan(app_.reader_layout.orientation, x, y, &dx, &dy);
     if (fixed_layout_viewport_utils::PanViewport(&s.viewport, dx, dy))
       s.dirty = true;
   }

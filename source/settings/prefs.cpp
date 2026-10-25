@@ -49,14 +49,14 @@ using settings::ClampLineSpacingSetting;
 
 static void ApplyParagraphPreferences(
     App *app, Text *ts, const settings::ParagraphPreferences &values) {
-  app->paraspacing = values.spacing;
-  app->paraindent = values.indent;
-  app->reader_line_spacing = values.line_spacing;
+  app->reader_layout.paragraph_spacing = values.spacing;
+  app->reader_layout.paragraph_indent = values.indent;
+  app->reader_layout.line_spacing = values.line_spacing;
   if (values.line_spacing_specified)
     ts->linespacing = values.line_spacing;
-  app->publisher_text_indent = values.publisher_text_indent;
-  app->publisher_block_margins = values.publisher_block_margins;
-  app->publisher_horizontal_margins = values.publisher_horizontal_margins;
+  app->reader_layout.publisher_text_indent = values.publisher_text_indent;
+  app->reader_layout.publisher_block_margins = values.publisher_block_margins;
+  app->reader_layout.publisher_horizontal_margins = values.publisher_horizontal_margins;
 }
 
 }
@@ -120,13 +120,13 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     }
     app->portrait_orientation = (u8)portrait_orientation;
     app->landscape = landscape;
-    app->orientation = landscape ? orientation_utils::ORIENT_LANDSCAPE
+    app->reader_layout.orientation = landscape ? orientation_utils::ORIENT_LANDSCAPE
                                  : app->portrait_orientation;
   } else if (!strcmp(name, "paragraph")) {
     const settings::ParagraphPreferences current = {
-        app->paraspacing, app->paraindent, app->reader_line_spacing,
-        app->publisher_text_indent, app->publisher_block_margins,
-        app->publisher_horizontal_margins, false};
+        app->reader_layout.paragraph_spacing, app->reader_layout.paragraph_indent, app->reader_layout.line_spacing,
+        app->reader_layout.publisher_text_indent, app->reader_layout.publisher_block_margins,
+        app->reader_layout.publisher_horizontal_margins, false};
     const settings::ParagraphPreferences values =
         settings::ParseParagraphPreferences(attr, current);
     ApplyParagraphPreferences(app, ts, values);
@@ -144,8 +144,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
 
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "size")) {
-        app->reader_font_size = ClampTextPixelSize(atoi(attr[i + 1]));
-        ts->SetPixelSize((u8)app->reader_font_size);
+        app->reader_layout.font_size = ClampTextPixelSize(atoi(attr[i + 1]));
+        ts->SetPixelSize((u8)app->reader_layout.font_size);
       }
       else if (!strcmp(attr[i], "fallback1") && strlen(attr[i + 1]))
         ts->SetFallbackFontFile(0, attr[i + 1]);
@@ -694,7 +694,7 @@ int Prefs::Write() {
           "%s=\"%s\" %s=\"%s\" %s=\"%s\" %s=\"%s\" %s=\"%s\" "
           "%s=\"%s\" fallback1=\"%s\" "
           "fallback2=\"%s\" fallback3=\"%s\" fallback4=\"%s\" />\n",
-          app ? app->reader_font_size : (ts ? ts->GetPixelSize() : 12),
+          app ? app->reader_layout.font_size : (ts ? ts->GetPixelSize() : 12),
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_REGULAR),
           font_regular.c_str(),
           font_config_utils::FontPrefAttrForStyle(TEXT_STYLE_BOLD),
@@ -716,10 +716,10 @@ int Prefs::Write() {
           fallback3.c_str(), fallback4.c_str());
   fprintf(fp,
           "\t<paragraph indent=\"%d\" spacing=\"%d\" lineSpacing=\"%d\" publisherTextIndent=\"%d\" publisherBlockMargins=\"%d\" publisherHorizontalMargins=\"%d\" />\n",
-          app->paraindent, app->paraspacing, app->reader_line_spacing,
-          app->publisher_text_indent ? 1 : 0,
-          app->publisher_block_margins ? 1 : 0,
-          app->publisher_horizontal_margins ? 1 : 0);
+          app->reader_layout.paragraph_indent, app->reader_layout.paragraph_spacing, app->reader_layout.line_spacing,
+          app->reader_layout.publisher_text_indent ? 1 : 0,
+          app->reader_layout.publisher_block_margins ? 1 : 0,
+          app->reader_layout.publisher_horizontal_margins ? 1 : 0);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);
 
   // Merge the visible folder into the complete state loaded from disk. Browser

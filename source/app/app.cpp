@@ -104,17 +104,9 @@ App::App()
   reopen = true; // Reopen last book on startup by default.
   nav_.mode = AppMode::Browser;
   cache = false;
-  orientation = orientation_utils::ORIENT_TURNED_LEFT;
   portrait_orientation = orientation_utils::ORIENT_TURNED_LEFT;
   render_orientation = orientation_utils::ORIENT_TURNED_LEFT;
   landscape = false;
-  reader_font_size = 12;
-  reader_line_spacing = 0;
-  paraspacing = 0;
-  paraindent = 0;
-  publisher_text_indent = true;
-  publisher_block_margins = true;
-  publisher_horizontal_margins = true;
   colorMode = 0;
 
   // Default key mappings
@@ -342,7 +334,7 @@ touchPosition App::MapTouch(const FrameInput &input) const
              "ORIENT touch raw=(%u,%u) mapped=(%u,%u) turned_right=%d",
              (unsigned)input.touch_raw_x, (unsigned)input.touch_raw_y,
              (unsigned)mapped.px,
-             (unsigned)mapped.py, orientation ? 1 : 0);
+             (unsigned)mapped.py, reader_layout.orientation ? 1 : 0);
     DBG_LOG(this, dmsg);
     g_orientation_touch_diag_budget--;
   }
@@ -383,10 +375,10 @@ void App::SetOrientation(u8 new_orientation)
                                ? orientation_utils::ORIENT_TURNED_RIGHT
                                : orientation_utils::ORIENT_TURNED_LEFT;
   }
-  orientation = landscape ? orientation_utils::ORIENT_LANDSCAPE
+  reader_layout.orientation = landscape ? orientation_utils::ORIENT_LANDSCAPE
                           : portrait_orientation;
   const bool reading_view = nav_.mode == AppMode::Book;
-  ApplyRenderOrientation(reading_view ? orientation : portrait_orientation);
+  ApplyRenderOrientation(reading_view ? reader_layout.orientation : portrait_orientation);
 }
 
 void App::SetHandedness(u8 portrait_orientation_value)
@@ -396,9 +388,9 @@ void App::SetHandedness(u8 portrait_orientation_value)
           ? orientation_utils::ORIENT_TURNED_RIGHT
           : orientation_utils::ORIENT_TURNED_LEFT;
   if (!landscape)
-    orientation = portrait_orientation;
+    reader_layout.orientation = portrait_orientation;
   const bool reading_view = nav_.mode == AppMode::Book;
-  ApplyRenderOrientation(reading_view ? orientation : portrait_orientation);
+  ApplyRenderOrientation(reading_view ? reader_layout.orientation : portrait_orientation);
 }
 
 void App::ApplyRenderOrientation(u8 new_orientation)

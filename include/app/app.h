@@ -66,6 +66,7 @@ https://github.com/rhaleblian/dslibris
 #include "shared/main.h"
 #include "parse.h"
 #include "reader/page_repeat_utils.h"
+#include "reader/reader_layout_state.h"
 #include "settings/prefs_button_ids.h"
 #include "ui/text.h"
 #include "shared/status_reporter.h"
@@ -117,17 +118,11 @@ public:
   bool cache;
   //! user data block passed to expat callbacks.
   parsedata_t parsedata;
-  u8 orientation;
+  reader::ReaderLayoutState reader_layout;
   u8 portrait_orientation;
   u8 render_orientation;
   bool landscape;
   u8 colorMode;
-  int reader_font_size;
-  int reader_line_spacing;
-  u8 paraspacing, paraindent;
-  bool publisher_text_indent;
-  bool publisher_block_margins;
-  bool publisher_horizontal_margins;
 
   Button prefsButtons[PREFS_BUTTON_COUNT];
 

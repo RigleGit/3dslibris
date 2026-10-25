@@ -170,7 +170,7 @@ bool ReuseParsedBook(App *app) {
   }
   app->SetCurrentBook(selected);
   if (app->GetMode() == AppMode::Browser) {
-    if (orientation_utils::IsTurnedRight(app->orientation)) {
+    if (orientation_utils::IsTurnedRight(app->reader_layout.orientation)) {
       // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
     }
     app->ShowCurrentBookView();
@@ -345,7 +345,7 @@ void CloseFailedOpenBook(App *app, Book *book, unsigned int session_id,
 void EnsureBookMode(App *app, const char *log_message) {
   if (!app || app->GetMode() != AppMode::Browser || app->ShouldAbortWork())
     return;
-  if (orientation_utils::IsTurnedRight(app->orientation)) {
+  if (orientation_utils::IsTurnedRight(app->reader_layout.orientation)) {
     // lcdSwap(); // Not used on 3DS, keep for parity with original flow.
   }
   app->ShowCurrentBookView();

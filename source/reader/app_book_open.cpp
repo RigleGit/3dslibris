@@ -49,8 +49,8 @@ static int ClampLineSpacingSetting(int value) {
 static void ApplyEffectiveTextLayoutSettings(App *app, Book *book) {
   if (!app || !app->ts)
     return;
-  int font_size = app->reader_font_size;
-  int line_spacing = app->reader_line_spacing;
+  int font_size = app->reader_layout.font_size;
+  int line_spacing = app->reader_layout.line_spacing;
   if (book && book->UsesTextLayoutSettings()) {
     if (book->GetStyleFontSizeOverride() >= 0)
       font_size = book->GetStyleFontSizeOverride();
@@ -288,8 +288,8 @@ u8 ReaderController::OpenBook()
   }
 
   // Cache-save progress keeps the portrait splash active until this point.
-  if (app_.render_orientation != app_.orientation)
-    app_.ApplyRenderOrientation(app_.orientation);
+  if (app_.render_orientation != app_.reader_layout.orientation)
+    app_.ApplyRenderOrientation(app_.reader_layout.orientation);
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   book_nav::DrawPage(bookcurrent_, ts);

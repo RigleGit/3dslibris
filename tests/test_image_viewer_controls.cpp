@@ -1,3 +1,4 @@
+#include "reader/reader_layout_state.h"
 #include "reader/image_viewer_session.h"
 #include "reader/image_view_utils.h"
 #include "app/frame_input.h"
@@ -115,7 +116,7 @@ struct App {
     u32 a = KEY_A, b = KEY_B, x = KEY_X, y = KEY_Y, start = KEY_START,
         select = KEY_SELECT;
   } key;
-  unsigned char orientation = 0;
+  reader::ReaderLayoutState reader_layout;
   AppMode mode = AppMode::Book;
   bool abort = false;
   Book *GetCurrentBook() {
@@ -172,7 +173,7 @@ struct Fixture {
   App app;
   ReaderController reader{app};
   explicit Fixture(unsigned char orientation) {
-    app.orientation = orientation;
+    app.reader_layout.orientation = orientation;
     reader.OpenImageViewer();
     auto &s = *reader.image_viewer_;
     s.loading = s.wait_release = false;
@@ -190,10 +191,10 @@ struct Fixture {
   void Input(u32 down, u32 held = 0, int x = 0, int y = 0) {
     // Independent inverse mapping from logical touch coordinates to raw panel.
     int rx = x, ry = y;
-    if (app.orientation == 0) {
+    if (app.reader_layout.orientation == 0) {
       rx = 319 - y;
       ry = x;
-    } else if (app.orientation == 1) {
+    } else if (app.reader_layout.orientation == 1) {
       rx = y;
       ry = 239 - x;
     }

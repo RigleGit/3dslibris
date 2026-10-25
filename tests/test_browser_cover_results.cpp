@@ -1,3 +1,4 @@
+#include "reader/reader_layout_state.h"
 // Exercise the actual embedded-cover job owner for five backend outcomes.
 // Folder I/O/cache/decoder integration lives in test_folder_cover_jobs.
 #define osGetTime UnusedPlatformTime
@@ -59,9 +60,7 @@ struct App : IStatusReporter {
   std::unique_ptr<Text> ts{new Text};
   std::unique_ptr<Prefs> prefs{new Prefs};
   std::vector<Book *> books;
-  unsigned char paraspacing = 0, paraindent = 0, orientation = 0;
-  bool publisher_text_indent = false, publisher_block_margins = false;
-  bool publisher_horizontal_margins = false;
+  reader::ReaderLayoutState reader_layout;
   bool suspended = false, abort_work = false, input_release = false, dirty = false;
   bool new_3ds = false;
   int page_start = 0;

@@ -222,8 +222,8 @@ static void TogglePublisherTextIndentSetting(App *app, Book *book, bool is_book_
             book->GetStylePublisherTextIndentOverride()));
     app->MarkBookLayoutDirty();
   } else {
-    app->publisher_text_indent =
-        settings::ToggleSetting(app->publisher_text_indent);
+    app->reader_layout.publisher_text_indent =
+        settings::ToggleSetting(app->reader_layout.publisher_text_indent);
     app->MarkBookLayoutDirty();
   }
   if (app->prefs)
@@ -239,8 +239,8 @@ static void TogglePublisherBlockMarginsSetting(App *app, Book *book, bool is_boo
             book->GetStylePublisherBlockMarginsOverride()));
     app->MarkBookLayoutDirty();
   } else {
-    app->publisher_block_margins =
-        settings::ToggleSetting(app->publisher_block_margins);
+    app->reader_layout.publisher_block_margins =
+        settings::ToggleSetting(app->reader_layout.publisher_block_margins);
     app->MarkBookLayoutDirty();
   }
   if (app->prefs)
@@ -257,8 +257,8 @@ static void TogglePublisherHorizontalMarginsSetting(App *app, Book *book,
             book->GetStylePublisherHorizontalMarginsOverride()));
     app->MarkBookLayoutDirty();
   } else {
-    app->publisher_horizontal_margins =
-        settings::ToggleSetting(app->publisher_horizontal_margins);
+    app->reader_layout.publisher_horizontal_margins =
+        settings::ToggleSetting(app->reader_layout.publisher_horizontal_margins);
     app->MarkBookLayoutDirty();
   }
   if (app->prefs)
@@ -710,7 +710,7 @@ void SettingsController::PrefsIncreasePixelSize() {
   Book *book = app_.GetCurrentBook();
   if (app_.IsBookSettingsContext() && book) {
     const int value = settings::EffectiveStyleValue(StyleValueForBook(
-        true, book, app_.reader_font_size,
+        true, book, app_.reader_layout.font_size,
         book->GetStyleFontSizeOverride()));
     if (value < kTextPixelSizeMax) {
       book->SetStyleFontSizeOverride(value + 1);
@@ -719,9 +719,9 @@ void SettingsController::PrefsIncreasePixelSize() {
       PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
       app_.prefs->RequestWrite();
     }
-  } else if (app_.reader_font_size < kTextPixelSizeMax) {
-    app_.reader_font_size++;
-    app_.ts->SetPixelSize((u8)app_.reader_font_size);
+  } else if (app_.reader_layout.font_size < kTextPixelSizeMax) {
+    app_.reader_layout.font_size++;
+    app_.ts->SetPixelSize((u8)app_.reader_layout.font_size);
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
     app_.prefs->RequestWrite();
@@ -735,7 +735,7 @@ void SettingsController::PrefsDecreasePixelSize() {
   Book *book = app_.GetCurrentBook();
   if (app_.IsBookSettingsContext() && book) {
     const int value = settings::EffectiveStyleValue(StyleValueForBook(
-        true, book, app_.reader_font_size,
+        true, book, app_.reader_layout.font_size,
         book->GetStyleFontSizeOverride()));
     if (value > kTextPixelSizeMin) {
       book->SetStyleFontSizeOverride(value - 1);
@@ -744,9 +744,9 @@ void SettingsController::PrefsDecreasePixelSize() {
       PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
       app_.prefs->RequestWrite();
     }
-  } else if (app_.reader_font_size > kTextPixelSizeMin) {
-    app_.reader_font_size--;
-    app_.ts->SetPixelSize((u8)app_.reader_font_size);
+  } else if (app_.reader_layout.font_size > kTextPixelSizeMin) {
+    app_.reader_layout.font_size--;
+    app_.ts->SetPixelSize((u8)app_.reader_layout.font_size);
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
     app_.prefs->RequestWrite();
@@ -760,7 +760,7 @@ void SettingsController::PrefsIncreaseLineSpacing() {
   Book *book = app_.GetCurrentBook();
   if (app_.IsBookSettingsContext() && book) {
     const int value = settings::EffectiveStyleValue(StyleValueForBook(
-        true, book, app_.reader_line_spacing,
+        true, book, app_.reader_layout.line_spacing,
         book->GetStyleLineSpacingOverride()));
     if (value < kLineSpacingMaxPx) {
       book->SetStyleLineSpacingOverride(value + 1);
@@ -769,9 +769,9 @@ void SettingsController::PrefsIncreaseLineSpacing() {
       PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
       app_.prefs->RequestWrite();
     }
-  } else if (app_.reader_line_spacing < kLineSpacingMaxPx) {
-    app_.reader_line_spacing++;
-    app_.ts->linespacing = app_.reader_line_spacing;
+  } else if (app_.reader_layout.line_spacing < kLineSpacingMaxPx) {
+    app_.reader_layout.line_spacing++;
+    app_.ts->linespacing = app_.reader_layout.line_spacing;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
     app_.prefs->RequestWrite();
@@ -785,7 +785,7 @@ void SettingsController::PrefsDecreaseLineSpacing() {
   Book *book = app_.GetCurrentBook();
   if (app_.IsBookSettingsContext() && book) {
     const int value = settings::EffectiveStyleValue(StyleValueForBook(
-        true, book, app_.reader_line_spacing,
+        true, book, app_.reader_layout.line_spacing,
         book->GetStyleLineSpacingOverride()));
     if (value > 0) {
       book->SetStyleLineSpacingOverride(value - 1);
@@ -794,9 +794,9 @@ void SettingsController::PrefsDecreaseLineSpacing() {
       PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
       app_.prefs->RequestWrite();
     }
-  } else if (app_.reader_line_spacing > 0) {
-    app_.reader_line_spacing--;
-    app_.ts->linespacing = app_.reader_line_spacing;
+  } else if (app_.reader_layout.line_spacing > 0) {
+    app_.reader_layout.line_spacing--;
+    app_.ts->linespacing = app_.reader_layout.line_spacing;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
     app_.prefs->RequestWrite();
@@ -818,8 +818,8 @@ void SettingsController::PrefsIncreaseParaspacing() {
       PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
       app_.prefs->RequestWrite();
     }
-  } else if (app_.paraspacing < 4) {
-    app_.paraspacing++;
+  } else if (app_.reader_layout.paragraph_spacing < 4) {
+    app_.reader_layout.paragraph_spacing++;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
     app_.prefs->RequestWrite();
@@ -841,8 +841,8 @@ void SettingsController::PrefsDecreaseParaspacing() {
       PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
       app_.prefs->RequestWrite();
     }
-  } else if (app_.paraspacing > 0) {
-    app_.paraspacing--;
+  } else if (app_.reader_layout.paragraph_spacing > 0) {
+    app_.reader_layout.paragraph_spacing--;
     app_.MarkBookLayoutDirty();
     PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
     app_.prefs->RequestWrite();
@@ -905,7 +905,7 @@ void SettingsController::PrefsRefreshButton(int index) {
   case PREFS_BUTTON_FONTSIZE:
     button.SetLabel2(
         settings::FontSizeValueLabel(StyleValueForBook(
-            is_book_ctx, book, app_.reader_font_size,
+            is_book_ctx, book, app_.reader_layout.font_size,
             book ? book->GetStyleFontSizeOverride() : -1)));
     break;
   case PREFS_BUTTON_LINE_SPACING:
@@ -913,7 +913,7 @@ void SettingsController::PrefsRefreshButton(int index) {
         std::string("extra line spacing"));
     button.SetLabel2(
         settings::LineSpacingValueLabel(StyleValueForBook(
-            is_book_ctx, book, app_.reader_line_spacing,
+            is_book_ctx, book, app_.reader_layout.line_spacing,
             book ? book->GetStyleLineSpacingOverride() : -1)));
     break;
   case PREFS_BUTTON_PARASPACING:
@@ -921,7 +921,7 @@ void SettingsController::PrefsRefreshButton(int index) {
         std::string("extra paragraph spacing"));
     button.SetLabel2(
         settings::ParagraphSpacingValueLabel(StyleValueForBook(
-            is_book_ctx, book, app_.paraspacing,
+            is_book_ctx, book, app_.reader_layout.paragraph_spacing,
             book ? book->GetStyleParagraphSpacingOverride() : -1)));
     break;
   case PREFS_BUTTON_ORIENTATION:
@@ -1071,9 +1071,9 @@ void SettingsController::PrefsRefreshButton(int index) {
         settings::PublisherSettingValueLabel(
             is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
             book ? book->GetStylePublisherTextIndentOverride() : -1,
-            app_.publisher_text_indent,
+            app_.reader_layout.publisher_text_indent,
             book ? book->GetPublisherTextIndentEnabled()
-                 : app_.publisher_text_indent));
+                 : app_.reader_layout.publisher_text_indent));
     break;
   case PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS:
     button.SetLabel1(
@@ -1082,9 +1082,9 @@ void SettingsController::PrefsRefreshButton(int index) {
         settings::PublisherSettingValueLabel(
             is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
             book ? book->GetStylePublisherBlockMarginsOverride() : -1,
-            app_.publisher_block_margins,
+            app_.reader_layout.publisher_block_margins,
             book ? book->GetPublisherBlockMarginsEnabled()
-                 : app_.publisher_block_margins));
+                 : app_.reader_layout.publisher_block_margins));
     break;
   case PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS:
     button.SetLabel1(
@@ -1093,9 +1093,9 @@ void SettingsController::PrefsRefreshButton(int index) {
         settings::PublisherSettingValueLabel(
             is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
             book ? book->GetStylePublisherHorizontalMarginsOverride() : -1,
-            app_.publisher_horizontal_margins,
+            app_.reader_layout.publisher_horizontal_margins,
             book ? book->GetPublisherHorizontalMarginsEnabled()
-                 : app_.publisher_horizontal_margins));
+                 : app_.reader_layout.publisher_horizontal_margins));
     break;
   }
   app_.MarkPrefsDirty();
@@ -1154,16 +1154,16 @@ void SettingsController::ClearAllCaches() {
 void SettingsController::ResetToDefaults() {
   if (!app_.prefs)
     return;
-  app_.reader_font_size = 12;
-  app_.reader_line_spacing = 0;
+  app_.reader_layout.font_size = 12;
+  app_.reader_layout.line_spacing = 0;
   app_.ts->SetPixelSize(12);
-  app_.ts->linespacing = app_.reader_line_spacing;
-  app_.paraspacing = 0;
-  app_.paraindent = 0;
-  app_.publisher_text_indent = true;
-  app_.publisher_block_margins = true;
-  app_.publisher_horizontal_margins = true;
-  if (app_.orientation != orientation_utils::ORIENT_TURNED_LEFT)
+  app_.ts->linespacing = app_.reader_layout.line_spacing;
+  app_.reader_layout.paragraph_spacing = 0;
+  app_.reader_layout.paragraph_indent = 0;
+  app_.reader_layout.publisher_text_indent = true;
+  app_.reader_layout.publisher_block_margins = true;
+  app_.reader_layout.publisher_horizontal_margins = true;
+  if (app_.reader_layout.orientation != orientation_utils::ORIENT_TURNED_LEFT)
     app_.SetOrientation(orientation_utils::ORIENT_TURNED_LEFT);
   app_.ts->SetColorMode(0);
   UiButtonSkin_SetColorMode(0);

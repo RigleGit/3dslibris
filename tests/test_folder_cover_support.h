@@ -1,3 +1,4 @@
+#include "reader/reader_layout_state.h"
 #pragma once
 #include "shared/fixed_layout_perf.h"
 // Platform/UI substitutes only. Directory I/O, job admission, disk cache,
@@ -44,9 +45,9 @@ struct Text { void *screenright=nullptr; void MarkScreenDirty(void *) {} };
 struct Prefs { bool disable_ebook_images=false; BrowserViewMode browser_view_mode=BROWSER_VIEW_GALLERY; };
 struct BookContext {
   Text *text=nullptr; Prefs *prefs=nullptr; bool *disable_ebook_images=nullptr;
-  int *paragraph_spacing=nullptr, *paragraph_indent=nullptr;
+  const unsigned char *paragraph_spacing=nullptr, *paragraph_indent=nullptr;
   bool *publisher_text_indent=nullptr, *publisher_block_margins=nullptr, *publisher_horizontal_margins=nullptr;
-  int *orientation=nullptr; void *status_reporter=nullptr;
+  const unsigned char *orientation=nullptr; void *status_reporter=nullptr;
   void (*draw_background)(void *)=nullptr; void *draw_background_user_data=nullptr;
   void (*draw_top_background)(void *)=nullptr; void *draw_top_background_user_data=nullptr;
   void (*on_spine_progress)(unsigned,unsigned,void *)=nullptr; void *on_spine_progress_user_data=nullptr;
@@ -76,8 +77,7 @@ public:
   std::vector<Book *> books; Book *selected=nullptr; int page_start=0;
   bool is_new=true, suspended=false, wait_release=false, dirty=false;
   u64 last_interaction=0; AppMode mode=AppMode::Browser;
-  int paraspacing=0, paraindent=0, orientation=0;
-  bool publisher_text_indent=false, publisher_block_margins=false, publisher_horizontal_margins=false;
+  reader::ReaderLayoutState reader_layout;
   ChapterMenu *chaptermenu=nullptr;
   int BookCount() const { return (int)books.size(); }
   int GetBrowserPageStart() const { return page_start; }

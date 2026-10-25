@@ -148,7 +148,7 @@ void ReaderController::DrawSearch() {
     ts->SetPen(8, 250); ts->PrintString(ShortLabel(s.message, 31).c_str());
     ts->SetStyle(old_style); ts->MarkScreenDirty(ts->screenright);
   } else {
-    app_.ApplyRenderOrientation(app_.orientation);
+    app_.ApplyRenderOrientation(app_.reader_layout.orientation);
     Page *page = s.book->GetPage();
     Page::Highlight highlight{};
     const unsigned current = s.book->GetPosition();

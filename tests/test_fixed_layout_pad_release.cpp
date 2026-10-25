@@ -1,3 +1,4 @@
+#include "reader/reader_layout_state.h"
 #include "reader/reader_controls.h"
 #include "app/frame_input.h"
 #include "formats/common/pdf_view_utils.h"
@@ -20,7 +21,7 @@ uint64_t osGetTime() { return now; }
 struct Prefs { void Write() {} };
 struct App {
   bool touch=false, new3ds=true;
-  unsigned char orientation=orientation_utils::ORIENT_TURNED_LEFT;
+  reader::ReaderLayoutState reader_layout;
   int last_x=-1, last_y=-1;
   uint64_t ready_at=0;
   struct { uint32_t r=0, l=0, zl=0, zr=0; } key;
@@ -145,7 +146,7 @@ static void TestPadPanDirection() {
   };
   App app; Book book; Text text;
   for (const PanCase &test : cases) {
-    app.orientation=test.orientation;
+    app.reader_layout.orientation=test.orientation;
     for (bool use_cstick : {false, true}) {
       pad={0, 0}; stick={0, 0};
       Frame(app, book, text); // Release the preceding gesture.

@@ -90,8 +90,8 @@ void App::ShowLibraryView()
     book_renderer::CancelFixedLayoutDeferredWork(bookcurrent_);
   }
 
-  ts->SetPixelSize((u8)reader_font_size);
-  ts->linespacing = reader_line_spacing;
+  ts->SetPixelSize((u8)reader_layout.font_size);
+  ts->linespacing = reader_layout.line_spacing;
   ResetBrowserMarquee();
   ResetPageRepeat();
   nav_.mode = AppMode::Browser;
@@ -264,7 +264,7 @@ void App::ShowCurrentBookView()
 {
   if (!reader_state_.bookcurrent)
     return;
-  ApplyRenderOrientation(orientation);
+  ApplyRenderOrientation(reader_layout.orientation);
   nav_.mode = AppMode::Book;
   ts->SetScreen(ts->screenright);
   ts->MarkAllScreensDirty();

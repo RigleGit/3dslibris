@@ -1,3 +1,4 @@
+#include "reader/reader_layout_state.h"
 #include "settings/prefs.h"
 #include "settings/prefs_file_utils.h"
 #include "shared/orientation_utils.h"
@@ -89,10 +90,15 @@ struct Book {
 };
 struct App {
   std::unique_ptr<Text> ts;
-  unsigned char portrait_orientation=0, orientation=0;
-  bool landscape=false, publisher_text_indent=false, publisher_block_margins=false, publisher_horizontal_margins=false;
-  u8 paraindent=0, paraspacing=0; // Match the real App byte-valued layout fields.
-  int colorMode=0, reader_font_size=12, reader_line_spacing=0, reopen=0;
+  unsigned char portrait_orientation=0;
+  bool landscape=false;
+  reader::ReaderLayoutState reader_layout;
+  int colorMode=0, reopen=0;
+  App() {
+    reader_layout.publisher_text_indent=false;
+    reader_layout.publisher_block_margins=false;
+    reader_layout.publisher_horizontal_margins=false;
+  }
   std::string fontdir, bookdir, requested_folder, requested_file;
   std::vector<Book *> books;
   Book *current=nullptr, *selected=nullptr, *restore_result=nullptr;
@@ -183,10 +189,10 @@ static void TestReadContracts() {
   reject_nothrow_allocations=false;
   assert(failed_read == XML_ERROR_NO_MEMORY);
   assert(rejected_nothrow_allocations == 1);
-  assert(retry_prefs.time24h && retry_app.reader_font_size == 12);
+  assert(retry_prefs.time24h && retry_app.reader_layout.font_size == 12);
   assert(ReadCurrent() == retry_xml);
   assert(retry_prefs.Read() == 0 && !retry_prefs.time24h);
-  assert(retry_app.reader_font_size == 18);
+  assert(retry_app.reader_layout.font_size == 18);
 
   const int inputs[]={0, 7, 8, 12, 20, 21, 255};
   const int expected[]={8, 8, 8, 12, 20, 20, 20};
@@ -195,7 +201,7 @@ static void TestReadContracts() {
     WriteXml("<dslibris><font size=\"" + size + "\"/><book file=\"size.epub\" fontSize=\"" + size + "\"/></dslibris>");
     App app; app.ts.reset(new Text()); Book book; book.filename="size.epub"; app.books={&book}; Prefs prefs(&app);
     assert(prefs.Read() == 0);
-    assert(app.reader_font_size == expected[i] && app.ts->GetPixelSize() == expected[i]);
+    assert(app.reader_layout.font_size == expected[i] && app.ts->GetPixelSize() == expected[i]);
     assert(book.FontSize == expected[i]);
   }
   struct Migration { const char *attrs; int book_sides; bool global_sides; };
@@ -211,7 +217,7 @@ static void TestReadContracts() {
     WriteXml(std::string("<dslibris><paragraph ") + row.attrs + "/><book file=\"legacy.epub\" " + row.attrs + "/></dslibris>");
     App app; app.ts.reset(new Text()); Book book; book.filename="legacy.epub"; app.books={&book}; Prefs prefs(&app);
     assert(prefs.Read() == 0 && book.PublisherHorizontalMargins == row.book_sides);
-    assert(app.publisher_horizontal_margins == row.global_sides);
+    assert(app.reader_layout.publisher_horizontal_margins == row.global_sides);
   }
   // Deferred restoration owns bookmarks even when the library is not loaded.
   WriteXml("<dslibris><book file=\"A &amp; B.epub\" folder=\"books/nested\" page=\"6\" current=\"1\"><bookmark page=\"3\"/></book></dslibris>");
@@ -271,32 +277,32 @@ static void TestParagraphPreferenceContracts() {
     WriteXml(row.attrs ? std::string("<dslibris><paragraph ") + row.attrs + "/></dslibris>"
                        : "<dslibris/>");
     App app; app.ts.reset(new Text()); Prefs prefs(&app);
-    app.paraspacing=2; app.paraindent=3; app.reader_line_spacing=5;
-    app.ts->linespacing=11; app.publisher_text_indent=true;
-    app.publisher_block_margins=false; app.publisher_horizontal_margins=true;
+    app.reader_layout.paragraph_spacing=2; app.reader_layout.paragraph_indent=3; app.reader_layout.line_spacing=5;
+    app.ts->linespacing=11; app.reader_layout.publisher_text_indent=true;
+    app.reader_layout.publisher_block_margins=false; app.reader_layout.publisher_horizontal_margins=true;
     assert(prefs.Read() == 0);
-    assert(app.paraspacing == row.spacing && app.paraindent == row.indent);
-    assert(app.reader_line_spacing == row.line_spacing && app.ts->linespacing == row.renderer_spacing);
-    assert(app.publisher_text_indent == row.text_indent && app.publisher_block_margins == row.block_margins);
-    assert(app.publisher_horizontal_margins == row.horizontal_margins);
+    assert(app.reader_layout.paragraph_spacing == row.spacing && app.reader_layout.paragraph_indent == row.indent);
+    assert(app.reader_layout.line_spacing == row.line_spacing && app.ts->linespacing == row.renderer_spacing);
+    assert(app.reader_layout.publisher_text_indent == row.text_indent && app.reader_layout.publisher_block_margins == row.block_margins);
+    assert(app.reader_layout.publisher_horizontal_margins == row.horizontal_margins);
     assert(prefs.Write() == 0);
     App restarted; restarted.ts.reset(new Text()); Prefs loaded(&restarted);
     assert(loaded.Read() == 0);
-    assert(restarted.paraspacing == row.spacing && restarted.paraindent == row.indent);
+    assert(restarted.reader_layout.paragraph_spacing == row.spacing && restarted.reader_layout.paragraph_indent == row.indent);
     // Writer always emits lineSpacing, so a fresh session receives the App value.
-    assert(restarted.reader_line_spacing == row.line_spacing && restarted.ts->linespacing == row.line_spacing);
-    assert(restarted.publisher_text_indent == row.text_indent && restarted.publisher_block_margins == row.block_margins);
-    assert(restarted.publisher_horizontal_margins == row.horizontal_margins);
+    assert(restarted.reader_layout.line_spacing == row.line_spacing && restarted.ts->linespacing == row.line_spacing);
+    assert(restarted.reader_layout.publisher_text_indent == row.text_indent && restarted.reader_layout.publisher_block_margins == row.block_margins);
+    assert(restarted.reader_layout.publisher_horizontal_margins == row.horizontal_margins);
   }
   WriteXml("<dslibris><paragraph lineSpacing=\"17\" publisherBlockMargins=\"1\"/><paragraph spacing=\"4\"/></dslibris>");
   App app; app.ts.reset(new Text()); Prefs prefs(&app);
-  assert(prefs.Read() == 0 && app.paraspacing == 4);
-  assert(app.reader_line_spacing == 16 && app.ts->linespacing == 16);
-  assert(app.publisher_block_margins && app.publisher_horizontal_margins);
+  assert(prefs.Read() == 0 && app.reader_layout.paragraph_spacing == 4);
+  assert(app.reader_layout.line_spacing == 16 && app.ts->linespacing == 16);
+  assert(app.reader_layout.publisher_block_margins && app.reader_layout.publisher_horizontal_margins);
   // Read has always applied completed tags even if a later XML tag is broken.
   WriteXml("<dslibris><paragraph spacing=\"9\" lineSpacing=\"8\"/><broken></dslibris>");
-  assert(prefs.Read() != 0 && app.paraspacing == 9);
-  assert(app.reader_line_spacing == 8 && app.ts->linespacing == 8);
+  assert(prefs.Read() != 0 && app.reader_layout.paragraph_spacing == 9);
+  assert(app.reader_layout.line_spacing == 8 && app.ts->linespacing == 8);
   puts("PASS: paragraph defaults, byte conversion, limits, legacy migration and save/read");
 }
 
@@ -358,8 +364,8 @@ int main() {
   nested.PublisherTextIndent=1; nested.PublisherBlockMargins=0;
   nested.PublisherHorizontalMargins=1; nested.wrap=true; nested.last_opened=1234;
   owner.ts.reset(new Text()); owner.ts->margin.bottom=24;
-  owner.reader_font_size=16; owner.ts->SetPixelSize(16);
-  owner.reader_line_spacing=3; owner.ts->linespacing=3;
+  owner.reader_layout.font_size=16; owner.ts->SetPixelSize(16);
+  owner.reader_layout.line_spacing=3; owner.ts->linespacing=3;
   p.browser_view_mode=BROWSER_VIEW_LIST; p.fixed_layout_rtl=true;
   p.circle_pad_page_turn=false; p.library_sort_mode=LIBRARY_SORT_RECENT;
   owner.books={&nested}; owner.current=&nested;
@@ -392,8 +398,8 @@ int main() {
   assert(!restored.time24h && restored.browser_view_mode == BROWSER_VIEW_LIST);
   assert(restored.fixed_layout_rtl && !restored.circle_pad_page_turn);
   assert(restored.library_sort_mode == LIBRARY_SORT_RECENT);
-  assert(restarted.reader_font_size == 16 && restarted.ts->GetPixelSize() == 16);
-  assert(restarted.reader_line_spacing == 3 && restarted.ts->linespacing == 3);
+  assert(restarted.reader_layout.font_size == 16 && restarted.ts->GetPixelSize() == 16);
+  assert(restarted.reader_layout.line_spacing == 3 && restarted.ts->linespacing == 3);
   assert(restarted.ts->margin.bottom == 24);
   assert(loaded_nested.position == 79 && loaded_nested.bookmarks == std::list<u16>{12});
   assert(loaded_nested.FontSize == 18 && loaded_nested.LineSpacing == 5);

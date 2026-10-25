@@ -217,7 +217,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
     float viewport_dy = 0.0f;
     const float accel = BuildViewportStickAccel(s_viewport_stick_active_frames);
     MapViewportPanToReadingOrientation(
-        app.orientation, physical_x * accel, physical_y * accel, &viewport_dx,
+        app.reader_layout.orientation, physical_x * accel, physical_y * accel, &viewport_dx,
         &viewport_dy);
 
     if (stick_active &&
