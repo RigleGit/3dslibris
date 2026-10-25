@@ -1,5 +1,8 @@
 #include "shared/boot_trace.h"
 
+#ifdef DSLIBRIS_DEBUG
+#include "shared/path_constants.h"
+
 #include <atomic>
 #include <stdio.h>
 
@@ -9,14 +12,16 @@ const int kPendingAptHookCapacity = 16;
 std::atomic<int> g_pending_apt_hook_write_index(0);
 std::atomic<int> g_pending_apt_hook_flush_index(0);
 std::atomic<int> g_pending_apt_hooks[kPendingAptHookCapacity];
+// Both recording and flushing run on the thread calling aptMainLoop.
+u64 g_pending_apt_hook_times[kPendingAptHookCapacity];
 
-void AppendTraceLine(const char *path, const char *message) {
+void AppendTraceLine(const char *path, const char *message, u64 event_time) {
   if (!path || !message)
     return;
   FILE *fp = fopen(path, "a");
   if (!fp)
     return;
-  fprintf(fp, "%llu %s\n", (unsigned long long)osGetTime(), message);
+  fprintf(fp, "%llu %s\n", (unsigned long long)event_time, message);
   fflush(fp);
   fclose(fp);
 }
@@ -43,12 +48,13 @@ const char *AptHookName(APT_HookType hook) {
 namespace boot_trace {
 
 void Boot(const char *message) {
-  AppendTraceLine("sdmc:/3dslibris_boot_trace.txt", message);
+  AppendTraceLine(paths::kBootTraceFile, message, osGetTime());
 }
 
 void RecordAptHook(APT_HookType hook) {
   const int index =
       g_pending_apt_hook_write_index.fetch_add(1, std::memory_order_relaxed);
+  g_pending_apt_hook_times[index % kPendingAptHookCapacity] = osGetTime();
   g_pending_apt_hooks[index % kPendingAptHookCapacity].store(
       (int)hook, std::memory_order_relaxed);
 }
@@ -67,10 +73,12 @@ void FlushAptHooks() {
     const APT_HookType hook = (APT_HookType)hook_value;
     char line[64];
     snprintf(line, sizeof(line), "%s value=%d", AptHookName(hook), hook_value);
-    AppendTraceLine("sdmc:/3dslibris_apt_trace.txt", line);
+    AppendTraceLine(paths::kAptTraceFile, line,
+                    g_pending_apt_hook_times[flush_index % kPendingAptHookCapacity]);
     flush_index++;
   }
   g_pending_apt_hook_flush_index.store(flush_index, std::memory_order_relaxed);
 }
 
 } // namespace boot_trace
+#endif // DSLIBRIS_DEBUG

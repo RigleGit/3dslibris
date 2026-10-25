@@ -22,6 +22,8 @@ static const char *kConfigSdmcBase  = "sdmc:/config/3dslibris";
 // __attribute__((unused)) suppresses the per-TU warning for TUs that
 // include this header but do not reference these symbols.
 static const char *kLogFile      __attribute__((unused)) = "sdmc:/3ds/3dslibris/3dslibris.log";
+static const char *kBootTraceFile __attribute__((unused)) = "sdmc:/3dslibris_boot_trace.txt";
+static const char *kAptTraceFile  __attribute__((unused)) = "sdmc:/3dslibris_apt_trace.txt";
 static const char *kRomfsBookDir __attribute__((unused)) = "romfs:/3ds/3dslibris/book";
 static const char *kRomfsFontDir __attribute__((unused)) = "romfs:/3ds/3dslibris/font";
 
