@@ -53,11 +53,15 @@ void CheckDrawablePage(const settings::PrefsPageContext &page) {
                    (count - 1) * pitch + (pitch - 2) < 288);
   for (unsigned char slot = 0; slot < count; ++slot) {
     const int id = settings::PrefsPageButtonForSlot(page, slot);
+    const int button = settings::PrefsButtonIndexForAction(id);
     test::ExpectTrue("row indexes an existing preference button",
-                     id >= 0 && id < PREFS_BUTTON_COUNT);
+                     button >= 0 && button < PREFS_BUTTON_COUNT);
     for (unsigned char previous = 0; previous < slot; ++previous) {
       test::ExpectNe("a preference cannot occupy two rows", id,
                      settings::PrefsPageButtonForSlot(page, previous));
+      test::ExpectNe("visible actions do not overwrite each other's button", button,
+          settings::PrefsButtonIndexForAction(
+              settings::PrefsPageButtonForSlot(page, previous)));
     }
   }
 }
@@ -149,6 +153,7 @@ int main() {
   // A book may still be open while viewing general preferences. Its format
   // must not hide global options or expose per-book navigation actions.
   for (int flags = 0; flags < 4; ++flags) {
+    page.can_go_to_page = true;
     page.fixed_layout = (flags & 1) != 0;
     page.include_line_wrap_fix = (flags & 2) != 0;
     for (int p = 0; p < 3; ++p) {
@@ -161,6 +166,8 @@ int main() {
                         HasButton(page, PREFS_BUTTON_BOOKMARKS));
       test::ExpectFalse("general preferences exclude book information",
                         HasButton(page, PREFS_BUTTON_BOOK_INFO));
+      test::ExpectFalse("an open book does not replace the global clock action",
+                        HasButton(page, PREFS_ACTION_GO_TO_PAGE));
     }
     page.page = 1;
     test::ExpectTrue("image toggle belongs to global style settings",
@@ -196,11 +203,16 @@ int main() {
       test::ExpectFalse("book page excludes global Circle Pad setting",
                         HasButton(page, PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN));
       test::ExpectTrue("optional line-wrap slot is present only when requested",
-                       HasButton(page, PREFS_BUTTON_LIBRARY_VIEW) == (wrap != 0));
+                       HasButton(page, PREFS_ACTION_MOBI_LINE_WRAP_FIX) == (wrap != 0));
+      test::ExpectFalse("book controls do not expose the library-view action",
+                        HasButton(page, PREFS_BUTTON_LIBRARY_VIEW));
+      test::ExpectTrue("a paginated book exposes navigation rather than the clock",
+                       HasButton(page, PREFS_ACTION_GO_TO_PAGE) &&
+                       !HasButton(page, PREFS_BUTTON_TIME24H));
       if (wrap) {
         test::ExpectEq("line-wrap action precedes normal book controls",
                        settings::PrefsPageButtonForSlot(page, 1),
-                       PREFS_BUTTON_LIBRARY_VIEW);
+                       PREFS_ACTION_MOBI_LINE_WRAP_FIX);
       }
       page.page = 1;
       CheckDrawablePage(page);
@@ -215,7 +227,7 @@ int main() {
       test::ExpectFalse("style page excludes global Circle Pad setting",
                         HasButton(page, PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN));
       test::ExpectTrue("reading direction belongs to fixed-layout settings",
-                       HasButton(page, PREFS_BUTTON_LIBRARY_VIEW) == (fixed != 0));
+                       HasButton(page, PREFS_ACTION_READING_DIRECTION) == (fixed != 0));
       const int typography[] = {PREFS_BUTTON_FONTSIZE, PREFS_BUTTON_LINE_SPACING,
           PREFS_BUTTON_PARASPACING, PREFS_BUTTON_PUBLISHER_TEXT_INDENT,
           PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS,
@@ -226,5 +238,16 @@ int main() {
       }
     }
   }
+  test::ExpectEq("line-wrap keeps the existing visual storage",
+      settings::PrefsButtonIndexForAction(PREFS_ACTION_MOBI_LINE_WRAP_FIX),
+      PREFS_BUTTON_LIBRARY_VIEW);
+  test::ExpectEq("reading direction keeps the existing visual storage",
+      settings::PrefsButtonIndexForAction(PREFS_ACTION_READING_DIRECTION),
+      PREFS_BUTTON_LIBRARY_VIEW);
+  test::ExpectEq("page navigation keeps the existing visual storage",
+      settings::PrefsButtonIndexForAction(PREFS_ACTION_GO_TO_PAGE),
+      PREFS_BUTTON_TIME24H);
+  test::ExpectEq("invalid actions cannot index button storage",
+      settings::PrefsButtonIndexForAction(-1), -1);
   return 0;
 }

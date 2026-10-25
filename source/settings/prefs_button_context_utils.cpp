@@ -7,6 +7,15 @@ int PrefsRowPitch(unsigned char visible_count) {
   return visible_count > 7 ? 35 : 38;
 }
 
+int PrefsButtonIndexForAction(int action) {
+  if (action == PREFS_ACTION_MOBI_LINE_WRAP_FIX ||
+      action == PREFS_ACTION_READING_DIRECTION)
+    return PREFS_BUTTON_LIBRARY_VIEW;
+  if (action == PREFS_ACTION_GO_TO_PAGE)
+    return PREFS_BUTTON_TIME24H;
+  return action >= 0 && action < PREFS_BUTTON_COUNT ? action : -1;
+}
+
 namespace {
 
 static const int kGeneralPrefsButtons[] = {
@@ -50,7 +59,7 @@ static const int kBookPrefsButtons[] = {
 
 static const int kBookPrefsButtonsWithBookOption[] = {
     PREFS_BUTTON_STYLE_CUSTOMIZATION,
-    PREFS_BUTTON_LIBRARY_VIEW,
+    PREFS_ACTION_MOBI_LINE_WRAP_FIX,
     PREFS_BUTTON_TIME24H,
     PREFS_BUTTON_SEARCH,
     PREFS_BUTTON_TIME_REMAINING,
@@ -73,7 +82,7 @@ static const int kReflowBookPrefsPage2Buttons[] = {
 static const int kFixedLayoutBookPrefsPage2Buttons[] = {
     PREFS_BUTTON_ORIENTATION,
     PREFS_BUTTON_HANDEDNESS,
-    PREFS_BUTTON_LIBRARY_VIEW,
+    PREFS_ACTION_READING_DIRECTION,
 };
 
 } // namespace
@@ -92,8 +101,8 @@ unsigned char PrefsPageButtonCount(const PrefsPageContext &context) {
          (context.from_book && context.fixed_layout ? 1 : 0);
 }
 
-int PrefsPageButtonForSlot(const PrefsPageContext &context,
-                           unsigned char slot) {
+static int PageActionForSlot(const PrefsPageContext &context,
+                             unsigned char slot) {
   if (slot >= PrefsPageButtonCount(context)) return -1;
   if (!context.from_book && context.page == 1)
     return kGeneralStyleButtons[slot];
@@ -112,6 +121,15 @@ int PrefsPageButtonForSlot(const PrefsPageContext &context,
   }
   return PrefsButtonForVisibleSlot(context.from_book,
                                    context.include_line_wrap_fix, slot);
+}
+
+int PrefsPageButtonForSlot(const PrefsPageContext &context,
+                           unsigned char slot) {
+  const int action = PageActionForSlot(context, slot);
+  if (action == PREFS_BUTTON_TIME24H && context.from_book &&
+      context.can_go_to_page)
+    return PREFS_ACTION_GO_TO_PAGE;
+  return action;
 }
 
 unsigned char VisiblePrefsButtonCount(bool from_book,

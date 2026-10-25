@@ -155,11 +155,11 @@ static bool CanOpenSelectedBookIndex(Book *book) {
   return book->format == FORMAT_EPUB;
 }
 
-static bool CurrentBookUsesLineWrapFixSlot(Book *book, bool is_book_ctx) {
+static bool CurrentBookSupportsLineWrapFix(Book *book, bool is_book_ctx) {
   return is_book_ctx && book && book->IsMobiFile();
 }
 
-static bool CurrentBookUsesReadingDirectionSlot(Book *book, bool is_book_ctx) {
+static bool CurrentBookSupportsReadingDirection(Book *book, bool is_book_ctx) {
   return is_book_ctx && book && book->IsFixedLayout();
 }
 
@@ -276,7 +276,9 @@ int SettingsController::EffectiveVisibleCount() const {
   context.fixed_layout =
       app_.GetCurrentBook() && app_.GetCurrentBook()->IsFixedLayout();
   context.include_line_wrap_fix =
-      CurrentBookUsesLineWrapFixSlot(app_.GetCurrentBook(), is_book_ctx);
+      CurrentBookSupportsLineWrapFix(app_.GetCurrentBook(), is_book_ctx);
+  context.can_go_to_page =
+      CurrentBookCanGoToPage(app_.GetCurrentBook(), is_book_ctx);
   return (int)settings::PrefsPageButtonCount(context);
 }
 
@@ -288,7 +290,9 @@ int SettingsController::EffectiveButtonForSlot(int slot) const {
   context.fixed_layout =
       app_.GetCurrentBook() && app_.GetCurrentBook()->IsFixedLayout();
   context.include_line_wrap_fix =
-      CurrentBookUsesLineWrapFixSlot(app_.GetCurrentBook(), is_book_ctx);
+      CurrentBookSupportsLineWrapFix(app_.GetCurrentBook(), is_book_ctx);
+  context.can_go_to_page =
+      CurrentBookCanGoToPage(app_.GetCurrentBook(), is_book_ctx);
   return settings::PrefsPageButtonForSlot(context, (u8)slot);
 }
 
@@ -324,12 +328,12 @@ void SettingsController::ShowSettingsView(bool from_book) {
 
 void SettingsController::ToggleCurrentBookMobiLineWrapFix() {
   Book *book = app_.GetCurrentBook();
-  if (!CurrentBookUsesLineWrapFixSlot(book, app_.IsBookSettingsContext()))
+  if (!CurrentBookSupportsLineWrapFix(book, app_.IsBookSettingsContext()))
     return;
   book->SetMobiLineWrapFix(!book->GetMobiLineWrapFix());
   if (book->GetPageCount() > 0)
     app_.SetPrefsLayoutNoticePending(true);
-  PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
+  PrefsRefreshButton(PREFS_ACTION_MOBI_LINE_WRAP_FIX);
   app_.prefs->RequestWrite();
   app_.MarkPrefsDirty();
 }
@@ -391,27 +395,12 @@ void SettingsController::PrefsDraw() {
   ClampSelectedIndex(&selected_index, visibleCount);
   app_.SetPrefsSelectedIndex(selected_index);
 
-  PrefsRefreshButton(PREFS_BUTTON_FONTSIZE);
-  PrefsRefreshButton(PREFS_BUTTON_LINE_SPACING);
-  PrefsRefreshButton(PREFS_BUTTON_PARASPACING);
-  PrefsRefreshButton(PREFS_BUTTON_STYLE_CUSTOMIZATION);
-  PrefsRefreshButton(PREFS_BUTTON_FONT_CONFIG);
-  PrefsRefreshButton(PREFS_BUTTON_TIME24H);
-  PrefsRefreshButton(PREFS_BUTTON_TIME_REMAINING);
-  PrefsRefreshButton(PREFS_BUTTON_REOPEN_LAST_BOOK);
-  PrefsRefreshButton(PREFS_BUTTON_COLORMODE);
-  PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
-  PrefsRefreshButton(PREFS_BUTTON_BOOK_INFO);
-  PrefsRefreshButton(PREFS_BUTTON_INDEX);
-  PrefsRefreshButton(PREFS_BUTTON_BOOKMARKS);
-  PrefsRefreshButton(PREFS_BUTTON_LIBRARY_SORT);
-  PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_TEXT_INDENT);
-  PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS);
-  PrefsRefreshButton(PREFS_BUTTON_DISABLE_EBOOK_IMAGES);
-  PrefsRefreshButton(PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS);
-
   for (int slot = 0; slot < visibleCount; slot++) {
-    const int button_id = EffectiveButtonForSlot(slot);
+    const int action = EffectiveButtonForSlot(slot);
+    // Keep the confirmation until settings are reopened, as before.
+    if (action != PREFS_BUTTON_CLEAR_CACHE)
+      PrefsRefreshButton(action);
+    const int button_id = settings::PrefsButtonIndexForAction(action);
     const int row_pitch = settings::PrefsRowPitch(visibleCount);
     app_.prefsButtons[button_id].Resize(230, row_pitch - 2);
     app_.prefsButtons[button_id].Move(5, slot * row_pitch);
@@ -674,7 +663,7 @@ void SettingsController::PrefsHandleTouch(const FrameInput &input) {
   app_.SetPrefsSelectedIndex(selected_index);
   for (u8 i = 0; i < visibleCount; i++) {
     const int button_id = EffectiveButtonForSlot(i);
-    if (enclosesWithSlack(app_.prefsButtons[button_id], (int)coord.px,
+    if (enclosesWithSlack(app_.prefsButtons[settings::PrefsButtonIndexForAction(button_id)], (int)coord.px,
                           (int)coord.py)) {
       if (i != app_.GetPrefsSelectedIndex())
         app_.SetPrefsSelectedIndex(i);
@@ -886,146 +875,144 @@ void SettingsController::PrefsToggleHandedness() {
 void SettingsController::PrefsRefreshButton(int index) {
   const bool is_book_ctx = app_.IsBookSettingsContext();
   Book *book = app_.GetCurrentBook();
+  const int button_index = settings::PrefsButtonIndexForAction(index);
+  if (button_index < 0) {
+    app_.MarkPrefsDirty();
+    return;
+  }
+  Button &button = app_.prefsButtons[button_index];
   char msg[64];
   switch (index) {
   case PREFS_BUTTON_SEARCH:
-    app_.prefsButtons[index].SetLabel2("word or phrase >");
+    button.SetLabel2("word or phrase >");
     break;
   case PREFS_BUTTON_FONT_CONFIG:
-    app_.prefsButtons[PREFS_BUTTON_FONT_CONFIG].SetLabel2(
+    button.SetLabel2(
         std::string("open menu >"));
     break;
   case PREFS_BUTTON_STYLE_CUSTOMIZATION:
-    app_.prefsButtons[PREFS_BUTTON_STYLE_CUSTOMIZATION].SetLabel1(
+    button.SetLabel1(
         is_book_ctx ? std::string("book style customization")
                     : std::string("global style customization"));
     if (is_book_ctx && book && !book->UsesTextLayoutSettings()) {
-      app_.prefsButtons[PREFS_BUTTON_STYLE_CUSTOMIZATION].SetLabel2(
+      button.SetLabel2(
           std::string("(PDF fixed)"));
     } else {
-      app_.prefsButtons[PREFS_BUTTON_STYLE_CUSTOMIZATION].SetLabel2(
+      button.SetLabel2(
           std::string(">"));
     }
     break;
   case PREFS_BUTTON_FONTSIZE:
-    app_.prefsButtons[PREFS_BUTTON_FONTSIZE].SetLabel2(
+    button.SetLabel2(
         settings::FontSizeValueLabel(StyleValueForBook(
             is_book_ctx, book, app_.reader_font_size,
             book ? book->GetStyleFontSizeOverride() : -1)));
     break;
   case PREFS_BUTTON_LINE_SPACING:
-    app_.prefsButtons[PREFS_BUTTON_LINE_SPACING].SetLabel1(
+    button.SetLabel1(
         std::string("extra line spacing"));
-    app_.prefsButtons[PREFS_BUTTON_LINE_SPACING].SetLabel2(
+    button.SetLabel2(
         settings::LineSpacingValueLabel(StyleValueForBook(
             is_book_ctx, book, app_.reader_line_spacing,
             book ? book->GetStyleLineSpacingOverride() : -1)));
     break;
   case PREFS_BUTTON_PARASPACING:
-    app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel1(
+    button.SetLabel1(
         std::string("extra paragraph spacing"));
-    app_.prefsButtons[PREFS_BUTTON_PARASPACING].SetLabel2(
+    button.SetLabel2(
         settings::ParagraphSpacingValueLabel(StyleValueForBook(
             is_book_ctx, book, app_.paraspacing,
             book ? book->GetStyleParagraphSpacingOverride() : -1)));
     break;
   case PREFS_BUTTON_ORIENTATION:
-    app_.prefsButtons[PREFS_BUTTON_ORIENTATION].SetLabel2(
+    button.SetLabel2(
         app_.landscape ? std::string("Horizontal")
                        : std::string("Vertical"));
     break;
   case PREFS_BUTTON_HANDEDNESS:
-    app_.prefsButtons[PREFS_BUTTON_HANDEDNESS].SetLabel2(
+    button.SetLabel2(
         orientation_utils::IsTurnedRight(app_.portrait_orientation)
             ? std::string("Left-handed")
             : std::string("Right-handed"));
     break;
-  case PREFS_BUTTON_TIME24H:
-    if (CurrentBookCanGoToPage(book, is_book_ctx)) {
-      app_.prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("go to page"));
-      if (book->GetPageCount() <= 1) {
-        app_.prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
-            std::string("(single page)"));
-      } else {
-        snprintf(msg, sizeof(msg), "Pg %d / %d >", book->GetPosition() + 1,
-                 book->GetPageCount());
-        app_.prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(std::string(msg));
-      }
-    } else {
-      app_.prefsButtons[PREFS_BUTTON_TIME24H].SetLabel1(std::string("clock format"));
-      app_.prefsButtons[PREFS_BUTTON_TIME24H].SetLabel2(
-          app_.prefs->time24h ? std::string("24h Format")
-                              : std::string("12h Format"));
+  case PREFS_ACTION_GO_TO_PAGE:
+    button.SetLabel1(std::string("go to page"));
+    if (book && book->GetPageCount() <= 1) {
+      button.SetLabel2(std::string("(single page)"));
+    } else if (book) {
+      snprintf(msg, sizeof(msg), "Pg %d / %d >", book->GetPosition() + 1,
+               book->GetPageCount());
+      button.SetLabel2(std::string(msg));
     }
     break;
+  case PREFS_BUTTON_TIME24H:
+    button.SetLabel1(std::string("clock format"));
+    button.SetLabel2(app_.prefs->time24h ? std::string("24h Format")
+                                       : std::string("12h Format"));
+    break;
   case PREFS_BUTTON_TIME_REMAINING:
-    app_.prefsButtons[PREFS_BUTTON_TIME_REMAINING].SetLabel1(
+    button.SetLabel1(
         std::string("time remaining"));
-    app_.prefsButtons[PREFS_BUTTON_TIME_REMAINING].SetLabel2(
+    button.SetLabel2(
         app_.prefs->show_time_remaining ? std::string("on")
                                          : std::string("off"));
     break;
   case PREFS_BUTTON_REOPEN_LAST_BOOK:
-    app_.prefsButtons[PREFS_BUTTON_REOPEN_LAST_BOOK].SetLabel1(
+    button.SetLabel1(
         std::string("reopen last book"));
-    app_.prefsButtons[PREFS_BUTTON_REOPEN_LAST_BOOK].SetLabel2(
+    button.SetLabel2(
         app_.reopen ? std::string("on") : std::string("off"));
     break;
   case PREFS_BUTTON_COLORMODE: {
     int mode = app_.ts->GetColorMode();
-    app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel1(std::string("color mode"));
+    button.SetLabel1(std::string("color mode"));
     switch (mode) {
     case 0:
-      app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Light"));
+      button.SetLabel2(std::string("Light"));
       break;
     case 1:
-      app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Dark"));
+      button.SetLabel2(std::string("Dark"));
       break;
     case 2:
-      app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Sepia"));
+      button.SetLabel2(std::string("Sepia"));
       break;
     case 3:
-      app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("True Light"));
+      button.SetLabel2(std::string("True Light"));
       break;
     case 4:
-      app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("True Dark"));
+      button.SetLabel2(std::string("True Dark"));
       break;
     case 5:
-      app_.prefsButtons[PREFS_BUTTON_COLORMODE].SetLabel2(std::string("Dark Sepia"));
+      button.SetLabel2(std::string("Dark Sepia"));
       break;
     }
     break;
   }
+  case PREFS_ACTION_MOBI_LINE_WRAP_FIX:
+    button.SetLabel1(std::string("line wrap fix"));
+    button.SetLabel2(book && book->GetMobiLineWrapFix()
+                         ? std::string("on") : std::string("off"));
+    break;
+  case PREFS_ACTION_READING_DIRECTION:
+    button.SetLabel1(std::string("reading direction"));
+    button.SetLabel2(app_.prefs->fixed_layout_rtl ? std::string("Right to left")
+                                                : std::string("Left to right"));
+    break;
   case PREFS_BUTTON_LIBRARY_VIEW:
-    if (CurrentBookUsesLineWrapFixSlot(book, is_book_ctx)) {
-      app_.prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel1(
-          std::string("line wrap fix"));
-      app_.prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel2(
-          book->GetMobiLineWrapFix() ? std::string("on") : std::string("off"));
-    } else if (CurrentBookUsesReadingDirectionSlot(book, is_book_ctx)) {
-      app_.prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel1(
-          std::string("reading direction"));
-      app_.prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel2(
-          app_.prefs->fixed_layout_rtl ? std::string("Right to left")
-                                       : std::string("Left to right"));
-    } else {
-      app_.prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel1(
-          std::string("library view"));
-      app_.prefsButtons[PREFS_BUTTON_LIBRARY_VIEW].SetLabel2(
-          std::string(browser_view_utils::Label(app_.prefs->browser_view_mode)));
-    }
+    button.SetLabel1(std::string("library view"));
+    button.SetLabel2(std::string(browser_view_utils::Label(app_.prefs->browser_view_mode)));
     break;
   case PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN:
-    app_.prefsButtons[PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN].SetLabel1(
+    button.SetLabel1(
         std::string("circle pad pages"));
-    app_.prefsButtons[PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN].SetLabel2(
+    button.SetLabel2(
         app_.prefs->circle_pad_page_turn ? std::string("on")
                                          : std::string("off"));
     break;
   case PREFS_BUTTON_DISABLE_EBOOK_IMAGES:
-    app_.prefsButtons[PREFS_BUTTON_DISABLE_EBOOK_IMAGES].SetLabel1(
+    button.SetLabel1(
         std::string("disable ebook images"));
-    app_.prefsButtons[PREFS_BUTTON_DISABLE_EBOOK_IMAGES].SetLabel2(
+    button.SetLabel2(
         app_.prefs->disable_ebook_images ? std::string("on") : std::string("off"));
     break;
   case PREFS_BUTTON_LIBRARY_SORT: {
@@ -1033,54 +1020,54 @@ void SettingsController::PrefsRefreshButton(int index) {
         "by title", "by filename", "by author",
         "by file type", "by date modified", "by recently opened"};
     const int mode = static_cast<int>(app_.prefs->library_sort_mode);
-    app_.prefsButtons[PREFS_BUTTON_LIBRARY_SORT].SetLabel1(
+    button.SetLabel1(
         std::string("library sort"));
-    app_.prefsButtons[PREFS_BUTTON_LIBRARY_SORT].SetLabel2(
+    button.SetLabel2(
         std::string(kSortModeLabels[mode >= 0 && mode < LIBRARY_SORT_COUNT
                                         ? mode
                                         : 0]));
     break;
   }
   case PREFS_BUTTON_BOOK_INFO:
-    app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel1(
+    button.SetLabel1(
         std::string("book information"));
     if (is_book_ctx && book) {
-      app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel2(std::string("open >"));
+      button.SetLabel2(std::string("open >"));
     } else {
-      app_.prefsButtons[PREFS_BUTTON_BOOK_INFO].SetLabel2(
+      button.SetLabel2(
           std::string("(book only)"));
     }
     break;
   case PREFS_BUTTON_INDEX:
     if (CanOpenBookIndexInCurrentContext(book, is_book_ctx)) {
-      app_.prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string(">"));
+      button.SetLabel2(std::string(">"));
     } else if (CanOpenSelectedBookIndex(app_.GetSelectedBook())) {
-      app_.prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(
+      button.SetLabel2(
           std::string("(open selected book)"));
     } else {
-      app_.prefsButtons[PREFS_BUTTON_INDEX].SetLabel2(std::string("(not available)"));
+      button.SetLabel2(std::string("(not available)"));
     }
     break;
   case PREFS_BUTTON_BOOKMARKS:
     if (is_book_ctx && book && !book->SupportsBookmarks()) {
-      app_.prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
+      button.SetLabel2(
           std::string("(PDF disabled)"));
     } else {
-      app_.prefsButtons[PREFS_BUTTON_BOOKMARKS].SetLabel2(
+      button.SetLabel2(
           (is_book_ctx && book) ? std::string(">")
                                 : std::string("(open selected book)"));
     }
     break;
   case PREFS_BUTTON_RESET_DEFAULTS:
-    app_.prefsButtons[PREFS_BUTTON_RESET_DEFAULTS].SetLabel2(std::string("restore defaults >"));
+    button.SetLabel2(std::string("restore defaults >"));
     break;
   case PREFS_BUTTON_CLEAR_CACHE:
-    app_.prefsButtons[PREFS_BUTTON_CLEAR_CACHE].SetLabel2(std::string("delete all caches >"));
+    button.SetLabel2(std::string("delete all caches >"));
     break;
   case PREFS_BUTTON_PUBLISHER_TEXT_INDENT:
-    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_TEXT_INDENT].SetLabel1(
+    button.SetLabel1(
         std::string("publisher indent"));
-    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_TEXT_INDENT].SetLabel2(
+    button.SetLabel2(
         settings::PublisherSettingValueLabel(
             is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
             book ? book->GetStylePublisherTextIndentOverride() : -1,
@@ -1089,9 +1076,9 @@ void SettingsController::PrefsRefreshButton(int index) {
                  : app_.publisher_text_indent));
     break;
   case PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS:
-    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS].SetLabel1(
+    button.SetLabel1(
         std::string("publisher spacing"));
-    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_BLOCK_MARGINS].SetLabel2(
+    button.SetLabel2(
         settings::PublisherSettingValueLabel(
             is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
             book ? book->GetStylePublisherBlockMarginsOverride() : -1,
@@ -1100,9 +1087,9 @@ void SettingsController::PrefsRefreshButton(int index) {
                  : app_.publisher_block_margins));
     break;
   case PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS:
-    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS].SetLabel1(
+    button.SetLabel1(
         std::string("publisher sides"));
-    app_.prefsButtons[PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS].SetLabel2(
+    button.SetLabel2(
         settings::PublisherSettingValueLabel(
             is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
             book ? book->GetStylePublisherHorizontalMarginsOverride() : -1,
@@ -1229,18 +1216,20 @@ void SettingsController::PrefsHandlePress() {
     return;
   }
 
-  if (selected_button == PREFS_BUTTON_TIME24H) {
+  if (selected_button == PREFS_ACTION_GO_TO_PAGE) {
     if (CurrentBookCanGoToPage(book, is_book_ctx)) {
-      if (book->GetPageCount() <= 1) {
+      if (book->GetPageCount() <= 1)
         app_.PrintStatus("This book has only one page");
-      } else {
+      else
         go_to_page_dialog_.Open();
-      }
-    } else {
-      ToggleClockFormatSetting(app_.prefs.get());
-      PrefsRefreshButton(PREFS_BUTTON_TIME24H);
-      app_.MarkPrefsDirty();
     }
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_TIME24H) {
+    ToggleClockFormatSetting(app_.prefs.get());
+    PrefsRefreshButton(PREFS_BUTTON_TIME24H);
+    app_.MarkPrefsDirty();
     return;
   }
 
@@ -1269,22 +1258,26 @@ void SettingsController::PrefsHandlePress() {
     return;
   }
 
-  if (selected_button == PREFS_BUTTON_LIBRARY_VIEW) {
-    if (CurrentBookUsesLineWrapFixSlot(book, is_book_ctx)) {
-      ToggleCurrentBookMobiLineWrapFix();
-    } else if (CurrentBookUsesReadingDirectionSlot(book, is_book_ctx)) {
+  if (selected_button == PREFS_ACTION_MOBI_LINE_WRAP_FIX) {
+    ToggleCurrentBookMobiLineWrapFix();
+    return;
+  }
+
+  if (selected_button == PREFS_ACTION_READING_DIRECTION) {
+    if (CurrentBookSupportsReadingDirection(book, is_book_ctx)) {
       ToggleFixedLayoutReadingDirection(app_.prefs.get());
-      if (book) {
-        book_renderer::ResetFixedLayoutViewportForNavigation(book);
-        app_.RequestStatusRedraw();
-      }
-      PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
-      app_.MarkPrefsDirty();
-    } else {
-      ToggleBrowserViewSetting(&app_);
-      PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
+      book_renderer::ResetFixedLayoutViewportForNavigation(book);
+      app_.RequestStatusRedraw();
+      PrefsRefreshButton(PREFS_ACTION_READING_DIRECTION);
       app_.MarkPrefsDirty();
     }
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_LIBRARY_VIEW) {
+    ToggleBrowserViewSetting(&app_);
+    PrefsRefreshButton(PREFS_BUTTON_LIBRARY_VIEW);
+    app_.MarkPrefsDirty();
     return;
   }
 

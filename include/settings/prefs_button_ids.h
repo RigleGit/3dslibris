@@ -27,3 +27,10 @@ enum prefsbuttonindex {
   PREFS_BUTTON_DISABLE_EBOOK_IMAGES,
   PREFS_BUTTON_COUNT
 };
+
+// Logical actions can share a visual button without sharing their identity.
+enum prefsactionindex {
+  PREFS_ACTION_MOBI_LINE_WRAP_FIX = PREFS_BUTTON_COUNT,
+  PREFS_ACTION_READING_DIRECTION,
+  PREFS_ACTION_GO_TO_PAGE
+};

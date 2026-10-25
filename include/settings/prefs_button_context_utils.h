@@ -9,13 +9,15 @@ struct PrefsPageContext {
   int page;
   bool fixed_layout;
   bool include_line_wrap_fix;
+  bool can_go_to_page;
 
   PrefsPageContext()
       : from_book(false), page(0), fixed_layout(false),
-        include_line_wrap_fix(false) {}
+        include_line_wrap_fix(false), can_go_to_page(false) {}
 };
 
 int PrefsRowPitch(unsigned char visible_count);
+int PrefsButtonIndexForAction(int action);
 
 unsigned char PrefsPageButtonCount(const PrefsPageContext &context);
 int PrefsPageButtonForSlot(const PrefsPageContext &context,
