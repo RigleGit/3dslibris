@@ -37,29 +37,46 @@ void ExpectFloatEq(const char *label, float actual, float expected) {
 }
 
 void TestDetectBookFormat() {
-  ExpectEq("epub", app_flow_utils::DetectBookFormat("book.epub"),
-           FORMAT_EPUB);
-  ExpectEq("epub uppercase", app_flow_utils::DetectBookFormat("BOOK.EPUB"),
-           FORMAT_EPUB);
-  ExpectEq("txt", app_flow_utils::DetectBookFormat("book.txt"),
-           FORMAT_XHTML);
-  ExpectEq("markdown md", app_flow_utils::DetectBookFormat("notes.md"),
-           FORMAT_XHTML);
-  ExpectEq("markdown long", app_flow_utils::DetectBookFormat("notes.markdown"),
-           FORMAT_XHTML);
-  ExpectEq("mobi", app_flow_utils::DetectBookFormat("book.mobi"),
-           FORMAT_XHTML);
-  ExpectEq("pdf", app_flow_utils::DetectBookFormat("book.pdf"),
-           FORMAT_PDF);
-  ExpectEq("xps", app_flow_utils::DetectBookFormat("book.xps"),
-           FORMAT_PDF);
-  ExpectEq("oxps", app_flow_utils::DetectBookFormat("book.oxps"),
-           FORMAT_PDF);
+  const struct {
+    const char *filename;
+    format_t format;
+  } cases[] = {
+      {"book.epub", FORMAT_EPUB},
+      {"BOOK.EPUB", FORMAT_EPUB},
+      {"folder/book.EpUb", FORMAT_EPUB},
+      {"book.txt", FORMAT_XHTML},
+      {"notes.md", FORMAT_XHTML},
+      {"notes.markdown", FORMAT_XHTML},
+      {"book.mobi", FORMAT_XHTML},
+      {"book.fb2", FORMAT_XHTML},
+      {"book.rtf", FORMAT_XHTML},
+      {"book.odt", FORMAT_XHTML},
+      {"BOOK.FB2", FORMAT_XHTML},
+      {"BOOK.MARKDOWN", FORMAT_XHTML},
+      {"book.pdf", FORMAT_PDF},
+      {"book.xps", FORMAT_PDF},
+      {"book.oxps", FORMAT_PDF},
+      {"BOOK.XPS", FORMAT_PDF},
+      {"BOOK.OXPS", FORMAT_PDF},
+      {"comic.cbz", FORMAT_CBZ},
+      {"COMIC.CBZ", FORMAT_CBZ},
+      {"comic.cbr", FORMAT_UNDEF},
+      {"book.xhtml", FORMAT_UNDEF},
+      {"book.html", FORMAT_UNDEF},
+      {"book.xml", FORMAT_UNDEF},
+      {"book.epub.bak", FORMAT_UNDEF},
+      {"folder.epub/chapter", FORMAT_UNDEF},
+      {"folder.epub/", FORMAT_UNDEF},
+      {".epub", FORMAT_EPUB},
+      {"book.", FORMAT_UNDEF},
+      {"book", FORMAT_UNDEF},
+      {"", FORMAT_UNDEF},
+      {nullptr, FORMAT_UNDEF},
+  };
+  for (const auto &entry : cases)
+    ExpectEq(entry.filename ? entry.filename : "null filename",
+             app_flow_utils::DetectBookFormat(entry.filename), entry.format);
   ExpectTrue("cbz support enabled", app_flow_utils::CbzSupportEnabled());
-  ExpectEq("cbz enabled", app_flow_utils::DetectBookFormat("comic.cbz"),
-           FORMAT_CBZ);
-  ExpectEq("cbr unsupported", app_flow_utils::DetectBookFormat("comic.cbr"),
-           FORMAT_UNDEF);
 }
 
 void TestMuPdfDocumentKindHelpers() {

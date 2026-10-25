@@ -1,40 +1,25 @@
 #include "shared/app_flow_utils.h"
 
-#include <cstring>
-
 #include "shared/debug_runtime_mode.h"
+#include "shared/string_utils.h"
 
 namespace app_flow_utils {
-namespace {
-
-bool EndsWithNoCase(const char *value, const char *suffix) {
-  if (!value || !suffix)
-    return false;
-  size_t value_len = std::strlen(value);
-  size_t suffix_len = std::strlen(suffix);
-  if (value_len < suffix_len)
-    return false;
-  return strcasecmp(value + value_len - suffix_len, suffix) == 0;
-}
-
-} // namespace
 
 format_t DetectBookFormat(const char *filename) {
   if (!filename)
     return FORMAT_UNDEF;
-  if (EndsWithNoCase(filename, ".epub"))
+  if (HasExtCI(filename, ".epub"))
     return FORMAT_EPUB;
-  if (EndsWithNoCase(filename, ".pdf") || EndsWithNoCase(filename, ".xps") ||
-      EndsWithNoCase(filename, ".oxps"))
+  if (HasExtCI(filename, ".pdf") || HasExtCI(filename, ".xps") ||
+      HasExtCI(filename, ".oxps"))
     return FORMAT_PDF;
-  if (EndsWithNoCase(filename, ".cbz"))
+  if (HasExtCI(filename, ".cbz"))
     return CbzSupportEnabled() ? FORMAT_CBZ
                                : FORMAT_UNDEF;
-  if (EndsWithNoCase(filename, ".fb2") || EndsWithNoCase(filename, ".txt") ||
-      EndsWithNoCase(filename, ".md") ||
-      EndsWithNoCase(filename, ".markdown") ||
-      EndsWithNoCase(filename, ".rtf") || EndsWithNoCase(filename, ".odt") ||
-      EndsWithNoCase(filename, ".mobi")) {
+  if (HasExtCI(filename, ".fb2") || HasExtCI(filename, ".txt") ||
+      HasExtCI(filename, ".md") || HasExtCI(filename, ".markdown") ||
+      HasExtCI(filename, ".rtf") || HasExtCI(filename, ".odt") ||
+      HasExtCI(filename, ".mobi")) {
     return FORMAT_XHTML;
   }
   return FORMAT_UNDEF;
@@ -45,9 +30,9 @@ bool CbzSupportEnabled() { return true; }
 MuPdfDocumentKind DetectMuPdfDocumentKind(const char *filename) {
   if (!filename)
     return MuPdfDocumentKind::Unknown;
-  if (EndsWithNoCase(filename, ".pdf"))
+  if (HasExtCI(filename, ".pdf"))
     return MuPdfDocumentKind::Pdf;
-  if (EndsWithNoCase(filename, ".xps") || EndsWithNoCase(filename, ".oxps"))
+  if (HasExtCI(filename, ".xps") || HasExtCI(filename, ".oxps"))
     return MuPdfDocumentKind::Xps;
   return MuPdfDocumentKind::Unknown;
 }
