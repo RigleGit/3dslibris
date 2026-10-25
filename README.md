@@ -27,6 +27,7 @@ Nintendo 3DS homebrew ebook and manga reader based on the original Nintendo DS p
 - Supported formats: `EPUB`, `FB2`, `TXT`, `Markdown`, `RTF`, `ODT`, `MOBI`, `PDF`, `CBZ` and `XPS`.
 - `EPUB` reflow with TOC support, bookmarks, `go to page`, cached pagination, and broad inline/block formatting support.
 - Word and phrase search in reflowable books, with whole-word matching and next/previous results.
+- Zoom and pan illustrations in EPUB, MOBI and FB2, with pad and touch controls.
 - Portrait and landscape reading, with separate handedness and PDF/CBZ reading direction settings.
 - Global and per-book controls for font size, spacing, and EPUB publisher layout.
 - Reading progress and bookmarks saved across library folders, with an option to reopen the last book on startup.
@@ -211,8 +212,8 @@ Expected outputs:
 ## Documentation
 
 - [sdmc/3ds/3dslibris/book/QuickStart.txt](sdmc/3ds/3dslibris/book/QuickStart.txt) - Quickstart guide explaining menus, options, and controls
-- [docs/IMAGE_VIEWER.md](docs/IMAGE_VIEWER.md) - enlarged book images and validation
-- [docs/BOOK_SEARCH.md](docs/BOOK_SEARCH.md) - search behavior, implementation, and validation
+- [docs/IMAGE_VIEWER.md](docs/IMAGE_VIEWER.md) - image selection, zoom and touch controls
+- [docs/BOOK_SEARCH.md](docs/BOOK_SEARCH.md) - search controls and supported formats
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 - [docs/PDF_SOURCE_RELEASE.md](docs/PDF_SOURCE_RELEASE.md) - source release and rebuild notes for distributed binaries
