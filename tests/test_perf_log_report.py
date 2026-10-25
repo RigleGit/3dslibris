@@ -104,6 +104,37 @@ class ReportCLI(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIsNone(report['rows'][0]['change_percent'])
 
+    def test_unknown_raster_workload_has_no_comparison_percentage(self):
+        current = log([50000])
+        current += 'PERF doc=0x12 page=3 zoom=-1 stage=pdf.raster us=100000 at_us=1100 ok=1 bytes=0 size=0x0\n'
+        current += 'PERF doc=0x12 page=3 zoom=-1 stage=pdf.raster us=200000 at_us=1200 ok=1 bytes=0 size=0x0\n'
+        reference = log([100000])
+        reference += 'PERF doc=0x12 page=3 zoom=-1 stage=pdf.raster us=400000 at_us=1100 ok=1 bytes=0 size=0x0\n'
+        result, report = self.run_cli(current, reference)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        raster = next(r for r in report['rows'] if r['metric']=='pdf.raster')
+        self.assertEqual(raster['current']['median'], 150)
+        self.assertIsNone(raster['change_percent'])
+        self.assertFalse(raster['comparable'])
+        self.assertIn('resolution', raster['comparison_note'])
+        present = next(r for r in report['rows'] if r['metric']=='first_present')
+        self.assertEqual(present['change_percent'], -50)
+
+    def test_new_session_cannot_inherit_an_old_document_pointer(self):
+        first = log([100000], file='sdmc:/library/old.pdf')
+        second = log([], doc='0x99', file='new.pdf')
+        second += 'PERF doc=0x12 page=0 zoom=-1 stage=cover.decode us=999 at_us=1000 ok=1 bytes=0 size=0x0\n'
+        second += 'PERF view=2 doc=0x55 format=PDF page=3 zoom=2 target=240x400 at_us=2000 file="old.pdf"\n'
+        second += 'PERF doc=0x55 page=3 zoom=2 stage=first_present us=20000 at_us=3000 ok=1 bytes=0 size=0x0\n'
+        result, report = self.run_cli(first + second)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(report['current']['unattributed_records'], 1)
+        self.assertTrue(all(r['metric']!='cover.decode' for r in report['rows']))
+        old_run = next(r for r in report['rows'] if r['file']=='sdmc:/library/old.pdf')
+        new_run = next(r for r in report['rows'] if r['file']=='old.pdf')
+        self.assertEqual(old_run['current']['n'], 1)
+        self.assertEqual(new_run['current']['median'], 20)
+
     def test_malformed_timing_is_not_a_measurement(self):
         result,_=self.run_cli(log([-1]))
         self.assertNotEqual(result.returncode,0)

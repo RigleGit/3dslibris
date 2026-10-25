@@ -51,6 +51,10 @@ def parse_log(path):
                     raise ValueError('invalid device/runtime')
                 if info['metadata'] is not None and info['metadata'] != metadata:
                     raise ValueError('mixed device/runtime metadata')
+                # A header starts another process/session in concatenated logs.
+                # Pointer and active-file identities cannot cross that boundary.
+                documents.clear()
+                active_files.clear()
                 info['metadata'] = metadata
                 continue
             if 'dropped' in fields:
@@ -131,8 +135,16 @@ def report(current_path, reference_path, environment):
         row['current'] = summary(current_groups.get(key))
         row['reference'] = summary(reference_groups.get(key))
         before, after = row['reference'], row['current']
+        # The original PDF producer omits raster dimensions/zoom. Its outer
+        # view target cannot distinguish preview from interactive raster work.
+        dimensions = row['size'].split('x')
+        raster_size_known = (len(dimensions) == 2 and
+                             all(v.isdigit() and int(v) > 0 for v in dimensions))
+        row['comparable'] = row['metric'] != 'pdf.raster' or raster_size_known
+        row['comparison_note'] = ('' if row['comparable'] else
+                                  'PDF raster resolution unspecified; descriptive only')
         row['change_percent'] = (100 * (after['median'] / before['median'] - 1)
-                                 if before and after and before['median'] else None)
+                                 if row['comparable'] and before and after and before['median'] else None)
         rows.append(row)
     return {'environment': environment, 'current': current, 'reference': reference,
             'limits': 'Elapsed stage times, not CPU time. Heap values are phase samples, not peaks. File labels do not verify input hashes, fonts or cache state.',
@@ -152,14 +164,14 @@ def write_report(data, output):
         return f"{stats['median']:.3f} ({stats['n']})" if stats else '—'
     with (output/'measurements.csv').open('w', newline='', encoding='utf-8') as fp:
         writer = csv.writer(fp)
-        writer.writerow([*KEYS, 'reference_n', 'reference_median', 'current_n', 'current_median', 'change_percent'])
+        writer.writerow([*KEYS, 'reference_n', 'reference_median', 'current_n', 'current_median', 'change_percent', 'comparison_note'])
         for row in data['rows']:
             before, after = row['reference'], row['current']
             change = row['change_percent']
             writer.writerow([*(row[k] for k in KEYS), *(before[k] if before else '' for k in ('n','median')),
-                             *(after[k] if after else '' for k in ('n','median')), change if change is not None else ''])
+                             *(after[k] if after else '' for k in ('n','median')), change if change is not None else '', row['comparison_note']])
             file = row['file'].replace('|', '\\|')
-            delta = f'{change:+.2f}' if change is not None else '—'
+            delta = f'{change:+.2f}' if change is not None else ('descriptive only' if not row['comparable'] else '—')
             lines.append(f"| {file} | {row['page']} / {row['zoom']} / {row['target']} / {row['size']} | {row['metric']} | {row['unit']} | {display(before)} | {display(after)} | {delta} |")
     for name in ('reference', 'current'):
         info = data[name]
