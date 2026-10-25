@@ -1,4 +1,3 @@
-#include "formats/common/book_search_cache.h"
 /*
     3dslibris - epub_page_cache.cpp
     EPUB persistent page cache serialization.
@@ -11,6 +10,7 @@
 #include "book/page.h"
 #include "book/page_buffer_utils.h"
 #include "shared/debug_log.h"
+#include "formats/common/book_search_cache.h"
 #include "formats/common/page_cache_field_limits.h"
 #include "formats/common/page_cache_utils.h"
 #include "shared/path_constants.h"
@@ -44,7 +44,7 @@ static const u32 kEpubPageCacheMagic = 0x45504347U;
 static const u16 kEpubPageCacheVersion = 22;
 static const u16 kPageCacheHrefMaxBytes = 2048;
 // Bulk-loading cache files duplicates memory (file buffer + decoded pages).
-// Very large caches can spike memory and crash on reopen, so skip them.
+// Stream larger caches to avoid retaining a second full copy in memory.
 static const long kMaxBulkCacheLoadBytes = 16L * 1024L * 1024L;
 
 struct EpubPageCacheHeader {
@@ -231,9 +231,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     return false;
 
 #ifdef DSLIBRIS_DEBUG
-  // Per-step timing: large books show ~700us per cached page; this breakdown
-  // identifies which section dominates (page deserialize vs anchor map vs
-  // inline-image registration) so optimization targets the right hot loop.
+  // The pages phase includes the associated search data in both readers.
   const u64 t_load_begin = osGetTime();
   u64 t_after_hdr = t_load_begin;
   u64 t_after_pages = t_load_begin;
@@ -244,9 +242,7 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
   u64 t_after_hrefs = t_load_begin;
 #endif
 
-  // Bulk-read whole file into memory; on a 7706-page book the per-record
-  // fread() path was costing ~10s here (1.3ms per page) because each page
-  // = 2 stdio reads (length + body) plus locking. One fread() replaces ~15k.
+  // Bulk-read smaller caches; larger ones stay on the bounded-memory path.
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp)
     return false;
@@ -292,6 +288,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     ok = AppendPagesFromFile(fp, book, hdr.page_count,
                              page_cache_limits::kPageMaxBytes);
     if (ok) ok = book_search_cache::Read(fp, book);
+#ifdef DSLIBRIS_DEBUG
+    t_after_pages = osGetTime();
+#endif
   } else {
     std::vector<uint8_t> file_buf((size_t)file_size_long);
     memcpy(file_buf.data(), &hdr, sizeof(hdr));
@@ -324,6 +323,9 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     if (ok)
       AppendPages(book, pages);
     if (ok) ok = book_search_cache::Read(&reader, book);
+#ifdef DSLIBRIS_DEBUG
+    t_after_pages = osGetTime();
+#endif
 
     if (ok) {
       std::vector<page_cache_utils::CachedChapter> chapters;
@@ -414,10 +416,6 @@ bool TryLoad(Book *book, const char *book_path, int pixel_size,
     fclose(fp);
     fp = NULL;
   }
-#ifdef DSLIBRIS_DEBUG
-  t_after_pages = osGetTime();
-#endif
-
   if (use_stream_load) {
     std::vector<page_cache_utils::CachedChapter> chapters;
     if (ok)
@@ -600,6 +598,7 @@ struct StreamWriter::State {
   size_t documents, anchors;
 #ifdef DSLIBRIS_DEBUG
   u64 started_ms, active_ms, max_slice_ms;
+  u64 idle_max_slice_ms, closing_max_slice_ms;
   unsigned slices;
 #endif
 
@@ -607,7 +606,8 @@ struct StreamWriter::State {
             step_bytes(0), reference_ready(false), frozen(false), session(0),
             revision(0), documents(0), anchors(0)
 #ifdef DSLIBRIS_DEBUG
-            , started_ms(osGetTime()), active_ms(0), max_slice_ms(0), slices(0)
+            , started_ms(osGetTime()), active_ms(0), max_slice_ms(0),
+            idle_max_slice_ms(0), closing_max_slice_ms(0), slices(0)
 #endif
   { memset(&header, 0, sizeof(header)); }
 
@@ -767,13 +767,19 @@ struct StreamWriter::State {
     const u64 elapsed = now - (slices ? begin : started_ms);
     active_ms += elapsed;
     max_slice_ms = std::max(max_slice_ms, elapsed);
+    if (closing)
+      closing_max_slice_ms = std::max(closing_max_slice_ms, elapsed);
+    else
+      idle_max_slice_ms = std::max(idle_max_slice_ms, elapsed);
     ++slices;
     if (result != Pending) {
       DBG_LOGF(book->GetStatusReporter(),
-               "EPUB cache save: done ok=%d ms=%llu pages=%u active_ms=%llu max_slice_ms=%llu slices=%u closing=%d",
+               "EPUB cache save: done ok=%d ms=%llu pages=%u active_ms=%llu max_slice_ms=%llu slices=%u closing=%d idle_max_slice_ms=%llu closing_max_slice_ms=%llu",
                result == Complete ? 1 : 0, (unsigned long long)(now - started_ms),
                (unsigned)header.page_count, (unsigned long long)active_ms,
-               (unsigned long long)max_slice_ms, slices, closing ? 1 : 0);
+               (unsigned long long)max_slice_ms, slices, closing ? 1 : 0,
+               (unsigned long long)idle_max_slice_ms,
+               (unsigned long long)closing_max_slice_ms);
     }
 #else
     (void)book; (void)begin; (void)closing; (void)result;

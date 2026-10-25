@@ -23,5 +23,14 @@ typedef struct {
   u16 py;
 } touchPosition;
 
+#ifdef DSLIBRIS_TEST_CLOCK
+extern long long dslibris_test_clock;
+extern long long dslibris_test_clock_step;
+static inline long long osGetTime(void) {
+  dslibris_test_clock += dslibris_test_clock_step;
+  return dslibris_test_clock;
+}
+#else
 static inline long long osGetTime(void) { return 0; }
+#endif
 static inline void aptSetHomeAllowed(bool) {}

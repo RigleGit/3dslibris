@@ -2,9 +2,16 @@
 set -eu
 source "$(dirname "$0")/test_build.sh"
 
+for mode in release debug; do
+  flags=()
+  if [ "$mode" = debug ]; then
+    flags+=(-DDSLIBRIS_DEBUG -DDSLIBRIS_TEST_CLOCK)
+  fi
+
 "${CXX:-c++}" -std=c++11 \
   ${CXXFLAGS:-} \
   -DDSLIBRIS_HOST_TEST \
+  ${flags[@]+"${flags[@]}"} \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \
   "-I$TEST_ROOT/third_party/utf8proc" \
@@ -44,6 +51,11 @@ source "$(dirname "$0")/test_build.sh"
   "${THIRD_PARTY_OBJS[@]}" \
   ${LDFLAGS:-} \
   -lz \
-  -o "$TEST_OUTDIR/test_epub_page_cache"
+  -o "$TEST_OUTDIR/test_epub_page_cache_$mode"
 
-"$TEST_OUTDIR/test_epub_page_cache" "$@"
+  if [ "$mode" = debug ]; then
+    "$TEST_OUTDIR/test_epub_page_cache_$mode" metrics
+  else
+    "$TEST_OUTDIR/test_epub_page_cache_$mode" "$@"
+  fi
+done

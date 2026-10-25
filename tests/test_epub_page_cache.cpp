@@ -3,14 +3,21 @@
 #include "book/page.h"
 #include "formats/epub/epub_page_cache.h"
 #include "file_write_failure_utils.h"
+#include "shared/status_reporter.h"
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <dirent.h>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+
+#ifdef DSLIBRIS_TEST_CLOCK
+long long dslibris_test_clock = 0;
+long long dslibris_test_clock_step = 1;
+#endif
 
 namespace mobi_page_cache {
 void SavePending(Book *) {}
@@ -345,6 +352,79 @@ void TestBookOwnsPendingWriter() {
         "completion after idle work saves every page exactly once");
 }
 
+#if defined(DSLIBRIS_DEBUG) && defined(DSLIBRIS_TEST_CLOCK)
+struct MetricsReporter : IStatusReporter {
+  std::string load, save;
+  void PrintStatus(const char *message) override {
+    if (strstr(message, "EPUB cache load: hdr=")) load = message;
+    if (strstr(message, "EPUB cache save: done")) save = message;
+  }
+  void PrintStatus(std::string message) override { PrintStatus(message.c_str()); }
+};
+
+unsigned long long Metric(const std::string &message, const char *key) {
+  const size_t start = message.find(key);
+  Check(start != std::string::npos, key);
+  return start == std::string::npos ? 0 :
+      strtoull(message.c_str() + start + strlen(key), NULL, 10);
+}
+
+void TestCacheLoadMetricsStayWithinTotal() {
+  // Exercise both real reader branches with a monotonic platform clock.
+  for (bool large : {false, true}) {
+    Fixture fixture;
+    fixture.AddPages(large ? 4200 : 2, large ? 1024 : 2);
+    fixture.source.AddChapter(1, "Second page", 1);
+    fixture.source.SetChapterDocStartPage("chapter.xhtml", 0);
+    fixture.source.SetChapterAnchorPage("chapter.xhtml#start", 1);
+    fixture.Save();
+    MetricsReporter reporter;
+    BookContext ctx = fixture.ctx;
+    ctx.status_reporter = &reporter;
+    Book loaded(ctx);
+    Require(fixture.Load(&loaded), "load real cache for metrics");
+    const unsigned long long total = Metric(reporter.load, " total=");
+    Check(total > 0, "load metrics use elapsed platform time");
+    for (const char *key : {" hdr=", " pages=", " chapters=", " doc_starts=",
+                            " anchors=", " images=", " hrefs="})
+      Check(Metric(reporter.load, key) <= total,
+            "each cache load phase fits within total time");
+  }
+}
+
+void TestCacheSaveMetricsSeparateIdleAndClosing() {
+  Fixture fixture;
+  MetricsReporter reporter;
+  BookContext ctx = fixture.ctx;
+  ctx.status_reporter = &reporter;
+  Book book(ctx);
+  const u32 text[] = {'a', 'b'};
+  book.AppendPage()->SetBuffer(text, 2);
+  book.AppendPage()->SetBuffer(text, 2);
+  epub_page_cache::StreamWriter writer;
+  Require(writer.Begin(&book, kBookPath, 14, 2, 0, 0, 0,
+                       12, 12, 10, 36, NULL), "begin metrics save");
+  Require(writer.Step(&book, 1, 0) == epub_page_cache::StreamWriter::Pending,
+          "save starts with a bounded idle step");
+  // Closing is deliberately slower; it must not contaminate the idle maximum.
+  dslibris_test_clock_step = 100;
+  Require(writer.FlushPages(&book, 1, true) && writer.Finalize(&book, true),
+          "finish real cache with explicit flush");
+  dslibris_test_clock_step = 1;
+  const unsigned long long idle = Metric(reporter.save, " idle_max_slice_ms=");
+  const unsigned long long closing = Metric(reporter.save, " closing_max_slice_ms=");
+  Check(idle > 0 && idle < 100, "idle maximum excludes slow closing work");
+  Check(closing >= 100, "closing work has its own maximum");
+  Check(Metric(reporter.save, " max_slice_ms=") == closing,
+        "overall maximum includes closing work");
+  Check(Metric(reporter.save, " closing=") == 1,
+        "completion still identifies the final explicit flush");
+  Book loaded(fixture.ctx);
+  Check(fixture.Load(&loaded) && loaded.GetPageCount() == 2,
+        "metrics do not alter the saved cache");
+}
+#endif
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -353,9 +433,10 @@ int main(int argc, char **argv) {
       selected != "maps-load" && selected != "maps-save" &&
       selected != "load-large-pages" && selected != "load-large-search" &&
       selected != "stream-counts" && selected != "write-failure" &&
-      selected != "replacement" && selected != "steps" && selected != "owner")) {
+      selected != "replacement" && selected != "steps" && selected != "owner" &&
+      selected != "metrics")) {
     fprintf(stderr, "usage: %s [all|maps|maps-load|maps-save|load-large-pages|"
-                    "load-large-search|stream-counts|write-failure|replacement|steps|owner]\n", argv[0]);
+                    "load-large-search|stream-counts|write-failure|replacement|steps|owner|metrics]\n", argv[0]);
     return 2;
   }
   if (selected == "all")
@@ -378,6 +459,12 @@ int main(int argc, char **argv) {
     TestLargeCachePreservesEarlierReadFailure(true);
   if (selected == "all" || selected == "stream-counts")
     TestStreamWriterCountsMatchSerializedPages();
+#if defined(DSLIBRIS_DEBUG) && defined(DSLIBRIS_TEST_CLOCK)
+  if (selected == "all" || selected == "metrics") {
+    TestCacheLoadMetricsStayWithinTotal();
+    TestCacheSaveMetricsSeparateIdleAndClosing();
+  }
+#endif
   printf("EPUB cache owner: %d failures\n", failures);
   return failures ? 1 : 0;
 }
