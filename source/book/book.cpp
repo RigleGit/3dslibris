@@ -843,11 +843,18 @@ void Book::PumpPendingEpubPageCacheSave() {
     return;
   }
   if (!epub_cache_save_writer_) {
+    if (foldername.empty() || filename.empty()) {
+      CancelPendingEpubPageCacheSave();
+      return;
+    }
     epub_cache_save_writer_ = new (std::nothrow) epub_page_cache::StreamWriter;
+    if (!epub_cache_save_writer_) {
+      epub_page_cache_save_pending = false;
+      return;
+    }
     std::string path = foldername + "/" + filename;
     const EpubCacheSaveParams &p = epub_cache_save_params;
-    if (!epub_cache_save_writer_ || foldername.empty() || filename.empty() ||
-        !epub_cache_save_writer_->Begin(this, path.c_str(), p.pixel_size,
+    if (!epub_cache_save_writer_->Begin(this, path.c_str(), p.pixel_size,
             p.line_spacing, p.paragraph_spacing, p.paragraph_indent, p.orientation,
             p.margin_left, p.margin_right, p.margin_top, p.margin_bottom,
             p.regular_font.empty() ? NULL : p.regular_font.c_str())) {

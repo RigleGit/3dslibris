@@ -647,9 +647,33 @@ void TestEpubContentAllocationFailureAndRecovery() {
   ExpectTrue("remove allocation failure cache directory", rmdir(cache_dir) == 0);
 }
 
+void TestOptionalCacheAllocationFailureKeepsReading() {
+  char cache_dir[] = "/tmp/3dslibris-epub-writer-allocation-XXXXXX";
+  ExpectTrue("optional writer cache directory", mkdtemp(cache_dir) != nullptr);
+  epub_page_cache::SetCacheDirForTest(cache_dir);
+  Book *book = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
+  const u32 text[] = {'R', 'e', 'a', 'd'};
+  book->AppendPage()->SetBuffer(text, 4);
+  book->SetPendingEpubPageCacheSaveWithParams(kCachePx, kCacheLS, kCachePS,
+      kCachePI, kCacheOri, kCacheMl, kCacheMr, kCacheMt, kCacheMb, NULL);
+  g_rejected_nothrow_allocations = 0;
+  g_reject_nothrow_allocations = true;
+  book->PumpPendingEpubPageCacheSave();
+  g_reject_nothrow_allocations = false;
+  ExpectTrue("writer allocation failure was exercised", g_rejected_nothrow_allocations > 0);
+  ExpectTrue("cache allocation failure keeps the readable page",
+      book->GetPageCount() == 1 && book->GetPage(0)->GetBuffer()[0] == 'R');
+  ExpectFalse("failed optional save is not retried every frame", book->HasPendingEpubPageCacheSave());
+  book->Close();
+  delete book;
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  ExpectTrue("allocation failure left no cache artifact", rmdir(cache_dir) == 0);
+}
+
 } // namespace
 
 int main() {
+  TestOptionalCacheAllocationFailureKeepsReading();
   TestEpubContentAllocationFailureAndRecovery();
   TestEmbeddedStylesFromReportedEpub();
   TestNavSpineOrderAndAnchors();
