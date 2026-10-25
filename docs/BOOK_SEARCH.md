@@ -39,3 +39,7 @@ horizontal rules and separate XHTML documents form search boundaries.
 
 After updating, EPUB and MOBI page caches may be rebuilt on first open.
 Saved reading progress and preferences are kept.
+
+EPUB page caches are prepared between reader inputs after opening. Returning to
+the library finishes a pending save; closing the app can discard an unfinished
+cache. Reading progress is stored separately.
