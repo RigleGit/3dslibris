@@ -25,6 +25,7 @@ source "$(dirname "$0")/test_build.sh"
   "$TEST_ROOT/source/book/heading_layout.cpp" \
   "$TEST_ROOT/source/book/inline_image_layout.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_page_cache.cpp" \
+  "$TEST_ROOT/source/formats/epub/epub_page_cache.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_heading_markers.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_utils.cpp" \
   "$TEST_ROOT/source/formats/common/binary_io_utils.cpp" \

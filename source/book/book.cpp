@@ -32,6 +32,7 @@
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
 #include <algorithm>
+#include <new>
 #include <stdio.h>
 #include <string.h>
 #include <sys/param.h>
@@ -90,6 +91,7 @@ static int RemainingMinutesFromMsPerPage(int remaining_pages,
 } // namespace
 
 Book::Book(const BookContext &c) : ctx(c) {
+  epub_cache_save_writer_ = NULL;
   // State / Formats
   mupdf_state = NULL;
   cbz_state = NULL;
@@ -833,6 +835,47 @@ void Book::ReservePageCapacity(size_t incoming_pages) {
     pages.reserve(required_capacity);
 }
 
+void Book::PumpPendingEpubPageCacheSave() {
+  if (!HasPendingEpubPageCacheSave() || IsAsyncReflowOpenPending())
+    return;
+  if (GetPageCount() == 0) {
+    CancelPendingEpubPageCacheSave();
+    return;
+  }
+  if (!epub_cache_save_writer_) {
+    epub_cache_save_writer_ = new (std::nothrow) epub_page_cache::StreamWriter;
+    std::string path = foldername + "/" + filename;
+    const EpubCacheSaveParams &p = epub_cache_save_params;
+    if (!epub_cache_save_writer_ || foldername.empty() || filename.empty() ||
+        !epub_cache_save_writer_->Begin(this, path.c_str(), p.pixel_size,
+            p.line_spacing, p.paragraph_spacing, p.paragraph_indent, p.orientation,
+            p.margin_left, p.margin_right, p.margin_top, p.margin_bottom,
+            p.regular_font.empty() ? NULL : p.regular_font.c_str())) {
+      DBG_LOG(GetStatusReporter(), "EPUB cache save: cannot begin idle save");
+      CancelPendingEpubPageCacheSave();
+      return;
+    }
+  }
+  if (epub_cache_save_writer_->Step(this, 16384, 8) !=
+      epub_page_cache::StreamWriter::Pending)
+    CancelPendingEpubPageCacheSave();
+}
+
+void Book::CancelPendingEpubPageCacheSave() {
+  delete epub_cache_save_writer_;
+  epub_cache_save_writer_ = NULL;
+  epub_page_cache_save_pending = false;
+}
+
+void Book::FinishPendingEpubPageCacheSave() {
+  if (epub_cache_save_writer_) {
+    epub_cache_save_writer_->Step(this, 0, 0, true);
+    CancelPendingEpubPageCacheSave();
+  } else {
+    epub_page_cache::SavePending(this, true);
+  }
+}
+
 void Book::FlushPendingCacheSaves() {
   IStatusReporter *r = GetStatusReporter();
   const bool flush_epub =
@@ -847,7 +890,7 @@ void Book::FlushPendingCacheSaves() {
     DBG_LOGF(r, "BOOK flush-cache: save-epub begin pages=%d book=%s",
              (int)pages.size(), filename.c_str());
     HomeButtonGuard home_guard;
-    epub_page_cache::SavePending(this, true);
+    FinishPendingEpubPageCacheSave();
     DBG_LOGF(r, "BOOK flush-cache: save-epub done book=%s", filename.c_str());
   }
   if (flush_mobi) {
@@ -871,13 +914,13 @@ void Book::Close() {
   CancelAsyncReflowOpen();
   if (flush_pending_epub_cache) {
     HomeButtonGuard home_guard;
-    epub_page_cache::SavePending(this, true);
+    FinishPendingEpubPageCacheSave();
   }
   if (flush_pending_mobi_cache) {
     HomeButtonGuard home_guard;
     mobi_page_cache::SavePending(this);
   }
-  epub_page_cache_save_pending = false;
+  CancelPendingEpubPageCacheSave();
   mobi_page_cache_save_pending = false;
   std::vector<Page *>::iterator it = pages.begin();
   while (it != pages.end()) {
@@ -937,13 +980,17 @@ bool Book::HasPendingEpubPageCacheSave() const {
 }
 
 void Book::SetPendingEpubPageCacheSave(bool pending) {
-  epub_page_cache_save_pending = pending;
+  if (!pending)
+    CancelPendingEpubPageCacheSave();
+  else
+    epub_page_cache_save_pending = true;
 }
 
 void Book::SetPendingEpubPageCacheSaveWithParams(
     int pixel_size, int line_spacing, int paragraph_spacing,
     int paragraph_indent, int orientation, int margin_left, int margin_right,
     int margin_top, int margin_bottom, const char *regular_font) {
+  CancelPendingEpubPageCacheSave();
   epub_page_cache_save_pending = true;
   epub_cache_save_params.pixel_size = pixel_size;
   epub_cache_save_params.line_spacing = line_spacing;

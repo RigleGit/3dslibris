@@ -11,10 +11,6 @@
 #include <vector>
 #include <unistd.h>
 
-namespace epub_page_cache {
-void SavePending(Book *, bool) {}
-} // namespace epub_page_cache
-
 namespace {
 
 [[noreturn]] void Fail(const std::string &message) {

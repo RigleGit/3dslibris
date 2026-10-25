@@ -29,26 +29,30 @@ void SavePending(Book *book, bool closing = false);
 
 class StreamWriter {
 public:
+  enum StepResult { Pending, Complete, Failed };
   StreamWriter();
   ~StreamWriter();
+  StreamWriter(const StreamWriter &) = delete;
+  StreamWriter &operator=(const StreamWriter &) = delete;
 
   bool Begin(Book *book, const char *book_path, int pixel_size, int line_spacing,
              int paragraph_spacing, int paragraph_indent, int orientation,
              int margin_left, int margin_right, int margin_top, int margin_bottom,
              const char *regular_font);
 
-  bool FlushPages(Book *book, u16 from_page);
+  bool FlushPages(Book *book, u16 from_page, bool closing = false);
 
-  bool Finalize(Book *book);
+  bool Finalize(Book *book, bool closing = false);
+  StepResult Step(Book *book, size_t max_bytes, u32 max_ms,
+                  bool closing = false);
 
   void Abort();
 
-  bool IsOpen() const { return fp_ != NULL; }
+  bool IsOpen() const;
 
 private:
-  FILE *fp_;
-  std::string cache_path_;
-  u32 pages_written_;
+  struct State;
+  State *state_;
 };
 
 #ifdef DSLIBRIS_HOST_TEST

@@ -33,6 +33,12 @@ void App::PrepareForShutdown()
 
   pending_boot_reopen_ = false;
   skip_next_browser_present_ = false;
+  // Do not finish a large optional cache after aptMainLoop has requested exit.
+  // This is normal main-thread cleanup, never the APT hook.
+  if (Book *current = GetCurrentBook())
+    current->CancelPendingEpubPageCacheSave();
+  if (reader_state_.opening.book && reader_state_.opening.book != GetCurrentBook())
+    reader_state_.opening.book->CancelPendingEpubPageCacheSave();
   lifecycle_state_.SetResumePending(false);
   lifecycle_state_.SetSuspendHandled(false);
   lifecycle_state_.SetExitRequested(false);
@@ -56,6 +62,7 @@ void App::PrepareForShutdown()
     opening_book->RequestAbortOpen();
     book_renderer::CancelFixedLayoutDeferredWork(opening_book);
     opening_book->CancelAsyncReflowOpen();
+    opening_book->CancelPendingEpubPageCacheSave();
   }
 
   CloseBook();

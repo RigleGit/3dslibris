@@ -15,6 +15,7 @@
 #include "formats/mobi/mobi_text_decode.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/epub/epub_page_cache.h"
+#include <unistd.h>
 #include "minizip/unzip.h"
 #include "shared/app_flow_utils.h"
 #include "shared/open_cancel_poll.h"
@@ -1793,6 +1794,43 @@ void TestEpubXmlRecoveryAndZipFailure() {
   epub_page_cache::SetCacheDirForTest(nullptr);
 }
 
+void TestWarmEpubTocRepairIsDeferred() {
+  const char *folder = getenv("TEST_EPUB_RECOVERY_DIR");
+  test::ExpectTrue("TOC repair fixture folder supplied", folder != nullptr);
+  const std::string cache_dir = std::string(folder) + "/cache-toc-repair";
+  test::ExpectEq("create isolated TOC cache", mkdir(cache_dir.c_str(), 0700), 0);
+  epub_page_cache::SetCacheDirForTest(cache_dir.c_str());
+  Text text;
+  BookContext ctx; ctx.text = &text;
+  Book book(ctx);
+  book.SetFolderName(folder); book.SetFileName("valid.epub"); book.format = FORMAT_EPUB;
+  test::ExpectEq("open real TOC fixture", book_parser::Open(&book), 0);
+  test::ExpectGt("source fixture has chapters", (int)book.GetChapters().size(), 0);
+  book.ClearChapters();
+  book.FlushPendingCacheSaves();
+  book.Close();
+  const std::vector<std::string> caches = CacheFiles(cache_dir);
+  test::ExpectEq("one chapterless cache prepared", (int)caches.size(), 1);
+  test::ExpectEq("open cached pages and repair TOC", book_parser::Open(&book), 0);
+  test::ExpectGt("TOC is repaired before reading", (int)book.GetChapters().size(), 0);
+  test::ExpectTrue("TOC cache rewrite remains pending until after opening",
+                   book.HasPendingEpubPageCacheSave());
+  const std::string bytes = ReadFileBytes(caches[0]);
+  test::ExpectGt("saved header is complete", (int)bytes.size(), 16);
+  uint32_t chapter_count = 99;
+  memcpy(&chapter_count, bytes.data() + 12, sizeof(chapter_count));
+  test::ExpectEqU("opening did not synchronously rewrite the chapter table", chapter_count, 0);
+  book.FlushPendingCacheSaves();
+  book.Close();
+  test::ExpectEq("reopen completed TOC cache", book_parser::Open(&book), 0);
+  test::ExpectFalse("completed TOC no longer requires a rewrite", book.HasPendingEpubPageCacheSave());
+  book.Close();
+  for (const std::string &cache : CacheFiles(cache_dir))
+    remove(cache.c_str());
+  rmdir(cache_dir.c_str());
+  epub_page_cache::SetCacheDirForTest(nullptr);
+}
+
 void TestUtf8DetectionAndPassThrough() {
   const std::string utf8 = "\xC2\xA1Hola, se\xC3\xB1or!";
 
@@ -1908,6 +1946,7 @@ int main(int argc, char **argv) {
     else if(std::string(argv[1])=="reading-geometry") TestReadingGeometryParserBoundaries();
     else if(std::string(argv[1])=="image-cache") TestInlineImageCacheRetainsDistinctDimensions();
     else if(std::string(argv[1])=="image-widths") TestRepeatedImageWidthsRemainPerOccurrence();
+    else if(std::string(argv[1])=="toc-cache") TestWarmEpubTocRepairIsDeferred();
     else return 2;
     return 0;
   }
@@ -1935,6 +1974,7 @@ int main(int argc, char **argv) {
   TestMobiParseCloseCachedReopenAndRecovery();
   TestEpubInterruptedSpineAndRecovery();
   TestEpubXmlRecoveryAndZipFailure();
+  TestWarmEpubTocRepairIsDeferred();
   TestDecodeCp1252();
   TestUtf8DetectionAndPassThrough();
   TestDecodeIso88591();

@@ -365,8 +365,7 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
   {
     ClearDeferredRelayoutState();
   }
-  if (bookcurrent_->HasPendingEpubPageCacheSave() ||
-      bookcurrent_->HasPendingMobiPageCacheSave())
+  if (bookcurrent_->HasPendingMobiPageCacheSave())
   {
     boot_trace::Boot("async open cache save begin");
     DrawOpeningSplashImpl(&app_, 0, 0, "saving cache...");

@@ -273,8 +273,7 @@ u8 ReaderController::OpenBook()
            (unsigned long)bookcurrent_->GetLastOpenedTime(),
            bookcurrent_->GetFileName() ? bookcurrent_->GetFileName() : "?");
 
-  if (bookcurrent_->HasPendingEpubPageCacheSave() ||
-      bookcurrent_->HasPendingMobiPageCacheSave())
+  if (bookcurrent_->HasPendingMobiPageCacheSave())
   {
     boot_trace::Boot("open book cache save begin");
     DrawOpeningSplashImpl(&app_, 0, 0, "saving cache...");

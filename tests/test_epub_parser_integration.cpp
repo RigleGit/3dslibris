@@ -485,12 +485,18 @@ void TestEpubStreamCommitAndAbort() {
   ExpectTrue("stream begin", writer.Begin(source, kCacheBookPath,
       kCachePx, kCacheLS, kCachePS, kCachePI, kCacheOri,
       kCacheMl, kCacheMr, kCacheMt, kCacheMb, nullptr));
-  const std::string path = CacheFilePath(cache_dir);
   ExpectTrue("stream first batch", writer.FlushPages(source, 0));
   writer.Abort();
   writer.Abort();
   ExpectFalse("aborted stream closed", writer.IsOpen());
-  ExpectTrue("aborted stream removed partial artifact", access(path.c_str(), F_OK) != 0);
+  DIR *aborted_dir = opendir(cache_dir);
+  ExpectTrue("inspect aborted stream directory", aborted_dir != nullptr);
+  unsigned artifacts = 0;
+  while (dirent *entry = readdir(aborted_dir))
+    if (entry->d_name[0] != '.')
+      ++artifacts;
+  closedir(aborted_dir);
+  ExpectTrue("aborted stream removes every partial artifact", artifacts == 0);
   Book *loaded = MakeEpubBook("/tmp", "3dslibris_cache_roundtrip_book.epub");
   ExpectFalse("aborted stream cannot be loaded", InvokeTryLoad(loaded, kCacheBookPath));
   ExpectTrue("restart stream", writer.Begin(source, kCacheBookPath,
@@ -501,6 +507,7 @@ void TestEpubStreamCommitAndAbort() {
   source->AddChapter(1, "Second streamed page", 1);
   ExpectTrue("stream incremental second page", writer.FlushPages(source, 1));
   ExpectTrue("commit stream", writer.Finalize(source));
+  const std::string path = CacheFilePath(cache_dir);
   ExpectFalse("committed stream closed", writer.IsOpen());
   ExpectTrue("committed stream loads", InvokeTryLoad(loaded, kCacheBookPath));
   ExpectTrue("stream pages not duplicated", loaded->GetPageCount() == 2);

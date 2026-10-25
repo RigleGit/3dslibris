@@ -19,6 +19,7 @@
 #include <string>
 
 #include "app/app.h"
+#include "book/book.h"
 #include "shared/boot_trace.h"
 #include "shared/debug_log.h"
 #include "library/browser_warmup_utils.h"
@@ -276,6 +277,13 @@ int MainLoopController::RunMainLoop()
             osGetTime(), app_.GetBrowserLastInteractionMs(),
             app_.IsBrowserWaitingInputRelease()))
       app_.ProcessJobs(3);
+    if (!wrote_prefs && app_.GetMode() == AppMode::Book &&
+        input.keys_down == 0 && input.keys_held == 0 &&
+        !app_.ShouldAbortWork() && aptIsActive()) {
+      Book *book = app_.GetCurrentBook();
+      if (book)
+        book->PumpPendingEpubPageCacheSave();
+    }
     fixed_perf::Flush(&app_);
   }
   fixed_perf::Flush(&app_);

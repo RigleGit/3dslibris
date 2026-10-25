@@ -34,6 +34,7 @@ struct fz_context;
 struct fz_document;
 struct fz_display_list;
 struct fz_outline;
+namespace epub_page_cache { class StreamWriter; }
 
 struct ChapterEntry
 {
@@ -87,6 +88,8 @@ public:
   };
 
 private:
+  epub_page_cache::StreamWriter *epub_cache_save_writer_;
+  void FinishPendingEpubPageCacheSave();
   std::string filename;
   std::string foldername;
   std::string title;
@@ -450,6 +453,8 @@ public:
   void SignalReflowWorkerShutdown();
   void FinishShutdownReflowWorker();
   void FlushPendingCacheSaves();
+  void PumpPendingEpubPageCacheSave();
+  void CancelPendingEpubPageCacheSave();
   bool HasPendingEpubPageCacheSave() const;
   void SetPendingEpubPageCacheSave(bool pending);
   void SetPendingEpubPageCacheSaveWithParams(

@@ -539,26 +539,15 @@ int epub(Book *book, std::string name, bool metadataonly) {
                (unsigned long long)(osGetTime() - t_parse_begin));
 #endif
     }
+    bool repaired_toc = false;
     if (book->GetChapters().empty() && book->GetPageCount() > 0) {
       std::map<std::string, u16> page_start_by_href;
       BuildPageStartMapFromPackage(parsedata, folder, book, &page_start_by_href);
       ResolveEpubTocFromPackageData(uf, book, parsedata, folder,
                                     page_start_by_href, reporter);
-      if (!book->GetChapters().empty()) {
-        epub_page_cache::Save(
-            book, name.c_str(),
-            deps.ts ? (int)deps.ts->GetPixelSize() : 0,
-            deps.ts ? (int)deps.ts->linespacing : 0,
-            deps.paragraph_spacing, deps.paragraph_indent, deps.orientation,
-            deps.ts ? (int)deps.ts->margin.left : 0,
-            deps.ts ? (int)deps.ts->margin.right : 0,
-            deps.ts ? (int)deps.ts->margin.top : 0,
-            deps.ts ? (int)deps.ts->margin.bottom : 0,
-            deps.ts ? deps.ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : NULL,
-            false);
-      }
+      repaired_toc = !book->GetChapters().empty();
     }
-    return FinalizeEpubParse(uf, &parsedata, book, name, deps, 0, false);
+    return FinalizeEpubParse(uf, &parsedata, book, name, deps, 0, repaired_toc);
   }
 
   std::vector<std::string> hrefs = BuildEpubSpineDocumentList(parsedata);
@@ -570,7 +559,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
   epub_page_cache::StreamWriter stream_writer;
   // Avoid SD cache writes on the critical first-open path. The pages remain
   // resident for reading, and FinalizeEpubParse marks the cache save pending so
-  // it can be flushed when the book is closed.
+  // it can be saved between reader inputs, or completed when the book is closed.
   const bool use_stream = false;
 
   rc = ParseEpubSpineDocuments(

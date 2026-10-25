@@ -55,6 +55,7 @@ struct Fixture {
   }
 
   ~Fixture() {
+    source.Close();
     const std::string path = CacheFile();
     if (!path.empty()) remove(path.c_str());
     rmdir(directory.c_str());
@@ -259,6 +260,91 @@ void TestStreamWriterCountsMatchSerializedPages() {
   }
 }
 
+void TestInterruptedReplacementPreservesCache() {
+  Fixture fixture;
+  fixture.AddPages(2);
+  fixture.Save();
+  const u32 replacement[] = {'b', 'b'};
+  fixture.source.GetPage(0)->SetBuffer(replacement, 2);
+  epub_page_cache::StreamWriter writer;
+  Require(fixture.Begin(&writer), "begin replacement writer");
+  Require(writer.FlushPages(&fixture.source, 0), "write replacement pages");
+  writer.Abort();
+  Book loaded(fixture.ctx);
+  const bool ok = fixture.Load(&loaded);
+  Check(ok && loaded.GetPageCount() == 2 &&
+            loaded.GetPage(0)->GetBuffer()[0] == 'a',
+        "aborted replacement keeps the previous complete EPUB cache");
+}
+
+void TestSaveStepsBudgetMetadataAndPreserveContent() {
+  Fixture fixture;
+  fixture.AddPages(2);
+  for (int i = 0; i < 1000; ++i)
+    fixture.source.SetChapterAnchorPage("chapter.xhtml#" + std::to_string(i), 1);
+  fixture.source.SetChapterDocStartPage("chapter.xhtml", 0);
+  fixture.source.AddChapter(1, "Second page", 2);
+  const u16 link = fixture.source.RegisterInlineLinkHref("chapter.xhtml#7");
+  Require(link != 0, "register cache link");
+  page_search::Events events;
+  page_search::Annotate(events, 1, page_search::Skip);
+  fixture.source.GetPage(1)->SetSearchEvents(events);
+  epub_page_cache::StreamWriter writer;
+  Require(fixture.Begin(&writer), "begin stepped cache save");
+  unsigned steps = 0;
+  epub_page_cache::StreamWriter::StepResult result;
+  do {
+    result = writer.Step(&fixture.source, 1, 0);
+    ++steps;
+    Require(steps < 1100, "stepped writer finishes without an unbounded retry");
+  } while (result == epub_page_cache::StreamWriter::Pending);
+  Check(result == epub_page_cache::StreamWriter::Complete && steps >= 1000,
+        "byte budget covers anchors as well as page buffers");
+  Book loaded(fixture.ctx);
+  const bool ok = fixture.Load(&loaded);
+  Check(ok && loaded.GetPageCount() == 2, "stepped cache loads through the real reader");
+  if (ok) {
+    u16 page = 0;
+    Check(loaded.FindChapterAnchorPage("chapter.xhtml#999", &page) && page == 1,
+          "last anchor survives incremental serialization");
+    Check(loaded.GetChapters().size() == 1 && loaded.GetChapters()[0].page == 1 &&
+              loaded.GetChapters()[0].title == "Second page",
+          "stepped save preserves chapters");
+    Check(page_search::FlagsAt(loaded.GetPage(1)->GetSearchEvents(), 1) == page_search::Skip,
+          "stepped save preserves search annotations");
+    Check(loaded.GetInlineLinkHrefCount() == 1 &&
+              *loaded.GetInlineLinkHref(1) == "chapter.xhtml#7",
+          "stepped save preserves link resources");
+  }
+}
+
+void TestBookOwnsPendingWriter() {
+  Fixture fixture;
+  fixture.AddPages(20, 1024);
+  fixture.source.SetFolderName("/tmp");
+  fixture.source.SetFileName("3dslibris-epub-cache-owner.epub");
+  auto mark_pending = [&]() {
+    fixture.source.SetPendingEpubPageCacheSaveWithParams(14, 2, 0, 0, 0,
+                                                       12, 12, 10, 36, NULL);
+  };
+  mark_pending();
+  fixture.source.PumpPendingEpubPageCacheSave();
+  Check(fixture.source.HasPendingEpubPageCacheSave(),
+        "one idle step does not serialize an entire large book");
+  fixture.source.CancelPendingEpubPageCacheSave();
+  Check(!fixture.source.HasPendingEpubPageCacheSave() && fixture.CacheFile().empty(),
+        "shutdown cancellation releases the writer and removes its temporary");
+  mark_pending();
+  fixture.source.PumpPendingEpubPageCacheSave();
+  fixture.source.FlushPendingCacheSaves();
+  Check(!fixture.source.HasPendingEpubPageCacheSave(),
+        "explicit flush completes the pending writer");
+  Book loaded(fixture.ctx);
+  Check(fixture.Load(&loaded) && loaded.GetPageCount() == 20 &&
+            loaded.GetPage(19)->GetLength() == 1024,
+        "completion after idle work saves every page exactly once");
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -266,15 +352,22 @@ int main(int argc, char **argv) {
   if (argc > 2 || (selected != "all" && selected != "maps" &&
       selected != "maps-load" && selected != "maps-save" &&
       selected != "load-large-pages" && selected != "load-large-search" &&
-      selected != "stream-counts" && selected != "write-failure")) {
+      selected != "stream-counts" && selected != "write-failure" &&
+      selected != "replacement" && selected != "steps" && selected != "owner")) {
     fprintf(stderr, "usage: %s [all|maps|maps-load|maps-save|load-large-pages|"
-                    "load-large-search|stream-counts|write-failure]\n", argv[0]);
+                    "load-large-search|stream-counts|write-failure|replacement|steps|owner]\n", argv[0]);
     return 2;
   }
   if (selected == "all")
     TestPreviousLayoutCacheIsRejected();
   if (selected == "all" || selected == "write-failure")
     TestBufferedWriteFailureRemovesCache();
+  if (selected == "all" || selected == "replacement")
+    TestInterruptedReplacementPreservesCache();
+  if (selected == "all" || selected == "steps")
+    TestSaveStepsBudgetMetadataAndPreserveContent();
+  if (selected == "all" || selected == "owner")
+    TestBookOwnsPendingWriter();
   if (selected == "all" || selected == "maps" || selected == "maps-load")
     TestNavigationIndicesAreValidated();
   if (selected == "all" || selected == "maps" || selected == "maps-save")
