@@ -463,9 +463,7 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   perf_phase = fixed_perf::Now();
   // In synchronous mode, render the interactive tile immediately after preview.
   // This gives proper zoom-aware resolution without background threads.
-  if (debug_runtime::ForceSynchronousMuPdfRender() &&
-      (mupdf_state->wide_top_screen ||
-       !BitmapCacheValid(mupdf_state->current_interactive_tile, page_index))) {
+  if (debug_runtime::ForceSynchronousMuPdfRender()) {
     EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index);
   }
 

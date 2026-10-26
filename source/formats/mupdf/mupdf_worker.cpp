@@ -239,8 +239,7 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   if (!mupdf_state)
     return false;
   PromoteMuPdfAdjacentSlotIfMatching(mupdf_state, page_index);
-  const bool visible_tile = mupdf_state->wide_top_screen &&
-                            debug_runtime::ForceSynchronousMuPdfRender();
+  const bool visible_tile = debug_runtime::ForceSynchronousMuPdfRender();
   const pdf_view_utils::NormalizedRect viewport = visible_tile
       ? ComputeCurrentMuPdfViewport(mupdf_state)
       : pdf_view_utils::NormalizedRect{0.0f, 0.0f, 1.0f, 1.0f};
@@ -279,7 +278,7 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   fz_display_list *new_list = NULL;
   float page_width = mupdf_state->page_width;
   float page_height = mupdf_state->page_height;
-  // A visible native tile uses the display resolution even when the page
+  // A visible tile uses the display resolution even when the page
   // aspect differs from the screen. Rendering the whole page at fit scale
   // undersamples the subsequent cover crop and wastes memory at high zoom.
   const float render_scale = visible_tile

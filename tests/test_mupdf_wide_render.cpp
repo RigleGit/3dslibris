@@ -8,6 +8,20 @@
 #include <algorithm>
 #include "shared/debug_runtime_mode.h"
 #include "shared/debug_log.h"
+#include "ui/text.h"
+#include "formats/common/fixed_layout_blit_utils.h"
+
+int test_model = 5;
+Result test_cfg_result = 0;
+bool test_wide = false;
+u8 test_top_buffers[2][240 * 800 * 3];
+u8 test_bottom_buffers[2][240 * 320 * 3];
+int test_frame_slot = 0;
+// Font loading is outside the raster-to-surface contract.
+FontManager::FontManager(Text *) {}
+FontManager::~FontManager() {}
+#include "renderer_accessors.inc"
+#include "viewport_blit.inc"
 
 u16 g_gray_to_rgb565[256];
 void EnsureGrayLut() {}
@@ -110,16 +124,54 @@ static void TestLandscapePageVisibleTile(const char *path) {
     assert(std::abs(cache.bitmap_width - state.target_top_width) <= 2);
     assert(std::abs(cache.bitmap_height - state.target_top_height) <= 2);
     assert(state.cached_display_list == interpreted);
-    // The non-wide path retains the existing full-page raster policy.
+    // Switching to 400 retains the same viewport at logical pixel density.
     ResetBitmapCache(&cache);
     state.wide_top_screen = false;
     assert(EnsureCurrentMuPdfInteractiveTile(&state, 0));
-    assert(cache.width == 1 && cache.height == 1);
-    assert(cache.bitmap_width == (landscape ? 600 : 360));
-    assert(cache.bitmap_height == (landscape ? 360 : 216));
+    assert(cache.width < 1 && cache.height < 1);
+    assert(std::abs(cache.bitmap_width - state.target_top_width) <= 2);
+    assert(std::abs(cache.bitmap_height - state.target_top_height) <= 2);
     if (state.cached_display_list) fz_drop_display_list(ctx,state.cached_display_list);
   }
   fz_drop_document(ctx,doc); fz_drop_context(ctx);
+}
+
+static void TestNormalLandscapePageRetainsVisibleDetail(const char *path) {
+  // At the default reading zoom, the portrait viewport covers 160 PDF units
+  // vertically. These half-unit bands require ~320 visible transitions.
+  // Rasterising the entire landscape page at fit scale loses those bands
+  // before the viewport is enlarged to the 400-row screen.
+  std::string bands = "0 g\n";
+  for (int y = 0; y < 240; ++y)
+    bands += "0 " + std::to_string(y) + " 400 0.5 re f\n";
+  WritePdf(path, bands, 400, 240);
+  fz_context *ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT); assert(ctx);
+  fz_register_document_handlers(ctx);
+  fz_document *doc = fz_open_document(ctx, path); assert(doc);
+  Book::MuPdfState state;
+  state.ctx = ctx; state.doc = doc;
+  state.page_width = 400; state.page_height = 240;
+  state.document_kind = app_flow_utils::MuPdfDocumentKind::Pdf;
+  state.target_top_width = 240; state.target_top_height = 400;
+  state.viewport.zoom_index = 2;
+  Text text;
+  text.SetOrientation(0);
+  assert(!text.IsWideTopScreenActive());
+  assert(EnsureCurrentMuPdfInteractiveTile(&state, 0));
+  const auto viewport = ComputeCurrentMuPdfViewport(&state);
+  assert(BlitBitmapCacheViewport(&text, text.screenleft, 400, 240, 400,
+                                state.current_interactive_tile, viewport, true));
+  int transitions = 0;
+  bool previous = false;
+  for (int y = 0; y < 400; ++y) {
+    const bool dark = ((text.screenleft[y * text.BufferStride() + 120] >> 11) & 31) < 16;
+    if (y && dark != previous) ++transitions;
+    previous = dark;
+  }
+  fprintf(stderr, "400px visible fine-band transitions: %d (minimum 250)\n", transitions);
+  assert(transitions >= 250);
+  if (state.cached_display_list) fz_drop_display_list(ctx, state.cached_display_list);
+  fz_drop_document(ctx, doc); fz_drop_context(ctx);
 }
 
 struct ControlledAllocation {
@@ -138,35 +190,38 @@ static void *ControlledRealloc(void *user, void *ptr, size_t size) {
 }
 static void ControlledFree(void *, void *ptr) { std::free(ptr); }
 static void TestFailedTileKeepsRequestIdentity(const char *path) {
-  ControlledAllocation control;
-  fz_alloc_context allocator{&control,ControlledMalloc,ControlledRealloc,ControlledFree};
-  fz_context *ctx = fz_new_context(&allocator,NULL,FZ_STORE_DEFAULT); assert(ctx);
-  fz_register_document_handlers(ctx);
-  fz_document *doc = fz_open_document(ctx,path); assert(doc);
-  Book::MuPdfState state; state.ctx=ctx; state.doc=doc;
-  state.page_width=400; state.page_height=240; state.wide_top_screen=true;
-  state.document_kind=app_flow_utils::MuPdfDocumentKind::Pdf;
-  state.viewport.zoom_index=2; state.viewport.center_x=0.25f;
-  assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
-  state.viewport.center_x=0.75f; control.reject=true;
-  assert(!EnsureCurrentMuPdfInteractiveTile(&state,0));
-  auto &cache=state.current_interactive_tile;
-  // Draw resets unmatched request keys. A failed tile must remain identified
-  // while being invalid as a bitmap, or its failure guard is lost next frame.
-  assert(cache.page == 0 && cache.zoom_index == 2);
-  assert(!BitmapCacheValid(cache,0));
-  size_t attempts=control.attempts;
-  assert(!EnsureCurrentMuPdfInteractiveTile(&state,0));
-  assert(control.attempts == attempts);
-  control.reject=false; state.viewport.center_x=0.5f;
-  assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
-  assert(BitmapCacheValid(cache,0));
-  if(state.cached_display_list) fz_drop_display_list(ctx,state.cached_display_list);
-  fz_drop_document(ctx,doc); fz_drop_context(ctx);
+  for (bool wide : {false, true}) {
+    ControlledAllocation control;
+    fz_alloc_context allocator{&control,ControlledMalloc,ControlledRealloc,ControlledFree};
+    fz_context *ctx = fz_new_context(&allocator,NULL,FZ_STORE_DEFAULT); assert(ctx);
+    fz_register_document_handlers(ctx);
+    fz_document *doc = fz_open_document(ctx,path); assert(doc);
+    Book::MuPdfState state; state.ctx=ctx; state.doc=doc;
+    state.page_width=400; state.page_height=240; state.wide_top_screen=wide;
+    state.document_kind=app_flow_utils::MuPdfDocumentKind::Pdf;
+    state.viewport.zoom_index=2; state.viewport.center_x=0.25f;
+    assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
+    state.viewport.center_x=0.75f; control.reject=true;
+    assert(!EnsureCurrentMuPdfInteractiveTile(&state,0));
+    auto &cache=state.current_interactive_tile;
+    // Draw resets unmatched request keys. A failed tile must remain identified
+    // while being invalid as a bitmap, or its failure guard is lost next frame.
+    assert(cache.page == 0 && cache.zoom_index == 2);
+    assert(!BitmapCacheValid(cache,0));
+    size_t attempts=control.attempts;
+    assert(!EnsureCurrentMuPdfInteractiveTile(&state,0));
+    assert(control.attempts == attempts);
+    control.reject=false; state.viewport.center_x=0.5f;
+    assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
+    assert(BitmapCacheValid(cache,0));
+    if(state.cached_display_list) fz_drop_display_list(ctx,state.cached_display_list);
+    fz_drop_document(ctx,doc); fz_drop_context(ctx);
+  }
 }
 
 int main(int argc, char **argv) {
   assert(argc == 2);
+  TestNormalLandscapePageRetainsVisibleDetail(argv[1]);
   std::string stripes = "0 g\n";
   for (int y = 0; y < 400; ++y) stripes += "0 " + std::to_string(y) + " 240 0.5 re f\n";
   WritePdf(argv[1], stripes, 240, 400);

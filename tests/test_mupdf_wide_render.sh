@@ -6,6 +6,10 @@ if [ -z "${MUPDF_HOST_LIB_DIR:-}" ]; then
   echo 'SKIP: native MuPDF libraries required (MUPDF_HOST_LIB_DIR)'
   exit 77
 fi
+if ! pkg-config --exists freetype2; then
+  echo 'SKIP: PDF surface integration needs host FreeType headers'
+  exit 77
+fi
 TASK_TMP="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMP"' EXIT
 if [ "$(uname -s)" = Darwin ]; then
@@ -13,6 +17,10 @@ if [ "$(uname -s)" = Darwin ]; then
 else
   DEAD_STRIP=-Wl,--gc-sections
 fi
+for signature in 'TextRenderer::TextRenderer(' 'TextRenderer::~TextRenderer(' 'void TextRenderer::SetScreen(' 'u16 *TextRenderer::GetScreen(' 'void TextRenderer::SetOrientation(' 'u8 TextRenderer::GetOrientation(' 'void TextRenderer::SetColorMode(' 'int TextRenderer::GetColorMode('; do
+  python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/ui/text_renderer.cpp" "$signature" >> "$TASK_TMP/renderer_accessors.inc"
+done
+python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_draw.cpp" 'static bool BlitBitmapCacheViewport(' > "$TASK_TMP/viewport_blit.inc"
 # Exercise the actual interactive-cache owner with real MuPDF. Only inactive
 # worker platform operations are substituted in the test.
 for signature in 'void ResetMuPdfRenderFailureState(' 'bool HasMuPdfInteractiveRenderFailed(' 'void CancelMuPdfIncrementalRenderState(' 'bool PromoteMuPdfAdjacentSlotIfMatching(' 'bool EnsureMuPdfDisplayListForPage(' 'bool EnsureCurrentMuPdfInteractiveTile('; do
@@ -25,10 +33,14 @@ for signature in 'float ComputeFitScale(' 'float ComputeEffectiveMuPdfZoom('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_common.cpp" "$signature" >> "$TASK_TMP/viewport_owner.inc"
 done
 "${CXX:-c++}" -std=c++11 -ffunction-sections -fdata-sections ${CXXFLAGS:-} \
+  $(pkg-config --cflags freetype2) \
   -I"$TASK_TMP" -I"$ROOT/tests/stubs/wide_surface" -I"$ROOT/include" \
   -I"$ROOT/third_party/mupdf/include" \
   "$ROOT/tests/test_mupdf_wide_render.cpp" \
   "$ROOT/source/formats/mupdf/mupdf_render.cpp" \
+  "$ROOT/source/ui/text.cpp" "$ROOT/source/ui/text_screen_surface.cpp" \
+  "$ROOT/source/ui/text_wide_surface.cpp" \
+  "$ROOT/source/formats/common/fixed_layout_blit_utils.cpp" \
   "$ROOT/source/formats/common/pdf_view_utils.cpp" \
   "$ROOT/source/shared/app_flow_utils.cpp" \
   "$MUPDF_HOST_LIB_DIR/libmupdf.a" "$MUPDF_HOST_LIB_DIR/libmupdf-third.a" \
