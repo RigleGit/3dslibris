@@ -152,6 +152,8 @@ int MainLoopController::RunMainLoop()
     const AppMode input_mode = app_.GetMode();
 #ifdef DSLIBRIS_DEBUG
     const uint64_t input_started_ms = osGetTime();
+    uint64_t browser_input_ms = 0;
+    uint64_t browser_warmup_ms = 0;
 #endif
     switch (app_.GetMode())
     {
@@ -167,6 +169,9 @@ int MainLoopController::RunMainLoop()
 
     case AppMode::Browser:
       app_.browser_handleevent(input);
+#ifdef DSLIBRIS_DEBUG
+      browser_input_ms = osGetTime() - input_started_ms;
+#endif
       if (app_.GetMode() != AppMode::Browser)
       {
         DBG_LOGF(&app_, "MAIN browser frame aborted after handleevent mode=%d",
@@ -175,6 +180,9 @@ int MainLoopController::RunMainLoop()
       }
       if (!debug_runtime::BrowserWarmupDisabled())
         app_.TickBrowserWarmup();
+#ifdef DSLIBRIS_DEBUG
+      browser_warmup_ms = osGetTime() - input_started_ms - browser_input_ms;
+#endif
       if (app_.GetMode() != AppMode::Browser)
       {
         DBG_LOGF(&app_, "MAIN browser frame aborted after warmup mode=%d",
@@ -256,7 +264,14 @@ int MainLoopController::RunMainLoop()
     }
 #ifdef DSLIBRIS_DEBUG
     const uint64_t input_elapsed_ms = osGetTime() - input_started_ms;
-    if (input_elapsed_ms >= 32)
+    if (input_elapsed_ms >= 32 && input_mode == AppMode::Browser)
+      DBG_LOGF(&app_, "TIMING: ui_frame mode=%d ms=%llu keys=%lu held=%lu browser_input_ms=%llu browser_warmup_ms=%llu browser_draw_present_ms=%llu",
+               (int)input_mode, (unsigned long long)input_elapsed_ms,
+               (unsigned long)input.keys_down, (unsigned long)input.keys_held,
+               (unsigned long long)browser_input_ms,
+               (unsigned long long)browser_warmup_ms,
+               (unsigned long long)(input_elapsed_ms - browser_input_ms - browser_warmup_ms));
+    else if (input_elapsed_ms >= 32)
       DBG_LOGF(&app_, "TIMING: ui_frame mode=%d ms=%llu keys=%lu held=%lu",
                (int)input_mode, (unsigned long long)input_elapsed_ms,
                (unsigned long)input.keys_down, (unsigned long)input.keys_held);
