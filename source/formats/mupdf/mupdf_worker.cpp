@@ -239,7 +239,34 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   if (!mupdf_state)
     return false;
   PromoteMuPdfAdjacentSlotIfMatching(mupdf_state, page_index);
-  if (BitmapCacheValid(mupdf_state->current_interactive_tile, page_index))
+  const bool visible_tile = mupdf_state->wide_top_screen &&
+                            debug_runtime::ForceSynchronousMuPdfRender();
+  const pdf_view_utils::NormalizedRect viewport = visible_tile
+      ? ComputeCurrentMuPdfViewport(mupdf_state)
+      : pdf_view_utils::NormalizedRect{0.0f, 0.0f, 1.0f, 1.0f};
+  Book::MuPdfState::BitmapCache &cache = mupdf_state->current_interactive_tile;
+  if (visible_tile &&
+      (cache.page != page_index ||
+       cache.zoom_index != mupdf_state->viewport.zoom_index ||
+       std::fabs(cache.left - viewport.left) > 0.000001f ||
+       std::fabs(cache.top - viewport.top) > 0.000001f ||
+       std::fabs(cache.width - viewport.width) > 0.000001f ||
+       std::fabs(cache.height - viewport.height) > 0.000001f)) {
+    // Pan changes which page region is cached. Drop the old tile before
+    // allocating its replacement, including a failure recorded for that tile.
+    ResetBitmapCache(&cache);
+    ResetMuPdfRenderFailureState(mupdf_state);
+    // Keep the request key even on failure. The draw owner otherwise resets
+    // unmatched keys, which would erase the failed viewport and retry forever.
+    cache.page = page_index;
+    cache.zoom_index = mupdf_state->viewport.zoom_index;
+    cache.left = viewport.left;
+    cache.top = viewport.top;
+    cache.width = viewport.width;
+    cache.height = viewport.height;
+  }
+  if (BitmapCacheValid(cache, page_index) &&
+      cache.zoom_index == mupdf_state->viewport.zoom_index)
     return true;
   if (HasMuPdfInteractiveRenderFailed(mupdf_state, page_index))
     return false;
@@ -252,15 +279,19 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   fz_display_list *new_list = NULL;
   float page_width = mupdf_state->page_width;
   float page_height = mupdf_state->page_height;
+  // A visible native tile uses the display resolution even when the page
+  // aspect differs from the screen. Rendering the whole page at fit scale
+  // undersamples the subsequent cover crop and wastes memory at high zoom.
+  const float render_scale = visible_tile
+      ? ComputeFitScale(page_width * viewport.width, page_height * viewport.height,
+                        mupdf_state->target_top_width, mupdf_state->target_top_height)
+      : kPdfInteractiveScale * ComputeFitScale(page_width, page_height,
+            mupdf_state->target_top_width, mupdf_state->target_top_height) *
+            ComputeEffectiveMuPdfZoom(mupdf_state->document_kind,
+                                      mupdf_state->viewport.zoom_index);
+  const pdf_view_utils::NormalizedRect *crop = visible_tile ? &viewport : NULL;
   bool render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
-                       kPdfInteractiveScale *
-                           ComputeFitScale(page_width, page_height,
-                                           mupdf_state->target_top_width,
-                                           mupdf_state->target_top_height) *
-                           ComputeEffectiveMuPdfZoom(
-                               mupdf_state->document_kind,
-                               mupdf_state->viewport.zoom_index),
-                       &rendered, &page_width, &page_height, NULL,
+                       render_scale, &rendered, &page_width, &page_height, crop,
                        display_list, display_list ? NULL : &new_list,
                        mupdf_state->reporter, NULL,
                        mupdf_state->wide_top_screen && mupdf_state->target_top_width == 400 ? 2.0f : 1.0f,
@@ -268,11 +299,7 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   if (!render_ok && mupdf_state->wide_top_screen) {
     // Allocation failure at native density must still leave the book readable.
     render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
-        kPdfInteractiveScale * ComputeFitScale(page_width, page_height,
-            mupdf_state->target_top_width, mupdf_state->target_top_height) *
-            ComputeEffectiveMuPdfZoom(mupdf_state->document_kind,
-                                      mupdf_state->viewport.zoom_index),
-        &rendered, &page_width, &page_height, NULL, display_list,
+        render_scale, &rendered, &page_width, &page_height, crop, display_list,
         display_list ? NULL : &new_list, mupdf_state->reporter);
   }
   if (!render_ok) {
@@ -289,7 +316,8 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   }
 
   StoreBitmapCache(&mupdf_state->current_interactive_tile, page_index,
-                   mupdf_state->viewport.zoom_index, 0.0f, 0.0f, 1.0f, 1.0f, &rendered);
+                   mupdf_state->viewport.zoom_index, viewport.left, viewport.top,
+                   viewport.width, viewport.height, &rendered);
   mupdf_state->page_width = page_width;
   mupdf_state->page_height = page_height;
   if (new_list && !display_list) {
