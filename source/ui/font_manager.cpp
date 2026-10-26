@@ -24,6 +24,13 @@
 
 namespace {
 
+// Rendered bitmaps share one bounded LRU across sizes. Use the face's actual
+// size because the browser face stays at 12px and fallbacks have their own size.
+static u32 GlyphCacheKey(u32 ucs, FT_Face face) {
+  const u32 height = face && face->size ? face->size->metrics.y_ppem : 0;
+  return (height << 24) | (ucs & 0x00FFFFFFu);
+}
+
 static bool FileReadable(const char *path) {
   if (!path || !*path)
     return false;
@@ -267,10 +274,11 @@ int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
   Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
   if (!face || !face_cache)
     return -1;
-  uint32_t evicted_ucs = 0;
-  if (face_cache->lru.Insert(ucs, &evicted_ucs)) {
+  const u32 cache_key = GlyphCacheKey(ucs, face);
+  uint32_t evicted_key = 0;
+  if (face_cache->lru.Insert(cache_key, &evicted_key)) {
     auto evicted =
-        face_cache->cacheMap.find(evicted_ucs);
+        face_cache->cacheMap.find(evicted_key);
     if (evicted != face_cache->cacheMap.end()) {
       delete[] evicted->second->bitmap.buffer;
       delete evicted->second;
@@ -295,7 +303,7 @@ int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
   dst->bitmap_top = src->bitmap_top;
   dst->bitmap_left = src->bitmap_left;
   dst->advance = src->advance;
-  face_cache->cacheMap.insert(std::make_pair(ucs, dst));
+  face_cache->cacheMap.insert(std::make_pair(cache_key, dst));
   return ucs;
 }
 
@@ -329,11 +337,11 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
   if (face && fallback_count_ > 0) {
     Cache *primary_cache = text_cache_utils::FindFaceCache(textCache, face);
     if (primary_cache) {
-      auto fast_iter = primary_cache->cacheMap.find(ucs);
+      auto fast_iter = primary_cache->cacheMap.find(GlyphCacheKey(ucs, face));
       if (fast_iter != primary_cache->cacheMap.end()) {
         if (parent->tr)
           parent->tr->SetHit(true);
-        primary_cache->lru.Touch(ucs);
+        primary_cache->lru.Touch(GlyphCacheKey(ucs, face));
         return fast_iter->second;
       }
     }
@@ -372,11 +380,12 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     FT_Load_Char(face, ucs, flags);
     return face->glyph;
   }
-  auto iter = face_cache->cacheMap.find(ucs);
+  const u32 cache_key = GlyphCacheKey(ucs, face);
+  auto iter = face_cache->cacheMap.find(cache_key);
   if (iter != face_cache->cacheMap.end()) {
     if (parent->tr)
       parent->tr->SetHit(true);
-    face_cache->lru.Touch(ucs);
+    face_cache->lru.Touch(cache_key);
     return iter->second;
   }
 
@@ -384,7 +393,7 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     parent->tr->SetHit(false);
   int i = CacheGlyph(ucs, face);
   if (i >= 0)
-    return face_cache->cacheMap[ucs];
+    return face_cache->cacheMap[cache_key];
 
   FT_Load_Char(face, ucs, flags);
   return face->glyph;
@@ -639,7 +648,8 @@ void FontManager::SetPixelSize(u8 size) {
       if (it.first == TEXT_STYLE_BROWSER)
         continue;
       FT_Set_Pixel_Sizes(it.second, 0, pixelsize);
-      ClearRenderCache(it.second);
+      // Keep bitmaps of other sizes within the same 512-entry LRU budget.
+      // Browser draws temporarily select 10px before restoring reader size.
     }
   }
 }
