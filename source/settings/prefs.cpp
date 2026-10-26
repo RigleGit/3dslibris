@@ -643,6 +643,9 @@ int Prefs::Write() {
     return 255;
   }
 
+#ifdef DSLIBRIS_DEBUG
+  const uint64_t write_open_done = osGetTime();
+#endif
   fprintf(fp, "<dslibris format=\"2\">\n");
   fprintf(fp,
       "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" fixedLayoutWideTopScreen=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" disableEbookImages=\"%d\" />\n",
@@ -816,15 +819,24 @@ int Prefs::Write() {
 
   fprintf(fp, "</dslibris>\n");
   fprintf(fp, "\n");
+#ifdef DSLIBRIS_DEBUG
+  const uint64_t write_body_done = osGetTime();
+#endif
   const bool ok = prefs_file_utils::Commit(fp, paths::GetPrefsFile(),
                                           paths::GetPrefsTempFile(),
                                           paths::GetPrefsBackupFile());
   write_pending = !ok;
   if (!ok)
     write_due_ms = osGetTime() + 5000;
-  DBG_LOGF(app, "TIMING: prefs_write ms=%llu ok=%u books=%u",
-           (unsigned long long)(osGetTime() - write_start), ok ? 1u : 0u,
-           (unsigned)saved_state_by_book_key.size());
+#ifdef DSLIBRIS_DEBUG
+  const uint64_t write_done = osGetTime();
+  DBG_LOGF(app, "TIMING: prefs_write ms=%llu ok=%u books=%u open_ms=%llu body_ms=%llu commit_ms=%llu",
+           (unsigned long long)(write_done - write_start), ok ? 1u : 0u,
+           (unsigned)saved_state_by_book_key.size(),
+           (unsigned long long)(write_open_done - write_start),
+           (unsigned long long)(write_body_done - write_open_done),
+           (unsigned long long)(write_done - write_body_done));
+#endif
   return ok ? 0 : 255;
 }
 

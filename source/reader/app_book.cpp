@@ -500,7 +500,7 @@ void ReaderController::ToggleBookmark()
   app_.RequestStatusRedraw();
 }
 
-void ReaderController::CloseBook()
+void ReaderController::CloseBook(bool persist_progress)
 {
   InvalidateImageViewer();
   InvalidateSearch(true);
@@ -512,7 +512,8 @@ void ReaderController::CloseBook()
 
   if (bookcurrent_)
   {
-    TryPersistProgress(bookcurrent_, true);
+    if (persist_progress)
+      TryPersistProgress(bookcurrent_, true);
     DBG_LOGF(&app_, "BOOK close current session=%u book=%s",
              app_.GetCurrentBookSessionId(), SafeBookName(bookcurrent_));
     bookcurrent_->Close();

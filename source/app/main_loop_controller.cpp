@@ -75,7 +75,7 @@ int MainLoopController::RunMainLoop()
       fixed_perf::ResetView();
     if (app_.GetMode() == AppMode::Quit)
     {
-      app_.PersistPrefs();
+      // main() calls PrepareForShutdown, which owns the final save.
       return 0;
     }
 
@@ -196,7 +196,7 @@ int MainLoopController::RunMainLoop()
       break;
 
     case AppMode::Quit:
-      app_.PersistPrefs();
+      // main() calls PrepareForShutdown, which owns the final save.
       return 0;
 
     case AppMode::Prefs:
@@ -237,7 +237,7 @@ int MainLoopController::RunMainLoop()
 
     if (app_.GetMode() == AppMode::Quit)
     {
-      app_.PersistPrefs();
+      // main() calls PrepareForShutdown, which owns the final save.
       return 0;
     }
 
@@ -287,6 +287,6 @@ int MainLoopController::RunMainLoop()
     fixed_perf::Flush(&app_);
   }
   fixed_perf::Flush(&app_);
-  app_.PersistPrefs();
+  // PrepareForShutdown persists before releasing the current book.
   return 0;
 }

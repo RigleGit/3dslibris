@@ -21,7 +21,7 @@ public:
   void RunSearchFrame(const FrameInput &input);
   void InvalidateSearch(bool forget_query);
 
-  void CloseBook();
+  void CloseBook(bool persist_progress = true);
   int GetBookIndex(Book *book);
   void HandleEventInBook(const FrameInput &input);
   void HandleEventInOpening(const FrameInput &input);

@@ -9,6 +9,8 @@
 */
 
 #include "app/app.h"
+#include "app/reader_controller.h"
+#include "settings/prefs.h"
 
 #include <3ds.h>
 
@@ -65,7 +67,12 @@ void App::PrepareForShutdown()
     opening_book->CancelPendingEpubPageCacheSave();
   }
 
-  CloseBook();
+  // PersistPrefs above owns the final snapshot while the current book is
+  // still attached. Retry only a failed write; normal CloseBook would save
+  // the same state a second time. Never perform SD writes in the APT hook.
+  if (prefs)
+    prefs->FlushPendingWrite(true);
+  reader_controller_->CloseBook(false);
   nav_.mode = AppMode::Quit;
 
 #ifdef DSLIBRIS_DEBUG
