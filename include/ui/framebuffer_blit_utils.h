@@ -196,6 +196,22 @@ inline void ConvertLogicalRgb565ToPhysicalBgr888(
 
   const int max_sy = MaxConvertibleLogicalY(geometry, logical_height, orientation);
   const int max_sx = MaxConvertibleLogicalX(geometry, logical_width, orientation);
+  const bool double_density = geometry.phys_width == 800 &&
+      (orientation_utils::IsLandscape(orientation) ? logical_width : logical_height) == 400;
+  if (!double_density) {
+    // Keep the ordinary/native path direct. At -Og devkitARM leaves a
+    // density-helper call per pixel, penalising 400px presentation.
+    for (int sy = 0; sy < max_sy; ++sy) {
+      for (int sx = 0; sx < max_sx; ++sx) {
+        const uint16_t pixel = src[(size_t)sy * (size_t)src_stride + (size_t)sx];
+        const size_t off = PhysicalOffsetBytes(geometry, sx, sy, orientation);
+        dst[off] = (uint8_t)((pixel & 0x1F) << 3);
+        dst[off + 1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
+        dst[off + 2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
+      }
+    }
+    return;
+  }
   for (int sy = 0; sy < max_sy; sy++) {
     for (int sx = 0; sx < max_sx; sx++) {
       const uint16_t pixel = src[(size_t)sy * (size_t)src_stride + (size_t)sx];
@@ -223,6 +239,25 @@ inline void ConvertLogicalRgb565RectToPhysicalBgr888(
   const int x1 = std::max(0, std::min(max_sx, dirty.x1));
   if (x0 >= x1 || y0 >= y1)
     return;
+
+  const bool double_density = geometry.phys_width == 800 &&
+      (orientation_utils::IsLandscape(orientation) ? logical_width : logical_height) == 400;
+  if (!double_density) {
+    for (int sy = y0; sy < y1; ++sy) {
+      for (int sx = x0; sx < x1; ++sx) {
+        const uint16_t pixel = src[(size_t)sy * (size_t)src_stride + (size_t)sx];
+        const size_t off = PhysicalOffsetBytes(geometry, sx, sy, orientation);
+        if (pixel == 0xFFFF) {
+          dst[off] = dst[off + 1] = dst[off + 2] = 0xFF;
+        } else {
+          dst[off] = (uint8_t)((pixel & 0x1F) << 3);
+          dst[off + 1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
+          dst[off + 2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
+        }
+      }
+    }
+    return;
+  }
 
   for (int sy = y0; sy < y1; sy++) {
     for (int sx = x0; sx < x1; sx++) {
