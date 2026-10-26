@@ -205,7 +205,7 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
                        fz_display_list *reuse_list,
                        fz_display_list **out_list,
                        IStatusReporter *reporter, const char *perf_stage,
-                       float density_x, float density_y) {
+                       float density_x, float density_y, bool optional_output) {
   if (!ctx || !doc || !out || scale <= 0.0f)
     return false;
   DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
@@ -232,6 +232,7 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
   fz_var(pixmap);
   fz_var(device);
   fz_var(list);
+  fz_var(owns_list);
 
   fz_try(ctx) {
     DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
@@ -341,10 +342,10 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     out->width = pix_w;
     out->height = pix_h;
     const size_t output_pixels = (size_t)pix_w * (size_t)pix_h;
-    if (density_x > 1.0f || density_y > 1.0f) {
+    if (density_x > 1.0f || density_y > 1.0f || optional_output) {
       out->native_pixels.reset(new (std::nothrow) u16[output_pixels]);
       if (!out->native_pixels)
-        fz_throw(ctx, FZ_ERROR_SYSTEM, "wide RGB565 allocation failed");
+        fz_throw(ctx, FZ_ERROR_SYSTEM, "optional RGB565 allocation failed");
     } else {
       out->pixels.resize(output_pixels);
     }

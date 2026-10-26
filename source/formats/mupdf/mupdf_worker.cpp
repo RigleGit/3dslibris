@@ -247,11 +247,11 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   if (visible_tile &&
       (cache.page != page_index ||
        cache.zoom_index != mupdf_state->viewport.zoom_index ||
-       std::fabs(cache.left - viewport.left) > 0.000001f ||
-       std::fabs(cache.top - viewport.top) > 0.000001f ||
-       std::fabs(cache.width - viewport.width) > 0.000001f ||
-       std::fabs(cache.height - viewport.height) > 0.000001f)) {
-    // Pan changes which page region is cached. Drop the old tile before
+       cache.left > viewport.left + 0.000001f ||
+       cache.top > viewport.top + 0.000001f ||
+       cache.left + cache.width < viewport.left + viewport.width - 0.000001f ||
+       cache.top + cache.height < viewport.top + viewport.height - 0.000001f)) {
+    // Replace only when the visible region leaves the cached raster. Drop it before
     // allocating its replacement, including a failure recorded for that tile.
     ResetBitmapCache(&cache);
     ResetMuPdfRenderFailureState(mupdf_state);
@@ -288,13 +288,42 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
             mupdf_state->target_top_width, mupdf_state->target_top_height) *
             ComputeEffectiveMuPdfZoom(mupdf_state->document_kind,
                                       mupdf_state->viewport.zoom_index);
-  const pdf_view_utils::NormalizedRect *crop = visible_tile ? &viewport : NULL;
+  const float density_x = mupdf_state->wide_top_screen && mupdf_state->target_top_width == 400 ? 2.0f : 1.0f;
+  const float density_y = mupdf_state->wide_top_screen && mupdf_state->target_top_height == 400 ? 2.0f : 1.0f;
+  pdf_view_utils::NormalizedRect region = viewport;
+  bool expanded = visible_tile && mupdf_state->viewport.interaction_active;
+  if (expanded) {
+    // Keep the existing 1M-pixel ceiling. A complete page avoids any further
+    // raster work during pan when it fits; otherwise retain a small border.
+    const double full_pixels = std::ceil(page_width * render_scale + 1.0f) *
+        std::ceil(page_height * render_scale + 1.0f) * density_x * density_y;
+    if (full_pixels <= 1024.0 * 1024.0) {
+      region = pdf_view_utils::NormalizedRect{0, 0, 1, 1};
+    } else {
+      region.width = std::min(1.0f, viewport.width * 1.5f);
+      region.height = std::min(1.0f, viewport.height * 1.5f);
+      region.left = std::max(0.0f, std::min(1.0f - region.width,
+          viewport.left - (region.width - viewport.width) * 0.5f));
+      region.top = std::max(0.0f, std::min(1.0f - region.height,
+          viewport.top - (region.height - viewport.height) * 0.5f));
+    }
+    expanded = region.left != viewport.left || region.top != viewport.top ||
+               region.width != viewport.width || region.height != viewport.height;
+  }
+  const pdf_view_utils::NormalizedRect *crop = visible_tile ? &region : NULL;
   bool render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
                        render_scale, &rendered, &page_width, &page_height, crop,
                        display_list, display_list ? NULL : &new_list,
                        mupdf_state->reporter, NULL,
-                       mupdf_state->wide_top_screen && mupdf_state->target_top_width == 400 ? 2.0f : 1.0f,
-                       mupdf_state->wide_top_screen && mupdf_state->target_top_height == 400 ? 2.0f : 1.0f);
+                       density_x, density_y, expanded);
+  if (!render_ok && expanded) {
+    // The border is optional. Retry just the visible area before reducing density.
+    region = viewport;
+    render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
+        render_scale, &rendered, &page_width, &page_height, &region, display_list,
+        display_list ? NULL : &new_list, mupdf_state->reporter, NULL,
+        density_x, density_y);
+  }
   if (!render_ok && mupdf_state->wide_top_screen) {
     // Allocation failure at native density must still leave the book readable.
     render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
@@ -315,8 +344,8 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   }
 
   StoreBitmapCache(&mupdf_state->current_interactive_tile, page_index,
-                   mupdf_state->viewport.zoom_index, viewport.left, viewport.top,
-                   viewport.width, viewport.height, &rendered);
+                   mupdf_state->viewport.zoom_index, region.left, region.top,
+                   region.width, region.height, &rendered);
   mupdf_state->page_width = page_width;
   mupdf_state->page_height = page_height;
   if (new_list && !display_list) {

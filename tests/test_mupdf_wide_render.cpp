@@ -220,18 +220,98 @@ static void TestInitialPageFitKeepsMarginsAndSquare(const char *path) {
 struct ControlledAllocation {
   bool reject = false;
   size_t attempts = 0;
+  size_t live = 0;
 };
 static void *ControlledMalloc(void *user, size_t size) {
   auto *control = static_cast<ControlledAllocation *>(user);
   ++control->attempts;
-  return control->reject ? nullptr : std::malloc(size);
+  void *result = control->reject ? nullptr : std::malloc(size);
+  if (result) ++control->live;
+  return result;
 }
 static void *ControlledRealloc(void *user, void *ptr, size_t size) {
   auto *control = static_cast<ControlledAllocation *>(user);
   ++control->attempts;
-  return control->reject ? nullptr : std::realloc(ptr, size);
+  if (control->reject) return nullptr;
+  if (!size && ptr) { std::free(ptr); --control->live; return nullptr; }
+  void *result = std::realloc(ptr,size);
+  if (result && !ptr) ++control->live;
+  return result;
 }
-static void ControlledFree(void *, void *ptr) { std::free(ptr); }
+static void ControlledFree(void *user, void *ptr) {
+  if (ptr) --static_cast<ControlledAllocation *>(user)->live;
+  std::free(ptr);
+}
+static void TestPanReusesBoundedRaster(const char *path) {
+  WritePdf(path,"1 0 0 rg 170 270 60 60 re f\n",400,600);
+  for (bool wide : {false,true}) for (int zoom : {3,6}) {
+    ControlledAllocation control;
+    fz_alloc_context allocator{&control,ControlledMalloc,ControlledRealloc,ControlledFree};
+    fz_context *ctx=fz_new_context(&allocator,NULL,FZ_STORE_DEFAULT); assert(ctx);
+    fz_register_document_handlers(ctx);
+    fz_document *doc=fz_open_document(ctx,path); assert(doc);
+    Book::MuPdfState state; state.ctx=ctx; state.doc=doc;
+    state.page_width=400; state.page_height=600; state.wide_top_screen=wide;
+    state.document_kind=app_flow_utils::MuPdfDocumentKind::Pdf;
+    state.viewport.zoom_index=zoom; state.viewport.interaction_active=true;
+    assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
+    const auto *pixels=state.current_interactive_tile.PixelData();
+    assert(state.current_interactive_tile.PixelCount()<=1024u*1024u);
+    const size_t attempts=control.attempts;
+    control.reject=true;
+    for (int frame=1; frame<=20; ++frame) {
+      state.viewport.center_x=0.5f+frame*0.001f;
+      state.viewport.center_y=0.5f+frame*0.001f;
+      assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
+      assert(control.attempts==attempts && state.current_interactive_tile.PixelData()==pixels);
+    }
+    // Reusing a larger raster must still place page content at the current
+    // viewport coordinates, rather than stretching the whole cached region.
+    {
+      Text text;
+      text.SetOrientation(0);
+      const auto viewport = ComputeCurrentMuPdfViewport(&state);
+      assert(BlitBitmapCacheViewport(&text,text.screenleft,400,240,400,
+          state.current_interactive_tile,viewport,true));
+      int x0=240,x1=-1,y0=400,y1=-1;
+      for (int y=0; y<400; ++y) for (int x=0; x<240; ++x) {
+        if (text.screenleft[y*text.BufferStride()+x]==0xF800) {
+          x0=std::min(x0,x); x1=std::max(x1,x);
+          y0=std::min(y0,y); y1=std::max(y1,y);
+        }
+      }
+      assert(x1>=x0 && y1>=y0);
+      assert(std::fabs((x0+x1+1)*0.5f-(0.5f-viewport.left)/viewport.width*240)<2);
+      assert(std::fabs((y0+y1+1)*0.5f-(0.5f-viewport.top)/viewport.height*400)<2);
+    }
+    if (zoom==6) {
+      state.viewport.center_x=0.95f; state.viewport.center_y=0.95f;
+      assert(!EnsureCurrentMuPdfInteractiveTile(&state,0));
+      const size_t failed=control.attempts;
+      assert(!EnsureCurrentMuPdfInteractiveTile(&state,0) && control.attempts==failed);
+      control.reject=false;
+      state.viewport.center_x=0.5f; state.viewport.center_y=0.5f;
+      assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
+    }
+    control.reject=false;
+    // A larger bitmap is optional even at normal density. Failed reservation
+    // must retry the original visible tile and keep the context usable.
+    ResetBitmapCache(&state.current_interactive_tile);
+    fz_drop_display_list(ctx,state.cached_display_list);
+    state.cached_display_list=nullptr; state.cached_display_list_page=-1;
+    state.viewport.center_x=state.viewport.center_y=0.5f;
+    reject_native_pixels=true;
+    assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
+    const auto viewport=ComputeCurrentMuPdfViewport(&state);
+    assert(std::fabs(state.current_interactive_tile.width-viewport.width)<0.000001f);
+    assert(std::fabs(state.current_interactive_tile.height-viewport.height)<0.000001f);
+    assert(fz_caught(ctx)==FZ_ERROR_NONE);
+    if(state.cached_display_list) fz_drop_display_list(ctx,state.cached_display_list);
+    fz_drop_document(ctx,doc); fz_drop_context(ctx);
+    assert(control.live==0);
+  }
+  puts("PASS: 20 consecutive pan frames reuse raster without MuPDF allocations; bounded fallback recovers");
+}
 static void TestFailedTileKeepsRequestIdentity(const char *path) {
   for (bool wide : {false, true}) {
     ControlledAllocation control;
@@ -264,6 +344,7 @@ static void TestFailedTileKeepsRequestIdentity(const char *path) {
 
 int main(int argc, char **argv) {
   assert(argc == 2);
+  TestPanReusesBoundedRaster(argv[1]);
   TestNormalLandscapePageRetainsVisibleDetail(argv[1]);
   std::string stripes = "0 g\n";
   for (int y = 0; y < 400; ++y) stripes += "0 " + std::to_string(y) + " 240 0.5 re f\n";

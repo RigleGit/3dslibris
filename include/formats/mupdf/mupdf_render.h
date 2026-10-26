@@ -19,7 +19,8 @@ bool RenderMuPdfBitmap(
     const pdf_view_utils::NormalizedRect *crop_rect = NULL,
     fz_display_list *reuse_list = NULL, fz_display_list **out_list = NULL,
     IStatusReporter *reporter = NULL, const char *perf_stage = NULL,
-    float density_x = 1.0f, float density_y = 1.0f);
+    float density_x = 1.0f, float density_y = 1.0f,
+    bool optional_output = false);
 void AddMuPdfOutlineEntries(Book *book, fz_context *ctx, fz_document *doc,
                             const fz_outline *entry, u8 level);
 void PopulateMuPdfMetadata(Book *book, fz_context *ctx, fz_document *doc);
