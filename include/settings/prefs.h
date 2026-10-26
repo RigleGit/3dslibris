@@ -66,6 +66,7 @@ public:
   bool show_time_remaining;
   BrowserViewMode browser_view_mode;
   bool fixed_layout_rtl;
+  bool fixed_layout_wide_top_screen;
   bool circle_pad_page_turn;
   bool disable_ebook_images;
   LibrarySortMode library_sort_mode;

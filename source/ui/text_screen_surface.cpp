@@ -294,6 +294,9 @@ void TextRenderer::ClearScreen(u16 *screen, u8 r, u8 g, u8 b) {
 
 void TextRenderer::MarkScreenDirty(u16 *target) {
   if (target == parent->screenleft) {
+    if (parent->wide_top_valid_)
+      parent->wide_top_ui_dirty_ = framebuffer_blit_utils::MakeDirtyRect(
+          0, 0, parent->LogicalWidthFor(true), parent->LogicalHeightFor(true));
     parent->screenleft_dirty = true;
     parent->screenleft_dirty_rect = framebuffer_blit_utils::MakeDirtyRect(
         0, 0, parent->LogicalWidthFor(true), parent->LogicalHeightFor(true));
@@ -309,6 +312,9 @@ void TextRenderer::MarkScreenDirtyRect(u16 *target, int x0, int y0, int x1,
   framebuffer_blit_utils::DirtyRect *dirty_rect = nullptr;
   bool is_left = true;
   if (target == parent->screenleft) {
+    if (parent->wide_top_valid_)
+      framebuffer_blit_utils::ExpandDirtyRect(&parent->wide_top_ui_dirty_,
+          x0, y0, x1, y1, parent->LogicalWidthFor(true), parent->LogicalHeightFor(true));
     parent->screenleft_dirty = true;
     dirty_rect = &parent->screenleft_dirty_rect;
   } else if (target == parent->screenright) {
@@ -356,8 +362,20 @@ bool TextRenderer::BlitToFramebuffer() {
     if (!fb || !src)
       return;
 
-    const int logicalWidth =
-        parent->LogicalWidthFor(src == parent->screenleft);
+    const bool is_top = src == parent->screenleft;
+    if (is_top)
+      parent->SyncWideTopUiRect();
+    const bool hardware_wide = is_top && parent->wide_top_fb_cache_;
+    const bool native_wide = is_top && parent->wide_top_pixels_ && parent->wide_top_valid_;
+    const bool landscape = orientation_utils::IsLandscape(orientation_);
+    int logicalWidth = parent->LogicalWidthFor(is_top);
+    int source_stride = parent->BufferStride();
+    if (native_wide) {
+      src = parent->wide_top_pixels_;
+      logicalWidth *= landscape ? 2 : 1;
+      logicalHeight *= landscape ? 1 : 2;
+      source_stride = logicalWidth;
+    }
     const framebuffer_blit_utils::FramebufferGeometry geometry =
         framebuffer_blit_utils::MakeFramebufferGeometry((int)fbW, (int)fbH);
     if (geometry.stride <= 0 || geometry.phys_width <= 0 ||
@@ -378,7 +396,9 @@ bool TextRenderer::BlitToFramebuffer() {
     }
 #endif
 
-    if (cache.size() != geometry.byte_size) {
+    if (hardware_wide && geometry.byte_size != 240u * 800u * 3u)
+      return;
+    if (!hardware_wide && cache.size() != geometry.byte_size) {
       cache.assign(geometry.byte_size, 0xFF);
       dirty = true;
       dirty_rect =
@@ -386,14 +406,15 @@ bool TextRenderer::BlitToFramebuffer() {
                                                 logicalHeight);
     }
 
+    u8 *conversion = hardware_wide ? parent->wide_top_fb_cache_ : cache.data();
     if (dirty) {
-      if (dirty_rect.valid) {
+      if (dirty_rect.valid && !native_wide) {
         framebuffer_blit_utils::ConvertLogicalRgb565RectToPhysicalBgr888(
-            cache.data(), geometry, src, parent->BufferStride(),
+            conversion, geometry, src, source_stride,
             logicalWidth, logicalHeight, orientation_, dirty_rect);
       } else {
         framebuffer_blit_utils::ConvertLogicalRgb565ToPhysicalBgr888(
-            cache.data(), geometry, src, parent->BufferStride(),
+            conversion, geometry, src, source_stride,
             logicalWidth, logicalHeight, orientation_);
       }
       cache_generation++;
@@ -404,7 +425,7 @@ bool TextRenderer::BlitToFramebuffer() {
     const bool needs_copy = framebuffer_blit_utils::NeedsPhysicalFramebufferCopy(
         sync, slot, cache_generation);
     if (needs_copy) {
-      memcpy(fb, cache.data(), geometry.byte_size);
+      memcpy(fb, conversion, geometry.byte_size);
       framebuffer_blit_utils::MarkPhysicalFramebufferCopied(&sync, slot, fb,
                                                             cache_generation);
       wrote_anything = true;

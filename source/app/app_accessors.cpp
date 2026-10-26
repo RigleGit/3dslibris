@@ -23,6 +23,8 @@ bool App::IsFontMode(AppMode mode)
 AppMode App::GetMode() const { return nav_.mode; }
 
 void App::SetMode(AppMode mode) {
+  if ((mode == AppMode::Browser || mode == AppMode::Quit) && ts)
+    ts->SetTopScreenWideMode(false);
   if (mode == AppMode::Browser && nav_.mode != AppMode::Browser && ts)
     ts->MarkScreenDirty(ts->screenleft);
   nav_.mode = mode;

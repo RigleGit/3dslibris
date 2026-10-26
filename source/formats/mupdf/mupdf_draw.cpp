@@ -215,7 +215,7 @@ static bool BlitBitmapCacheViewport(Text *ts, u16 *screen, int logical_height,
                   (int)((rel_bottom - rel_top) * cache.bitmap_height + 0.5f)));
 
   fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
-      ts, screen, logical_height, 0, 0, draw_width, draw_height, cache.pixels,
+      ts, screen, logical_height, 0, 0, draw_width, draw_height, cache.PixelData(), cache.PixelCount(),
       cache.bitmap_width, cache.bitmap_height, crop_x, crop_y, crop_w, crop_h,
       high_quality_filter);
   return true;
@@ -265,7 +265,7 @@ static bool BlitBitmapCacheViewportRegion(
 
   fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
       ts, screen, logical_height, 0, dst_y0, draw_width, dst_y1 - dst_y0,
-      cache.pixels, cache.bitmap_width, cache.bitmap_height, crop_x, crop_y,
+      cache.PixelData(), cache.PixelCount(), cache.bitmap_width, cache.bitmap_height, crop_x, crop_y,
       crop_w, crop_h, high_quality_filter);
   return true;
 }
@@ -373,6 +373,17 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
     return;
   if (!mupdf_state || !mupdf_state->ctx || !mupdf_state->doc || mupdf_state->page_count == 0)
     return;
+
+  const bool wide = ts->IsWideTopScreenActive();
+  if (mupdf_state->wide_top_screen != wide) {
+    CancelMuPdfIncrementalRenderState(mupdf_state);
+    ResetBitmapCache(&mupdf_state->current_interactive_tile);
+    ResetBitmapCache(&mupdf_state->current_final_zoom);
+    ResetAdjacentSlot(&mupdf_state->prev_slot, mupdf_state->ctx);
+    ResetAdjacentSlot(&mupdf_state->next_slot, mupdf_state->ctx);
+    ResetMuPdfRenderFailureState(mupdf_state);
+    mupdf_state->wide_top_screen = wide;
+  }
 
   const fixed_layout_screen::TargetDimensions top_dims =
       fixed_layout_screen::TargetDims((unsigned char)GetOrientation(), true);

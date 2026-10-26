@@ -11,6 +11,8 @@ int PrefsButtonIndexForAction(int action) {
   if (action == PREFS_ACTION_MOBI_LINE_WRAP_FIX ||
       action == PREFS_ACTION_READING_DIRECTION)
     return PREFS_BUTTON_LIBRARY_VIEW;
+  if (action == PREFS_ACTION_WIDE_TOP_SCREEN)
+    return PREFS_BUTTON_TIME_REMAINING;
   if (action == PREFS_ACTION_GO_TO_PAGE)
     return PREFS_BUTTON_TIME24H;
   return action >= 0 && action < PREFS_BUTTON_COUNT ? action : -1;
@@ -95,7 +97,8 @@ unsigned char PrefsPageButtonCount(const PrefsPageContext &context) {
   if (!context.from_book && context.page == 2)
     return ExtraPrefsButtonCount();
   if (context.from_book && context.page == 1)
-    return BookPrefsPage2ButtonCount(context.fixed_layout);
+    return BookPrefsPage2ButtonCount(context.fixed_layout) +
+           (context.fixed_layout && context.wide_top_capable ? 1 : 0);
   return VisiblePrefsButtonCount(context.from_book,
                                  context.include_line_wrap_fix) -
          (context.from_book && context.fixed_layout ? 1 : 0);
@@ -108,8 +111,12 @@ static int PageActionForSlot(const PrefsPageContext &context,
     return kGeneralStyleButtons[slot];
   if (!context.from_book && context.page == 2)
     return ExtraPrefsButtonForSlot(slot);
-  if (context.from_book && context.page == 1)
+  if (context.from_book && context.page == 1) {
+    if (context.fixed_layout && context.wide_top_capable &&
+        slot == BookPrefsPage2ButtonCount(true))
+      return PREFS_ACTION_WIDE_TOP_SCREEN;
     return BookPrefsPage2ButtonForSlot(context.fixed_layout, slot);
+  }
   if (context.from_book && context.fixed_layout) {
     const unsigned count=VisiblePrefsButtonCount(true,context.include_line_wrap_fix);
     for (unsigned i = 0, visible = 0; i<count; ++i) {

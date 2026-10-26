@@ -26,7 +26,8 @@ static int MeasureTextAdvance(uint32_t codepoint, void *ctx) {
 
 }
 
-Text::Text() : reporter_(nullptr), fm(nullptr), tr(nullptr) {
+Text::Text() : reporter_(nullptr), wide_top_pixels_(nullptr), wide_top_fb_cache_(nullptr),
+               wide_top_ui_dirty_{0, 0, 0, 0, false}, wide_top_valid_(false), wide_top_capable_(-1), fm(nullptr), tr(nullptr) {
   display.height = PAGE_HEIGHT;
   display.width = PAGE_WIDTH;
 
@@ -73,6 +74,8 @@ Text::Text() : reporter_(nullptr), fm(nullptr), tr(nullptr) {
 }
 
 Text::~Text() {
+  delete[] wide_top_pixels_;
+  delete[] wide_top_fb_cache_;
   delete tr;
   delete fm;
   delete[] offscreen;
@@ -82,7 +85,10 @@ Text::~Text() {
 
 int Text::Init() { return fm->Init(); }
 
-void Text::SetReporter(IStatusReporter *reporter) { reporter_ = reporter; }
+void Text::SetReporter(IStatusReporter *reporter) {
+  reporter_ = reporter;
+  DBG_LOGF(reporter_, "EXPERIMENT: wide-top-screen 800x240");
+}
 IStatusReporter *Text::GetReporter() const { return reporter_; }
 void Text::SetFontDir(const std::string &dir) { fm->SetFontDir(dir); }
 
@@ -166,7 +172,13 @@ void Text::SetClipToContentEnabled(bool enabled) {
 void Text::SetScriptScale(float s) { if (tr) tr->SetScriptScale(s); }
 float Text::GetScriptScale() const { return tr ? tr->GetScriptScale() : 1.0f; }
 
-void Text::SetOrientation(u8 orientation) { tr->SetOrientation(orientation); }
+void Text::SetOrientation(u8 orientation) {
+  if (tr->GetOrientation() != orientation) {
+    wide_top_valid_ = false;
+    wide_top_ui_dirty_.valid = false;
+  }
+  tr->SetOrientation(orientation);
+}
 
 u8 Text::GetOrientation() const { return tr->GetOrientation(); }
 

@@ -96,6 +96,11 @@ public:
 
   // Geometry. The stub keeps display.* configurable per test, so the buffer
   // stride and logical width mirror it instead of the real fixed constants.
+  bool IsWideTopScreenActive() const { return false; }
+  bool IsWideTopScreenCapable() { return false; }
+  bool SetTopScreenWideMode(bool) { return true; }
+  u16 *BeginWideTopBlit(int, int, int, int) { return nullptr; }
+  u8 GetOrientation() const { return landscape ? 2 : 0; }
   int BufferStride() const { return display.height; }
   int LogicalWidthFor(bool is_left_buffer) const {
     return capture_rendered_text && landscape

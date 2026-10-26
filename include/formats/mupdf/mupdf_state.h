@@ -7,9 +7,17 @@
 #include "shared/status_reporter.h"
 
 #include <vector>
+#include <memory>
 
 struct Book::MuPdfState {
   struct BitmapCache : fixed_layout_bitmap_cache::Base {
+    std::unique_ptr<u16[]> native_pixels;
+    const u16 *PixelData() const {
+      return native_pixels ? native_pixels.get() : pixels.data();
+    }
+    size_t PixelCount() const {
+      return native_pixels ? (size_t)bitmap_width * (size_t)bitmap_height : pixels.size();
+    }
     float left;
     float top;
     float width;
@@ -85,6 +93,7 @@ struct Book::MuPdfState {
           job_submitted(false), thread_handle(NULL) {}
   };
 
+  bool wide_top_screen;
   int target_top_width;
   int target_top_height;
   int target_bottom_width;
@@ -122,7 +131,7 @@ struct Book::MuPdfState {
   int final_render_failed_zoom;
 
   MuPdfState()
-      : target_top_width(240), target_top_height(400),
+      : wide_top_screen(false), target_top_width(240), target_top_height(400),
         target_bottom_width(240), target_bottom_height(320), ctx(NULL),
         doc(NULL), outline(NULL), page_count(0),
         page_width(612.0f), page_height(792.0f), page_width_cache(),

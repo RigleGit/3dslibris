@@ -18,6 +18,8 @@ struct Text {
   std::vector<u16> left, right;
   u16 *screenleft, *screenright, *screen;
   unsigned char orientation;
+  bool wide_top_valid_=false;
+  framebuffer_blit_utils::DirtyRect wide_top_ui_dirty_{};
   bool screenleft_dirty=false, screenright_dirty=false;
   framebuffer_blit_utils::DirtyRect screenleft_dirty_rect{}, screenright_dirty_rect{};
   struct { int width, height; } display;

@@ -330,6 +330,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         p->prefs->browser_view_mode =
             browser_view_utils::ParsePrefValue(attr[i + 1]);
       }
+      if (!strcmp(attr[i], "fixedLayoutWideTopScreen"))
+        p->prefs->fixed_layout_wide_top_screen = atoi(attr[i + 1]) != 0;
       if (!strcmp(attr[i], "fixedLayoutRtl")) {
         p->prefs->fixed_layout_rtl = atoi(attr[i + 1]) != 0;
       }
@@ -643,11 +645,12 @@ int Prefs::Write() {
 
   fprintf(fp, "<dslibris format=\"2\">\n");
   fprintf(fp,
-      "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" disableEbookImages=\"%d\" />\n",
+      "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" fixedLayoutWideTopScreen=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" disableEbookImages=\"%d\" />\n",
           swapshoulder, time24h,
       show_time_remaining ? 1 : 0,
           browser_view_utils::ToPrefValue(browser_view_mode),
           fixed_layout_rtl ? 1 : 0,
+          fixed_layout_wide_top_screen ? 1 : 0,
           circle_pad_page_turn ? 1 : 0,
           static_cast<int>(library_sort_mode),
           disable_ebook_images ? 1 : 0);
@@ -834,6 +837,7 @@ void Prefs::Init() {
   show_time_remaining = false;
   browser_view_mode = BROWSER_VIEW_GALLERY;
   fixed_layout_rtl = false;
+  fixed_layout_wide_top_screen = false;
   circle_pad_page_turn = true;
   disable_ebook_images = false;
   library_sort_mode = LIBRARY_SORT_TITLE;

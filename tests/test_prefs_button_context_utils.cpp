@@ -250,5 +250,16 @@ int main() {
       PREFS_BUTTON_TIME24H);
   test::ExpectEq("invalid actions cannot index button storage",
       settings::PrefsButtonIndexForAction(-1), -1);
+  settings::PrefsPageContext wide_page;
+  wide_page.from_book = true; wide_page.fixed_layout = true; wide_page.page = 1;
+  test::ExpectFalse("wide option hidden without panel support",
+                    HasButton(wide_page, PREFS_ACTION_WIDE_TOP_SCREEN));
+  wide_page.wide_top_capable = true;
+  test::ExpectTrue("wide option available in fixed-layout book settings",
+                   HasButton(wide_page, PREFS_ACTION_WIDE_TOP_SCREEN));
+  CheckDrawablePage(wide_page);
+  wide_page.fixed_layout = false;
+  test::ExpectFalse("reflow books do not expose wide mode",
+                    HasButton(wide_page, PREFS_ACTION_WIDE_TOP_SCREEN));
   return 0;
 }

@@ -1,6 +1,7 @@
 #include "formats/common/fixed_layout_blit_utils.h"
 
 #include "shared/color_utils.h"
+#include "shared/orientation_utils.h"
 #include "ui/text.h"
 
 #include <algorithm>
@@ -8,7 +9,7 @@
 
 namespace fixed_layout_blit_utils {
 
-void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
+static void BlitSurface(u16 *screen, int stride, int logical_width, int logical_height,
                                 int x, int y, int draw_width,
                                 int draw_height,
                                 const u16 *pixels, size_t pixel_count,
@@ -16,7 +17,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int crop_x, int crop_y,
                                 int crop_width, int crop_height,
                                 bool high_quality_filter) {
-  if (!ts || !screen || !pixels || draw_width <= 0 || draw_height <= 0 ||
+  if (!screen || !pixels || draw_width <= 0 || draw_height <= 0 ||
       src_width <= 0 || src_height <= 0 || crop_width <= 0 ||
       crop_height <= 0) {
     return;
@@ -30,10 +31,6 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
   crop_y = std::max(0, std::min(src_height - 1, crop_y));
   crop_width = std::max(1, std::min(src_width - crop_x, crop_width));
   crop_height = std::max(1, std::min(src_height - crop_y, crop_height));
-
-  const int stride = ts->BufferStride();
-  const int logical_width = ts->LogicalWidthFor(screen == ts->screenleft);
-  ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
 
   if (crop_width == draw_width && crop_height == draw_height) {
     const int col0 = std::max(0, -x);
@@ -131,6 +128,35 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
           b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11 + 0.5f);
     }
   }
+}
+
+void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
+                                int x, int y, int draw_width, int draw_height,
+                                const u16 *pixels, size_t pixel_count,
+                                int src_width, int src_height,
+                                int crop_x, int crop_y, int crop_width, int crop_height,
+                                bool high_quality_filter) {
+  if (!ts || !screen || !pixels || src_width <= 0 || src_height <= 0 ||
+      draw_width <= 0 || draw_height <= 0 || crop_width <= 0 || crop_height <= 0 ||
+      pixel_count < (size_t)src_width * (size_t)src_height)
+    return;
+  const int logical_width = ts->LogicalWidthFor(screen == ts->screenleft);
+  if (screen == ts->screenleft && ts->IsWideTopScreenActive()) {
+    const bool landscape = orientation_utils::IsLandscape(ts->GetOrientation());
+    const int dx = landscape ? 2 : 1, dy = landscape ? 1 : 2;
+    u16 *wide = ts->BeginWideTopBlit(x, y, draw_width, draw_height);
+    BlitSurface(wide, logical_width * dx, logical_width * dx,
+                logical_height * dy, x * dx, y * dy,
+                draw_width * dx, draw_height * dy, pixels, pixel_count,
+                src_width, src_height, crop_x, crop_y, crop_width, crop_height,
+                high_quality_filter);
+  } else {
+    ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
+  }
+  BlitSurface(screen, ts->BufferStride(), logical_width, logical_height,
+              x, y, draw_width, draw_height, pixels, pixel_count,
+              src_width, src_height, crop_x, crop_y, crop_width, crop_height,
+              high_quality_filter);
 }
 
 void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,

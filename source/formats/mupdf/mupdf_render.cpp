@@ -3,6 +3,8 @@
 
 #include "formats/mupdf/mupdf_render.h"
 
+#include <new>
+
 #include <algorithm>
 
 #include "shared/debug_log.h"
@@ -21,7 +23,7 @@ static void ComputeBitmapContentBoundsPx(const RenderedMuPdfBitmap &bitmap,
   bounds->top = 0;
   bounds->width = std::max(0, bitmap.width);
   bounds->height = std::max(0, bitmap.height);
-  if (bitmap.width <= 0 || bitmap.height <= 0 || bitmap.pixels.empty())
+  if (bitmap.width <= 0 || bitmap.height <= 0 || bitmap.PixelCount() == 0)
     return;
 
   const int w = bitmap.width;
@@ -31,7 +33,7 @@ static void ComputeBitmapContentBoundsPx(const RenderedMuPdfBitmap &bitmap,
   // instead of scanning every pixel.  O(W+H) typical vs O(W*H).
   int min_y = h;
   for (int y = 0; y < h && min_y == h; y++) {
-    const u16 *row = bitmap.pixels.data() + (size_t)y * (size_t)w;
+    const u16 *row = bitmap.PixelData() + (size_t)y * (size_t)w;
     for (int x = 0; x < w; x++) {
       if (!IsMostlyWhite(row[x])) { min_y = y; break; }
     }
@@ -41,7 +43,7 @@ static void ComputeBitmapContentBoundsPx(const RenderedMuPdfBitmap &bitmap,
 
   int max_y = min_y;
   for (int y = h - 1; y > min_y; y--) {
-    const u16 *row = bitmap.pixels.data() + (size_t)y * (size_t)w;
+    const u16 *row = bitmap.PixelData() + (size_t)y * (size_t)w;
     for (int x = 0; x < w; x++) {
       if (!IsMostlyWhite(row[x])) { max_y = y; break; }
     }
@@ -51,7 +53,7 @@ static void ComputeBitmapContentBoundsPx(const RenderedMuPdfBitmap &bitmap,
   int min_x = w;
   int max_x = 0;
   for (int y = min_y; y <= max_y; y++) {
-    const u16 *row = bitmap.pixels.data() + (size_t)y * (size_t)w;
+    const u16 *row = bitmap.PixelData() + (size_t)y * (size_t)w;
     // Scan from left for this row
     for (int x = 0; x < min_x; x++) {
       if (!IsMostlyWhite(row[x])) { min_x = x; break; }
@@ -202,7 +204,8 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
                        const pdf_view_utils::NormalizedRect *crop_rect,
                        fz_display_list *reuse_list,
                        fz_display_list **out_list,
-                       IStatusReporter *reporter, const char *perf_stage) {
+                       IStatusReporter *reporter, const char *perf_stage,
+                       float density_x, float density_y) {
   if (!ctx || !doc || !out || scale <= 0.0f)
     return false;
   DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
@@ -281,7 +284,19 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
                    page_index);
     }
 
-    const fz_matrix ctm = MakeMuPdfRenderMatrix(bounds, scale);
+    fz_matrix ctm = MakeMuPdfRenderMatrix(bounds, scale);
+    if (density_x > 1.0f || density_y > 1.0f) {
+      const fz_matrix dense = fz_concat(ctm, fz_scale(density_x, density_y));
+      const fz_irect dense_bbox = fz_round_rect(fz_transform_rect(render_rect, dense));
+      const double pixel_count = (double)(dense_bbox.x1 - dense_bbox.x0) *
+                                (double)(dense_bbox.y1 - dense_bbox.y0);
+      // Wide is optional: cap the additional-density raster at 1M pixels
+      // (roughly 5 MiB for RGB888 + RGB565), then retain the normal raster.
+      if (pixel_count > 0 && pixel_count <= 1024.0 * 1024.0)
+        ctm = dense;
+      else
+        DBG_LOGF(reporter, "WIDE: PDF normal-density fallback pixels=%.0f", pixel_count);
+    }
     bbox = fz_round_rect(fz_transform_rect(render_rect, ctm));
     if (bbox.x1 <= bbox.x0 || bbox.y1 <= bbox.y0)
       fz_throw(ctx, FZ_ERROR_FORMAT, "invalid pdf render bbox");
@@ -325,12 +340,19 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     EnsureGrayLut();
     out->width = pix_w;
     out->height = pix_h;
-    out->pixels.resize((size_t)pix_w * (size_t)pix_h);
+    const size_t output_pixels = (size_t)pix_w * (size_t)pix_h;
+    if (density_x > 1.0f || density_y > 1.0f) {
+      out->native_pixels.reset(new (std::nothrow) u16[output_pixels]);
+      if (!out->native_pixels)
+        fz_throw(ctx, FZ_ERROR_SYSTEM, "wide RGB565 allocation failed");
+    } else {
+      out->pixels.resize(output_pixels);
+    }
     DBG_LOGF_CAT(
         reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
         "MUPDF render: convert-begin page=%d pix=%dx%d comps=%d stride=%d",
         page_index, pix_w, pix_h, comps, stride);
-    u16 *dst = out->pixels.data();
+    u16 *dst = out->native_pixels ? out->native_pixels.get() : out->pixels.data();
     if (comps == 1) {
       // Fast path: grayscale → RGB565 via lookup table.
       for (int y = 0; y < pix_h; y++) {
@@ -351,7 +373,7 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                  "MUPDF render: convert-done page=%d pix=%dx%d", page_index,
                  pix_w, pix_h);
-    fixed_perf::Record(doc, page_index, -1, "pdf.rgb565", fixed_perf::Now()-perf_phase, 1, out->pixels.size()*sizeof(u16), pix_w, pix_h);
+    fixed_perf::Record(doc, page_index, -1, "pdf.rgb565", fixed_perf::Now()-perf_phase, 1, out->PixelCount()*sizeof(u16), pix_w, pix_h);
     ok = true;
   }
   fz_always(ctx) {
@@ -362,9 +384,11 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
   fz_catch(ctx) {
     DBG_LOGF_CAT(reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
                  "MUPDF render error: %s", fz_caught_message(ctx));
+    fz_ignore_error(ctx);
     out->width = 0;
     out->height = 0;
     out->pixels.clear();
+    out->native_pixels.reset();
     if (owns_list && list) {
       fz_drop_display_list(ctx, list);
       list = NULL;
@@ -383,7 +407,7 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
   DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF render: end page=%d ok=%d", page_index, ok ? 1 : 0);
 
-  perf_total.End(ok ? 1 : 0, out->pixels.size()*sizeof(u16), out->width, out->height);
+  perf_total.End(ok ? 1 : 0, out->PixelCount()*sizeof(u16), out->width, out->height);
   return ok;
 }
 

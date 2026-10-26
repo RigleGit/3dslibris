@@ -49,6 +49,7 @@ void App::ShowFontView(AppMode app_font_mode)
 
 void App::ShowLibraryView()
 {
+  ts->SetTopScreenWideMode(false);
   InvalidateImageViewer();
   InvalidateSearch(false);
   ApplyRenderOrientation(portrait_orientation);

@@ -368,6 +368,8 @@ int main() {
   owner.reader_layout.line_spacing=3; owner.ts->linespacing=3;
   p.browser_view_mode=BROWSER_VIEW_LIST; p.fixed_layout_rtl=true;
   p.circle_pad_page_turn=false; p.library_sort_mode=LIBRARY_SORT_RECENT;
+  assert(!p.fixed_layout_wide_top_screen);
+  p.fixed_layout_wide_top_screen=true;
   owner.books={&nested}; owner.current=&nested;
   assert(p.Write() == 0);
   Book root_book; root_book.folder="books"; root_book.filename="other.epub";
@@ -397,6 +399,7 @@ int main() {
   assert(restored.Read() == 0 && restarted.current == nullptr);
   assert(!restored.time24h && restored.browser_view_mode == BROWSER_VIEW_LIST);
   assert(restored.fixed_layout_rtl && !restored.circle_pad_page_turn);
+  assert(restored.fixed_layout_wide_top_screen);
   assert(restored.library_sort_mode == LIBRARY_SORT_RECENT);
   assert(restarted.reader_layout.font_size == 16 && restarted.ts->GetPixelSize() == 16);
   assert(restarted.reader_layout.line_spacing == 3 && restarted.ts->linespacing == 3);

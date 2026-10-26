@@ -49,6 +49,13 @@ struct RenderedMuPdfBitmap {
   int width;
   int height;
   std::vector<u16> pixels;
+  std::unique_ptr<u16[]> native_pixels;
+  const u16 *PixelData() const {
+    return native_pixels ? native_pixels.get() : pixels.data();
+  }
+  size_t PixelCount() const {
+    return native_pixels ? (size_t)width * (size_t)height : pixels.size();
+  }
 
   RenderedMuPdfBitmap() : width(0), height(0), pixels() {}
 };
@@ -105,6 +112,7 @@ inline void ResetBitmapCache(Book::MuPdfState::BitmapCache *cache) {
   cache->bitmap_width = 0;
   cache->bitmap_height = 0;
   cache->pixels.clear();
+  cache->native_pixels.reset();
 }
 
 inline void ResetAdjacentSlot(Book::MuPdfState::AdjacentSlot *slot,
@@ -134,10 +142,11 @@ inline void StoreBitmapCache(Book::MuPdfState::BitmapCache *cache, int page,
   cache->bitmap_width = rendered->width;
   cache->bitmap_height = rendered->height;
   cache->pixels.swap(rendered->pixels);
+  cache->native_pixels.swap(rendered->native_pixels);
 }
 
 inline bool BitmapCacheValid(const Book::MuPdfState::BitmapCache &cache,
                              int page) {
   return cache.page == page && cache.bitmap_width > 0 &&
-         cache.bitmap_height > 0 && !cache.pixels.empty();
+         cache.bitmap_height > 0 && cache.PixelData() && cache.PixelCount() > 0;
 }

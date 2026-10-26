@@ -159,6 +159,29 @@ inline int MaxConvertibleLogicalY(const FramebufferGeometry &geometry,
   return std::min(logical_height, limit);
 }
 
+// Wide mode doubles physical horizontal density without changing UI geometry.
+// Native wide bitmaps already span 800 samples and are copied one-for-one.
+inline void StoreLogicalPixel(uint8_t *dst, const FramebufferGeometry &geometry,
+                               uint16_t pixel, int sx, int sy,
+                               int logical_width, int logical_height,
+                               unsigned char orientation, bool preserve_white = false) {
+  const bool landscape = orientation_utils::IsLandscape(orientation);
+  const int long_axis = landscape ? logical_width : logical_height;
+  const int density = geometry.phys_width == 800 && long_axis == 400 ? 2 : 1;
+  for (int sample = 0; sample < density; ++sample) {
+    const int px = landscape ? sx * density + sample : sx;
+    const int py = landscape ? sy : sy * density + sample;
+    const size_t off = PhysicalOffsetBytes(geometry, px, py, orientation);
+    if (preserve_white && pixel == 0xFFFF) {
+      dst[off] = dst[off + 1] = dst[off + 2] = 0xFF;
+      continue;
+    }
+    dst[off] = (uint8_t)((pixel & 0x1F) << 3);
+    dst[off + 1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
+    dst[off + 2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
+  }
+}
+
 inline void ConvertLogicalRgb565ToPhysicalBgr888(
     uint8_t *dst, const FramebufferGeometry &geometry, const uint16_t *src,
     int src_stride, int logical_width, int logical_height,
@@ -176,10 +199,8 @@ inline void ConvertLogicalRgb565ToPhysicalBgr888(
   for (int sy = 0; sy < max_sy; sy++) {
     for (int sx = 0; sx < max_sx; sx++) {
       const uint16_t pixel = src[(size_t)sy * (size_t)src_stride + (size_t)sx];
-      const size_t off = PhysicalOffsetBytes(geometry, sx, sy, orientation);
-      dst[off + 0] = (uint8_t)((pixel & 0x1F) << 3);
-      dst[off + 1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
-      dst[off + 2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
+      StoreLogicalPixel(dst, geometry, pixel, sx, sy, logical_width,
+                         logical_height, orientation);
     }
   }
 }
@@ -206,16 +227,8 @@ inline void ConvertLogicalRgb565RectToPhysicalBgr888(
   for (int sy = y0; sy < y1; sy++) {
     for (int sx = x0; sx < x1; sx++) {
       const uint16_t pixel = src[(size_t)sy * (size_t)src_stride + (size_t)sx];
-      const size_t off = PhysicalOffsetBytes(geometry, sx, sy, orientation);
-      if (pixel == 0xFFFF) {
-        dst[off + 0] = 0xFF;
-        dst[off + 1] = 0xFF;
-        dst[off + 2] = 0xFF;
-        continue;
-      }
-      dst[off + 0] = (uint8_t)((pixel & 0x1F) << 3);
-      dst[off + 1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
-      dst[off + 2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
+      StoreLogicalPixel(dst, geometry, pixel, sx, sy, logical_width,
+                         logical_height, orientation, true);
     }
   }
 }

@@ -118,8 +118,8 @@ bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *mupdf_state,
   CancelMuPdfIncrementalRenderState(mupdf_state);
   ResetBitmapCache(&mupdf_state->current_preview);
   ResetBitmapCache(&mupdf_state->current_interactive_tile);
-  mupdf_state->current_preview = slot->preview;
-  mupdf_state->current_interactive_tile = slot->interactive_tile;
+  mupdf_state->current_preview = std::move(slot->preview);
+  mupdf_state->current_interactive_tile = std::move(slot->interactive_tile);
   ResetBitmapCache(&slot->preview);
   ResetBitmapCache(&slot->interactive_tile);
 
@@ -252,7 +252,7 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   fz_display_list *new_list = NULL;
   float page_width = mupdf_state->page_width;
   float page_height = mupdf_state->page_height;
-  const bool render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
+  bool render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
                        kPdfInteractiveScale *
                            ComputeFitScale(page_width, page_height,
                                            mupdf_state->target_top_width,
@@ -262,7 +262,19 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
                                mupdf_state->viewport.zoom_index),
                        &rendered, &page_width, &page_height, NULL,
                        display_list, display_list ? NULL : &new_list,
-                       mupdf_state->reporter);
+                       mupdf_state->reporter, NULL,
+                       mupdf_state->wide_top_screen && mupdf_state->target_top_width == 400 ? 2.0f : 1.0f,
+                       mupdf_state->wide_top_screen && mupdf_state->target_top_height == 400 ? 2.0f : 1.0f);
+  if (!render_ok && mupdf_state->wide_top_screen) {
+    // Allocation failure at native density must still leave the book readable.
+    render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
+        kPdfInteractiveScale * ComputeFitScale(page_width, page_height,
+            mupdf_state->target_top_width, mupdf_state->target_top_height) *
+            ComputeEffectiveMuPdfZoom(mupdf_state->document_kind,
+                                      mupdf_state->viewport.zoom_index),
+        &rendered, &page_width, &page_height, NULL, display_list,
+        display_list ? NULL : &new_list, mupdf_state->reporter);
+  }
   if (!render_ok) {
     mupdf_state->interactive_render_failed_page = page_index;
     mupdf_state->interactive_render_failed_zoom =

@@ -401,9 +401,51 @@ void TestLandscapeBookHudUsesSlimBottomStrip() {
                      layout.clear_bottom);
 }
 
+void TestWideFramebufferRepeatsLogicalPixelsWithoutChangingSize() {
+  using namespace framebuffer_blit_utils;
+  for (unsigned char orientation : {0, 1, 2}) {
+    const bool landscape = orientation == 2;
+    const int width = landscape ? 400 : 240;
+    const int height = landscape ? 240 : 400;
+    std::vector<uint16_t> pixels(400 * 400, 0xF800);
+    // Half of the logical screen is blue, the other half red.
+    for (int y = 0; y < height; ++y)
+      for (int x = 0; x < width; ++x)
+        if ((landscape ? x : y) >= 200) pixels[y * 400 + x] = 0x001F;
+    const FramebufferGeometry geometry = MakeFramebufferGeometry(240, 800);
+    std::vector<uint8_t> output(geometry.byte_size + 16, 0xA5);
+    ConvertLogicalRgb565ToPhysicalBgr888(output.data(), geometry,
+        pixels.data(), 400, width, height, orientation);
+    // Independent physical-column oracle: normal left portrait reverses x;
+    // landscape and right portrait preserve it. Every column must be filled.
+    for (int column = 0; column < 800; ++column) {
+      const bool blue = orientation == 0 ? column < 400 : column >= 400;
+      for (int row = 0; row < 240; ++row) {
+        const size_t offset = (column * 240 + row) * 3;
+        ExpectEqByte("wide blue channel", output[offset], blue ? 0xF8 : 0);
+        ExpectEqByte("wide red channel", output[offset + 2], blue ? 0 : 0xF8);
+      }
+    }
+    for (size_t i = geometry.byte_size; i < output.size(); ++i)
+      ExpectEqByte("wide buffer guard", output[i], 0xA5);
+    // A partial UI change must replace both physical samples of that pixel.
+    pixels[7 * 400 + 5] = 0x07E0;
+    ConvertLogicalRgb565RectToPhysicalBgr888(output.data(), geometry,
+        pixels.data(), 400, width, height, orientation, MakeDirtyRect(5, 7, 6, 8));
+    for (int duplicate = 0; duplicate < 2; ++duplicate) {
+      const int column = landscape ? 10 + duplicate
+          : orientation == 1 ? 14 + duplicate : 785 - duplicate;
+      const int row = landscape ? 232 : orientation == 1 ? 5 : 234;
+      const size_t offset = (column * 240 + row) * 3;
+      ExpectEqByte("wide partial green", output[offset + 1], 0xFC);
+    }
+  }
+}
+
 } // namespace
 
 int main() {
+  TestWideFramebufferRepeatsLogicalPixelsWithoutChangingSize();
   TestPortraitGeometry();
   TestLandscapeGeometry();
   TestGeometryFitsBufferStride();

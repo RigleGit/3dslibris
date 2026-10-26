@@ -87,6 +87,13 @@ public:
   int LogicalWidth() const;
   int LogicalHeight() const;
 
+  bool IsWideTopScreenCapable();
+  bool SetTopScreenWideMode(bool wide);
+  bool IsWideTopScreenActive() const { return wide_top_pixels_ != nullptr; }
+  // Fixed-layout blits keep logical coordinates; only this packed surface has
+  // twice the sample density along the panel's horizontal axis.
+  u16 *BeginWideTopBlit(int x, int y, int width, int height);
+
   void SetReporter(IStatusReporter *reporter);
   IStatusReporter *GetReporter() const;
   void SetFontDir(const std::string &dir);
@@ -169,8 +176,15 @@ private:
   friend class TextRenderer;
   friend class FontMenu;
   IStatusReporter *reporter_;
+  u16 *wide_top_pixels_;
+  u8 *wide_top_fb_cache_;
+  framebuffer_blit_utils::DirtyRect wide_top_ui_dirty_;
+  bool wide_top_valid_;
+  int wide_top_capable_;
   FontManager *fm;
   TextRenderer *tr;
+
+  void SyncWideTopUiRect();
 
   inline int CacheGlyph(u32 ucs) { return CacheGlyph(ucs, (u8)GetStyle()); }
   inline int CacheGlyph(u32 ucs, u8 style) {

@@ -277,6 +277,8 @@ int SettingsController::EffectiveVisibleCount() const {
       app_.GetCurrentBook() && app_.GetCurrentBook()->IsFixedLayout();
   context.include_line_wrap_fix =
       CurrentBookSupportsLineWrapFix(app_.GetCurrentBook(), is_book_ctx);
+  context.wide_top_capable = context.fixed_layout && app_.ts &&
+                             app_.ts->IsWideTopScreenCapable();
   context.can_go_to_page =
       CurrentBookCanGoToPage(app_.GetCurrentBook(), is_book_ctx);
   return (int)settings::PrefsPageButtonCount(context);
@@ -291,6 +293,8 @@ int SettingsController::EffectiveButtonForSlot(int slot) const {
       app_.GetCurrentBook() && app_.GetCurrentBook()->IsFixedLayout();
   context.include_line_wrap_fix =
       CurrentBookSupportsLineWrapFix(app_.GetCurrentBook(), is_book_ctx);
+  context.wide_top_capable = context.fixed_layout && app_.ts &&
+                             app_.ts->IsWideTopScreenCapable();
   context.can_go_to_page =
       CurrentBookCanGoToPage(app_.GetCurrentBook(), is_book_ctx);
   return settings::PrefsPageButtonForSlot(context, (u8)slot);
@@ -993,6 +997,11 @@ void SettingsController::PrefsRefreshButton(int index) {
     button.SetLabel2(book && book->GetMobiLineWrapFix()
                          ? std::string("on") : std::string("off"));
     break;
+  case PREFS_ACTION_WIDE_TOP_SCREEN:
+    button.SetLabel1(std::string("wide top screen"));
+    button.SetLabel2(app_.prefs->fixed_layout_wide_top_screen ? std::string("800px")
+                                                            : std::string("400px"));
+    break;
   case PREFS_ACTION_READING_DIRECTION:
     button.SetLabel1(std::string("reading direction"));
     button.SetLabel2(app_.prefs->fixed_layout_rtl ? std::string("Right to left")
@@ -1171,6 +1180,8 @@ void SettingsController::ResetToDefaults() {
   app_.prefs->swapshoulder = false;
   app_.prefs->browser_view_mode = BROWSER_VIEW_GALLERY;
   app_.prefs->fixed_layout_rtl = false;
+  app_.prefs->fixed_layout_wide_top_screen = false;
+  app_.ts->SetTopScreenWideMode(false);
   app_.prefs->circle_pad_page_turn = true;
   app_.prefs->disable_ebook_images = false;
   app_.prefs->show_time_remaining = false;
@@ -1260,6 +1271,20 @@ void SettingsController::PrefsHandlePress() {
 
   if (selected_button == PREFS_ACTION_MOBI_LINE_WRAP_FIX) {
     ToggleCurrentBookMobiLineWrapFix();
+    return;
+  }
+
+  if (selected_button == PREFS_ACTION_WIDE_TOP_SCREEN) {
+    if (!is_book_ctx || !book || !book->IsFixedLayout())
+      return;
+    const bool wide = !app_.prefs->fixed_layout_wide_top_screen;
+    if (app_.ts->SetTopScreenWideMode(wide)) {
+      app_.prefs->fixed_layout_wide_top_screen = wide;
+      app_.prefs->RequestWrite();
+      app_.RequestStatusRedraw();
+      PrefsRefreshButton(PREFS_ACTION_WIDE_TOP_SCREEN);
+      app_.MarkPrefsDirty();
+    }
     return;
   }
 

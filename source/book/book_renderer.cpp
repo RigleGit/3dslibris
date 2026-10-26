@@ -2,6 +2,8 @@
 
 #include "book/book.h"
 #include "book/page.h"
+#include "settings/prefs.h"
+#include "ui/text.h"
 
 #include <stddef.h>
 
@@ -43,6 +45,9 @@ namespace book_renderer {
 void DrawCurrentView(Book *book, Text *text) {
   if (!book || !text)
     return;
+  Prefs *prefs = book->GetPrefs();
+  text->SetTopScreenWideMode(book->IsFixedLayout() && prefs &&
+                             prefs->fixed_layout_wide_top_screen);
   for (size_t i = 0; i < sizeof(kBookRenderers) / sizeof(kBookRenderers[0]);
        i++) {
     const BookRendererEntry &entry = kBookRenderers[i];
