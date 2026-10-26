@@ -32,6 +32,7 @@ Nintendo 3DS homebrew ebook and manga reader based on the original Nintendo DS p
 - Global and per-book controls for font size, spacing, and EPUB publisher layout.
 - Reading progress and bookmarks saved across library folders, with an option to reopen the last book on startup.
 - Fixed-layout viewer for manga and document formats (`CBZ`, `PDF` and `XPS`) with zoom, pan, chapter navigation, and full-page preview.
+- Optional 800×240 top-screen rendering for PDF, CBZ and XPS on Old/New 3DS (including XL) and New 2DS XL. Enable `wide top screen` in BOOK settings; the original 2DS uses 400×240.
 - Bundled fallback fonts for broader language coverage (Latin, Cyrillic, Greek, CJK, Arabic, Hebrew, Thai, and more).
 
 
