@@ -172,10 +172,46 @@ void TestCoverDownsampleAveragesRgb888Channels() {
   ExpectEq("cover averages all four RGB888 colors", pixel, 0x8410);
 }
 
+void TestRoundedNativeRastersKeepFilteredPixels() {
+  // Frozen R3 RGB565 output for the non-integral native sizes seen on console.
+  // Include negative origins and stride padding so an optimization cannot
+  // silently shift/drop edge samples or write outside the visible rectangle.
+  const uint64_t expected[] = {0xab36fdd9c536904aULL,
+      0x4597879dc51352abULL, 0x6c4dec34929f8e8cULL};
+  for (int shape=0; shape<3; ++shape) {
+    const int sw=shape==2?801:241, sh=shape==2?241:800;
+    const int dw=shape==2?800:240, dh=shape==0?800:shape==1?400:240;
+    Text ts; ts.display.width=dw; ts.display.height=dw+3;
+    std::vector<u16> screen((dw+3)*dh,0xeeee), pixels(sw*sh,0xffff);
+    for (int y=sh/4; y<sh*3/4; ++y)
+      for (int x=sw/4; x<sw*3/4; ++x)
+        pixels[y*sw+x]=(u16)((x*641+y*193)&65535);
+    fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
+        &ts,screen.data(),dh,-3,-5,dw,dh,pixels,sw,sh,0,0,sw,sh,true);
+    uint64_t hash=14695981039346656037ULL;
+    for (u16 pixel:screen) { hash^=pixel; hash*=1099511628211ULL; }
+    if (hash!=expected[shape]) Fail("rounded native raster changed filtered pixels");
+  }
+}
+
+void TestBilinearPreservesEveryUniformRgb565Color() {
+  Text ts; ts.display.width=3; ts.display.height=3;
+  std::vector<u16> pixels(4), screen(9);
+  for (unsigned color=0; color<65536; ++color) {
+    std::fill(pixels.begin(),pixels.end(),(u16)color);
+    fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
+        &ts,screen.data(),3,0,0,3,3,pixels,2,2,0,0,2,2,true);
+    for (u16 pixel:screen)
+      ExpectEq("uniform bilinear color stays exact",pixel,(u16)color);
+  }
+}
+
 } // namespace
 
 int main() {
   TestCoverDownsampleAveragesRgb888Channels();
+  TestRoundedNativeRastersKeepFilteredPixels();
+  TestBilinearPreservesEveryUniformRgb565Color();
   TestExactCopyClipsNegativeOriginWithCropOffset();
   TestExactCopyClipsRightEdgeWithCropOffset();
   TestNearestResizeUsesCropAndPreservesDestinationBorder();

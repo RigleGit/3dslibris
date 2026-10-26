@@ -9,6 +9,17 @@
 
 namespace fixed_layout_blit_utils {
 
+static inline u16 InterpolateRgb565(u16 first, u16 second, float t) {
+  if (first == second)
+    return first;
+  int r0, g0, b0, r1, g1, b1;
+  UnpackRgb565(first, &r0, &g0, &b0);
+  UnpackRgb565(second, &r1, &g1, &b1);
+  return RGB565FromU8(r0 * (1.0f - t) + r1 * t + 0.5f,
+                     g0 * (1.0f - t) + g1 * t + 0.5f,
+                     b0 * (1.0f - t) + b1 * t + 0.5f);
+}
+
 static void BlitSurface(u16 *screen, int stride, int logical_width, int logical_height,
                                 int x, int y, int draw_width,
                                 int draw_height,
@@ -104,19 +115,35 @@ static void BlitSurface(u16 *screen, int stride, int logical_width, int logical_
       const int x0 = sample.x0;
       const int x1 = sample.x1;
       const float tx = sample.t;
+      const u16 p00 = pixels[(size_t)y0 * (size_t)src_width + (size_t)x0];
+      const u16 p10 = pixels[(size_t)y0 * (size_t)src_width + (size_t)x1];
+      // Identity rows need only horizontal interpolation. Rounded PDF bounds
+      // often add one column to an otherwise native-size raster.
+      if (ty == 0.0f) {
+        screen[(size_t)dy * (size_t)stride + (size_t)dx] =
+            InterpolateRgb565(p00, p10, tx);
+        continue;
+      }
+      const u16 p01 = pixels[(size_t)y1 * (size_t)src_width + (size_t)x0];
+      const u16 p11 = pixels[(size_t)y1 * (size_t)src_width + (size_t)x1];
+      if (p00 == p10 && p00 == p01 && p00 == p11) {
+        screen[(size_t)dy * (size_t)stride + (size_t)dx] = p00;
+        continue;
+      }
+      if (tx == 0.0f) {
+        screen[(size_t)dy * (size_t)stride + (size_t)dx] =
+            InterpolateRgb565(p00, p01, ty);
+        continue;
+      }
 
       int r00 = 0, g00 = 0, b00 = 0;
       int r10 = 0, g10 = 0, b10 = 0;
       int r01 = 0, g01 = 0, b01 = 0;
       int r11 = 0, g11 = 0, b11 = 0;
-      UnpackRgb565(pixels[(size_t)y0 * (size_t)src_width + (size_t)x0], &r00,
-                   &g00, &b00);
-      UnpackRgb565(pixels[(size_t)y0 * (size_t)src_width + (size_t)x1], &r10,
-                   &g10, &b10);
-      UnpackRgb565(pixels[(size_t)y1 * (size_t)src_width + (size_t)x0], &r01,
-                   &g01, &b01);
-      UnpackRgb565(pixels[(size_t)y1 * (size_t)src_width + (size_t)x1], &r11,
-                   &g11, &b11);
+      UnpackRgb565(p00, &r00, &g00, &b00);
+      UnpackRgb565(p10, &r10, &g10, &b10);
+      UnpackRgb565(p01, &r01, &g01, &b01);
+      UnpackRgb565(p11, &r11, &g11, &b11);
 
       const float w00 = (1.0f - tx) * (1.0f - ty);
       const float w10 = tx * (1.0f - ty);
