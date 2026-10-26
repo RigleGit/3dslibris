@@ -108,16 +108,20 @@ NormalizedRect ComputeViewportRect(float page_width, float page_height,
       screen_height <= 0.0f || zoom <= 0.0f) {
     return out;
   }
+  // At page fit there is no crop or pan, including rounding at non-integral
+  // scale factors. Presentation centers the complete page within the screen.
+  if (zoom <= 1.0f)
+    return out;
 
-  const float cover_scale =
-      std::max(screen_width / page_width, screen_height / page_height);
-  if (cover_scale <= 0.0f)
+  const float fit_scale =
+      std::min(screen_width / page_width, screen_height / page_height);
+  if (fit_scale <= 0.0f)
     return out;
 
   const float visible_page_width =
-      std::min(page_width, screen_width / (cover_scale * zoom));
+      std::min(page_width, screen_width / (fit_scale * zoom));
   const float visible_page_height =
-      std::min(page_height, screen_height / (cover_scale * zoom));
+      std::min(page_height, screen_height / (fit_scale * zoom));
 
   out.width = Clamp01(visible_page_width / page_width);
   out.height = Clamp01(visible_page_height / page_height);

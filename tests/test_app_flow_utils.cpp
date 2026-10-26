@@ -114,15 +114,15 @@ void TestMuPdfDocumentKindHelpers() {
   ExpectFloatEq("pdf base zoom",
                 app_flow_utils::GetMuPdfReadingBaseZoom(
                     MuPdfDocumentKind::Pdf),
-                1.5f);
+                1.0f);
   ExpectFloatEq("xps base zoom",
                 app_flow_utils::GetMuPdfReadingBaseZoom(
                     MuPdfDocumentKind::Xps),
-                1.5f);
+                1.0f);
   ExpectFloatEq("unknown base zoom",
                 app_flow_utils::GetMuPdfReadingBaseZoom(
                     MuPdfDocumentKind::Unknown),
-                1.5f);
+                1.0f);
 
   ExpectFalse("pdf final render disabled",
               app_flow_utils::MuPdfWantsFinalQualityRender(

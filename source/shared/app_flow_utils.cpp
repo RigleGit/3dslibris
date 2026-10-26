@@ -55,7 +55,7 @@ float GetMuPdfReadingBaseZoom(MuPdfDocumentKind kind) {
   case MuPdfDocumentKind::Xps:
   case MuPdfDocumentKind::Unknown:
   default:
-    return 1.5f;
+    return 1.0f;
   }
 }
 

@@ -22,12 +22,8 @@ inline pdf_view_utils::NormalizedRect Viewport(int width, int height,
                                                int screen_width,
                                                int screen_height, int zoom,
                                                float x, float y) {
-  const float fit =
-      std::min((float)screen_width / width, (float)screen_height / height);
-  const float cover =
-      std::max((float)screen_width / width, (float)screen_height / height);
   return pdf_view_utils::ComputeViewportRect(
-      width, height, pdf_view_utils::ZoomForIndex(zoom) * fit / cover,
+      width, height, pdf_view_utils::ZoomForIndex(zoom),
       screen_width, screen_height, x, y);
 }
 inline void MapPan(unsigned char orientation, float x, float y, float *dx,

@@ -3,6 +3,9 @@
 #include "formats/common/format_limits.h"
 #include "formats/common/pdf_view_utils.h"
 #include "formats/common/fixed_layout_preview_constants.h"
+#include "formats/common/fixed_layout_screen_constants.h"
+#include "formats/common/fixed_layout_blit_utils.h"
+#include "ui/text.h"
 #include "shared/fixed_layout_perf.h"
 #include <algorithm>
 #include <cassert>
@@ -36,7 +39,27 @@ bool ScaleCbzBitmap(const CbzBitmap &, int w, int h, bool, CbzBitmap *o) {
   o->width=w; o->height=h; o->pixels.assign(w*h,42); return true;
 }
 #include "cbz_source_under_test.inc"
+static void TestInitialFitKeepsEveryCorner() {
+  Book::CbzState state;
+  state.page_width=400; state.page_height=240;
+  state.target_top_width=240; state.target_top_height=400;
+  state.viewport.zoom_index=pdf_view_utils::DefaultZoomIndex();
+  const auto viewport=ComputeCurrentCbzViewport(&state);
+  assert(viewport.left==0 && viewport.top==0);
+  assert(viewport.width==1 && viewport.height==1);
+  Text text; text.display.width=240; text.display.height=400;
+  std::vector<u16> image(400*240,0xffff), screen(400*400,0x7777);
+  for(int y=0;y<10;++y)for(int x=0;x<10;++x){
+    image[y*400+x]=0xf800; image[y*400+399-x]=0x07e0;
+    image[(239-y)*400+x]=0x001f; image[(239-y)*400+399-x]=0;
+  }
+  assert(BlitCbzViewport(&text,screen.data(),400,240,400,image,400,240,viewport,true));
+  assert(screen[128*400]==0xf800 && screen[128*400+239]==0x07e0);
+  assert(screen[271*400]==0x001f && screen[271*400+239]==0);
+  assert(screen[127*400]==0x7777 && screen[272*400]==0x7777);
+}
 int main() {
+  TestInitialFitKeepsEveryCorner();
   FixtureState s;
   assert(EnsureCbzPreviewCache(&s, 0));
   assert(EnsureCbzInteractiveCache(&s, 0));

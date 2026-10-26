@@ -76,7 +76,7 @@ static void TestLandscapePageVisibleTile(const char *path) {
     state.target_top_width = landscape ? 400 : 240;
     state.target_top_height = landscape ? 240 : 400;
     state.wide_top_screen = true;
-    state.viewport.zoom_index = 2;
+    state.viewport.zoom_index = 6;
     state.viewport.center_x = 0.25f; state.viewport.center_y = 0.5f;
     assert(EnsureCurrentMuPdfInteractiveTile(&state, 0));
     auto &cache = state.current_interactive_tile;
@@ -113,11 +113,12 @@ static void TestLandscapePageVisibleTile(const char *path) {
       state.viewport.zoom_index = zoom;
       assert(EnsureCurrentMuPdfInteractiveTile(&state, 0));
       assert(std::abs(cache.bitmap_width - (landscape ? 800 : 240)) <= 2);
-      assert(std::abs(cache.bitmap_height - (landscape ? 240 : 800)) <= 2);
+      const int portrait_heights[] = {432,576,800,800};
+      assert(std::abs(cache.bitmap_height - (landscape ? 240 : portrait_heights[zoom-3])) <= 2);
       assert(cache.PixelCount() <= 802u * 242u);
     }
     ResetBitmapCache(&cache);
-    state.viewport.zoom_index = 2;
+    state.viewport.zoom_index = 6;
     reject_native_pixels = true;
     assert(EnsureCurrentMuPdfInteractiveTile(&state, 0));
     assert(!cache.native_pixels && cache.width < 1 && cache.height < 1);
@@ -137,8 +138,8 @@ static void TestLandscapePageVisibleTile(const char *path) {
 }
 
 static void TestNormalLandscapePageRetainsVisibleDetail(const char *path) {
-  // At the default reading zoom, the portrait viewport covers 160 PDF units
-  // vertically. These half-unit bands require ~320 visible transitions.
+  // At zoom 4x fit, the portrait viewport covers about 167 PDF units
+  // vertically. These half-unit bands require about 333 visible transitions.
   // Rasterising the entire landscape page at fit scale loses those bands
   // before the viewport is enlarged to the 400-row screen.
   std::string bands = "0 g\n";
@@ -153,7 +154,7 @@ static void TestNormalLandscapePageRetainsVisibleDetail(const char *path) {
   state.page_width = 400; state.page_height = 240;
   state.document_kind = app_flow_utils::MuPdfDocumentKind::Pdf;
   state.target_top_width = 240; state.target_top_height = 400;
-  state.viewport.zoom_index = 2;
+  state.viewport.zoom_index = 6;
   Text text;
   text.SetOrientation(0);
   assert(!text.IsWideTopScreenActive());
@@ -172,6 +173,48 @@ static void TestNormalLandscapePageRetainsVisibleDetail(const char *path) {
   assert(transitions >= 250);
   if (state.cached_display_list) fz_drop_display_list(ctx, state.cached_display_list);
   fz_drop_document(ctx, doc); fz_drop_context(ctx);
+}
+
+static void TestInitialPageFitKeepsMarginsAndSquare(const char *path) {
+  WritePdf(path, "1 0 0 rg 170 90 60 60 re f\n", 400, 240);
+  fz_context *ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT); assert(ctx);
+  fz_register_document_handlers(ctx);
+  fz_document *doc = fz_open_document(ctx, path); assert(doc);
+  for (bool wide : {false, true}) {
+    Text text;
+    text.SetOrientation(0);
+    text.SetScreen(text.screenleft);
+    text.FillRect(0, 0, 240, 400, 0x07E0);
+    assert(text.SetTopScreenWideMode(wide));
+    Book::MuPdfState state;
+    state.ctx = ctx; state.doc = doc;
+    state.page_width = 400; state.page_height = 240;
+    state.document_kind = app_flow_utils::MuPdfDocumentKind::Pdf;
+    state.target_top_width = 240; state.target_top_height = 400;
+    state.wide_top_screen = wide;
+    state.viewport.zoom_index = pdf_view_utils::DefaultZoomIndex();
+    const auto viewport = ComputeCurrentMuPdfViewport(&state);
+    assert(viewport.left == 0 && viewport.top == 0);
+    assert(viewport.width == 1 && viewport.height == 1);
+    assert(EnsureCurrentMuPdfInteractiveTile(&state, 0));
+    assert(BlitBitmapCacheViewport(&text, text.screenleft, 400, 240, 144,
+                                  state.current_interactive_tile, viewport,
+                                  true, 0, 128));
+    int x0=240, x1=-1, y0=400, y1=-1;
+    for (int y=0; y<400; ++y) {
+      for (int x=0; x<240; ++x) {
+        const u16 pixel=text.screenleft[y*text.BufferStride()+x];
+        if (y<128 || y>=272) assert(pixel == 0x07E0);
+        if (pixel == 0xF800) {
+          x0=std::min(x0,x); x1=std::max(x1,x);
+          y0=std::min(y0,y); y1=std::max(y1,y);
+        }
+      }
+    }
+    assert(x0==102 && x1==137 && y0==182 && y1==217);
+    if (state.cached_display_list) fz_drop_display_list(ctx,state.cached_display_list);
+  }
+  fz_drop_document(ctx,doc); fz_drop_context(ctx);
 }
 
 struct ControlledAllocation {
@@ -199,14 +242,14 @@ static void TestFailedTileKeepsRequestIdentity(const char *path) {
     Book::MuPdfState state; state.ctx=ctx; state.doc=doc;
     state.page_width=400; state.page_height=240; state.wide_top_screen=wide;
     state.document_kind=app_flow_utils::MuPdfDocumentKind::Pdf;
-    state.viewport.zoom_index=2; state.viewport.center_x=0.25f;
+    state.viewport.zoom_index=6; state.viewport.center_x=0.25f;
     assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
     state.viewport.center_x=0.75f; control.reject=true;
     assert(!EnsureCurrentMuPdfInteractiveTile(&state,0));
     auto &cache=state.current_interactive_tile;
     // Draw resets unmatched request keys. A failed tile must remain identified
     // while being invalid as a bitmap, or its failure guard is lost next frame.
-    assert(cache.page == 0 && cache.zoom_index == 2);
+    assert(cache.page == 0 && cache.zoom_index == 6);
     assert(!BitmapCacheValid(cache,0));
     size_t attempts=control.attempts;
     assert(!EnsureCurrentMuPdfInteractiveTile(&state,0));
@@ -264,5 +307,6 @@ int main(int argc, char **argv) {
   fz_drop_document(ctx, doc); fz_drop_context(ctx);
   TestLandscapePageVisibleTile(argv[1]);
   TestFailedTileKeepsRequestIdentity(argv[1]);
+  TestInitialPageFitKeepsMarginsAndSquare(argv[1]);
   puts("PASS: real PDF native detail, bounded horizontal-page tiles, proportions, pan and allocation recovery");
 }

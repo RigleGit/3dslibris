@@ -131,23 +131,31 @@ void TestTouchMovementThreshold() {
                                                            3));
 }
 
-void TestViewportAtMinimumZoomMatchesScreenAspect() {
+void TestViewportAtMinimumZoomFitsWholePage() {
   pdf_view_utils::NormalizedRect rect =
       pdf_view_utils::ComputeViewportRect(1000.0f, 2000.0f, 1.0f, 400.0f,
                                           240.0f, 0.5f, 0.5f);
   ExpectNear("minimum zoom uses full portrait page width", rect.width, 1.0f);
-  ExpectNear("minimum zoom crops portrait height to screen aspect", rect.height,
-             0.3f);
+  ExpectNear("minimum zoom keeps full portrait height", rect.height, 1.0f);
   ExpectNear("minimum zoom portrait left", rect.left, 0.0f);
-  ExpectNear("minimum zoom portrait top", rect.top, 0.35f);
-  ExpectNear("minimum zoom crop aspect matches screen",
-             (rect.width * 1000.0f) / (rect.height * 2000.0f),
-             400.0f / 240.0f);
+  ExpectNear("minimum zoom portrait top", rect.top, 0.0f);
+  const auto layout = pdf_view_utils::ComputePreviewLayout(
+      1000, 2000, 400, 240);
+  ExpectEq("full portrait centers horizontally", layout.x, 140);
+  ExpectEq("full portrait fits height", layout.height, 240);
+  ExpectEq("full portrait width keeps aspect", layout.width, 120);
 
   rect = pdf_view_utils::ComputeViewportRect(1000.0f, 600.0f, 1.0f,
                                              400.0f, 240.0f, 0.5f, 0.5f);
   ExpectNear("matching page aspect keeps full width", rect.width, 1.0f);
   ExpectNear("matching page aspect keeps full height", rect.height, 1.0f);
+  rect = pdf_view_utils::ComputeViewportRect(400, 240, 1, 240, 400, 0, 1);
+  ExpectNear("apaisado initial view keeps full width", rect.width, 1);
+  ExpectNear("apaisado initial view keeps full height", rect.height, 1);
+  const auto horizontal = pdf_view_utils::ComputePreviewLayout(400, 240, 240, 400);
+  ExpectEq("apaisado fits width", horizontal.width, 240);
+  ExpectEq("apaisado height keeps aspect", horizontal.height, 144);
+  ExpectEq("apaisado centers vertically", horizontal.y, 128);
 }
 
 void TestViewportStateFeedsGeometry() {
@@ -159,7 +167,7 @@ void TestViewportStateFeedsGeometry() {
   ExpectTrue("target change ends fast interaction", !state.interaction_active);
   auto rect=pdf_view_utils::ComputeViewportRect(1000, 2000,
       pdf_view_utils::ZoomForIndex(state.zoom_index), 400, 240, state.center_x, state.center_y);
-  ExpectNear("target reset centers visible vertical crop", rect.top, 0.35f);
+  ExpectNear("target reset shows complete portrait", rect.top, 0);
   ExpectNear("target reset keeps whole portrait width", rect.width, 1);
   ExpectTrue("zoom advances", AdjustZoom(&state, 3));
   ResetViewport(&state, PAGE_TURN_RIGHT_TO_LEFT);
@@ -189,6 +197,6 @@ int main() {
   TestPreviewFitInsideInsetBounds();
   TestViewportClampAndTouchRecenter();
   TestTouchMovementThreshold();
-  TestViewportAtMinimumZoomMatchesScreenAspect();
+  TestViewportAtMinimumZoomFitsWholePage();
   return 0;
 }
