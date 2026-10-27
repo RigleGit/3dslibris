@@ -61,19 +61,21 @@ struct BookContext {
   void (*on_spine_progress)(unsigned,unsigned,void *)=nullptr; void *on_spine_progress_user_data=nullptr;
 };
 class Book {
-  bool is_folder_=false; std::string folder_, name_, sidecar_;
+  bool browser_folder_entry=false; std::string browser_folder_path, name_;
+  mutable std::string browser_folder_cover_path;
+  mutable bool browser_folder_cover_checked_=false;
 public:
   explicit Book(const BookContext & = BookContext()) {}
   ~Book() { delete[] coverPixels; }
   format_t format=FORMAT_UNDEF; bool metadataIndexTried=false, tocResolveTried=false, tocResolved=false;
   u16 *coverPixels=nullptr; int coverWidth=0, coverHeight=0; u8 coverAttempts=0;
   u64 coverRetryAfterMs=0; std::string coverImagePath;
-  bool IsBrowserFolder() const { return is_folder_; }
+  bool IsBrowserFolder() const { return browser_folder_entry; }
   bool TryLoadMetadataFromCache() { return false; }
-  void SetBrowserFolderEntry(const std::string &path,const std::string &name,const std::string &sidecar) { is_folder_=true; folder_=path; name_=name; sidecar_=sidecar; }
-  const std::string &GetBrowserFolderCoverPath() const { return sidecar_; }
-  const char *GetFolderName() const { return folder_.c_str(); }
-  const char *GetFileName() const { return is_folder_ ? "" : name_.c_str(); }
+  void SetBrowserFolderEntry(const std::string &path,const std::string &name,const std::string &sidecar) { browser_folder_entry=true; browser_folder_path=path; name_=name; browser_folder_cover_path=sidecar; browser_folder_cover_checked_=!sidecar.empty(); }
+  const std::string &GetBrowserFolderCoverPath() const;
+  const char *GetFolderName() const { return browser_folder_path.c_str(); }
+  const char *GetFileName() const { return browser_folder_entry ? "" : name_.c_str(); }
   const char *GetTitle() const { return name_.c_str(); }
   void *GetStatusReporter() const { return nullptr; }
   void ClearBrowserDisplayNameCache() {}

@@ -27,6 +27,7 @@ path=root/'source/library/library_controller.cpp'
 for signature in ('static bool PathIsDirectory(', 'static bool PathIsRegularFile(', 'static bool HasBrowserEntryKey(', 'static bool DirectoryHasDirectSupportedBook(', 'static void TryLoadFolderCover(', 'static void AppendFolderEntry('):
     if signature in path.read_text():
         extracted+=subprocess.check_output(['python3',str(root/'tests/extract_test_function.py'),str(path),signature],text=True)
+extracted+=subprocess.check_output(['python3',str(root/'tests/extract_test_function.py'),str(root/'source/book/book_folder_cover.cpp'),'const std::string &Book::GetBrowserFolderCoverPath() const'],text=True)
 extracted+='\nvoid AppendTestFolder(App *app,const std::string &root,const std::string &name,std::set<std::string> *seen) { AppendFolderEntry(app,root,name,seen); }\n'
 (tmp/'folders.cpp').write_text(extracted)
 def chunk(name,data): return struct.pack('>I',len(data))+name+data+struct.pack('>I',zlib.crc32(name+data))

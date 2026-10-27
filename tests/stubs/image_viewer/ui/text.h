@@ -41,7 +41,7 @@ public:
   int GetHeight() const {
     return 14;
   }
-  int GetAdvance(u32) const {
+  int GetAdvance(u32, u8 = TEXT_STYLE_REGULAR) const {
     return 7;
   }
   u8 GetCharCode(const char *s, u32 *cp) {
