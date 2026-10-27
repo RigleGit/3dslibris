@@ -823,13 +823,14 @@ void LibraryController::LoadFolderPath(const std::string &folder_path,
         ? app_.prefs->library_sort_mode : LIBRARY_SORT_TITLE;
     // Retain metadata and buttons only; hidden root entries own no bitmaps.
     for (auto book : app_.books) {
-      delete[] book->coverPixels;
-      book->coverPixels = nullptr;
-      book->coverWidth = book->coverHeight = 0;
-      if (book->IsBrowserFolder()) {
+      if (book->IsBrowserFolder() || book->coverPixels) {
+        // The disk entry may be pruned while this directory is hidden.
         book->coverAttempts = 0;
         book->coverRetryAfterMs = 0;
       }
+      delete[] book->coverPixels;
+      book->coverPixels = nullptr;
+      book->coverWidth = book->coverHeight = 0;
     }
     root_books_.swap(app_.books);
     root_buttons_.swap(app_.buttons);

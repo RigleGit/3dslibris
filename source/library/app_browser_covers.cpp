@@ -65,7 +65,7 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
       Book *book = app_.books[i];
       if (!book)
         continue;
-      if (book->IsBrowserFolder()) {
+      if (book->IsBrowserFolder() || book->coverPixels) {
         book->coverAttempts = 0;
         book->coverRetryAfterMs = 0;
       }
@@ -90,7 +90,7 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
     Book *book = app_.books[i];
     if (!book)
       continue;
-    if (book->IsBrowserFolder()) {
+    if (book->IsBrowserFolder() || book->coverPixels) {
       book->coverAttempts = 0;
       book->coverRetryAfterMs = 0;
     }
