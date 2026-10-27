@@ -61,6 +61,9 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
     return;
 
   if (!ShouldCurrentBrowserLoadCovers(app_)) {
+    // Returning to gallery starts a fresh cover snapshot, allowing external
+    // sidecar edits to be picked up without probing on every page revisit.
+    cover_cache::ClearPathCache();
     for (int i = 0; i < app_.BookCount(); i++) {
       Book *book = app_.books[i];
       if (!book)
