@@ -1278,6 +1278,8 @@ PageData ImagePagesWithoutResourceIds(Book *book) {
   return data;
 }
 
+#include "page_alignment_rendering_cases.h"
+
 // Exercise the real token consumer; the Text spy records the selected face,
 // not a second implementation of the style-token state machine.
 void TestPageFontFaceTransitions() {
@@ -1948,10 +1950,16 @@ int main(int argc, char **argv) {
     else if(std::string(argv[1])=="image-widths") TestRepeatedImageWidthsRemainPerOccurrence();
     else if(std::string(argv[1])=="toc-cache") TestWarmEpubTocRepairIsDeferred();
     else if(std::string(argv[1])=="mobi-diagnostics") TestMobiParseCloseCachedReopenAndRecovery();
+    else if(std::string(argv[1])=="page-alignment") {
+      TestPageAlignmentRedrawMeasurements();
+      TestPageAlignmentCacheInvalidation();
+    }
     else return 2;
     return 0;
   }
   TestPageFontFaceTransitions();
+  TestPageAlignmentRedrawMeasurements();
+  TestPageAlignmentCacheInvalidation();
   TestRepeatedInlineImageWidthsAndCachedDraw();
   TestCoverHeaderPreflight();
   TestOdtAndPlainAllocationRecovery();

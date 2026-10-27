@@ -48,6 +48,46 @@
 
 namespace {
 
+// Only the most recently drawn page retains measurements. Keeping widths,
+// rather than positions, leaves screen geometry and margins to the draw path.
+struct AlignedLineWidthCache {
+  struct Entry {
+    size_t offset;
+    int width;
+    u8 pixel_size;
+    u8 style;
+  };
+  const Page *owner = NULL;
+  const Text *text = NULL;
+  u32 font_revision = 0;
+  unsigned int layout_revision = 0;
+  size_t count = 0;
+  static const size_t kMaxEntries = 128;
+  Entry entries[kMaxEntries];
+
+  void Forget(const Page *page) {
+    if (owner == page) {
+      owner = NULL;
+      count = 0;
+    }
+  }
+
+  void Prepare(const Page *page, const Text *ts, unsigned int revision) {
+    const u32 fonts = ts->GetFontRevision();
+    if (owner != page || text != ts || font_revision != fonts ||
+        layout_revision != revision) {
+      owner = page;
+      text = ts;
+      font_revision = fonts;
+      layout_revision = revision;
+      count = 0;
+    }
+  }
+};
+
+// Page drawing is confined to the main thread, like Text and its font caches.
+AlignedLineWidthCache aligned_line_width_cache;
+
 void DrawSolidDecoration(Text *ts, int x0, int x1, int y, u16 color) {
   if (!ts || x1 <= x0 || y < 0)
     return;
@@ -158,13 +198,17 @@ Page::Page(Book *b) {
   cached_inline_link_count_ = -1;
 }
 
-Page::~Page() { buf = NULL; }
+Page::~Page() {
+  aligned_line_width_cache.Forget(this);
+  buf = NULL;
+}
 
 void Page::InvalidateLinkCountCache() {
   cached_inline_link_count_ = -1;
 }
 
 void Page::SyncBufferAlias() {
+  aligned_line_width_cache.Forget(this);
   rendered_selectables_.clear();
   buf = storage.empty() ? NULL : storage.data();
   length = (int)storage.size();
@@ -233,6 +277,7 @@ struct Page::DrawState {
   };
 
   Text *ts;
+  const Page *page_owner;
   Book *book;
   const u32 *buf;
   const int length;
@@ -287,7 +332,7 @@ struct Page::DrawState {
 #endif
 
   DrawState(Page &page, Text *text, const Highlight *match)
-      : ts(text), book(page.book), buf(page.buf), length(page.length),
+      : ts(text), page_owner(&page), book(page.book), buf(page.buf), length(page.length),
         highlight(match), rendered_selectables_(page.rendered_selectables_),
         saved_auto_wrap(ts->IsAutoWrapEnabled()),
         saved_clip_to_content(ts->IsClipToContentEnabled()),
@@ -315,6 +360,7 @@ struct Page::DrawState {
   void DrawScreenBreak();
   bool DrawInlineImage();
   void AlignGlyph();
+  int MeasureAlignedWidth();
   void DrawGlyph(u32 c);
   void DrawHighlights();
   void DrawDecorations(int glyph_x0, int glyph_x1);
@@ -326,6 +372,8 @@ struct Page::DrawState {
 };
 
 void Page::DrawState::BeginDrawing() {
+  aligned_line_width_cache.Prepare(
+      page_owner, ts, book ? book->GetLayoutRevision() : 0);
   // Reflowed buffers already carry line breaks; per-glyph wrapping breaks RTL.
   ts->SetAutoWrapEnabled(false);
   ts->SetClipToContentEnabled(true);
@@ -924,6 +972,34 @@ bool Page::DrawState::DrawInlineImage() {
   return true;
 }
 
+int Page::DrawState::MeasureAlignedWidth() {
+  AlignedLineWidthCache &cache = aligned_line_width_cache;
+  const unsigned int revision = book ? book->GetLayoutRevision() : 0;
+  cache.Prepare(page_owner, ts, revision);
+  const size_t offset = (size_t)(i - 1);
+  const u8 pixel_size = ts->GetPixelSize();
+  const u8 style = (ts->bold ? 1 : 0) | (ts->italic ? 2 : 0) | (mono ? 4 : 0);
+  for (size_t entry = 0; entry < cache.count; ++entry) {
+    const AlignedLineWidthCache::Entry &cached = cache.entries[entry];
+    if (cached.offset == offset && cached.pixel_size == pixel_size &&
+        cached.style == style)
+      return cached.width;
+  }
+  auto measure_fn = [](u32 codepoint, unsigned char glyph_style,
+                       void *ctx) -> int {
+    return ((Text *)ctx)->GetAdvance(codepoint, glyph_style);
+  };
+  const int width = page_alignment_utils::MeasureAlignedLineWidth(
+      buf, length, offset, ts->bold, ts->italic, mono, measure_fn, ts);
+  // Measuring can lazily load a face and change the font revision.
+  cache.Prepare(page_owner, ts, revision);
+  if (cache.count < AlignedLineWidthCache::kMaxEntries) {
+    AlignedLineWidthCache::Entry entry = {offset, width, pixel_size, style};
+    cache.entries[cache.count++] = entry;
+  }
+  return width;
+}
+
 void Page::DrawState::AlignGlyph() {
   if (rtl_paragraph && !ts->linebegan) {
     int line_width;
@@ -965,12 +1041,7 @@ void Page::DrawState::AlignGlyph() {
   } else if ((!ts->linebegan || line_alignment_pending) &&
              (paragraph_align == book_xml_css_style_utils::TextAlign::Center ||
               paragraph_align == book_xml_css_style_utils::TextAlign::Right)) {
-    auto measure_fn = [](u32 codepoint, unsigned char style, void *ctx) -> int {
-      return ((Text *)ctx)->GetAdvance(codepoint, style);
-    };
-    int line_width = page_alignment_utils::MeasureAlignedLineWidth(
-        buf, length, (size_t)(i - 1), ts->bold, ts->italic, mono,
-        measure_fn, ts);
+    const int line_width = MeasureAlignedWidth();
     ts->SetPen((u16)page_alignment_utils::ComputeAlignedLineStartX(
                    ts->margin.left, ts->margin.right, ts->GetPenX(),
                    ts->LogicalWidth(), line_width,

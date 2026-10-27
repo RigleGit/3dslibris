@@ -18,6 +18,7 @@ class Text {
 public:
   int pixelsize;
   int color_mode = 0;
+  u32 font_revision = 0;
   struct { u8 r, g, b; } bgcolor;
   u16 fgcolor;
   bool usefgcolor;
@@ -56,10 +57,11 @@ public:
 
   // Layout metrics
   u8 GetHeight() const { return (u8)pixelsize; }
-  u8 GetAdvance(u32) const { return (u8)(pixelsize * 8 / 14); }
-  u8 GetAdvance(u32, u8) const { return (u8)(pixelsize * 8 / 14); }
+  u8 GetAdvance(u32) const { ++advance_calls; return (u8)(pixelsize * 8 / 14); }
+  u8 GetAdvance(u32, u8) const { ++advance_calls; return (u8)(pixelsize * 8 / 14); }
   u16 GetBgColor() const { return ((bgcolor.r >> 3) << 11) | ((bgcolor.g >> 2) << 5) | (bgcolor.b >> 3); }
   u8 GetPixelSize() const { return (u8)pixelsize; }
+  u32 GetFontRevision() const { return font_revision; }
   void SetPixelSize(u8 size) { pixelsize = (int)size; }
   int GetStringAdvance(const char *) { return 0; }
 
@@ -67,6 +69,7 @@ public:
   void SetStyle(int) {}
   int GetStyle() const { return 0; }
   std::string GetFontFile(u8) const { return ""; }
+  void SetFontFile(const char *, u8) { ++font_revision; }
   std::string GetFontFile(u8, int) const { return ""; }
   int GetColorMode() { return color_mode; }
   void SetColorMode(int value) { color_mode = value; }
