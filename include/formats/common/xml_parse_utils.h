@@ -67,7 +67,8 @@ XmlParseResult ParseXmlZipEntryTransformed(unzFile uf,
                                            const XmlParserOptions &options,
                                            size_t chunk_size,
                                            XmlTransformChunkFn transform_chunk,
-                                           void *transform_ctx);
+                                           void *transform_ctx,
+                                           const std::string *prefix = NULL);
 std::string FormatXmlParseError(const XmlParseResult &result);
 
 } // namespace xml_parse_utils

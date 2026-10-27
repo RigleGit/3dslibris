@@ -259,9 +259,8 @@ static int ParseEpubSpineDocuments(
   unzFile inline_probe_uf = book->GetEbookImagesEnabled()
       ? unzOpen(archive_path.c_str()) : NULL;
   book->SetInlineImageProbeZip(inline_probe_uf);
-  // Open a shared handle for CSS stylesheet scanning so LoadCssClassMapForDoc
-  // can reuse it across all spine documents instead of opening and closing the
-  // zip once per document.
+  // CSS resources need a separate handle while the content stream stays open.
+  // Both handles share the spine's ZIP entry offsets for this archive.
   unzFile css_scan_uf = unzOpen(archive_path.c_str());
 
   for (size_t i = 0; i < hrefs.size(); i++) {
@@ -299,7 +298,8 @@ static int ParseEpubSpineDocuments(
         break;
       parsedata->docpath = path;
       parsedata->archive_path = archive_path;
-      const int parse_rc = epub_parse_currentfile(uf, parsedata, deps, css_scan_uf);
+      const int parse_rc = epub_parse_currentfile(
+          uf, parsedata, deps, css_scan_uf, &zip_index);
       const int close_rc = unzCloseCurrentFile(uf);
       // Expat XML parse errors (positive, < BOOK_ERR_CANCELLED) are
       // recoverable: real-world EPUBs routinely have malformed XHTML (mismatched

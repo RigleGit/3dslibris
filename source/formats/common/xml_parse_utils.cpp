@@ -1,6 +1,7 @@
 #include "formats/common/xml_parse_utils.h"
 
 #include <algorithm>
+#include <cstring>
 #include <stdio.h>
 #include <vector>
 
@@ -150,7 +151,8 @@ XmlParseResult ParseXmlZipEntryTransformed(unzFile uf,
                                            const XmlParserOptions &options,
                                            size_t chunk_size,
                                            XmlTransformChunkFn transform_chunk,
-                                           void *transform_ctx) {
+                                           void *transform_ctx,
+                                           const std::string *prefix) {
   if (!uf || chunk_size == 0) {
     XmlParseResult result;
     result.ok = false;
@@ -164,6 +166,7 @@ XmlParseResult ParseXmlZipEntryTransformed(unzFile uf,
 
   std::vector<char> buffer(chunk_size);
   std::string transformed;
+  size_t prefix_offset = 0;
   XmlParseResult result;
   while (true) {
     if (ShouldAbortParse(options)) {
@@ -171,7 +174,14 @@ XmlParseResult ParseXmlZipEntryTransformed(unzFile uf,
                                 result.bytes_consumed);
       break;
     }
-    int len = unzReadCurrentFile(uf, buffer.data(), (unsigned)buffer.size());
+    int len = 0;
+    if (prefix && prefix_offset < prefix->size()) {
+      len = (int)std::min(buffer.size(), prefix->size() - prefix_offset);
+      memcpy(buffer.data(), prefix->data() + prefix_offset, (size_t)len);
+      prefix_offset += (size_t)len;
+    } else {
+      len = unzReadCurrentFile(uf, buffer.data(), (unsigned)buffer.size());
+    }
     if (len < 0) {
       result = BuildCustomError(parser, XML_ERROR_EXTERNAL_ENTITY_HANDLING,
                                 result.bytes_consumed);

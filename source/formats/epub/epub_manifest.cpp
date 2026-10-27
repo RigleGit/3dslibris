@@ -110,50 +110,36 @@ using epub_package_toc_utils::ReadZipEntryText;
 
 namespace {
 
-// Read a bounded head prefix; both linked and embedded CSS are collected.
-std::vector<epub_stylesheet_utils::Stylesheet> ScanXhtmlHeadForStylesheets(unzFile uf,
-                                                   const std::string &xhtml_path,
-                                                   IStatusReporter *reporter) {
-#if !EPUB_CSS_TRACE
-  (void)reporter;
-#endif
-#if EPUB_CSS_TRACE
-  DBG_LOGF(reporter, "EPUB: CSS-SCAN read begin %s", xhtml_path.c_str());
-#endif
-  epub_zip_utils::ZipEntryIndex zip_index;
-  if (!epub_zip_utils::LocateSafe(uf, xhtml_path, &zip_index)) {
-#if EPUB_CSS_TRACE
-    DBG_LOG(reporter, "EPUB: CSS-SCAN locate fail");
-#endif
-    return {};
-  }
-#if EPUB_CSS_TRACE
-  DBG_LOG(reporter, "EPUB: CSS-SCAN locate ok");
-#endif
-
-  if (unzOpenCurrentFile(uf) != UNZ_OK)
-    return {};
-
+// Consume the head from the already-open content entry. The same bytes are
+// replayed to Expat before it continues reading the rest of this ZIP stream.
+std::vector<epub_stylesheet_utils::Stylesheet> ScanXhtmlHeadForStylesheets(
+    unzFile uf, const std::string &xhtml_path, IStatusReporter *reporter,
+    Book *book, std::string *prefix, int *read_error) {
   static const size_t kChunkSize = 4096;
   static const size_t kMaxScanBytes = 65536;
   char chunk[kChunkSize];
-  std::string buf;
+  std::string &buf = *prefix;
+  buf.clear();
   buf.reserve(kChunkSize);
-
+  *read_error = 0;
   while (buf.size() < kMaxScanBytes) {
-    int n = unzReadCurrentFile(uf, chunk, (unsigned)kChunkSize);
-    if (n <= 0)
+    if (book && open_cancel_poll::Poll(book, reporter, "epub-css-head")) {
+      *read_error = BOOK_ERR_CANCELLED;
+      return {};
+    }
+    const int n = unzReadCurrentFile(uf, chunk, (unsigned)kChunkSize);
+    if (n < 0) {
+      *read_error = n;
+      return {};
+    }
+    if (n == 0)
       break;
+    const size_t search_start = buf.size() > 6 ? buf.size() - 6 : 0;
     buf.append(chunk, (size_t)n);
-    if (buf.find("</head>") != std::string::npos ||
-        buf.find("</HEAD>") != std::string::npos)
+    if (buf.find("</head>", search_start) != std::string::npos ||
+        buf.find("</HEAD>", search_start) != std::string::npos)
       break;
   }
-
-  unzCloseCurrentFile(uf);
-#if EPUB_CSS_TRACE
-  DBG_LOGF(reporter, "EPUB: CSS-SCAN read ok bytes=%u", (unsigned)buf.size());
-#endif
   bool head_complete = false;
   auto sheets = epub_stylesheet_utils::ExtractHeadStylesheets(buf, &head_complete);
   if (!head_complete)
@@ -162,15 +148,17 @@ std::vector<epub_stylesheet_utils::Stylesheet> ScanXhtmlHeadForStylesheets(unzFi
   return sheets;
 }
 
-void LoadCssClassMapForDoc(const std::string &archive_path,
+int LoadCssClassMapForDoc(const std::string &archive_path,
                            const std::string &xhtml_path,
                            IStatusReporter *reporter,
                            epub_data_t *epd,
                            epub_css_class_map::CssClassMap *out,
-                           unzFile external_scan_uf) {
+                           unzFile external_scan_uf, unzFile content_uf,
+                           std::string *prefix,
+                           epub_zip_utils::ZipEntryIndex *css_index) {
   out->clear();
   if (archive_path.empty() || xhtml_path.empty())
-    return;
+    return 0;
 
   std::string xhtml_folder;
   size_t slash = xhtml_path.find_last_of('/');
@@ -187,7 +175,7 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
           epub_stylesheet_utils::MergeRules(css_it->second, out);
         }
       }
-      return;
+      return 0;
     }
   }
 
@@ -196,9 +184,19 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
   const bool owns_scan_uf = (external_scan_uf == NULL);
   unzFile scan_uf = owns_scan_uf ? unzOpen(archive_path.c_str()) : external_scan_uf;
   if (!scan_uf)
-    return;
+    return 0;
 
-  const auto sheets = ScanXhtmlHeadForStylesheets(scan_uf, xhtml_path, reporter);
+  int read_error = 0;
+  const auto sheets = ScanXhtmlHeadForStylesheets(
+      content_uf, xhtml_path, reporter, epd ? epd->book : NULL, prefix,
+      &read_error);
+  if (read_error != 0) {
+    if (owns_scan_uf) unzClose(scan_uf);
+    return read_error;
+  }
+  epub_zip_utils::ZipEntryIndex local_css_index;
+  if (!css_index)
+    css_index = &local_css_index;
   std::vector<std::string> source_keys;
   unsigned embedded_count = 0;
   unsigned failed_count = 0;
@@ -224,10 +222,9 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
     if (embedded) {
       css_text = sheet.css;
     } else {
-      epub_zip_utils::ZipEntryIndex css_index;
       if (!ReadZipEntryText(scan_uf, css_path, css_text,
                             EPUB_CSS_TRACE ? reporter : NULL, "CSS-LOAD",
-                            &css_index)) {
+                            css_index)) {
         ++failed_count;
         DBG_LOGF(reporter, "EPUB CSS: load failed doc=%s sheet=%s",
                  xhtml_path.c_str(), css_path.c_str());
@@ -248,6 +245,7 @@ void LoadCssClassMapForDoc(const std::string &archive_path,
            xhtml_path.c_str(), (unsigned)(sheets.size() - embedded_count),
            embedded_count, failed_count, (unsigned)out->size());
   if (owns_scan_uf) unzClose(scan_uf);
+  return 0;
 }
 
 void NormalizeHtmlEntityChunkForXml(const std::string &chunk, bool final,
@@ -513,8 +511,10 @@ static void InitParsedataWithEpubDeps(parsedata_t *parsedata, Book *book,
 }
 
 int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
-                           unzFile css_scan_uf) {
+                           unzFile css_scan_uf,
+                           epub_zip_utils::ZipEntryIndex *zip_index) {
   int rc = 0;
+  std::string content_prefix;
   std::unique_ptr<parsedata_t> content_data;
 #if defined(DSLIBRIS_DEBUG) && EPUB_LAYOUT_PROFILE
   bool log_content_layout = false;
@@ -578,9 +578,13 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
     parsedata_t &pd = *content_data;
     InitParsedataWithEpubDeps(&pd, epd->book, deps);
     pd.docpath = epd->docpath;
-    if (!epd->archive_path.empty())
-      LoadCssClassMapForDoc(epd->archive_path, epd->docpath, deps.reporter,
-                            epd, &pd.css_class_map, css_scan_uf);
+    if (!epd->archive_path.empty()) {
+      const int css_rc = LoadCssClassMapForDoc(
+          epd->archive_path, epd->docpath, deps.reporter, epd,
+          &pd.css_class_map, css_scan_uf, uf, &content_prefix, zip_index);
+      if (css_rc != 0)
+        return css_rc;
+    }
 #ifdef DSLIBRIS_DEBUG
     unsigned align_rules = 0;
     for (const auto &rule : pd.css_class_map)
@@ -648,7 +652,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
     html_entity_utils::ChunkedEntityNormalizerState normalize_state;
     parse_result = xml_parse_utils::ParseXmlZipEntryTransformed(
         uf, options, parser_limits::kXmlStreamBufferSize,
-        NormalizeHtmlEntityChunkForXml, &normalize_state);
+        NormalizeHtmlEntityChunkForXml, &normalize_state, &content_prefix);
   } else {
     parse_result =
         xml_parse_utils::ParseXmlZipEntry(uf, options,
