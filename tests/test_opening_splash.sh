@@ -6,9 +6,7 @@ TASK_TMP="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMP"' EXIT
 python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/ui/text.cpp" 'int Text::GetStringAdvance(' > "$TASK_TMP/opening_text_measure.inc"
 # Private measurement helper is kept private in production.
-if rg -q '^static int MeasureOpeningText\(' "$ROOT/source/reader/app_book_internal.cpp"; then
-  python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/reader/app_book_internal.cpp" 'static int MeasureOpeningText(' >> "$TASK_TMP/opening_splash_under_test.inc"
-fi
+python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/reader/app_book_internal.cpp" 'static int MeasureOpeningText(' > "$TASK_TMP/opening_splash_under_test.inc"
 for signature in 'std::string EllipsizeToWidth(' 'std::vector<std::string> BuildOpeningTitleLines(' 'void DrawOpeningSplashImpl('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/reader/app_book_internal.cpp" "$signature" >> "$TASK_TMP/opening_splash_under_test.inc"
 done
