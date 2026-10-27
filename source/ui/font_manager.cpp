@@ -247,6 +247,18 @@ FT_Error FontManager::CreateFace(int style) {
   return error;
 }
 
+FT_Error FontManager::CreateConfiguredFace(int style) {
+  FT_Error err = CreateFace(style);
+  const char *bundled = paths::kDefaultFonts[style][0];
+  if (err && filenames[style] != bundled) {
+    // Pre-init settings cannot validate a face yet. Retain the same bundled
+    // fallback used when changing an already initialized font fails.
+    filenames[style] = bundled;
+    err = CreateFace(style);
+  }
+  return err;
+}
+
 int FontManager::InitCache(void) {
   error = FT_Init_FreeType(&library);
   if (error) {
@@ -260,7 +272,7 @@ int FontManager::InitCache(void) {
                         TEXT_STYLE_MONO_BOLD, TEXT_STYLE_MONO_ITALIC,
                         TEXT_STYLE_MONO_BOLDITALIC};
   for (int i = 0; i < (int)(sizeof(styles) / sizeof(styles[0])); i++) {
-    FT_Error err = CreateFace(styles[i]);
+    FT_Error err = CreateConfiguredFace(styles[i]);
     if (err && !error)
       error = err;
   }
@@ -276,8 +288,15 @@ int FontManager::Init() {
     err = InitFreeTypeCache();
   else
     err = InitCache();
-  if (err == 0)
+  if (err == 0) {
+    fallback_count_ = 0;
+    for (int i = 0; i < kMaxFallbackFaces; ++i) {
+      const std::string path = fallback_filenames_[i];
+      fallback_filenames_[i].clear();
+      if (!path.empty()) SetFallbackFile(i, path.c_str());
+    }
     AutoLoadCjkFallbackFonts();
+  }
   return err;
 }
 
@@ -657,6 +676,8 @@ void FontManager::SetFontFile(const char *path, u8 style) {
     return;
   const std::string previous = filenames[style];
   filenames[style] = std::string(path);
+  if (!library)
+    return;
   FT_Error err = CreateFace(style);
   if (err) {
     // Keep runtime/prefs consistency: do not leave a filename selected when
@@ -710,6 +731,10 @@ bool FontManager::SetFallbackFile(int index, const char *path) {
   if (index < 0 || index >= kMaxFallbackFaces || !path || !*path)
     return false;
 
+  if (!library) {
+    fallback_filenames_[index] = path;
+    return true;
+  }
   const std::string resolved = ResolveFontPath(fontdir_, path);
   if (!FileReadable(resolved.c_str())) {
     printf("[WARN] Fallback font not found: %s\n", resolved.c_str());
@@ -769,6 +794,7 @@ bool FontManager::SetFallbackFile(int index, const char *path) {
 
 void FontManager::UnloadFallbackFonts() {
   for (int i = 0; i < kMaxFallbackFaces; i++) {
+    fallback_filenames_[i].clear();
     FT_Face face = fallback_faces_[i];
     if (!face)
       continue;
@@ -781,7 +807,6 @@ void FontManager::UnloadFallbackFonts() {
     advanceCache.erase(face);
     FT_Done_Face(face);
     fallback_faces_[i] = nullptr;
-    fallback_filenames_[i].clear();
   }
   fallback_count_ = 0;
 }
@@ -856,6 +881,8 @@ static void AutoLoadFallbackFontsFromDir(FontManager *fm, const std::string &fon
 }
 
 void FontManager::AutoLoadCjkFallbackFonts() {
+  if (!library)
+    return;
   std::vector<std::string> search_dirs;
   GetFallbackFontSearchDirs(fontdir_, paths::GetFontDir().c_str(), &search_dirs);
   int loaded = 0;
