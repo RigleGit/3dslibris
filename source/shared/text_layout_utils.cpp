@@ -50,7 +50,7 @@ static bool IsAsciiWhitespace(uint32_t cp) {
          cp == 0x000B || cp == 0x000C;
 }
 
-static bool TryShapeAsciiTextRun(const char *s, size_t len,
+static bool TryShapeSimpleTextRun(const char *s, size_t len,
                                  MeasureCodepointFn measure_codepoint,
                                  void *measure_ctx,
                                  std::vector<ShapedGlyph> *out) {
@@ -59,29 +59,42 @@ static bool TryShapeAsciiTextRun(const char *s, size_t len,
 
   out->clear();
   out->reserve(len);
-  for (size_t i = 0; i < len; i++) {
+  for (size_t i = 0; i < len;) {
     const unsigned char c = (unsigned char)s[i];
     if (c == '\0')
       return true;
-    if (c >= 0x80 || (c < 0x20 && !IsAsciiWhitespace(c)) || c == 0x7F) {
-      out->clear();
-      return false;
-    }
 
     ShapedGlyph glyph;
-    glyph.text.codepoint = (uint32_t)c;
-    glyph.text.byte_offset = i;
-    glyph.text.byte_length = 1;
-    glyph.text.grapheme_start = true;
-    glyph.text.whitespace = IsAsciiWhitespace(c);
-    glyph.text.breakable_space = glyph.text.whitespace;
-    glyph.text.allow_break_after =
-        glyph.text.breakable_space || c == '-' || c == '/';
-    glyph.text.must_break_after =
-        c == '\n' || c == '\r' || c == 0x000B || c == 0x000C;
-    glyph.advance = measure_codepoint((uint32_t)c, measure_ctx);
+    size_t step = 1;
+    if (c >= 0x80) {
+      // Continue the same run for Latin accents and typographic punctuation;
+      // complex scripts still restart through the full Unicode/BiDi path.
+      step = text_unicode_utils::DecodeSimpleTextCodepoint(s, len, i,
+                                                           &glyph.text);
+      if (!step) {
+        out->clear();
+        return false;
+      }
+    } else {
+      if ((c < 0x20 && !IsAsciiWhitespace(c)) || c == 0x7F) {
+        out->clear();
+        return false;
+      }
+      glyph.text.codepoint = (uint32_t)c;
+      glyph.text.byte_offset = i;
+      glyph.text.byte_length = 1;
+      glyph.text.grapheme_start = true;
+      glyph.text.whitespace = IsAsciiWhitespace(c);
+      glyph.text.breakable_space = glyph.text.whitespace;
+      glyph.text.allow_break_after =
+          glyph.text.breakable_space || c == '-' || c == '/';
+      glyph.text.must_break_after =
+          c == '\n' || c == '\r' || c == 0x000B || c == 0x000C;
+    }
+    glyph.advance = measure_codepoint(glyph.text.codepoint, measure_ctx);
     glyph.bidi_level = 0;
     out->push_back(glyph);
+    i += step;
   }
   return true;
 }
@@ -164,7 +177,7 @@ bool ShapeTextRunUtf8(const char *s, size_t len, const char *lang,
   if (contains_arabic)
     *contains_arabic = false;
 
-  if (TryShapeAsciiTextRun(s, len, measure_codepoint, measure_ctx, out)) {
+  if (TryShapeSimpleTextRun(s, len, measure_codepoint, measure_ctx, out)) {
 #ifdef DSLIBRIS_DEBUG
     g_perf_stats.shape_calls++;
     g_perf_stats.shaped_glyphs += (uint32_t)out->size();

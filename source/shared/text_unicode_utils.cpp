@@ -174,26 +174,10 @@ bool BuildTextRunUtf8Simple(const char *s, size_t len,
   out->clear();
   size_t offset = 0;
   while (offset < len && s[offset] != '\0') {
-    uint32_t cp = 0;
-    size_t step =
-        DecodeNextSimpleDisplayCodepoint(s + offset, len - offset, &cp);
+    TextCodepoint unit;
+    const size_t step = DecodeSimpleTextCodepoint(s, len, offset, &unit);
     if (!step)
       return false;
-    if (!IsSimpleLtrCodepoint(cp))
-      return false;
-
-    TextCodepoint unit;
-    unit.codepoint = cp;
-    unit.byte_offset = offset;
-    unit.byte_length = step;
-    unit.grapheme_start = true;
-    unit.whitespace = IsSimpleWhitespaceCodepoint(cp);
-    unit.breakable_space =
-        unit.whitespace && cp != 0x00A0 && cp != 0x202F && cp != 0x2060;
-    unit.allow_break_after = unit.breakable_space || AllowsSimpleBreakAfter(cp);
-    unit.must_break_after =
-        cp == '\n' || cp == '\r' || cp == 0x000B || cp == 0x000C ||
-        cp == 0x0085 || cp == 0x2028 || cp == 0x2029;
     out->push_back(unit);
     offset += step;
   }
@@ -240,6 +224,29 @@ size_t ConsumeOrderedListMarkerUtf8(const char *s, size_t len) {
 }
 
 } // namespace
+
+size_t DecodeSimpleTextCodepoint(const char *s, size_t len, size_t offset,
+                                 TextCodepoint *out) {
+  if (!s || !out || offset >= len || s[offset] == '\0')
+    return 0;
+  uint32_t cp = 0;
+  const size_t step =
+      DecodeNextSimpleDisplayCodepoint(s + offset, len - offset, &cp);
+  if (!step || !IsSimpleLtrCodepoint(cp))
+    return 0;
+  out->codepoint = cp;
+  out->byte_offset = offset;
+  out->byte_length = step;
+  out->grapheme_start = true;
+  out->whitespace = IsSimpleWhitespaceCodepoint(cp);
+  out->breakable_space =
+      out->whitespace && cp != 0x00A0 && cp != 0x202F && cp != 0x2060;
+  out->allow_break_after = out->breakable_space || AllowsSimpleBreakAfter(cp);
+  out->must_break_after =
+      cp == '\n' || cp == '\r' || cp == 0x000B || cp == 0x000C ||
+      cp == 0x0085 || cp == 0x2028 || cp == 0x2029;
+  return step;
+}
 
 size_t DecodeNextDisplayCodepoint(const char *s, size_t len, uint32_t *out) {
   if (!s || !len || !out)

@@ -17,6 +17,9 @@ struct TextCodepoint {
   bool must_break_after;
 };
 
+// Decode one unit of the simple LTR path. Zero requests the full Unicode path.
+size_t DecodeSimpleTextCodepoint(const char *s, size_t len, size_t offset,
+                                 TextCodepoint *out);
 size_t DecodeNextDisplayCodepoint(const char *s, size_t len, uint32_t *out);
 bool BuildTextRunUtf8(const char *s, size_t len, const char *lang,
                       std::vector<TextCodepoint> *out);
