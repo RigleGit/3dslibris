@@ -530,6 +530,9 @@ bool Prefs::ApplyPendingCurrentBookRestore() {
       pending_current_style_publisher_horizontal_margins);
   if (pending_current_position)
     matched->SetPosition(pending_current_position - 1);
+  // Discovery may already have applied the saved-state map to this Book.
+  // Restoration replaces its saved bookmarks instead of appending them twice.
+  matched->GetBookmarks().clear();
   for (size_t i = 0; i < pending_current_bookmarks.size(); i++)
     matched->GetBookmarks().push_back(pending_current_bookmarks[i]);
 
