@@ -234,6 +234,10 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
           continue;
         const size_t dst_index =
             (size_t)sy * (size_t)parent->BufferStride() + (size_t)sx;
+        if (a == 255) {
+          parent->screen[dst_index] = fg_color;
+          continue;
+        }
         int br, bgc, bb;
         RGB565ToU8(parent->screen[dst_index], &br, &bgc, &bb);
         const int ia = 255 - (int)a;
@@ -305,6 +309,10 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
         const size_t dst_index =
             (size_t)sy * (size_t)parent->BufferStride() + (size_t)sx;
 
+        if (a == 255) {
+          parent->screen[dst_index] = fg_color;
+          continue;
+        }
         int br, bgc, bb;
         RGB565ToU8(parent->screen[dst_index], &br, &bgc, &bb);
         const int ia = 255 - (int)a;
