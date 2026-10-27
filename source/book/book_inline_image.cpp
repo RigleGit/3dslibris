@@ -31,7 +31,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <utility>
-#include <vector>
 
 
 namespace {
@@ -839,9 +838,10 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   } else {
     if(!entry.pixels.resize((size_t)draw_w*draw_h,6000000)) return false;
     // Every destination row uses the same nearest-neighbor source columns.
-    std::vector<size_t> source_x((size_t)draw_w);
+    image_memory::Buffer<size_t> source_x;
+    if (!source_x.resize((size_t)draw_w)) return false;
     for (int x = 0; x < draw_w; ++x)
-      source_x[(size_t)x] = (size_t)x * decoded.width / draw_w;
+      source_x.mutable_data()[(size_t)x] = (size_t)x * decoded.width / draw_w;
     for(int y=0;y<draw_h;++y) {
       const size_t sy=(size_t)y*decoded.height/draw_h;
       const u32 *src = decoded.pixels.data() + sy * decoded.width;
