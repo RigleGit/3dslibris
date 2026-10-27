@@ -253,6 +253,16 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
 
   const size_t text_pre_cleanup = text->size();
   const bool have_map = html_map && !html_map->empty();
+  const bool run_post_normalize =
+      mobi_cleanup_policy::ShouldRunPostNormalizeCleanup(
+          have_map, line_wrap_fix_applied);
+  const bool needs_newlines = text->find('\r') != std::string::npos;
+  const bool needs_mojibake = run_post_normalize &&
+      text->find("\xC3\x83") != std::string::npos;
+  // Most already-clean books need neither a remap copy nor a replacement
+  // string. Check the only repair prefix before retaining megabytes of text.
+  if (!needs_newlines && !needs_mojibake && !line_wrap_fix_applied)
+    return;
   std::string text_before_cleanup;
   if (have_map)
     text_before_cleanup = *text;
@@ -268,7 +278,8 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
              (unsigned)osGetMemRegionFree(MEMREGION_ALL));
 #endif
 
-  NormalizeNewlines(text);
+  if (needs_newlines)
+    NormalizeNewlines(text);
 
 #ifdef DSLIBRIS_DEBUG
   if (reporter)
@@ -277,8 +288,7 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
              (unsigned)osGetMemRegionFree(MEMREGION_ALL));
 #endif
 
-  if (!mobi_cleanup_policy::ShouldRunPostNormalizeCleanup(
-          have_map, line_wrap_fix_applied)) {
+  if (!run_post_normalize) {
 #ifdef DSLIBRIS_DEBUG
     if (reporter)
       DBG_LOGF(reporter, "MOBI cleanup: step=post-normalize-skipped mem=%u",
@@ -287,7 +297,8 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
     return;
   }
 
-  const bool track_image_tokens = HasMobiInlineImageTokens(*text);
+  const bool track_image_tokens = (needs_mojibake || line_wrap_fix_applied) &&
+      HasMobiInlineImageTokens(*text);
   std::string text_before_mobi_cleanup;
   std::vector<u16> image_ids_before_cleanup;
   if (track_image_tokens) {
@@ -303,11 +314,16 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
              (unsigned)osGetMemRegionFree(MEMREGION_ALL));
 #endif
 
-  if (track_image_tokens) {
-    *text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(
-        text_before_mobi_cleanup);
-  } else {
-    *text = mobi_text_cleanup::RepairCommonMojibake(*text);
+  if (needs_mojibake) {
+    if (track_image_tokens) {
+      *text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(
+          text_before_mobi_cleanup);
+    } else {
+      *text = mobi_text_cleanup::RepairCommonMojibake(*text);
+    }
+  } else if (track_image_tokens) {
+    // The original stays available for the wrap-fix image-ID rollback.
+    *text = text_before_mobi_cleanup;
   }
 
 #ifdef DSLIBRIS_DEBUG
