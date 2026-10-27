@@ -576,7 +576,8 @@ static int AppendBooksFromPosixDirectory(App *app,
 
 LibraryController::LibraryController(App &app)
     : app_(app), inside_folder_(false), root_selected_book_(NULL),
-      root_sort_mode_(LIBRARY_SORT_TITLE), root_cached_(false) {}
+      root_sort_mode_(LIBRARY_SORT_TITLE), root_cached_(false),
+      browser_assets_pending_(true) {}
 
 LibraryController::~LibraryController() {
   for (auto book : root_books_)

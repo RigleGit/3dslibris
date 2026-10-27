@@ -62,6 +62,7 @@ private:
   Book *root_selected_book_;
   LibrarySortMode root_sort_mode_;
   bool root_cached_;
+  bool browser_assets_pending_;
 
   void RebuildRoot();
   void EnterFolder(Book *folder);

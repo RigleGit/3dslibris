@@ -425,9 +425,8 @@ void LibraryController::browser_init(void) {
         CurrentBrowserPageSize(app_));
   }
   g_marquee.Reset();
-  PrioritizeSelectedBookJobs(app_.GetSelectedBook());
   app_.SetBrowserLastInteractionMs(osGetTime());
-  LoadVisibleBrowserCoverCaches();
+  browser_assets_pending_ = true;
 }
 
 void LibraryController::browser_nextpage() {
@@ -458,6 +457,12 @@ void LibraryController::browser_prevpage() {
 }
 
 void LibraryController::browser_draw(void) {
+  // Boot may reopen a book without ever presenting the browser.
+  if (browser_assets_pending_) {
+    browser_assets_pending_ = false;
+    PrioritizeSelectedBookJobs(app_.GetSelectedBook());
+    LoadVisibleBrowserCoverCaches();
+  }
   // save state
   int colorMode = app_.ts->GetColorMode();
   u16 *screen = app_.ts->GetScreen();
