@@ -1,5 +1,6 @@
 #include "app/library_controller.h"
 #include "library/library_sort_mode.h"
+#include "shared/app_flow_utils.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -18,6 +19,8 @@ struct Book {
   std::string folder, filename, title, author;
   bool is_folder = false, missing_name = false;
   uint32_t last_opened = 0;
+  format_t format = FORMAT_UNDEF;
+  bool TryLoadMetadataFromCache() { return false; }
   bool IsBrowserFolder() const { return is_folder; }
   const char *GetFolderName() const { return folder.c_str(); }
   const char *GetFileName() const { return missing_name ? nullptr : filename.c_str(); }
@@ -28,6 +31,10 @@ struct Book {
 struct Prefs { LibrarySortMode library_sort_mode = LIBRARY_SORT_DATE_MODIFIED; };
 struct App { Prefs settings; Prefs *prefs = &settings; std::vector<Book *> books; };
 LibraryController::LibraryController(App &app) : app_(app), inside_folder_(false) {}
+LibraryController::~LibraryController() = default;
+namespace app_flow_utils {
+bool SupportsMetadataIndexing(format_t) { return false; }
+}
 
 static std::map<std::string, int> stats;
 static bool reject_snapshot = false;

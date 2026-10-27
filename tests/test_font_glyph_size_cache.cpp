@@ -84,6 +84,7 @@ int main() {
     for (int pass=0; pass<2; ++pass) {
       for (u8 px=8; px<=20; ++px) {
         manager.SetPixelSize(px);
+        face=manager.GetFace(style);
         assert(!FT_Set_Pixel_Sizes(oracle,0,style==TEXT_STYLE_BROWSER?12:px));
         for (u32 cp : {u32('A'),u32('g'),u32(0x00e9)}) {
           assert(!FT_Load_Char(oracle,cp,flags));
@@ -116,6 +117,7 @@ int main() {
   manager.SetPixelSize(12);
   manager.GetGlyph(600,flags,regular);
   manager.SetPixelSize(10);
+  regular=manager.GetFace(TEXT_STYLE_REGULAR);
   reads=0;
   manager.GetGlyph(544,flags,regular);
   assert(reads==0);

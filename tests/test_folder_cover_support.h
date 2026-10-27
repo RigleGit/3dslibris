@@ -13,6 +13,8 @@
 #include <deque>
 #include <dirent.h>
 #include <list>
+#include <map>
+#include <ctime>
 #include <memory>
 #include <set>
 #include <string>
@@ -35,6 +37,7 @@
 #include "library/cover_override_utils.h"
 #include "library/cover_cache.h"
 #include "library/library_job.h"
+#include "library/library_sort_mode.h"
 #include "book/cover_layout_constants.h"
 #include "stb_image.h"
 typedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64;
@@ -43,7 +46,11 @@ inline u64 osGetTime() { return test_now; }
 static const int MEMREGION_ALL=0;
 inline u64 osGetMemRegionFree(int) { return test_free_bytes; }
 struct Text { void *screenright=nullptr; void MarkScreenDirty(void *) {} };
-struct Prefs { bool disable_ebook_images=false; BrowserViewMode browser_view_mode=BROWSER_VIEW_GALLERY; };
+struct Prefs {
+  bool disable_ebook_images=false;
+  BrowserViewMode browser_view_mode=BROWSER_VIEW_GALLERY;
+  LibrarySortMode library_sort_mode=LIBRARY_SORT_TITLE;
+};
 struct BookContext {
   Text *text=nullptr; Prefs *prefs=nullptr; bool *disable_ebook_images=nullptr;
   const unsigned char *paragraph_spacing=nullptr, *paragraph_indent=nullptr;
@@ -62,6 +69,7 @@ public:
   u16 *coverPixels=nullptr; int coverWidth=0, coverHeight=0; u8 coverAttempts=0;
   u64 coverRetryAfterMs=0; std::string coverImagePath;
   bool IsBrowserFolder() const { return is_folder_; }
+  bool TryLoadMetadataFromCache() { return false; }
   void SetBrowserFolderEntry(const std::string &path,const std::string &name,const std::string &sidecar) { is_folder_=true; folder_=path; name_=name; sidecar_=sidecar; }
   const std::string &GetBrowserFolderCoverPath() const { return sidecar_; }
   const char *GetFolderName() const { return folder_.c_str(); }

@@ -7,6 +7,8 @@
 #include "library/browser_list_view.h"
 #include "library/cover_cache.h"
 #include "library/library_job.h"
+#include "library/library_sort_mode.h"
+#include "shared/app_flow_utils.h"
 #include <algorithm>
 #include <deque>
 #include <cassert>
@@ -21,6 +23,8 @@ struct Book {
   std::string folder="books", filename="book.epub";
   int id=0; bool is_folder=false, missing_name=false;
   uint16_t *coverPixels=nullptr; int coverWidth=0, coverHeight=0;
+  format_t format=FORMAT_UNDEF;
+  bool TryLoadMetadataFromCache() { return false; }
   uint8_t coverAttempts=0; uint64_t coverRetryAfterMs=99;
   bool IsBrowserFolder() const { return is_folder; }
   const std::string &GetBrowserFolderCoverPath() const { return folder; }
@@ -28,7 +32,10 @@ struct Book {
   const char *GetFileName() const { return missing_name ? nullptr : filename.c_str(); }
   ~Book() { delete[] coverPixels; }
 };
-struct Prefs { BrowserViewMode browser_view_mode=BROWSER_VIEW_GALLERY; };
+struct Prefs {
+  BrowserViewMode browser_view_mode=BROWSER_VIEW_GALLERY;
+  LibrarySortMode library_sort_mode=LIBRARY_SORT_TITLE;
+};
 struct App {
   Prefs settings; Prefs *prefs=&settings; std::vector<Book *> books;
   Book *selected=nullptr; int page_start=0; bool dirty=false; uint64_t interaction_ms=0;
@@ -45,7 +52,11 @@ struct App {
   }
 };
 static std::vector<int> loaded;
+namespace app_flow_utils {
+bool SupportsMetadataIndexing(format_t) { return false; }
+}
 namespace cover_cache {
+void ClearPathCache() {}
 bool TryLoad(Book *book, const std::string &path) {
   assert(path == (book->is_folder ? book->folder
                                 : book->folder + "/" + book->filename));

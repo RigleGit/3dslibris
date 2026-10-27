@@ -96,6 +96,7 @@ static void DrawBottomGradientFromApp(void *) {}
 static void DrawTopGradientFromApp(void *) {}
 static void DrawOpeningSplashWithProgress(unsigned, unsigned, void *) {}
 LibraryController::LibraryController(App &app) : app_(app), inside_folder_(false) {}
+LibraryController::~LibraryController() = default;
 void LibraryController::ResetBrowserMarquee() {}
 
 // Extractor providers supply outcomes; the production job owner decides

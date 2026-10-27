@@ -78,7 +78,7 @@ int main() {
   assert(manager.GetAdvance(0x10ffff, primary) == 0);
   assert(manager.GetAdvance(armenian, bold) == fallback12);
   manager.SetPixelSize(18);
-  const u8 latin18 = NativeAdvance(primary, 'A');
+  const u8 latin18 = NativeAdvance(manager.GetFace(TEXT_STYLE_REGULAR), 'A');
   assert(manager.GetAdvance('A', primary) == latin18);
   assert(manager.GetAdvance('A', primary) == latin18);
   assert(!Contains(reporter, "ADVANCE")); // No per-glyph or size-change logs.
