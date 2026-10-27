@@ -157,20 +157,6 @@ static bool DecodeLatin1Supplement(const std::string &text, size_t start,
   return false;
 }
 
-static std::string TrimAscii(const std::string &text) {
-  size_t begin = 0;
-  while (begin < text.size() &&
-         std::isspace((unsigned char)text[begin]) != 0) {
-    begin++;
-  }
-
-  size_t end = text.size();
-  while (end > begin && std::isspace((unsigned char)text[end - 1]) != 0) {
-    end--;
-  }
-  return text.substr(begin, end - begin);
-}
-
 static bool IsAllCapsHeading(const std::string &text) {
   int letters = 0;
   int upper = 0;
@@ -355,11 +341,12 @@ std::string RepairCommonMojibakePreservingMobiImageTokens(
 }
 
 std::string FixBrokenParagraphWraps(const std::string &text) {
-  // Work on already-decoded plain text so the repair can clean either <br>
-  // wraps or block-tag-per-line conversions with the same heuristic.
-  std::vector<std::string> blocks;
-  std::vector<int> separators;
-  std::string current;
+  // Keep only the current fragment and the preceding merged paragraph;
+  // collecting every trimmed line duplicates the complete book in memory.
+  std::string out;
+  std::string previous;
+  std::string line;
+  bool have_block = false;
   int pending_blank_lines = 0;
 
   size_t line_start = 0;
@@ -368,13 +355,34 @@ std::string FixBrokenParagraphWraps(const std::string &text) {
     if (line_end == std::string::npos)
       line_end = text.size();
 
-    std::string line = TrimAscii(text.substr(line_start, line_end - line_start));
+    size_t begin = line_start;
+    size_t end = line_end;
+    while (begin < end && std::isspace((unsigned char)text[begin]) != 0)
+      ++begin;
+    while (end > begin && std::isspace((unsigned char)text[end - 1]) != 0)
+      --end;
+    line.assign(text, begin, end - begin);
     if (line.empty()) {
-      pending_blank_lines++;
+      ++pending_blank_lines;
     } else {
-      if (!blocks.empty())
-        separators.push_back(pending_blank_lines);
-      blocks.push_back(line);
+      if (!have_block) {
+        out.reserve(text.size());
+        out = line;
+        previous = line;
+        have_block = true;
+      } else if (ShouldMergeBlocks(previous, line, pending_blank_lines)) {
+        AppendMergedSpace(&out);
+        out += line;
+        previous += " ";
+        previous += line;
+      } else {
+        if (pending_blank_lines > 0)
+          out.append("\n\n");
+        else
+          out.push_back('\n');
+        out += line;
+        previous = line;
+      }
       pending_blank_lines = 0;
     }
 
@@ -383,29 +391,8 @@ std::string FixBrokenParagraphWraps(const std::string &text) {
     line_start = line_end + 1;
   }
 
-  if (blocks.empty())
+  if (!have_block)
     return text;
-
-  std::string out = blocks[0];
-  std::string previous = blocks[0];
-  for (size_t i = 1; i < blocks.size(); i++) {
-    const int blank_lines = separators[i - 1];
-    if (ShouldMergeBlocks(previous, blocks[i], blank_lines)) {
-      AppendMergedSpace(&out);
-      out += blocks[i];
-      previous += " ";
-      previous += blocks[i];
-      continue;
-    }
-
-    if (blank_lines > 0)
-      out.append("\n\n");
-    else
-      out.push_back('\n');
-    out += blocks[i];
-    previous = blocks[i];
-  }
-
   return out;
 }
 
