@@ -145,6 +145,10 @@ bool LookupWhiteSpaceForClassAttr(const std::string &class_attr,
 // Fills *out with merged values from all matching classes. Returns true if any
 // class matched. Use this instead of calling individual Lookup* functions.
 // When reset_output is false, merges into *out without clearing first.
+bool LookupAllForClassAttr(const char *class_attr,
+                           const CssClassMap &class_map,
+                           CssClassMargins *out,
+                           bool reset_output = true);
 bool LookupAllForClassAttr(const std::string &class_attr,
                            const CssClassMap &class_map,
                            CssClassMargins *out,
@@ -157,6 +161,8 @@ bool LookupAllForTag(const char *tag, const CssClassMap &class_map,
 
 // Merges class rules from class_attr into *out WITHOUT resetting first.
 // Call after LookupAllForTag to overlay class rules (higher specificity).
+bool MergeClassRulesToStyle(const char *class_attr,
+                             const CssClassMap &class_map, CssClassMargins *out);
 bool MergeClassRulesToStyle(const std::string &class_attr,
                              const CssClassMap &class_map, CssClassMargins *out);
 

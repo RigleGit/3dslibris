@@ -12,26 +12,34 @@ namespace epub_css_class_map {
 namespace {
 
 template <typename Fn>
-static bool ForEachClass(const std::string &class_attr,
+static bool ForEachClass(const char *class_attr,
                          const CssClassMap &class_map, Fn fn) {
-  if (class_attr.empty() || class_map.empty())
+  if (!class_attr || !*class_attr || class_map.empty())
     return false;
+  const size_t len = strlen(class_attr);
   size_t pos = 0;
-  while (pos < class_attr.size()) {
-    while (pos < class_attr.size() &&
+  std::string class_name;
+  while (pos < len) {
+    while (pos < len &&
            (class_attr[pos] == ' ' || class_attr[pos] == '\t' ||
             class_attr[pos] == '\r' || class_attr[pos] == '\n'))
       ++pos;
     const size_t start = pos;
-    while (pos < class_attr.size() && epub_css_tokenizer::IsIdentChar(class_attr[pos]))
+    while (pos < len && epub_css_tokenizer::IsIdentChar(class_attr[pos]))
       ++pos;
-    if (pos == start) { if (pos < class_attr.size()) ++pos; continue; }
-    const std::string class_name = class_attr.substr(start, pos - start);
+    if (pos == start) { if (pos < len) ++pos; continue; }
+    class_name.assign(class_attr + start, pos - start);
     CssClassMap::const_iterator it = class_map.find(class_name);
     if (it != class_map.end() && fn(it->second))
       return true;
   }
   return false;
+}
+
+template <typename Fn>
+static bool ForEachClass(const std::string &class_attr,
+                         const CssClassMap &class_map, Fn fn) {
+  return ForEachClass(class_attr.c_str(), class_map, fn);
 }
 
 } // namespace
@@ -414,7 +422,7 @@ MarginTopResult LookupMarginRightForClassAttr(const std::string &class_attr,
   return result;
 }
 
-bool LookupAllForClassAttr(const std::string &class_attr,
+bool LookupAllForClassAttr(const char *class_attr,
                            const CssClassMap &class_map,
                            CssClassMargins *out,
                            bool reset_output) {
@@ -422,7 +430,7 @@ bool LookupAllForClassAttr(const std::string &class_attr,
     return false;
   if (reset_output)
     *out = CssClassMargins{};
-  if (class_attr.empty() || class_map.empty())
+  if (!class_attr || !*class_attr || class_map.empty())
     return false;
 
   bool found_any = false;
@@ -457,6 +465,12 @@ bool LookupAllForClassAttr(const std::string &class_attr,
   return found_any;
 }
 
+bool LookupAllForClassAttr(const std::string &class_attr,
+                           const CssClassMap &class_map,
+                           CssClassMargins *out, bool reset_output) {
+  return LookupAllForClassAttr(class_attr.c_str(), class_map, out, reset_output);
+}
+
 bool LookupAllForTag(const char *tag, const CssClassMap &class_map,
                      CssClassMargins *out) {
   if (!out)
@@ -476,6 +490,11 @@ bool LookupAllForTag(const char *tag, const CssClassMap &class_map,
     return false;
   *out = it->second;
   return true;
+}
+
+bool MergeClassRulesToStyle(const char *class_attr,
+                             const CssClassMap &class_map, CssClassMargins *out) {
+  return LookupAllForClassAttr(class_attr, class_map, out, false);
 }
 
 bool MergeClassRulesToStyle(const std::string &class_attr,

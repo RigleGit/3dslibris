@@ -343,9 +343,8 @@ void start(void *data, const char *el, const char **attr) {
   }
   epub_css_class_map::CssClassMargins elem_css;
   epub_css_class_map::LookupAllForTag(el, p->css_class_map, &elem_css);
-  epub_css_class_map::MergeClassRulesToStyle(
-      el_class_raw ? std::string(el_class_raw) : std::string(),
-      p->css_class_map, &elem_css);
+  epub_css_class_map::MergeClassRulesToStyle(el_class_raw, p->css_class_map,
+                                            &elem_css);
 
   if (HasActiveStackHiddenStyle(p) || ElementIsHidden(attr, elem_css)) {
     if (PushHiddenElement(p, el))
