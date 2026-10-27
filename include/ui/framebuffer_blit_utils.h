@@ -26,8 +26,12 @@ struct FramebufferGeometry {
 struct PhysicalFramebufferSyncState {
   const uint8_t *slots[2];
   uint64_t slot_generations[2];
+  DirtyRect pending_rects[2];
+  bool full_copy[2];
 
-  PhysicalFramebufferSyncState() : slots{nullptr, nullptr}, slot_generations{0, 0} {}
+  PhysicalFramebufferSyncState()
+      : slots{nullptr, nullptr}, slot_generations{0, 0}, pending_rects{},
+        full_copy{true, true} {}
 };
 
 inline int LogicalTextScreenHeight(bool is_left_screen) {
@@ -63,12 +67,16 @@ inline int ResolvePhysicalFramebufferSlot(PhysicalFramebufferSyncState *state,
     if (!state->slots[i]) {
       state->slots[i] = fb;
       state->slot_generations[i] = 0;
+      state->pending_rects[i].valid = false;
+      state->full_copy[i] = true;
       return i;
     }
   }
 
   state->slots[0] = fb;
   state->slot_generations[0] = 0;
+  state->pending_rects[0].valid = false;
+  state->full_copy[0] = true;
   return 0;
 }
 
@@ -87,6 +95,8 @@ inline void MarkPhysicalFramebufferCopied(PhysicalFramebufferSyncState *state,
     return;
   state->slots[slot] = fb;
   state->slot_generations[slot] = cache_generation;
+  state->pending_rects[slot].valid = false;
+  state->full_copy[slot] = false;
 }
 
 inline DirtyRect MakeDirtyRect(int x0, int y0, int x1, int y1) {
@@ -116,6 +126,24 @@ inline void ExpandDirtyRect(DirtyRect *dst, int x0, int y0, int x1, int y1,
   dst->x1 = std::max(dst->x1, x1);
   dst->y1 = std::max(dst->y1, y1);
   dst->valid = true;
+}
+
+// Accumulate changes until each physical buffer has received them. A buffer
+// skipped for several presents needs the union, not only the latest frame.
+inline void AccumulatePhysicalFramebufferDamage(
+    PhysicalFramebufferSyncState *state, const DirtyRect &rect,
+    int logical_width, int logical_height, bool partial) {
+  if (!state)
+    return;
+  for (int i = 0; i < 2; ++i) {
+    if (!partial || !rect.valid) {
+      state->full_copy[i] = true;
+      state->pending_rects[i].valid = false;
+    } else if (!state->full_copy[i]) {
+      ExpandDirtyRect(&state->pending_rects[i], rect.x0, rect.y0, rect.x1,
+                       rect.y1, logical_width, logical_height);
+    }
+  }
 }
 
 // Maps a logical pixel to its byte offset in the physical framebuffer, whose
@@ -157,6 +185,34 @@ inline int MaxConvertibleLogicalY(const FramebufferGeometry &geometry,
                         ? geometry.stride
                         : geometry.phys_width;
   return std::min(logical_height, limit);
+}
+
+// Copy contiguous physical column spans from the already converted cache.
+// Wide top-screen surfaces keep the full-copy path in the caller.
+inline void CopyLogicalRectFromPhysicalBgr888(
+    uint8_t *dst, const uint8_t *src, const FramebufferGeometry &geometry,
+    int logical_width, int logical_height, unsigned char orientation,
+    const DirtyRect &rect) {
+  const int x0 = std::max(0, rect.x0);
+  const int y0 = std::max(0, rect.y0);
+  const int x1 = std::min(rect.x1, MaxConvertibleLogicalX(
+                                     geometry, logical_width, orientation));
+  const int y1 = std::min(rect.y1, MaxConvertibleLogicalY(
+                                     geometry, logical_height, orientation));
+  if (!dst || !src || !rect.valid || geometry.stride <= 0 ||
+      x0 >= x1 || y0 >= y1)
+    return;
+  const size_t column_bytes = (size_t)geometry.stride * 3u;
+  const size_t a = PhysicalOffsetBytes(geometry, x0, y0, orientation);
+  const size_t b = PhysicalOffsetBytes(geometry, x1 - 1, y1 - 1, orientation);
+  const size_t col0 = std::min(a / column_bytes, b / column_bytes);
+  const size_t col1 = std::max(a / column_bytes, b / column_bytes);
+  const size_t row0 = std::min(a % column_bytes, b % column_bytes);
+  const size_t row1 = std::max(a % column_bytes, b % column_bytes);
+  for (size_t col = col0; col <= col1; ++col) {
+    const size_t offset = col * column_bytes + row0;
+    memcpy(dst + offset, src + offset, row1 - row0 + 3u);
+  }
 }
 
 // Wide mode doubles physical horizontal density without changing UI geometry.

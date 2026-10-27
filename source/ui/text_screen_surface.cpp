@@ -418,6 +418,9 @@ bool TextRenderer::BlitToFramebuffer() {
             logicalWidth, logicalHeight, orientation_);
       }
       cache_generation++;
+      framebuffer_blit_utils::AccumulatePhysicalFramebufferDamage(
+          &sync, dirty_rect, logicalWidth, logicalHeight,
+          !hardware_wide && !native_wide && dirty_rect.valid);
     }
 
     const int slot =
@@ -425,7 +428,14 @@ bool TextRenderer::BlitToFramebuffer() {
     const bool needs_copy = framebuffer_blit_utils::NeedsPhysicalFramebufferCopy(
         sync, slot, cache_generation);
     if (needs_copy) {
-      memcpy(fb, conversion, geometry.byte_size);
+      if (slot >= 0 && !sync.full_copy[slot] &&
+          sync.pending_rects[slot].valid) {
+        framebuffer_blit_utils::CopyLogicalRectFromPhysicalBgr888(
+            fb, conversion, geometry, logicalWidth, logicalHeight,
+            orientation_, sync.pending_rects[slot]);
+      } else {
+        memcpy(fb, conversion, geometry.byte_size);
+      }
       framebuffer_blit_utils::MarkPhysicalFramebufferCopied(&sync, slot, fb,
                                                             cache_generation);
       wrote_anything = true;
