@@ -309,6 +309,18 @@ void TextRenderer::MarkScreenDirty(u16 *target) {
 
 void TextRenderer::MarkScreenDirtyRect(u16 *target, int x0, int y0, int x1,
                                        int y1) {
+  // Page drawing marks whole screens up front. Glyphs already covered by that
+  // damage need no geometry resolution or repeated dirty-rectangle expansion.
+  const framebuffer_blit_utils::DirtyRect *existing = nullptr;
+  if (target == parent->screenright && parent->screenright_dirty)
+    existing = &parent->screenright_dirty_rect;
+  else if (target == parent->screenleft && parent->screenleft_dirty &&
+           !parent->wide_top_valid_)
+    existing = &parent->screenleft_dirty_rect;
+  if (existing && existing->valid && x0 >= existing->x0 &&
+      y0 >= existing->y0 && x1 <= existing->x1 && y1 <= existing->y1)
+    return;
+
   framebuffer_blit_utils::DirtyRect *dirty_rect = nullptr;
   bool is_left = true;
   if (target == parent->screenleft) {
