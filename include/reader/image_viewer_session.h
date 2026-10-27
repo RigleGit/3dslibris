@@ -15,6 +15,7 @@ struct ReaderImageViewerSession {
   int selection = -1;
   fixed_layout_viewport_utils::ViewportState viewport;
   raster_image::Bitmap image, preview;
+  image_memory::Bytes source;
   pdf_view_utils::PreviewLayout overview{};
   std::string message;
   bool dirty = true, loading = true, wait_release = true, suspended = false;

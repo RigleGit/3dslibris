@@ -52,6 +52,7 @@ void Blit(Text *ts, u16 *screen, int height, int x, int y, int w, int h,
 const int kControlHeight = 44;
 const int kControlGap = 4;
 const int kControlFooter = 6 + 2 * kControlHeight + kControlGap;
+const size_t kSourceCacheMaxBytes = 1024u * 1024u;
 
 // Reserve the same footer in the decoder's preview buffer and in the draw path.
 // Two rows of buttons fit both the 240px portrait and 320px landscape panel.
@@ -135,6 +136,7 @@ void ReaderController::SuspendImageViewer() {
   ReaderImageViewerSession &s = *image_viewer_;
   s.image = raster_image::Bitmap();
   s.preview = raster_image::Bitmap();
+  s.source.clear();
   s.preview_ready = false;
   s.suspended = true;
   s.loading = true;
@@ -207,8 +209,9 @@ bool ReaderController::LoadImageViewer(int zoom) {
   if (app_.ShouldAbortWork() || !ImageViewerValid())
     return false;
   const uint64_t started = osGetTime();
-  image_memory::Bytes bytes;
-  const bool read = s.book->ReadInlineImageSource(s.image_id, &bytes);
+  const bool read = !s.source.empty() ||
+      s.book->ReadInlineImageSource(s.image_id, &s.source);
+  if (!read) s.source.clear();
   const uint64_t read_ms = osGetTime() - started;
   const auto target = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
   int width = s.image.original_width, height = s.image.original_height;
@@ -228,8 +231,12 @@ bool ReaderController::LoadImageViewer(int zoom) {
   const char *error = "Image unavailable (resource/memory limit)";
   const bool decoded =
       read && !app_.ShouldAbortWork() &&
-      raster_image::Decode(bytes.data(),bytes.size(),required.width, required.height,
+      raster_image::Decode(s.source.data(),s.source.size(),required.width, required.height,
                            app_.ts->GetBgColor(), &s.image, &error);
+  const size_t source_bytes = s.source.size();
+  // Cache one compressed resource only while this viewer/session is valid.
+  // Larger images remain readable without retaining their input between zooms.
+  if (source_bytes > kSourceCacheMaxBytes) s.source.clear();
   s.loading = false;
   s.suspended = false;
   if (decoded) {
@@ -253,7 +260,7 @@ bool ReaderController::LoadImageViewer(int zoom) {
            "bitmap_bytes=%lu decoder_peak=%lu zoom=%d",
            decoded ? 1 : 0, (unsigned long long)read_ms,
            (unsigned long long)(osGetTime() - started - read_ms),
-           (unsigned long)bytes.size(),
+           (unsigned long)source_bytes,
            (unsigned long)(s.image.PixelCount() * sizeof(u16)),
            (unsigned long)s.image.decoder_peak, zoom);
   return decoded;
