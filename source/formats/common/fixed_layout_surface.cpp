@@ -7,15 +7,16 @@
 
 namespace fixed_layout_blit_utils {
 
-static inline u16 InterpolateRgb565(u16 first, u16 second, float t) {
+static inline u16 InterpolateRgb565(u16 first, u16 second, int t) {
   if (first == second)
     return first;
   int r0, g0, b0, r1, g1, b1;
   UnpackRgb565(first, &r0, &g0, &b0);
   UnpackRgb565(second, &r1, &g1, &b1);
-  return RGB565FromU8(r0 * (1.0f - t) + r1 * t + 0.5f,
-                     g0 * (1.0f - t) + g1 * t + 0.5f,
-                     b0 * (1.0f - t) + b1 * t + 0.5f);
+  const int r = r0 * (256 - t) + r1 * t + 128;
+  const int g = g0 * (256 - t) + g1 * t + 128;
+  const int b = b0 * (256 - t) + b1 * t + 128;
+  return (u16)(((r >> 11) << 11) | ((g >> 10) << 5) | (b >> 11));
 }
 
 void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int logical_height,
@@ -70,7 +71,7 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
 
   struct ColumnSample {
     int x0, x1;
-    float t;
+    int t;
   };
   // Only visible columns are retained, even when a zoomed page is very wide.
   std::vector<ColumnSample> columns((size_t)(col1 - col0));
@@ -86,7 +87,7 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
         std::min((float)(crop_x + crop_width - 1), src_xf));
     sample.x0 = (int)clamped_x;
     sample.x1 = std::min(crop_x + crop_width - 1, sample.x0 + 1);
-    sample.t = clamped_x - (float)sample.x0;
+    sample.t = (int)((clamped_x - (float)sample.x0) * 256.0f + 0.5f);
   }
 
   for (int row = row0; row < row1; row++) {
@@ -106,18 +107,18 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
         std::min((float)(crop_y + crop_height - 1), src_yf));
     const int y0 = (int)clamped_y;
     const int y1 = std::min(crop_y + crop_height - 1, y0 + 1);
-    const float ty = clamped_y - (float)y0;
+    const int ty = (int)((clamped_y - (float)y0) * 256.0f + 0.5f);
     for (int col = col0; col < col1; col++) {
       const int dx = x + col;
       const ColumnSample &sample = columns[(size_t)(col - col0)];
       const int x0 = sample.x0;
       const int x1 = sample.x1;
-      const float tx = sample.t;
+      const int tx = sample.t;
       const u16 p00 = pixels[(size_t)y0 * (size_t)src_width + (size_t)x0];
       const u16 p10 = pixels[(size_t)y0 * (size_t)src_width + (size_t)x1];
       // Identity rows need only horizontal interpolation. Rounded PDF bounds
       // often add one column to an otherwise native-size raster.
-      if (ty == 0.0f) {
+      if (ty == 0) {
         screen[(size_t)dy * (size_t)stride + (size_t)dx] =
             InterpolateRgb565(p00, p10, tx);
         continue;
@@ -128,7 +129,7 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
         screen[(size_t)dy * (size_t)stride + (size_t)dx] = p00;
         continue;
       }
-      if (tx == 0.0f) {
+      if (tx == 0) {
         screen[(size_t)dy * (size_t)stride + (size_t)dx] =
             InterpolateRgb565(p00, p01, ty);
         continue;
@@ -143,14 +144,17 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
       UnpackRgb565(p01, &r01, &g01, &b01);
       UnpackRgb565(p11, &r11, &g11, &b11);
 
-      const float w00 = (1.0f - tx) * (1.0f - ty);
-      const float w10 = tx * (1.0f - ty);
-      const float w01 = (1.0f - tx) * ty;
-      const float w11 = tx * ty;
-      screen[(size_t)dy * (size_t)stride + (size_t)dx] = RGB565FromU8(
-          r00 * w00 + r10 * w10 + r01 * w01 + r11 * w11 + 0.5f,
-          g00 * w00 + g10 * w10 + g01 * w01 + g11 * w11 + 0.5f,
-          b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11 + 0.5f);
+      // Q8 axis weights sum to 65536 in two dimensions. Expanded RGB8
+      // channels retain the previous colour range; every sum fits in 24 bits.
+      const int w00 = (256 - tx) * (256 - ty);
+      const int w10 = tx * (256 - ty);
+      const int w01 = (256 - tx) * ty;
+      const int w11 = tx * ty;
+      const int r = r00 * w00 + r10 * w10 + r01 * w01 + r11 * w11 + 32768;
+      const int g = g00 * w00 + g10 * w10 + g01 * w01 + g11 * w11 + 32768;
+      const int b = b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11 + 32768;
+      screen[(size_t)dy * (size_t)stride + (size_t)dx] =
+          (u16)(((r >> 19) << 11) | ((g >> 18) << 5) | (b >> 19));
     }
   }
 }
