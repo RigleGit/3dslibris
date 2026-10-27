@@ -237,6 +237,9 @@ int StartupController::RunBootSequence()
   const int ok = 0;
 
   boot_trace::Boot("startup begin");
+  // Normalize defaults before reading user overrides. A custom font directory
+  // need not contain the bundled probe font; ResolveFontPath falls back per file.
+  NormalizeRuntimeAssetPaths(&app_);
   boot_trace::Boot("startup prefs read begin");
   const int prefs_read_err = app_.prefs->Read();
   boot_trace::Boot("startup prefs read done");
@@ -248,7 +251,6 @@ int StartupController::RunBootSequence()
     app_.PrintStatus(msg);
   }
   UiButtonSkin_SetColorMode(app_.colorMode);
-  NormalizeRuntimeAssetPaths(&app_);
 
   printf("Loading fonts...\n");
 #ifdef DSLIBRIS_DEBUG
