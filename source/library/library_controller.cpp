@@ -14,6 +14,8 @@
 #include "library/library_sort_mode.h"
 #include "library/cover_override_utils.h"
 #include "library/cover_cache.h"
+#include "library/browser_view_utils.h"
+#include "ui/button.h"
 #include "settings/prefs.h"
 
 // Forward declared from app_book.cpp
@@ -565,7 +567,15 @@ static int AppendBooksFromPosixDirectory(App *app,
 } // namespace
 
 LibraryController::LibraryController(App &app)
-    : app_(app), inside_folder_(false) {}
+    : app_(app), inside_folder_(false), root_selected_book_(NULL),
+      root_sort_mode_(LIBRARY_SORT_TITLE), root_cached_(false) {}
+
+LibraryController::~LibraryController() {
+  for (auto book : root_books_)
+    delete book;
+  for (auto button : root_buttons_)
+    delete button;
+}
 
 int LibraryController::FindBooks() {
   cover_cache::ClearPathCache();
@@ -730,15 +740,35 @@ void LibraryController::SortBooks() {
 }
 
 void LibraryController::RebuildRoot() {
-  PauseBrowserJobs();
+  job_queue_.clear();
   ResetBrowserMarquee();
   ClearBrowserBooksAndButtons(&app_);
   inside_folder_ = false;
   current_folder_name_.clear();
   current_folder_path_.clear();
-  FindBooks();
-  PrepareLibrary();
-  browser_init();
+  if (root_cached_) {
+    app_.books.swap(root_books_);
+    app_.buttons.swap(root_buttons_);
+    root_cached_ = false;
+    const LibrarySortMode sort_mode = app_.prefs
+        ? app_.prefs->library_sort_mode : LIBRARY_SORT_TITLE;
+    if (sort_mode != root_sort_mode_)
+      SortBooks();
+    app_.SetSelectedBook(root_selected_book_);
+    root_selected_book_ = NULL;
+    const BrowserViewMode view_mode = app_.prefs
+        ? app_.prefs->browser_view_mode : BROWSER_VIEW_GALLERY;
+    const int page_size = browser_view_utils::PageSize(view_mode);
+    const int index = app_.GetBookIndex(app_.GetSelectedBook());
+    app_.SetBrowserPageStart(index >= 0 ? (index / page_size) * page_size : 0);
+    LayoutBrowserNavButtons();
+    app_.SetBrowserLastInteractionMs(osGetTime());
+    LoadVisibleBrowserCoverCaches();
+  } else {
+    FindBooks();
+    PrepareLibrary();
+    browser_init();
+  }
   ResetBrowserMarquee();
   app_.ts->MarkAllScreensDirty();
   app_.SetBrowserDirty(true);
@@ -774,10 +804,34 @@ void LibraryController::LoadFolderPath(const std::string &folder_path,
   DBG_LOGF(&app_, "BROWSER load folder begin name=%s path=%s",
            name_copy.c_str(), path_copy.c_str());
 #endif
-  PauseBrowserJobs();
+  // No queued task may retain a book from the directory being detached.
+  job_queue_.clear();
   ResetBrowserMarquee();
   cover_cache::ClearPathCache();
-  ClearBrowserBooksAndButtons(&app_);
+  if (!inside_folder_ && !root_cached_) {
+    if (app_.GetCurrentBook())
+      app_.CloseBook();
+    root_selected_book_ = app_.GetSelectedBook();
+    root_sort_mode_ = app_.prefs
+        ? app_.prefs->library_sort_mode : LIBRARY_SORT_TITLE;
+    // Retain metadata and buttons only; hidden root entries own no bitmaps.
+    for (auto book : app_.books) {
+      delete[] book->coverPixels;
+      book->coverPixels = nullptr;
+      book->coverWidth = book->coverHeight = 0;
+      if (book->IsBrowserFolder()) {
+        book->coverAttempts = 0;
+        book->coverRetryAfterMs = 0;
+      }
+    }
+    root_books_.swap(app_.books);
+    root_buttons_.swap(app_.buttons);
+    root_cached_ = true;
+    app_.SetSelectedBook(NULL);
+    app_.SetBrowserPageStart(0);
+  } else {
+    ClearBrowserBooksAndButtons(&app_);
+  }
   inside_folder_ = true;
   current_folder_path_ = path_copy;
   current_folder_name_ = name_copy;

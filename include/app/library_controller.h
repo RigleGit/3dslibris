@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <deque>
 #include <string>
+#include <vector>
+
+#include "library/library_sort_mode.h"
 
 #include "library/library_job.h"
 
@@ -11,6 +14,7 @@ class App;
 struct FrameInput;
 class Book;
 class Text;
+class Button;
 
 struct LibraryGradientContext {
   Text *ts;
@@ -20,6 +24,7 @@ struct LibraryGradientContext {
 class LibraryController {
 public:
   explicit LibraryController(App &app);
+  ~LibraryController();
 
   int FindBooks();
   void PrepareLibrary();
@@ -52,6 +57,11 @@ private:
   bool inside_folder_;
   std::string current_folder_name_;
   std::string current_folder_path_;
+  std::vector<Book *> root_books_;
+  std::vector<Button *> root_buttons_;
+  Book *root_selected_book_;
+  LibrarySortMode root_sort_mode_;
+  bool root_cached_;
 
   void RebuildRoot();
   void EnterFolder(Book *folder);
