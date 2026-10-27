@@ -341,20 +341,26 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
   };
 #endif
 
-  // Page changes can leave folder jobs queued from the previous view. Drop
-  // them before admission so hidden sidecars are never read or decompressed.
+  // Page changes can leave warmup jobs queued from the previous page. Hidden
+  // books must not incur source I/O or retain newly decoded cover bitmaps.
   const browser_cover_cache_utils::VisibleRange visible =
       browser_cover_cache_utils::ComputeVisibleRange(
           app_.GetBrowserPageStart(), app_.BookCount(),
           CurrentBrowserPageSize(app_));
   for (std::deque<app_job_t>::iterator it = job_queue_.begin();
        it != job_queue_.end();) {
-    if (it->book && it->book->IsBrowserFolder() &&
-        (it->type != APP_JOB_EXTRACT_COVER ||
-         app_.GetMode() != AppMode::Browser ||
-         !ShouldCurrentBrowserLoadCovers(app_) ||
-         !browser_cover_cache_utils::RangeContains(
-             visible, app_.GetBookIndex(it->book)))) {
+    const bool hidden_warmup = it->book &&
+        app_.GetMode() == AppMode::Browser &&
+        browser_job_queue_utils::IsHeavyBrowserJobType(
+            it->type, APP_JOB_INDEX_METADATA, APP_JOB_EXTRACT_COVER) &&
+        !browser_cover_cache_utils::RangeContains(
+            visible, app_.GetBookIndex(it->book));
+    const bool unwanted_cover = it->type == APP_JOB_EXTRACT_COVER &&
+        (app_.GetMode() != AppMode::Browser ||
+         !ShouldCurrentBrowserLoadCovers(app_));
+    if (hidden_warmup || unwanted_cover ||
+        (it->book && it->book->IsBrowserFolder() &&
+         it->type != APP_JOB_EXTRACT_COVER)) {
       it = job_queue_.erase(it);
     } else {
       ++it;
@@ -370,11 +376,6 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
     if (job_queue_.empty())
       break;
 
-    const bool allow_selected_browser_jobs =
-        app_.GetMode() != AppMode::Browser ||
-        browser_warmup_utils::IsBrowserWarmupIdle(
-            osGetTime(), app_.GetBrowserLastInteractionMs(),
-            app_.IsBrowserWaitingInputRelease());
     const bool allow_heavy_browser_jobs =
         app_.GetMode() != AppMode::Browser ||
         browser_warmup_utils::IsBrowserHeavyWarmupIdleForDevice(
@@ -393,8 +394,8 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           }
           if (app_.GetMode() != AppMode::Browser)
             return true;
-          if (candidate.book == app_.GetSelectedBook())
-            return allow_selected_browser_jobs;
+          // Selection changes priority, not the admission delay of a task
+          // that cannot yield once decoding/parsing has started.
           return allow_heavy_browser_jobs;
         });
     if (!got_job)

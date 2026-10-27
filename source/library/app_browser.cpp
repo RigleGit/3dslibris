@@ -208,6 +208,11 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
     return;
   }
 
+  // Held input and edge presses also count as activity, even when the
+  // selection cannot move. Do not start an indivisible job just after release.
+  if (input.keys_down || input.keys_held)
+    app_.SetBrowserLastInteractionMs(input.timestamp_ms);
+
   auto navigateSelection = [&](BrowserNavMove move) {
     if (app_.BookCount() <= 0)
       return;
