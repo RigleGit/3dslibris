@@ -1,5 +1,7 @@
 #include "ui/font_manager.h"
 
+#include FT_SIZES_H
+
 #include <dirent.h>
 #include <new>
 #include <stdio.h>
@@ -154,8 +156,30 @@ void FontManager::EnsureFacePixelSize(FT_Face face) {
       return;
   }
   const int size = faces[TEXT_STYLE_BROWSER] == face ? 12 : pixelsize;
-  if (!face->size || face->size->metrics.y_ppem != size)
+  if (face->size && face->size->metrics.y_ppem == size)
+    return;
+  Cache *face_cache = GetFaceCache(face);
+  if (!face_cache || !face->size) {
     FT_Set_Pixel_Sizes(face, 0, size);
+    return;
+  }
+
+  FT_Size previous = face->size;
+  if (!face_cache->inactive_size &&
+      FT_New_Size(face, &face_cache->inactive_size)) {
+    // Keep rendering available under memory pressure using the original path.
+    FT_Set_Pixel_Sizes(face, 0, size);
+    return;
+  }
+  FT_Size next = face_cache->inactive_size;
+  if (FT_Activate_Size(next))
+    return;
+  if (next->metrics.y_ppem != size && FT_Set_Pixel_Sizes(face, 0, size)) {
+    FT_Activate_Size(previous);
+    return;
+  }
+  // A third requested size reuses the inactive object, keeping two per face.
+  face_cache->inactive_size = previous;
 }
 
 Cache *FontManager::GetFaceCache(FT_Face face) {
@@ -236,6 +260,7 @@ FT_Error FontManager::CreateFace(int style) {
   FT_Face old_face = faces[(size_t)style];
 
   faces[(size_t)style] = loaded_face;
+  ++font_revision_;
   textCache[loaded_face] = new_cache;
   advanceCache.erase(loaded_face);
 
@@ -711,6 +736,7 @@ void FontManager::SetPixelSize(u8 size) {
 }
 
 int FontManager::GetPixelSize() const { return pixelsize; }
+u32 FontManager::GetRevision() const { return font_revision_; }
 
 bool FontManager::LoadFallbackFont(const char *path) {
   if (!path || !*path)
@@ -788,6 +814,7 @@ bool FontManager::SetFallbackFile(int index, const char *path) {
   }
 
   fallback_faces_[index] = face;
+  ++font_revision_;
   fallback_filenames_[index] = std::string(path);
   textCache[face] = new_cache;
   if (index + 1 > fallback_count_)
@@ -814,6 +841,7 @@ void FontManager::UnloadFallbackFonts() {
     advanceCache.erase(face);
     FT_Done_Face(face);
     fallback_faces_[i] = nullptr;
+    ++font_revision_;
   }
   fallback_count_ = 0;
 }

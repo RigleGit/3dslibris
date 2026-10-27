@@ -35,6 +35,9 @@ public:
   glyph_cache_lru::GlyphCacheLru lru;
   std::array<FT_GlyphSlot, 256> latin1_slots;
   std::array<u32, 256> latin1_keys;
+  // Owned by the face, which frees both sizes in FT_Done_Face. Retain only
+  // one inactive size for alternating body and superscript/subscript text.
+  FT_Size inactive_size = nullptr;
   Cache() : lru(512), latin1_slots{}, latin1_keys{} {}
 
   FT_GlyphSlot FindGlyph(u32 ucs, u32 key) {
@@ -78,6 +81,7 @@ public:
   std::string GetFontFile(u8 style);
   void SetPixelSize(u8 size);
   int GetPixelSize() const;
+  u32 GetRevision() const;
 
   FT_Error CreateFace(int style);
   int CacheGlyph(u32 ucs, FT_Face face);
@@ -126,6 +130,7 @@ private:
   FTC_ImageTypeRec imagetype;
   FT_Int charmap_index;
   int pixelsize;
+  u32 font_revision_ = 0;
   struct {
     int left, right, top, bottom;
   } margin;

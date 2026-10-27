@@ -118,6 +118,7 @@ public:
   u16 GetPenX();
   u16 GetPenY();
   u8 GetPixelSize();
+  u32 GetFontRevision() const;
   u16 *GetScreen();
   int GetStringAdvance(const char *txt);
   u8 GetStringWidth(const char *txt, u8 style);

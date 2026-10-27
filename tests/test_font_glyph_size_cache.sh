@@ -12,6 +12,7 @@ while IFS= read -r flag; do
   [ -n "$flag" ] && FT_FLAGS+=("$flag")
 done < <(split_flags "$(pkg-config --cflags --libs freetype2)")
 build_test test_font_glyph_size_cache -- -fno-exceptions -fno-rtti \
+  -DFT_Set_Pixel_Sizes=ObserveSetPixelSizes -DFT_New_Size=ObserveNewSize \
   -I"$TEST_ROOT/tests/stubs/resource_owner" \
   "$TEST_ROOT/tests/test_font_glyph_size_cache.cpp" \
   "$TEST_ROOT/source/ui/font_manager.cpp" \

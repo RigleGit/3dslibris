@@ -121,6 +121,7 @@ u16 Text::GetPenX() { return tr->GetPenX(); }
 u16 Text::GetPenY() { return tr->GetPenY(); }
 
 u8 Text::GetPixelSize() { return (u8)fm->GetPixelSize(); }
+u32 Text::GetFontRevision() const { return fm->GetRevision(); }
 
 u16 *Text::GetScreen() { return tr->GetScreen(); }
 

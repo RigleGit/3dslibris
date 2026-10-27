@@ -1,11 +1,36 @@
 #include "ui/text.h"
 #include "ui/font_constants.h"
+#include FT_SIZES_H
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <map>
+
+// Observe the real dependency boundary without adding production test hooks.
+// The runner renames these two API references in FontManager only; the oracle
+// below calls the unmodified FreeType APIs.
+#undef FT_Set_Pixel_Sizes
+#undef FT_New_Size
+extern "C" FT_Error FT_Set_Pixel_Sizes(FT_Face, FT_UInt, FT_UInt);
+extern "C" FT_Error FT_New_Size(FT_Face, FT_Size *);
+static size_t pixel_size_setups=0, size_allocations=0;
+static bool reject_size_allocation=false;
+extern "C" FT_Error ObserveSetPixelSizes(FT_Face face, FT_UInt width,
+                                         FT_UInt height) {
+  ++pixel_size_setups;
+  return FT_Set_Pixel_Sizes(face,width,height);
+}
+extern "C" FT_Error ObserveNewSize(FT_Face face, FT_Size *size) {
+  if (reject_size_allocation) {
+    *size=nullptr;
+    return FT_Err_Out_Of_Memory;
+  }
+  FT_Error error=FT_New_Size(face,size);
+  if (!error) ++size_allocations;
+  return error;
+}
 
 // Real FontManager and FreeType; Text is configuration only for this owner test.
 Text::Text() : reporter_(nullptr), fm(nullptr), tr(nullptr) {
@@ -83,7 +108,9 @@ int main() {
     assert(configured.GetFallbackCount() > 0);
     // Rejecting an invalid setting before mono's first use must leave the
     // bundled mono face available for its subsequent lazy load.
+    const u32 revision=configured.GetRevision();
     configured.SetFontFile("missing-font.ttf", TEXT_STYLE_MONO);
+    assert(configured.GetRevision()==revision);
     assert(configured.GetFontFile(TEXT_STYLE_MONO) == FONTMONOFILE);
     const FT_Face mono = configured.GetFace(TEXT_STYLE_MONO);
     assert(mono && FT_IS_FIXED_WIDTH(mono));
@@ -96,6 +123,41 @@ int main() {
   FT_Library library;
   assert(!FT_Init_FreeType(&library));
   const int flags=FT_LOAD_RENDER|FT_LOAD_TARGET_NORMAL;
+  {
+    FT_Face oracle;
+    const std::string path=std::string(fontdir)+"/"+
+                           manager.GetFontFile(TEXT_STYLE_REGULAR);
+    assert(!FT_New_Face(library,path.c_str(),0,&oracle));
+    const u32 revision=manager.GetRevision();
+    // Failure to allocate the second size must keep native rendering working.
+    reject_size_allocation=true;
+    manager.SetPixelSize(16);
+    FT_Face face=manager.GetFace(TEXT_STYLE_REGULAR);
+    reject_size_allocation=false;
+    assert(!FT_Set_Pixel_Sizes(oracle,0,16));
+    assert(!FT_Load_Char(oracle,'A',flags));
+    ExpectGlyph(manager.GetGlyph('A',flags,face),oracle->glyph);
+    const size_t allocations_before=size_allocations;
+    // A 16px body uses 11px scripts (70%, truncated). Prime both first, then
+    // repeated draws must need no size setup or additional size allocation.
+    for (int pass=0; pass<9; ++pass) {
+      pixel_size_setups=0;
+      for (u8 px : {16,11}) {
+        manager.SetPixelSize(px);
+        face=manager.GetFace(TEXT_STYLE_REGULAR);
+        assert(!FT_Set_Pixel_Sizes(oracle,0,px));
+        for (u32 cp : {u32('A'),u32('g'),u32(0x00e9)}) {
+          assert(!FT_Load_Char(oracle,cp,flags));
+          ExpectGlyph(manager.GetGlyph(cp,flags,face),oracle->glyph);
+          assert(manager.GetAdvance(cp,face)==(oracle->glyph->advance.x>>6));
+        }
+      }
+      if (pass) assert(pixel_size_setups==0);
+      assert(size_allocations<=allocations_before+1);
+      assert(manager.GetRevision()==revision);
+    }
+    FT_Done_Face(oracle);
+  }
   // Every supported size, face style and revisited size must retain exactly
   // the native bitmap. Browser stays at 12px while other faces change size.
   for (u8 style : {TEXT_STYLE_REGULAR, TEXT_STYLE_BOLD, TEXT_STYLE_BROWSER}) {
@@ -103,6 +165,7 @@ int main() {
     std::string path=std::string(fontdir)+"/"+manager.GetFontFile(style);
     assert(!FT_New_Face(library,path.c_str(),0,&oracle));
     Observe(face);
+    const size_t allocations_before=size_allocations;
     for (int pass=0; pass<2; ++pass) {
       for (u8 px=8; px<=20; ++px) {
         manager.SetPixelSize(px);
@@ -116,6 +179,7 @@ int main() {
         }
       }
     }
+    assert(size_allocations<=allocations_before+1);
     FT_Done_Face(oracle);
   }
   // Explicit invalidation and replacement must discard all sizes of a face.
@@ -125,7 +189,9 @@ int main() {
   manager.GetGlyph('A',flags,regular);
   assert(reads>0);
   Unobserve(regular);
+  const u32 revision=manager.GetRevision();
   manager.SetFontFile("LiberationSerif-Bold.ttf",TEXT_STYLE_REGULAR);
+  assert(manager.GetRevision()!=revision);
   regular=manager.GetFace(TEXT_STYLE_REGULAR);
   // Old stream addresses may be reused after replacement.
   Observe(regular);
@@ -147,7 +213,9 @@ int main() {
   assert(reads>0);
   // A real fallback remains native at its own active size across primary
   // size changes, and replacing/unloading it retires its cached bitmaps.
+  const u32 before_fallback=manager.GetRevision();
   assert(manager.SetFallbackFile(0,fallback));
+  assert(manager.GetRevision()!=before_fallback);
   FT_Face oracle;
   assert(!FT_New_Face(library,fallback,0,&oracle));
   assert(!FT_Set_Pixel_Sizes(oracle,0,10));
@@ -156,12 +224,16 @@ int main() {
     manager.SetPixelSize(px);
     ExpectGlyph(manager.GetGlyph(0x0531,flags,regular),oracle->glyph);
   }
+  const u32 before_replacement=manager.GetRevision();
   assert(manager.SetFallbackFile(0,fallback));
+  assert(manager.GetRevision()!=before_replacement);
   ExpectGlyph(manager.GetGlyph(0x0531,flags,regular),oracle->glyph);
+  const u32 before_unload=manager.GetRevision();
   manager.UnloadFallbackFonts();
+  assert(manager.GetRevision()!=before_unload);
   FT_Done_Face(oracle);
   for (u8 style : {TEXT_STYLE_REGULAR, TEXT_STYLE_BOLD, TEXT_STYLE_BROWSER})
     Unobserve(manager.GetFace(style));
   FT_Done_FreeType(library);
-  puts("PASS: glyph pixels, size reuse, shared LRU budget, face/fallback retirement");
+  puts("PASS: glyph pixels/advances, bounded size reuse, font revisions, shared LRU budget, face/fallback retirement");
 }
