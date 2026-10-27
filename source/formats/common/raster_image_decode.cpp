@@ -136,13 +136,13 @@ bool Bitmap::Allocate(int w, int h) {
 namespace {
 template <typename Output>
 bool Target(int source_w, int source_h, int requested_w, int requested_h,
-            Output *bitmap) {
+            Output *bitmap, bool exact_size) {
   if (source_w <= 0 || source_h <= 0 || requested_w <= 0 || requested_h <= 0)
     return false;
   const double scale = std::min(1.0, std::max((double)requested_w / source_w,
                                               (double)requested_h / source_h));
-  bitmap->width = std::max(1, (int)(source_w * scale + 0.5));
-  bitmap->height = std::max(1, (int)(source_h * scale + 0.5));
+  bitmap->width = exact_size ? requested_w : std::max(1, (int)(source_w * scale + 0.5));
+  bitmap->height = exact_size ? requested_h : std::max(1, (int)(source_h * scale + 0.5));
   if (!bitmap->Allocate(bitmap->width, bitmap->height))
     return false;
   bitmap->original_width = source_w;
@@ -245,13 +245,13 @@ namespace {
 template <typename Output>
 bool DecodeWithStbi(const unsigned char *bytes,size_t length,int target_width,
                     int target_height, uint16_t background, Output *out,
-                    Budget *budget) {
+                    Budget *budget, bool exact_size) {
   stbi_budget = budget;
   int w = 0, h = 0, channels = 0;
   bool ok = false;
   if (stbi_info_from_memory(bytes, (int)length, &w, &h,
                             &channels) &&
-      Target(w, h, target_width, target_height, out)) {
+      Target(w, h, target_width, target_height, out, exact_size)) {
     unsigned char *pixels = stbi_load_from_memory(
         bytes, (int)length, &w, &h, &channels, 4);
     if (pixels) {
@@ -268,7 +268,7 @@ bool DecodeWithStbi(const unsigned char *bytes,size_t length,int target_width,
 template <typename Output>
 bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
             int target_height, uint16_t background, Output *out,
-            const char **error) {
+            const char **error, bool exact_size = false) {
   if (error)
     *error = "Image missing or unsupported";
   if (!out || !bytes || !length || length > INT_MAX || target_width <= 0 ||
@@ -282,7 +282,7 @@ bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
       length >= 6 && std::memcmp(bytes, "GIF8", 4) == 0;
   if (is_gif) {
     ok = DecodeWithStbi(bytes, length, target_width, target_height, background, &next,
-                        &budget);
+                        &budget, exact_size);
   } else {
     InitMuPdfLocks();
     fz_alloc_context allocator = {&budget, Allocate, Resize, Release};
@@ -306,7 +306,7 @@ bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
       buffer = fz_new_buffer_from_shared_data(ctx, bytes, length);
       image = fz_new_image_from_buffer(ctx, buffer);
       if (!image ||
-          !Target(image->w, image->h, target_width, target_height, &next))
+          !Target(image->w, image->h, target_width, target_height, &next, exact_size))
         fz_throw(ctx, FZ_ERROR_LIMIT, "Bitmap memory limit");
       int factor = SubsampleFactor(image->w, image->h, next.width, next.height);
       pixmap =
@@ -342,7 +342,7 @@ bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
   }
 #else
   ok = DecodeWithStbi(bytes, length, target_width, target_height, background, &next,
-                      &budget);
+                      &budget, exact_size);
 #endif
   if (!ok) {
     if (error)
@@ -361,7 +361,7 @@ bool Decode(const unsigned char *bytes,size_t length,int w,int h,
   return DecodeImage(bytes,length,w,h,bg,out,error);
 }
 bool DecodeArgb(const unsigned char *bytes,size_t length,int w,int h,
-                ArgbBitmap *out,const char **error) {
-  return DecodeImage(bytes,length,w,h,0,out,error);
+                ArgbBitmap *out,const char **error, bool exact_size) {
+  return DecodeImage(bytes,length,w,h,0,out,error,exact_size);
 }
 } // namespace raster_image

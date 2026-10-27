@@ -33,7 +33,9 @@ struct ArgbBitmap {
     width=w;height=h;return true;
   }
 };
-bool DecodeArgb(const unsigned char*,size_t,int,int,ArgbBitmap*,const char**);
+// Exact size is for final inline-image layout, including its pixel rounding.
+bool DecodeArgb(const unsigned char*,size_t,int,int,ArgbBitmap*,const char**,
+                bool exact_size = false);
 // Main-thread-only: decoder and bitmap budgets are not shared with workers.
 // Failure leaves out unchanged. Target is a minimum detail requirement; no
 // reduced-quality fallback is returned when either memory budget is exceeded.

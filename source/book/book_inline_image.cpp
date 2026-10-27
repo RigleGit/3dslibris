@@ -823,9 +823,11 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
 
   raster_image::ArgbBitmap decoded;
   const char *error=NULL;
+  const bool exact_size = draw_w > 0 && draw_h > 0 &&
+      !(need_page_recompute && page_imgW == 0 && page_imgH == 0);
   if(!raster_image::DecodeArgb(compressed.data(),compressed.size(),
       draw_w>0 ? draw_w : screen_w,draw_h>0 ? draw_h : screen_h,
-      &decoded,&error)) return false;
+      &decoded,&error,exact_size)) return false;
   if(need_page_recompute && page_imgW==0 && page_imgH==0) {
     const auto placement=ResolveInlineImagePagePlacement(
         screen_w,screen_h,0,0,0,draw_screen_layout.current_margin_bottom,
