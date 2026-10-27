@@ -384,14 +384,18 @@ static bool DirectoryHasDirectSupportedBook(const std::string &dir) {
   while ((ent = readdir(dp))) {
     if (ent->d_name[0] == '.')
       continue;
-    std::string child = dir + "/" + ent->d_name;
-    if (PathIsDirectory(child))
+    // Reject extensions before any filesystem query. Sidecars and unrelated
+    // files cannot make this directory visible in the library.
+    if (!app_flow_utils::ShouldIndexBookFilename(ent->d_name) ||
+        app_flow_utils::DetectBookFormat(ent->d_name) == FORMAT_UNDEF)
       continue;
-    if (app_flow_utils::ShouldIndexBookFilename(ent->d_name) &&
-        app_flow_utils::DetectBookFormat(ent->d_name) != FORMAT_UNDEF) {
-      found = true;
-      break;
-    }
+    if (ent->d_type == DT_DIR)
+      continue;
+    if (ent->d_type != DT_REG &&
+        PathIsDirectory(dir + "/" + ent->d_name))
+      continue;
+    found = true;
+    break;
   }
   closedir(dp);
   return found;
@@ -403,8 +407,8 @@ static void AppendFolderEntry(App *app, const std::string &source_dir,
   if (!app || folder_name.empty() || folder_name[0] == '.')
     return;
   const std::string folder_path = source_dir + "/" + folder_name;
-  if (!PathIsDirectory(folder_path) ||
-      !DirectoryHasDirectSupportedBook(folder_path))
+  // Callers have already established that this entry is a directory.
+  if (!DirectoryHasDirectSupportedBook(folder_path))
     return;
   if (HasBrowserEntryKey(seen_keys, std::string("folder:") + folder_name))
     return;
@@ -551,8 +555,12 @@ static int AppendBooksFromPosixDirectory(App *app,
   while ((ent = readdir(dp))) {
     if (ent->d_name[0] == '.')
       continue;
-    std::string child = dir + "/" + ent->d_name;
-    if (PathIsDirectory(child))
+    if (!app_flow_utils::ShouldIndexBookFilename(ent->d_name) ||
+        app_flow_utils::DetectBookFormat(ent->d_name) == FORMAT_UNDEF ||
+        ent->d_type == DT_DIR)
+      continue;
+    if (ent->d_type != DT_REG &&
+        PathIsDirectory(dir + "/" + ent->d_name))
       continue;
     AppendBookFromFilename(app, gradient_ctx, dir, ent->d_name, seen_keys);
   }
