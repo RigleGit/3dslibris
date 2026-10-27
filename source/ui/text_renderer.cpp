@@ -287,39 +287,46 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
     }
 #endif
 
-    for (u16 gy = 0; gy < height; gy++) {
-      for (u16 gx = 0; gx < width; gx++) {
-        u8 a = buffer[gy * width + gx];
+    const int glyph_x = (int)pen.x + bx;
+    const int glyph_y = (int)pen.y - by;
+    const int x0 = std::max(0, -glyph_x);
+    int x1 = std::min((int)width, screenWidth - glyph_x);
+    const int y0 = std::max(0, -glyph_y);
+    const int y1 = std::min((int)height, maxY - bottomClip - glyph_y);
+#ifndef DSLIBRIS_DEBUG
+    // Debug builds retain their nonzero-alpha clipping counters below.
+    x1 = std::min(x1, clipRight - glyph_x);
+#endif
+    const int stride = parent->BufferStride();
+    for (int gy = y0; gy < y1 && x0 < x1; ++gy) {
+      const u8 *alpha_row = buffer + (size_t)gy * width;
+      u16 *dst_row = parent->screen +
+          (size_t)(glyph_y + gy) * stride + (glyph_x + x0);
+      for (int gx = x0; gx < x1; ++gx) {
+        const u8 a = alpha_row[gx];
         if (!a)
           continue;
-        int sx = (int)pen.x + (int)gx + bx;
-        int sy = (int)pen.y + (int)gy - by;
-        if (sy < 0 || sy >= maxY - bottomClip || sx < 0 || sx >= screenWidth)
-          continue;
 #ifdef DSLIBRIS_DEBUG
+        const int sx = glyph_x + gx;
         if (sx >= contentRight)
           layout_overflow_pixels++;
-#endif
         if (!GlyphWithinContentRight(sx, clipRight)) {
-#ifdef DSLIBRIS_DEBUG
           clipped_right_pixels++;
-#endif
           continue;
         }
-        const size_t dst_index =
-            (size_t)sy * (size_t)parent->BufferStride() + (size_t)sx;
-
+#endif
+        u16 &pixel = dst_row[gx - x0];
         if (a == 255) {
-          parent->screen[dst_index] = fg_color;
+          pixel = fg_color;
           continue;
         }
         int br, bgc, bb;
-        RGB565ToU8(parent->screen[dst_index], &br, &bgc, &bb);
+        RGB565ToU8(pixel, &br, &bgc, &bb);
         const int ia = 255 - (int)a;
         const int r = div255(fg_r * (int)a + br * ia + 127);
         const int g = div255(fg_g * (int)a + bgc * ia + 127);
         const int b = div255(fg_b * (int)a + bb * ia + 127);
-        parent->screen[dst_index] = (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+        pixel = (u16)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
       }
     }
 
