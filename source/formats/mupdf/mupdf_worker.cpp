@@ -4,6 +4,7 @@
 #include "formats/mupdf/mupdf_worker.h"
 
 #include "shared/debug_log.h"
+#include "formats/common/fixed_layout_blit_utils.h"
 #include "formats/mupdf/mupdf_render_policy_utils.h"
 #include "formats/mupdf/mupdf_view.h"
 #include "shared/debug_runtime_mode.h"
@@ -198,6 +199,39 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
                  page_index, xobject_count, (unsigned)content_bytes);
     mupdf_state->page_too_complex_for_device = page_index;
     return false;
+  }
+  // At page fit the top raster contains the complete page. Render it once and
+  // derive the overview, retaining the independent preview render as fallback.
+  // A cropped tile at higher zoom cannot supply the missing parts of the page.
+  const pdf_view_utils::NormalizedRect viewport =
+      ComputeCurrentMuPdfViewport(mupdf_state);
+  if (debug_runtime::ForceSynchronousMuPdfRender() &&
+      viewport.left == 0.0f && viewport.top == 0.0f &&
+      viewport.width == 1.0f && viewport.height == 1.0f &&
+      EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index)) {
+    const Book::MuPdfState::BitmapCache &tile =
+        mupdf_state->current_interactive_tile;
+    if (BitmapCacheValid(tile, page_index) && tile.left == 0.0f &&
+        tile.top == 0.0f && tile.width == 1.0f && tile.height == 1.0f) {
+      // Use page geometry: a native-wide bitmap has twice the samples along
+      // one axis, but the preview must keep the document's aspect ratio.
+      const pdf_view_utils::PreviewLayout layout =
+          pdf_view_utils::ComputePreviewLayout(
+              mupdf_state->page_width, mupdf_state->page_height,
+              mupdf_state->target_bottom_width - 2 * kPdfPreviewPadding,
+              mupdf_state->target_bottom_height - 2 * kPdfPreviewPadding);
+      rendered.width = std::max(1, layout.width);
+      rendered.height = std::max(1, layout.height);
+      rendered.pixels.resize((size_t)rendered.width * rendered.height);
+      fixed_layout_blit_utils::BlitRgb565SurfaceScaledCrop(
+          rendered.pixels.data(), rendered.width, rendered.width, rendered.height,
+          0, 0, rendered.width, rendered.height, tile.PixelData(), tile.PixelCount(),
+          tile.bitmap_width, tile.bitmap_height, 0, 0,
+          tile.bitmap_width, tile.bitmap_height, true);
+      StoreBitmapCache(&mupdf_state->current_preview, page_index, -1,
+                       0.0f, 0.0f, 1.0f, 1.0f, &rendered);
+      return true;
+    }
   }
   // Keep one interpretation of the current page for preview, zoom and strips.
   // The existing helper joins any active strip before dropping an old list.
