@@ -199,19 +199,22 @@ struct Engine::State {
       matched = prefix[matched - 1];
     }
   }
+  void FeedNormalized(Character c) {
+  const bool collapsed_space = Space(c.cp) && previous_space;
+  Feed(c);
+  if (status != Searching) return;
+  if (!collapsed_space) {
+    // Forward search keeps the normalization/KMP stream across pages. Only
+    // its wrapped prefix needs lookahead beyond the final eligible start.
+    const bool beyond = backwards ? c.start.page > unit :
+        wrapped && !(c.start < anchor);
+    if (beyond && ++tail > query.size() + 2) FinishUnit();
+  }
+  }
   void Step() {
     if (ready_index < ready.size()) {
       Character c = ready[ready_index++];
-      const bool collapsed_space = Space(c.cp) && previous_space;
-      Feed(c);
-      if (status != Searching) return;
-      if (!collapsed_space) {
-        // Forward search keeps the normalization/KMP stream across pages. Only
-        // its wrapped prefix needs lookahead beyond the final eligible start.
-        const bool beyond = backwards ? c.start.page > unit :
-            wrapped && !(c.start < anchor);
-        if (beyond && ++tail > query.size() + 2) FinishUnit();
-      }
+      FeedNormalized(c);
       return;
     }
     ready.clear(); ready_index = 0;
