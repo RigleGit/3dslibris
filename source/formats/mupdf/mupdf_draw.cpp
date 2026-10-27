@@ -82,6 +82,8 @@ static void DrawMuPdfLoadFailure(Book *book, Text *ts, int page_index,
   ts->SetScreen(ts->screenright);
   if (!book->DrawBottomGradientBackground())
     ts->ClearScreen();
+  else
+    ts->MarkScreenDirty(ts->screenright);
   if (complex_page) {
     ts->SetPen(12, 22);
     ts->PrintString("Page too complex.");
@@ -607,6 +609,8 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   ts->SetScreen(ts->screenright);
   if (!DrawBottomGradientBackground())
     ts->ClearScreen();
+  else
+    ts->MarkScreenDirty(ts->screenright);
 
   fixed_perf::ViewStage("pdf.preview_background", fixed_perf::Now() - perf_phase);
   perf_phase = fixed_perf::Now();

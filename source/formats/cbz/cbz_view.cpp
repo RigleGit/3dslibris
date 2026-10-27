@@ -164,6 +164,8 @@ void DrawCbzLoadFailure(Book *book, Text *ts, int page_index,
   ts->SetScreen(ts->screenright);
   if (!book->DrawBottomGradientBackground())
     ts->ClearScreen();
+  else
+    ts->MarkScreenDirty(ts->screenright);
   ts->SetPen(12, 28);
   ts->PrintString("image decode failed");
   ts->SetPen(12, 48);
@@ -427,6 +429,8 @@ void DrawCbzPreviewPanel(Book *book, Text *ts,
   ts->SetScreen(ts->screenright);
   if (!book->DrawBottomGradientBackground())
     ts->ClearScreen();
+  else
+    ts->MarkScreenDirty(ts->screenright);
   if (CbzPreviewCacheValid(cbz_state->current_preview, page_index)) {
     fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
         ts, ts->screenright, cbz_state->target_bottom_height,
