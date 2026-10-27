@@ -157,6 +157,11 @@ inline const std::string &GetMetaCacheDir() {
   return path;
 }
 
+inline const std::string &GetMetaIndexPath() {
+  static const std::string path = GetMetaCacheDir() + "/meta_index.bin";
+  return path;
+}
+
 inline const std::string &GetLogFile() {
   static const std::string path = GetSdmcBase() + "/3dslibris.log";
   return path;

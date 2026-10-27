@@ -10,7 +10,7 @@
 
 // Tries to populate title/author/coverImagePath from the disk cache without
 // opening the source file. Returns true on cache hit.
-bool Book::TryLoadMetadataFromCache() {
+bool Book::TryLoadMetadataFromCache(book_meta_cache::Index *index) {
   if (metadataIndexTried)
     return metadataIndexed;
 
@@ -27,8 +27,9 @@ bool Book::TryLoadMetadataFromCache() {
     fmtime = (long long)st.st_mtime;
   }
   book_meta_cache::MetaEntry cached;
-  if (!book_meta_cache::Load(book_meta_cache::BuildPath(path, fsize, fmtime),
-                             &cached))
+  const std::string cache_path = book_meta_cache::BuildPath(path, fsize, fmtime);
+  if (!(index ? index->Load(cache_path, &cached)
+              : book_meta_cache::Load(cache_path, &cached)))
     return false;
 
   if (!cached.title.empty())

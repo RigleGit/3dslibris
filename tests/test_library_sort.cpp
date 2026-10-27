@@ -1,6 +1,7 @@
 #include "app/library_controller.h"
 #include "library/library_sort_mode.h"
 #include "shared/app_flow_utils.h"
+#include "formats/common/book_meta_cache.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -20,7 +21,8 @@ struct Book {
   bool is_folder = false, missing_name = false;
   uint32_t last_opened = 0;
   format_t format = FORMAT_UNDEF;
-  bool TryLoadMetadataFromCache() { return false; }
+  bool metadataIndexTried=false;
+  bool TryLoadMetadataFromCache(book_meta_cache::Index * = nullptr) { return false; }
   bool IsBrowserFolder() const { return is_folder; }
   const char *GetFolderName() const { return folder.c_str(); }
   const char *GetFileName() const { return missing_name ? nullptr : filename.c_str(); }

@@ -1,5 +1,9 @@
 set -eu
 source "$(dirname "$0")/test_build.sh"
+TASK_TMP="$(mktemp -d)"
+trap 'rm -rf "$TASK_TMP"' EXIT
+mkdir -p "$TASK_TMP/sdmc:/3ds/3dslibris/cache/meta"
+cd "$TASK_TMP"
 build_test test_book_meta_cache \
   "$TEST_ROOT/tests/test_book_meta_cache.cpp" \
   "$TEST_ROOT/source/formats/common/book_meta_cache.cpp" \

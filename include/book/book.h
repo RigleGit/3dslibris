@@ -35,6 +35,7 @@ struct fz_document;
 struct fz_display_list;
 struct fz_outline;
 namespace epub_page_cache { class StreamWriter; }
+namespace book_meta_cache { class Index; }
 
 struct ChapterEntry
 {
@@ -366,7 +367,7 @@ public:
   bool SupportsBookmarks() const;
   // Populates title/author/coverImagePath from the disk cache without
   // falling through to a full parse on a miss. Returns true on cache hit.
-  bool TryLoadMetadataFromCache();
+  bool TryLoadMetadataFromCache(book_meta_cache::Index *index = NULL);
   const char *GetFileName(void);
   const char *GetFolderName(void);
   Page *GetPage();

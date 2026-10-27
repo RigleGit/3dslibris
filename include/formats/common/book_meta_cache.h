@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <string>
+#include <map>
 
 // Persistent disk cache for book metadata (title/author + extended fields and
 // cover path).
@@ -42,5 +43,22 @@ bool Load(const std::string &cache_path, MetaEntry *out);
 
 // Creates the cache directory if it does not already exist.
 void EnsureDir();
+
+// Short-lived during library sorting. Keys retain the existing path/size/mtime
+// identity; the full metadata payload preserves later metadata/cover consumers.
+// Resident entries are bounded to 512 KiB and discarded when the sort ends.
+class Index {
+public:
+  Index();
+  ~Index();
+  bool Load(const std::string &cache_path, MetaEntry *out);
+private:
+  std::map<uint64_t, MetaEntry> entries_;
+  size_t bytes_;
+  bool dirty_;
+  void Remember(uint64_t key, const MetaEntry &entry);
+  Index(const Index &) = delete;
+  Index &operator=(const Index &) = delete;
+};
 
 } // namespace book_meta_cache

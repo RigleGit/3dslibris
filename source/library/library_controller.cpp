@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "library/library_sort_mode.h"
+#include "formats/common/book_meta_cache.h"
 #include "library/cover_override_utils.h"
 #include "library/cover_cache.h"
 #include "library/browser_view_utils.h"
@@ -678,10 +679,14 @@ void LibraryController::SortBooks() {
   // These modes compare only filenames or mtimes. Other sorts need cached
   // titles/authors (including their tie-breakers) before ordering the list.
   if (mode != LIBRARY_SORT_FILENAME && mode != LIBRARY_SORT_DATE_MODIFIED) {
+    std::unique_ptr<book_meta_cache::Index> index;
     for (auto book : app_.books) {
       if (!book->IsBrowserFolder() &&
-          app_flow_utils::SupportsMetadataIndexing(book->format))
-        book->TryLoadMetadataFromCache();
+          app_flow_utils::SupportsMetadataIndexing(book->format) &&
+          !book->metadataIndexTried) {
+        if (!index) index.reset(new (std::nothrow) book_meta_cache::Index());
+        book->TryLoadMetadataFromCache(index.get());
+      }
     }
   }
   switch (mode) {
