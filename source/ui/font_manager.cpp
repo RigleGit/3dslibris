@@ -689,6 +689,7 @@ void FontManager::SetFontFile(const char *path, u8 style) {
     // Keep runtime/prefs consistency: do not leave a filename selected when
     // the face could not be created.
     filenames[style] = previous;
+    face_load_attempted_[style] = faces[style] != NULL;
   }
 }
 

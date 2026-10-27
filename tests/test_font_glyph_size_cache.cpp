@@ -66,6 +66,28 @@ int main() {
   const char *fontdir=std::getenv("TEST_ADVANCE_FONT_DIR");
   const char *fallback=std::getenv("TEST_ADVANCE_FALLBACK");
   assert(fontdir && fallback);
+  {
+    Text staged;
+    FontManager configured(&staged);
+    configured.SetFontDir(fontdir);
+    configured.SetFontFile("LiberationSerif-Bold.ttf", TEXT_STYLE_REGULAR);
+    configured.SetPixelSize(16);
+    assert(configured.SetFallbackFile(0, fallback));
+    configured.AutoLoadCjkFallbackFonts();
+    assert(!configured.GetFace(TEXT_STYLE_REGULAR));
+    assert(!configured.Init());
+    const FT_Face selected = configured.GetFace(TEXT_STYLE_REGULAR);
+    assert(selected && (selected->style_flags & FT_STYLE_FLAG_BOLD));
+    assert(selected->size->metrics.y_ppem == 16);
+    assert(configured.GetFallbackFile(0) == fallback);
+    assert(configured.GetFallbackCount() > 0);
+    // Rejecting an invalid setting before mono's first use must leave the
+    // bundled mono face available for its subsequent lazy load.
+    configured.SetFontFile("missing-font.ttf", TEXT_STYLE_MONO);
+    assert(configured.GetFontFile(TEXT_STYLE_MONO) == FONTMONOFILE);
+    const FT_Face mono = configured.GetFace(TEXT_STYLE_MONO);
+    assert(mono && FT_IS_FIXED_WIDTH(mono));
+  }
   Text text;
   FontManager manager(&text);
   manager.SetFontDir(fontdir);
