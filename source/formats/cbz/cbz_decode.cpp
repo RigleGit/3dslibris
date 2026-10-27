@@ -2,6 +2,7 @@
 #include "formats/common/raster_image_decode.h"
 
 #include "formats/common/fixed_layout_screen_constants.h"
+#include "formats/common/fixed_layout_blit_utils.h"
 #include "formats/common/pdf_view_utils.h"
 #include "shared/color_utils.h"
 #include "shared/fixed_layout_perf.h"
@@ -338,74 +339,10 @@ bool ScaleCbzBitmap(const CbzBitmap &src, int dst_width, int dst_height,
   out->height = dst_height;
   out->pixels.assign((size_t)dst_width * (size_t)dst_height, 0);
 
-  if (!high_quality) {
-    // Compute each column once instead of dividing for every pixel on ARM11.
-    // The temporary table costs four bytes per output column, not per pixel.
-    std::vector<int> source_x((size_t)dst_width);
-    for (int x = 0; x < dst_width; x++)
-      source_x[x] = (x * src.width) / dst_width;
-    for (int y = 0; y < dst_height; y++) {
-      const int src_y = (y * src.height) / dst_height;
-      const uint16_t *row = &src.pixels[(size_t)src_y * src.width];
-      uint16_t *dst = &out->pixels[(size_t)y * dst_width];
-      for (int x = 0; x < dst_width; x++)
-        dst[x] = row[source_x[x]];
-    }
-    return true;
-  }
-
-  struct ColumnSample {
-    int x0, x1;
-    float t;
-  };
-  std::vector<ColumnSample> columns((size_t)dst_width);
-  for (int x = 0; x < dst_width; x++) {
-    const float src_xf =
-        (((float)x + 0.5f) * (float)src.width / (float)dst_width) - 0.5f;
-    const float clamped_x =
-        std::max(0.0f, std::min((float)(src.width - 1), src_xf));
-    columns[x].x0 = (int)clamped_x;
-    columns[x].x1 = std::min(src.width - 1, columns[x].x0 + 1);
-    columns[x].t = clamped_x - (float)columns[x].x0;
-  }
-  for (int y = 0; y < dst_height; y++) {
-    const float src_yf =
-        (((float)y + 0.5f) * (float)src.height / (float)dst_height) - 0.5f;
-    const float clamped_y =
-        std::max(0.0f, std::min((float)(src.height - 1), src_yf));
-    const int y0 = (int)clamped_y;
-    const int y1 = std::min(src.height - 1, y0 + 1);
-    const float ty = clamped_y - (float)y0;
-    for (int x = 0; x < dst_width; x++) {
-      const int x0 = columns[x].x0;
-      const int x1 = columns[x].x1;
-      const float tx = columns[x].t;
-
-      int r00 = 0, g00 = 0, b00 = 0;
-      int r10 = 0, g10 = 0, b10 = 0;
-      int r01 = 0, g01 = 0, b01 = 0;
-      int r11 = 0, g11 = 0, b11 = 0;
-
-      UnpackRgb565(src.pixels[(size_t)y0 * (size_t)src.width + (size_t)x0],
-                   &r00, &g00, &b00);
-      UnpackRgb565(src.pixels[(size_t)y0 * (size_t)src.width + (size_t)x1],
-                   &r10, &g10, &b10);
-      UnpackRgb565(src.pixels[(size_t)y1 * (size_t)src.width + (size_t)x0],
-                   &r01, &g01, &b01);
-      UnpackRgb565(src.pixels[(size_t)y1 * (size_t)src.width + (size_t)x1],
-                   &r11, &g11, &b11);
-
-      const float w00 = (1.0f - tx) * (1.0f - ty);
-      const float w10 = tx * (1.0f - ty);
-      const float w01 = (1.0f - tx) * ty;
-      const float w11 = tx * ty;
-
-      out->pixels[(size_t)y * (size_t)dst_width + (size_t)x] =
-          RGB565FromU8(r00 * w00 + r10 * w10 + r01 * w01 + r11 * w11 + 0.5f,
-                       g00 * w00 + g10 * w10 + g01 * w01 + g11 * w11 + 0.5f,
-                       b00 * w00 + b10 * w10 + b01 * w01 + b11 * w11 + 0.5f);
-    }
-  }
+  fixed_layout_blit_utils::BlitRgb565SurfaceScaledCrop(
+      out->pixels.data(), dst_width, dst_width, dst_height,
+      0, 0, dst_width, dst_height, src.pixels.data(), src.pixels.size(),
+      src.width, src.height, 0, 0, src.width, src.height, high_quality);
 
   return true;
 }
