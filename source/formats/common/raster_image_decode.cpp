@@ -151,14 +151,16 @@ bool Target(int source_w, int source_h, int requested_w, int requested_h,
 }
 
 void StorePixel(Bitmap *out,size_t index,float rgb[3],float alpha,const int bg[3]) {
-  for(int c=0;c<3;++c) rgb[c]+=bg[c]*(1.0-alpha/255.0);
+  if (alpha != 255.0f)
+    for(int c=0;c<3;++c) rgb[c]+=bg[c]*(1.0-alpha/255.0);
   out->pixels.get()[index]=RGB565FromU8(rgb[0]+0.5,rgb[1]+0.5,rgb[2]+0.5);
 }
 void StorePixel(ArgbBitmap *out,size_t index,float rgb[3],float alpha,const int[3]) {
   const unsigned a=std::max(0,std::min(255,(int)(alpha+0.5f)));
   uint32_t pixel=a<<24;
   if(alpha>0) for(int c=0;c<3;++c) {
-    const unsigned value=std::max(0,std::min(255,(int)(rgb[c]*255.0f/alpha+0.5f)));
+    const float value_rgb = alpha == 255.0f ? rgb[c] : rgb[c]*255.0f/alpha;
+    const unsigned value=std::max(0,std::min(255,(int)(value_rgb+0.5f)));
     pixel|=value<<((2-c)*8);
   }
   out->pixels.mutable_data()[index]=pixel;
