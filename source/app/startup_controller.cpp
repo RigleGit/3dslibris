@@ -230,6 +230,19 @@ int StartupController::RunBootSequence()
   const int ok = 0;
 
   boot_trace::Boot("startup begin");
+  boot_trace::Boot("startup prefs read begin");
+  const int prefs_read_err = app_.prefs->Read();
+  boot_trace::Boot("startup prefs read done");
+  if (prefs_read_err != 0)
+  {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "warning: prefs read failed (err=%d)",
+             prefs_read_err);
+    app_.PrintStatus(msg);
+  }
+  UiButtonSkin_SetColorMode(app_.colorMode);
+  NormalizeRuntimeAssetPaths(&app_);
+
   printf("Loading fonts...\n");
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(&app_, "DBG BUILD SIG: %s %s", __DATE__, __TIME__);
@@ -316,18 +329,6 @@ int StartupController::RunBootSequence()
            (unsigned)app_.BookCount());
 #endif
 
-  boot_trace::Boot("startup prefs read begin");
-  const int prefs_read_err = app_.prefs->Read();
-  boot_trace::Boot("startup prefs read done");
-  if (prefs_read_err != 0)
-  {
-    char msg[96];
-    snprintf(msg, sizeof(msg), "warning: prefs read failed (err=%d)",
-             prefs_read_err);
-    app_.PrintStatus(msg);
-  }
-  UiButtonSkin_SetColorMode(app_.colorMode);
-  NormalizeRuntimeAssetPaths(&app_);
   DrawBootStatus("Booting", {"Preparing library..."}, false);
   app_.SetOrientation(app_.reader_layout.orientation);
   DBG_LOG(&app_, "Preparing library...");
