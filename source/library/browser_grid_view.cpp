@@ -45,13 +45,13 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
   const int book_count = (int)ctx.books->size();
   for (int i = page_start;
        i < book_count && i < page_start + kPageCapacity; i++) {
-    int page_idx = i % kPageCapacity;
+    int page_idx = i - page_start;
     int col = page_idx % kGridCols;
     int row = page_idx / kGridCols;
     int btnX = kGridX0 + col * kCellW;
     int btnY = kGridY0 + row * kCellH;
 
-    (*ctx.buttons)[i]->Draw(ctx.ts->screenright,
+    (*ctx.buttons)[page_idx]->Draw(ctx.ts->screenright,
                             (*ctx.books)[i] == ctx.selected_book);
 
     const bool has_cover = (*ctx.books)[i]->coverPixels != NULL;

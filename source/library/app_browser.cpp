@@ -355,7 +355,7 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
                (i < app_.BookCount()) &&
                (i < app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT);
                i++) {
-            if (hitsButtonAt(*app_.buttons[i], x, y, 4)) {
+            if (hitsButtonAt(*app_.buttons[i - app_.GetBrowserPageStart()], x, y, 4)) {
               book_idx = i;
               break;
             }
@@ -383,12 +383,20 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
 }
 
 void LibraryController::browser_init(void) {
-  for (int i = 0; i < app_.BookCount(); i++) {
-    int page_idx = i % APP_BROWSER_BUTTON_COUNT;
+  // Buttons represent visible gallery slots, independently of book identity.
+  // Re-initialization can reuse the same slots after a view/layout change.
+  const int button_count = std::min(app_.BookCount(), APP_BROWSER_BUTTON_COUNT);
+  while ((int)app_.buttons.size() > button_count) {
+    delete app_.buttons.back();
+    app_.buttons.pop_back();
+  }
+  for (int i = 0; i < button_count; i++) {
+    int page_idx = i;
     int col = page_idx % browser_grid_view::kGridCols;
     int row = page_idx / browser_grid_view::kGridCols;
 
-    app_.buttons.push_back(new Button());
+    if (i >= (int)app_.buttons.size())
+      app_.buttons.push_back(new Button());
     app_.buttons[i]->Init(app_.ts.get());
     app_.buttons[i]->Resize(browser_grid_view::kCoverW + 4,
                             browser_grid_view::kCoverH + 4);

@@ -18,6 +18,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <memory>
 
 struct Book {
   std::string folder="books", filename="book.epub";
@@ -36,7 +37,19 @@ struct Prefs {
   BrowserViewMode browser_view_mode=BROWSER_VIEW_GALLERY;
   LibrarySortMode library_sort_mode=LIBRARY_SORT_TITLE;
 };
+struct Text {};
+struct Button {
+  void Init(Text *) {}
+  void Resize(int, int) {}
+  void Move(int, int) {}
+  void SetLabel1(const std::string &) {}
+};
+static const int APP_BROWSER_BUTTON_COUNT=browser_grid_view::kPageCapacity;
 struct App {
+  std::unique_ptr<Text> ts{new Text};
+  std::vector<Button *> buttons;
+  Button buttonprev, buttonnext, buttonprefs, buttonback;
+  ~App() { for (auto b : buttons) delete b; }
   Prefs settings; Prefs *prefs=&settings; std::vector<Book *> books;
   Book *selected=nullptr; int page_start=0; bool dirty=false; uint64_t interaction_ms=0;
   int BookCount() const { return (int)books.size(); }
@@ -70,6 +83,9 @@ static const uint8_t kCoverMaxAttempts=cover_cache::kMaxAttempts;
 static struct Marquee { int resets=0; void Reset() { ++resets; } } g_marquee;
 struct LibraryController {
   App &app_; Book *prioritized=nullptr;
+  bool browser_assets_pending_=false;
+  void LayoutBrowserNavButtons() {}
+  void browser_init();
   std::deque<app_job_t> job_queue_;
   explicit LibraryController(App &app): app_(app) {}
   void PrioritizeSelectedBookJobs(Book *book) { prioritized=book; }
@@ -139,6 +155,28 @@ static void TestBrowserPagesLoadOnlyVisibleCovers() {
   app.books.clear(); controller.LoadVisibleBrowserCoverCaches();
   controller.browser_nextpage(); controller.browser_prevpage();
 }
+static void TestBrowserButtonsStayBounded() {
+  std::vector<Book> storage(300);
+  App app; LibraryController controller(app);
+  for (int count : {0, 1, 3, 4, 300}) {
+    app.books.clear();
+    for (int i=0; i<count; ++i) app.books.push_back(&storage[i]);
+    app.selected=count ? &storage[count-1] : nullptr;
+    controller.browser_init();
+    assert(app.buttons.size()==(size_t)std::min(count, APP_BROWSER_BUTTON_COUNT));
+    const auto slots=app.buttons;
+    controller.browser_init();
+    assert(app.buttons==slots); // Re-entering/reconfiguring reuses the same objects.
+    assert(app.page_start==(count ? (count-1)/APP_BROWSER_BUTTON_COUNT*APP_BROWSER_BUTTON_COUNT : 0));
+  }
+  const auto slots=app.buttons;
+  app.settings.browser_view_mode=BROWSER_VIEW_LIST;
+  controller.browser_init();
+  assert(app.page_start==294 && app.selected==&storage[299] && app.buttons==slots);
+  app.settings.browser_view_mode=BROWSER_VIEW_GALLERY;
+  controller.browser_init();
+  assert(app.page_start==296 && app.selected==&storage[299] && app.buttons==slots);
+}
 static void TestBrowserPresentationAndStoredPolicy() {
   // Use public wrappers and their production geometry, not copied dimensions.
   using namespace browser_grid_view;
@@ -190,6 +228,7 @@ static void TestBrowserPresentationAndStoredPolicy() {
   assert(!browser_cover_cache_utils::VisibleBookNeedsBrowserRedraw(visible, 8));
 }
 int main() {
+  TestBrowserButtonsStayBounded();
   TestBrowserPagesLoadOnlyVisibleCovers();
   TestBrowserPresentationAndStoredPolicy();
   BrowserNavState state{0, 0};
