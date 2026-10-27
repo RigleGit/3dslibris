@@ -304,6 +304,7 @@ int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
     auto evicted =
         face_cache->cacheMap.find(evicted_key);
     if (evicted != face_cache->cacheMap.end()) {
+      face_cache->ForgetLatin1(evicted_key);
       delete[] evicted->second->bitmap.buffer;
       delete evicted->second;
       face_cache->cacheMap.erase(evicted);
@@ -327,7 +328,8 @@ int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
   dst->bitmap_top = src->bitmap_top;
   dst->bitmap_left = src->bitmap_left;
   dst->advance = src->advance;
-  face_cache->cacheMap.insert(std::make_pair(cache_key, dst));
+  const auto inserted = face_cache->cacheMap.insert(std::make_pair(cache_key, dst));
+  face_cache->RememberLatin1(ucs, cache_key, inserted.first->second);
   return ucs;
 }
 
@@ -363,12 +365,13 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
   if (face) {
     Cache *primary_cache = GetFaceCache(face);
     if (primary_cache) {
-      auto fast_iter = primary_cache->cacheMap.find(GlyphCacheKey(ucs, face));
-      if (fast_iter != primary_cache->cacheMap.end()) {
+      const u32 key = GlyphCacheKey(ucs, face);
+      FT_GlyphSlot glyph = primary_cache->FindGlyph(ucs, key);
+      if (glyph) {
         if (parent->tr)
           parent->tr->SetHit(true);
-        primary_cache->lru.Touch(GlyphCacheKey(ucs, face));
-        return fast_iter->second;
+        primary_cache->lru.Touch(key);
+        return glyph;
       }
     }
   }
@@ -407,12 +410,12 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     return face->glyph;
   }
   const u32 cache_key = GlyphCacheKey(ucs, face);
-  auto iter = face_cache->cacheMap.find(cache_key);
-  if (iter != face_cache->cacheMap.end()) {
+  FT_GlyphSlot glyph = face_cache->FindGlyph(ucs, cache_key);
+  if (glyph) {
     if (parent->tr)
       parent->tr->SetHit(true);
     face_cache->lru.Touch(cache_key);
-    return iter->second;
+    return glyph;
   }
 
   if (parent->tr)
@@ -489,6 +492,7 @@ void FontManager::ClearRenderCache(FT_Face face) {
     delete iter->second;
   }
   face_cache->cacheMap.clear();
+  face_cache->latin1_slots.fill(nullptr);
   face_cache->lru.Clear();
 }
 

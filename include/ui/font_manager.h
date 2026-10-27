@@ -33,7 +33,31 @@ class Cache {
 public:
   std::unordered_map<u32, FT_GlyphSlot> cacheMap;
   glyph_cache_lru::GlyphCacheLru lru;
-  Cache() : lru(512) {}
+  std::array<FT_GlyphSlot, 256> latin1_slots;
+  std::array<u32, 256> latin1_keys;
+  Cache() : lru(512), latin1_slots{}, latin1_keys{} {}
+
+  FT_GlyphSlot FindGlyph(u32 ucs, u32 key) {
+    if (ucs < latin1_slots.size() && latin1_slots[ucs] &&
+        latin1_keys[ucs] == key)
+      return latin1_slots[ucs];
+    const auto it = cacheMap.find(key);
+    if (it == cacheMap.end())
+      return nullptr;
+    RememberLatin1(ucs, key, it->second);
+    return it->second;
+  }
+  void RememberLatin1(u32 ucs, u32 key, FT_GlyphSlot slot) {
+    if (ucs < latin1_slots.size()) {
+      latin1_keys[ucs] = key;
+      latin1_slots[ucs] = slot;
+    }
+  }
+  void ForgetLatin1(u32 key) {
+    const u32 ucs = key & 0x00FFFFFFu;
+    if (ucs < latin1_slots.size() && latin1_keys[ucs] == key)
+      latin1_slots[ucs] = nullptr;
+  }
 };
 
 class FontManager {
