@@ -190,16 +190,34 @@ void Convert(const unsigned char *samples, int width, int height, int stride,
     }
     return;
   }
+  struct ColumnSample { int x0, x1; float t; };
+  auto column_sample = [&](int x) -> ColumnSample {
+    const float fx = std::max(0.0f, ((x + 0.5f) * width / out->width) - 0.5f);
+    ColumnSample sample;
+    sample.x0 = std::min(width - 1, (int)fx);
+    sample.x1 = std::min(width - 1, sample.x0 + 1);
+    sample.t = fx - sample.x0;
+    return sample;
+  };
+  // Bound scratch memory even for a very wide, one-row input. Failure keeps
+  // the original per-pixel coordinate calculation available.
+  const size_t kMaxColumnSamples = 4096;
+  image_memory::Buffer<ColumnSample> columns;
+  const bool cached_columns = (size_t)out->width <= kMaxColumnSamples &&
+      columns.resize((size_t)out->width, kMaxColumnSamples * sizeof(ColumnSample));
+  if (cached_columns) {
+    for (int x = 0; x < out->width; ++x)
+      columns.mutable_data()[x] = column_sample(x);
+  }
   for (int y = 0; y < out->height; ++y) {
     const float fy = std::max(0.0f, ((y + 0.5f) * height / out->height) - 0.5f);
     const int y0 = std::min(height - 1, (int)fy),
               y1 = std::min(height - 1, y0 + 1);
     const float ty = fy - y0;
     for (int x = 0; x < out->width; ++x) {
-      const float fx = std::max(0.0f, ((x + 0.5f) * width / out->width) - 0.5f);
-      const int x0 = std::min(width - 1, (int)fx),
-                x1 = std::min(width - 1, x0 + 1);
-      const float tx = fx - x0;
+      const ColumnSample column = cached_columns ? columns[x] : column_sample(x);
+      const int x0 = column.x0, x1 = column.x1;
+      const float tx = column.t;
       const unsigned char *p[4] = {
           samples + (size_t)y0 * stride + (size_t)x0 * components,
           samples + (size_t)y0 * stride + (size_t)x1 * components,
