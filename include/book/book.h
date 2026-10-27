@@ -247,7 +247,7 @@ public:
   int GetStylePublisherHorizontalMarginsOverride() const;
   void SetStylePublisherHorizontalMarginsOverride(int value);
   int GetOrientation();
-  void DrawBottomGradientBackground();
+  bool DrawBottomGradientBackground();
   void DrawTopGradientBackground();
   void NotifySpineProgress(unsigned done, unsigned total);
   inline const std::string &GetAuthor() const { return author; }

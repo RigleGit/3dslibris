@@ -161,8 +161,8 @@ void DrawCbzLoadFailure(Book *book, Text *ts, int page_index,
   ts->PrintString(page_msg);
 
   ts->SetScreen(ts->screenright);
-  ts->ClearScreen();
-  book->DrawBottomGradientBackground();
+  if (!book->DrawBottomGradientBackground())
+    ts->ClearScreen();
   ts->SetPen(12, 28);
   ts->PrintString("image decode failed");
   ts->SetPen(12, 48);
@@ -423,8 +423,8 @@ void DrawCbzPreviewPanel(Book *book, Text *ts,
     return;
 
   ts->SetScreen(ts->screenright);
-  ts->ClearScreen();
-  book->DrawBottomGradientBackground();
+  if (!book->DrawBottomGradientBackground())
+    ts->ClearScreen();
   ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
                (u16)(preview_layout.x + preview_layout.width),
                (u16)(preview_layout.y + preview_layout.height),

@@ -259,9 +259,11 @@ int Book::GetOrientation() {
   return ctx.orientation ? *ctx.orientation : 0;
 }
 
-void Book::DrawBottomGradientBackground() {
-  if (ctx.draw_background)
-    ctx.draw_background(ctx.draw_background_user_data);
+bool Book::DrawBottomGradientBackground() {
+  if (!ctx.draw_background)
+    return false;
+  ctx.draw_background(ctx.draw_background_user_data);
+  return true;
 }
 
 void Book::DrawTopGradientBackground() {

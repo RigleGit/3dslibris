@@ -80,8 +80,8 @@ static void DrawMuPdfLoadFailure(Book *book, Text *ts, int page_index,
   }
 
   ts->SetScreen(ts->screenright);
-  ts->ClearScreen();
-  book->DrawBottomGradientBackground();
+  if (!book->DrawBottomGradientBackground())
+    ts->ClearScreen();
   if (complex_page) {
     ts->SetPen(12, 22);
     ts->PrintString("Page too complex.");
@@ -605,8 +605,8 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   fixed_perf::ViewStage("pdf.blit_main", fixed_perf::Now() - perf_phase);
   perf_phase = fixed_perf::Now();
   ts->SetScreen(ts->screenright);
-  ts->ClearScreen();
-  DrawBottomGradientBackground();
+  if (!DrawBottomGradientBackground())
+    ts->ClearScreen();
   ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
                (u16)(preview_layout.x + preview_layout.width),
                (u16)(preview_layout.y + preview_layout.height), kPdfPaper);
