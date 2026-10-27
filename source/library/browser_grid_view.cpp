@@ -71,21 +71,32 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
       int source_x[kCoverW];
       for (int px = 0; px < draw_w; px++)
         source_x[px] =
-            (int)((long long)px * (*ctx.books)[i]->coverWidth / draw_w);
+            px * (*ctx.books)[i]->coverWidth / draw_w;
       ctx.ts->MarkScreenDirtyRect(ctx.ts->screenright, cx, cy,
                                   cx + draw_w, cy + draw_h);
       for (int py = 0; py < draw_h && (cy + py) < 320; py++) {
-        const int src_y =
-            (int)((long long)py * (long long)(*ctx.books)[i]->coverHeight /
-                  (long long)draw_h);
-        for (int px = 0; px < draw_w && (cx + px) < 240; px++) {
-          if (!browser_grid_geometry_utils::RoundedRectContains(
-                  px, py, draw_w, draw_h, 5))
-            continue;
-          ctx.ts->screenright[(cy + py) * w + (cx + px)] =
-              (*ctx.books)[i]
-                  ->coverPixels[src_y * (*ctx.books)[i]->coverWidth +
-                                source_x[px]];
+        const int src_y = py * (*ctx.books)[i]->coverHeight / draw_h;
+        int left = 0;
+        int right = draw_w;
+        // Rounded corners leave one contiguous span per row.
+        while (left < right &&
+               !browser_grid_geometry_utils::RoundedRectContains(
+                   left, py, draw_w, draw_h, 5))
+          ++left;
+        while (right > left &&
+               !browser_grid_geometry_utils::RoundedRectContains(
+                   right - 1, py, draw_w, draw_h, 5))
+          --right;
+        if (right > 240 - cx)
+          right = 240 - cx;
+        const u16 *src = (*ctx.books)[i]->coverPixels +
+                         src_y * (*ctx.books)[i]->coverWidth;
+        u16 *dst = ctx.ts->screenright + (cy + py) * w + cx;
+        if (draw_w == (*ctx.books)[i]->coverWidth && right > left) {
+          memcpy(dst + left, src + left, (right - left) * sizeof(u16));
+        } else {
+          for (int px = left; px < right; ++px)
+            dst[px] = src[source_x[px]];
         }
       }
     }
