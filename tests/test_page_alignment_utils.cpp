@@ -215,6 +215,7 @@ int main() {
   TestVisualLineWidthNoWordBoundaryHardBreak();
   TestVisualLineWidthSpaceAtOverflowEdge();
   TestVisualLineWidthTracksStyleChanges();
+  TestVisualLineWidthStopsAtParagraphAlignToken();
   TestVisualLineWidthSkipsControlTokens();
   TestVisualLineWidthMultipleWordBoundaries();
   TestBandImageAlignUsesExplicitModeFirst();

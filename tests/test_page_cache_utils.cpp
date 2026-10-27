@@ -139,41 +139,6 @@ void TestBoundedStringRoundTrip() {
   std::remove(tmp_name);
 }
 
-void TestPagesRoundTrip() {
-  char tmp_name[] = "/tmp/3dslibris-page-cache-pages-XXXXXX";
-  FILE *fp = OpenTempFile(tmp_name);
-
-  std::vector<page_cache_utils::CachedPage> pages;
-  pages.push_back(page_cache_utils::CachedPage());
-  pages.push_back(page_cache_utils::CachedPage(3, 0));
-  pages[1][0] = 1;
-  pages[1][1] = 2;
-  pages[1][2] = 3;
-  pages.push_back(page_cache_utils::CachedPage(2, 0));
-  pages[2][0] = 9;
-  pages[2][1] = 8;
-
-  ExpectTrue("write pages", page_cache_utils::WritePages(fp, pages, 4096));
-  ExpectTrue("seek to start", fseek(fp, 0, SEEK_SET) == 0);
-
-  std::vector<page_cache_utils::CachedPage> loaded;
-  ExpectTrue("read pages",
-             page_cache_utils::ReadPages(fp, (uint32_t)pages.size(), 4096,
-                                         &loaded));
-  ExpectSize("page count", loaded.size(), pages.size());
-  ExpectSize("page 0 size", loaded[0].size(), 0);
-  ExpectSize("page 1 size", loaded[1].size(), 3);
-  ExpectEq("page 1 byte 0", loaded[1][0], 1);
-  ExpectEq("page 1 byte 1", loaded[1][1], 2);
-  ExpectEq("page 1 byte 2", loaded[1][2], 3);
-  ExpectSize("page 2 size", loaded[2].size(), 2);
-  ExpectEq("page 2 byte 0", loaded[2][0], 9);
-  ExpectEq("page 2 byte 1", loaded[2][1], 8);
-
-  fclose(fp);
-  std::remove(tmp_name);
-}
-
 void TestChaptersRoundTrip() {
   char tmp_name[] = "/tmp/3dslibris-page-cache-chapters-XXXXXX";
   FILE *fp = OpenTempFile(tmp_name);
@@ -230,24 +195,6 @@ void TestClampString() {
            page_cache_utils::ClampString("", 10), std::string(""));
 }
 
-void TestTruncatedPagesRead() {
-  char tmp_name[] = "/tmp/3dslibris-page-cache-trunc-pages-XXXXXX";
-  FILE *fp = OpenTempFile(tmp_name);
-
-  std::vector<page_cache_utils::CachedPage> pages;
-  pages.push_back(page_cache_utils::CachedPage(2, 0));
-  pages[0][0] = 10; pages[0][1] = 20;
-  ExpectTrue("write 1 page", page_cache_utils::WritePages(fp, pages, 4096));
-  ExpectTrue("seek to start", fseek(fp, 0, SEEK_SET) == 0);
-
-  std::vector<page_cache_utils::CachedPage> loaded;
-  ExpectFalse("read more pages than written fails",
-              page_cache_utils::ReadPages(fp, 5, 4096, &loaded));
-
-  fclose(fp);
-  std::remove(tmp_name);
-}
-
 void TestTruncatedChaptersRead() {
   char tmp_name[] = "/tmp/3dslibris-page-cache-trunc-chap-XXXXXX";
   FILE *fp = OpenTempFile(tmp_name);
@@ -261,24 +208,6 @@ void TestTruncatedChaptersRead() {
   std::vector<page_cache_utils::CachedChapter> loaded;
   ExpectFalse("read truncated chapter fails",
               page_cache_utils::ReadChapters(fp, 1, 2048, &loaded));
-
-  fclose(fp);
-  std::remove(tmp_name);
-}
-
-void TestEmptyPagesRoundTrip() {
-  std::vector<page_cache_utils::CachedPage> empty;
-  // WritePages with empty vector writes nothing — ReadPages(count=0) should succeed
-  char tmp_name[] = "/tmp/3dslibris-page-cache-empty-XXXXXX";
-  FILE *fp = OpenTempFile(tmp_name);
-
-  ExpectTrue("write 0 pages", page_cache_utils::WritePages(fp, empty, 4096));
-  ExpectTrue("seek to start", fseek(fp, 0, SEEK_SET) == 0);
-
-  std::vector<page_cache_utils::CachedPage> loaded;
-  ExpectTrue("read 0 pages ok",
-             page_cache_utils::ReadPages(fp, 0, 4096, &loaded));
-  ExpectSize("0 pages loaded", loaded.size(), 0);
 
   fclose(fp);
   std::remove(tmp_name);
@@ -300,13 +229,10 @@ int main() {
   TestEffectiveLayoutKeepsExistingCacheKey();
   TestBuildPathVariantToken();
   TestBoundedStringRoundTrip();
-  TestPagesRoundTrip();
   TestChaptersRoundTrip();
   TestRawStringRoundTrip();
   TestClampString();
-  TestTruncatedPagesRead();
   TestTruncatedChaptersRead();
-  TestEmptyPagesRoundTrip();
   TestBuildPathDifferentBookPaths();
   return 0;
 }

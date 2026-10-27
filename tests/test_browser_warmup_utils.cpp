@@ -53,15 +53,32 @@ void TestWarmupRequiresIdleDelay() {
                  browser_warmup_utils::kBrowserWarmupIdleDelayMs, 0, false));
 }
 
-void TestHeavyWarmupRequiresLongerIdleDelay() {
-  ExpectFalse("heavy below threshold",
-              browser_warmup_utils::IsBrowserHeavyWarmupIdle(
-                  browser_warmup_utils::kBrowserHeavyWarmupIdleDelayMs - 1, 0,
-                  false));
-  ExpectTrue("heavy at threshold",
-             browser_warmup_utils::IsBrowserHeavyWarmupIdle(
-                 browser_warmup_utils::kBrowserHeavyWarmupIdleDelayMs, 0,
-                 false));
+void TestHeavyWarmupIdleForDevice() {
+  struct Case {
+    bool is_new_3ds;
+    uint64_t elapsed_ms;
+    bool expected_idle;
+  };
+  const Case cases[] = {
+      {false, 599, false}, {false, 600, false},
+      {false, 1199, false}, {false, 1200, true},
+      {true, 599, false}, {true, 600, true},
+      {true, 1199, true}, {true, 1200, true}};
+  for (const Case &row : cases) {
+    const bool idle = browser_warmup_utils::IsBrowserHeavyWarmupIdleForDevice(
+        row.is_new_3ds, 1000 + row.elapsed_ms, 1000, false);
+    if (idle != row.expected_idle)
+      Fail(std::string(row.is_new_3ds ? "New3DS" : "Old3DS") +
+           " heavy warmup after " + std::to_string(row.elapsed_ms) + " ms");
+  }
+  for (bool is_new_3ds : {false, true}) {
+    ExpectFalse("heavy warmup rejects clock rollback",
+                browser_warmup_utils::IsBrowserHeavyWarmupIdleForDevice(
+                    is_new_3ds, 999, 1000, false));
+    ExpectFalse("release wait blocks heavy warmup after either delay",
+                browser_warmup_utils::IsBrowserHeavyWarmupIdleForDevice(
+                    is_new_3ds, 2200, 1000, true));
+  }
 }
 
 void TestWarmupRejectsWrappedClock() {
@@ -183,7 +200,7 @@ int main() {
   TestWarmupBlockedDuringReleaseWait();
   TestReleaseWaitCanBeForcedClearAfterTimeout();
   TestWarmupRequiresIdleDelay();
-  TestHeavyWarmupRequiresLongerIdleDelay();
+  TestHeavyWarmupIdleForDevice();
   TestWarmupRejectsWrappedClock();
   TestVisibleBrowserEntryCount();
   TestSelectedCoverWarmupUsesShortIdle();

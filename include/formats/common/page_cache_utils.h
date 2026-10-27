@@ -63,11 +63,6 @@ bool WriteLengthPrefixedString16(FILE *fp, const std::string &value,
 bool ReadLengthPrefixedString16(FILE *fp, uint16_t max_bytes, bool allow_empty,
                                 std::string *out);
 
-bool WritePages(FILE *fp, const std::vector<CachedPage> &pages,
-                uint16_t max_page_codepoints);
-bool ReadPages(FILE *fp, uint32_t count, uint16_t max_page_codepoints,
-               std::vector<CachedPage> *pages);
-
 bool WriteChapters(FILE *fp, const std::vector<CachedChapter> &chapters,
                    uint16_t max_title_bytes);
 bool ReadChapters(FILE *fp, uint32_t count, uint16_t max_title_bytes,

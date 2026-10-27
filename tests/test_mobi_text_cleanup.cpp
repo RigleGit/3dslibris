@@ -32,11 +32,18 @@ int main() {
               RepairCommonMojibake("as\xc3\x83\xc2\xad como"),
               "as\xc3\xad como");
 
-  ExpectEqual("preserving wrapper matches plain mojibake cleanup without tokens",
+  // Image IDs are opaque bytes. These IDs resemble the start of mojibake,
+  // which must not be repaired together with text following the image.
+  ExpectEqual("repairs prose without changing bare or contextual image tokens",
               RepairCommonMojibakePreservingMobiImageTokens(
-                  "coraz\xc3\x83\xc2\xb3n, religi\xc3\x83\xc2\xb3n"),
-              RepairCommonMojibake(
-                  "coraz\xc3\x83\xc2\xb3n, religi\xc3\x83\xc2\xb3n"));
+                  "coraz\xc3\x83\xc2\xb3n "
+                  "\x06\xc3\x83" "\xc2\xb3 y "
+                  "religi\xc3\x83\xc2\xb3n "
+                  "\x07\x06\xc3\x83" "\xc2\xb3"),
+              "coraz\xc3\xb3n "
+              "\x06\xc3\x83" "\xc2\xb3 y "
+              "religi\xc3\xb3n "
+              "\x07\x06\xc3\x83" "\xc2\xb3");
 
   ExpectEqual("keeps utf8 acute letter when merging wraps",
               FixBrokenParagraphWraps(
@@ -65,14 +72,18 @@ int main() {
                                       "Segunda idea independiente."),
               "Primera idea completa.\n\nSegunda idea independiente.");
 
-  ExpectEqual("preserving wrapper matches plain wrap cleanup without tokens",
+  // The two image-ID bytes are a newline and a space; treating the token as
+  // prose would consume them while joining or trimming paragraph fragments.
+  ExpectEqual("merges prose wraps while preserving image ID whitespace",
               FixBrokenParagraphWrapsPreservingMobiImageTokens(
                   "encontrado solo el reflejo de si mismo\n\n"
                   "en la fantastica realidad del\n\n"
-                  "cielo, donde buscaba un superhombre"),
-              FixBrokenParagraphWraps(
-                  "encontrado solo el reflejo de si mismo\n\n"
-                  "en la fantastica realidad del\n\n"
-                  "cielo, donde buscaba un superhombre"));
+                  "cielo, donde buscaba un superhombre\n\n"
+                  "\x07\x06\x0a\x20"
+                  "\n\nOtro parrafo completo."),
+              "encontrado solo el reflejo de si mismo en la fantastica realidad "
+              "del cielo, donde buscaba un superhombre\n\n"
+              "\x07\x06\x0a\x20"
+              "\n\nOtro parrafo completo.");
   return 0;
 }

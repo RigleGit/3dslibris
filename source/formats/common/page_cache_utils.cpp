@@ -138,50 +138,6 @@ bool ReadLengthPrefixedString16(FILE *fp, uint16_t max_bytes, bool allow_empty,
   return ReadRawString(fp, length, out);
 }
 
-bool WritePages(FILE *fp, const std::vector<CachedPage> &pages,
-                uint16_t max_page_codepoints) {
-  if (!fp)
-    return false;
-
-  for (size_t i = 0; i < pages.size(); i++) {
-    const CachedPage &page = pages[i];
-    if (page.size() > max_page_codepoints)
-      return false;
-    const uint16_t length = (uint16_t)page.size();
-    if (fwrite(&length, 1, sizeof(length), fp) != sizeof(length))
-      return false;
-    if (!page.empty()) {
-      const size_t byte_count = page.size() * sizeof(uint32_t);
-      if (fwrite(page.data(), 1, byte_count, fp) != byte_count)
-        return false;
-    }
-  }
-  return true;
-}
-
-bool ReadPages(FILE *fp, uint32_t count, uint16_t max_page_codepoints,
-               std::vector<CachedPage> *pages) {
-  if (!fp || !pages)
-    return false;
-
-  pages->clear();
-  pages->reserve(count);
-  for (uint32_t i = 0; i < count; i++) {
-    uint16_t length = 0;
-    if (fread(&length, 1, sizeof(length), fp) != sizeof(length) ||
-        length > max_page_codepoints) {
-      return false;
-    }
-
-    CachedPage page(length);
-    const size_t byte_count = (size_t)length * sizeof(uint32_t);
-    if (length > 0 && fread(page.data(), 1, byte_count, fp) != byte_count)
-      return false;
-    pages->push_back(page);
-  }
-  return true;
-}
-
 bool WriteChapters(FILE *fp, const std::vector<CachedChapter> &chapters,
                    uint16_t max_title_bytes) {
   if (!fp)

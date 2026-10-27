@@ -122,14 +122,6 @@ inline ReadingScreenMetrics ResolveReadingScreenMetricsForOrientation(
       left_bottom_margin, right_bottom_margin);
 }
 
-// Logical height of a reading screen for the given orientation.
-inline int ReadingScreenHeightPxForOrientation(unsigned char orientation,
-                                               int reading_screen_index) {
-  if (orientation_utils::IsLandscape(orientation))
-    return kLandscapeReadingScreenHeightPx;
-  return ReadingScreenHeightPx(reading_screen_index);
-}
-
 inline bool WouldOverflowReadingScreen(int pen_y, int line_height,
                                        int line_spacing, int max_height,
                                        int bottom_margin) {

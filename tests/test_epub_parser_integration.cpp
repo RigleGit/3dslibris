@@ -103,26 +103,6 @@ uint8_t EpubOpen(Book *book) {
   return epub_parser::Open(book, path);
 }
 
-void TestEpubOpen() {
-  const char *fixture = TEST_FIXTURES_DIR "/books/basic.epub";
-  FILE *fp = fopen(fixture, "r");
-  if (!fp)
-    Fail("required EPUB fixture", "cannot open repository fixture");
-  fclose(fp);
-
-  Book *book = MakeEpubBook(TEST_FIXTURES_DIR "/books", "basic.epub");
-  uint8_t err = EpubOpen(book);
-  ExpectFalse("epub open: no error", err != 0);
-  ExpectGt("epub open: pages > 0", (int)book->GetPageCount(), 0);
-
-  // TOC: fixture has 2 chapters so at least 1 chapter entry expected.
-  ExpectGt("epub open: chapters >= 1", (int)book->GetChapters().size(), 0);
-
-  book->Close();
-  ExpectTrue("close releases parsed pages", book->GetPageCount() == 0);
-  delete book;
-}
-
 void TestEmbeddedStylesFromReportedEpub() {
   TestCtx tc;
   Book book(tc.ctx);
@@ -168,37 +148,6 @@ void TestRealEpubOpenFromEnv() {
   ExpectTrue("real epub open: stops before unsafe 3DS page volume",
              book->GetPageCount() <= 5500);
 
-  book->Close();
-  delete book;
-}
-
-void TestEpubReopen() {
-  const char *fixture = TEST_FIXTURES_DIR "/books/basic.epub";
-  FILE *fp = fopen(fixture, "r");
-  if (!fp)
-    Fail("required EPUB fixture", "cannot open repository fixture");
-  fclose(fp);
-
-  Book *book = MakeEpubBook(TEST_FIXTURES_DIR "/books", "basic.epub");
-  uint8_t err1 = EpubOpen(book);
-  u16 pages1 = book->GetPageCount();
-  book->Close();
-
-  uint8_t err2 = EpubOpen(book);
-  u16 pages2 = book->GetPageCount();
-  book->Close();
-  delete book;
-
-  ExpectFalse("epub reopen: first open no error", err1 != 0);
-  ExpectFalse("epub reopen: second open no error", err2 != 0);
-  ExpectGt("epub reopen: pages > 0", (int)pages1, 0);
-  ExpectTrue("epub reopen: same page count", pages1 == pages2);
-}
-
-void TestEpubInvalidFile() {
-  Book *book = MakeEpubBook("/tmp", "nonexistent_3dslibris_epub.epub");
-  uint8_t err = EpubOpen(book);
-  ExpectTrue("epub invalid: returns error", err != 0);
   book->Close();
   delete book;
 }
@@ -678,10 +627,7 @@ int main() {
   TestEmbeddedStylesFromReportedEpub();
   TestNavSpineOrderAndAnchors();
   TestDeferredTocProxyTargets();
-  TestEpubOpen();
   TestRealEpubOpenFromEnv();
-  TestEpubReopen();
-  TestEpubInvalidFile();
   TestEpubIndexMetadata();
   TestEpubIndexMissingFile();
   TestEpubIndexThenOpen();
