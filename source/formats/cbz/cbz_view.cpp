@@ -288,6 +288,7 @@ bool EnsureCbzPreviewCache(Book::CbzState *cbz_state, int page_index) {
   PromoteCbzAdjacentSlotIfMatching(cbz_state, page_index);
   if (CbzPreviewCacheValid(cbz_state->current_preview, page_index))
     return true;
+  cbz_state->preview_panel.valid = false;
   // Synchronous drawing needs both caches before presenting. Decode once at
   // the requested zoom so the preview and interactive view share the source.
   const int source_zoom = debug_runtime::ForceSynchronousCbzDecode()
@@ -419,37 +420,12 @@ bool BlitCbzCacheViewport(Text *ts, u16 *screen, int logical_height,
 }
 
 void DrawCbzPreviewPanel(Book *book, Text *ts,
-                         const Book::CbzState *cbz_state,
+                         Book::CbzState *cbz_state,
                          int page_index,
                          const pdf_view_utils::PreviewLayout &preview_layout,
                          const pdf_view_utils::NormalizedRect &viewport) {
   if (!book || !ts || !cbz_state)
     return;
-
-  ts->SetScreen(ts->screenright);
-  if (!book->DrawBottomGradientBackground())
-    ts->ClearScreen();
-  else
-    ts->MarkScreenDirty(ts->screenright);
-  if (CbzPreviewCacheValid(cbz_state->current_preview, page_index)) {
-    fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
-        ts, ts->screenright, cbz_state->target_bottom_height,
-        preview_layout.x, preview_layout.y, preview_layout.width,
-        preview_layout.height, cbz_state->current_preview.pixels,
-        cbz_state->current_preview.bitmap_width,
-        cbz_state->current_preview.bitmap_height, 0, 0,
-        cbz_state->current_preview.bitmap_width,
-        cbz_state->current_preview.bitmap_height, true);
-  } else {
-    ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
-                 (u16)(preview_layout.x + preview_layout.width),
-                 (u16)(preview_layout.y + preview_layout.height),
-                 fixed_layout_preview::kPaper);
-  }
-  ts->DrawRect((u16)preview_layout.x, (u16)preview_layout.y,
-               (u16)(preview_layout.x + preview_layout.width),
-               (u16)(preview_layout.y + preview_layout.height),
-               fixed_layout_preview::kFrame);
 
   const int viewport_x =
       preview_layout.x + (int)(viewport.left * preview_layout.width + 0.5f);
@@ -459,10 +435,16 @@ void DrawCbzPreviewPanel(Book *book, Text *ts,
       std::max(1, (int)(viewport.width * preview_layout.width + 0.5f));
   const int viewport_h =
       std::max(1, (int)(viewport.height * preview_layout.height + 0.5f));
-  ts->DrawRect((u16)viewport_x, (u16)viewport_y,
-               (u16)(viewport_x + viewport_w),
-               (u16)(viewport_y + viewport_h),
-               fixed_layout_preview::kViewportAccent);
+  const fixed_layout_preview_panel::Rect viewport_rect = {
+      viewport_x, viewport_y, viewport_w, viewport_h};
+  fixed_layout_preview_panel::Draw(
+      book, ts, &cbz_state->preview_panel,
+      cbz_state->current_preview.pixels.data(),
+      cbz_state->current_preview.pixels.size(),
+      cbz_state->current_preview.bitmap_width,
+      cbz_state->current_preview.bitmap_height,
+      page_index, cbz_state->viewport.zoom_index,
+      ts->IsWideTopScreenActive(), preview_layout, viewport_rect);
 }
 
 bool HasCbzNeighborPending(const Book::CbzState *cbz_state, int page_index) {
@@ -493,6 +475,7 @@ void Book::ResetCbzTransientViewState(bool restart_worker) {
   if (!IsCbz() || !cbz_state)
     return;
 
+  cbz_state->preview_panel.valid = false;
   cbz_state->viewport.interaction_active = false;
   cbz_state->preload_pending = false;
   cbz_state->viewport.center_x = 0.5f;
@@ -555,7 +538,10 @@ void Book::DrawCurrentCbzView(Text *ts) {
   if (cbz_state->current_interactive.page != page_index)
     ResetCbzBitmapCache(&cbz_state->current_interactive);
 
+  if (!CbzPreviewCacheValid(cbz_state->current_preview, page_index))
+    cbz_state->preview_panel.valid = false;
   if (!EnsureCbzPreviewCache(cbz_state, page_index)) {
+    cbz_state->preview_panel.valid = false;
     IStatusReporter *reporter = GetStatusReporter();
     if (reporter && cbz_state->failed_page == page_index &&
         cbz_state->logged_failed_page != page_index) {

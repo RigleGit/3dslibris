@@ -27,10 +27,12 @@ public:
   struct { int width, height; } display;
   int linespacing;
   bool linebegan, bold, italic;
+  u64 screenright_cache_generation = 1;
   bool screenleft_dirty, screenright_dirty;
 
   // Opt-in recording for tests that exercise the real Page::Draw loop.
   bool capture_rendered_text = false;
+  mutable unsigned advance_calls = 0;
   bool landscape = false;
   int pen_x = 0, pen_y = 0;
   std::string rendered_ascii;

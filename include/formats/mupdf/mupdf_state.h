@@ -2,6 +2,7 @@
 
 #include "book/book.h"
 #include "formats/common/fixed_layout_bitmap_cache.h"
+#include "formats/common/fixed_layout_preview_panel.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "shared/app_flow_utils.h"
 #include "shared/status_reporter.h"
@@ -113,6 +114,7 @@ struct Book::MuPdfState {
   bool keep_tile_cache;
   fixed_layout_viewport_utils::ViewportState viewport;
   BitmapCache current_preview;
+  fixed_layout_preview_panel::State preview_panel;
   BitmapCache current_interactive_tile;
   BitmapCache current_final_zoom;
   bool final_cache_pending;
@@ -139,7 +141,7 @@ struct Book::MuPdfState {
         document_kind(app_flow_utils::MuPdfDocumentKind::Unknown),
         keep_preview_cache(true), keep_tile_cache(false),
         viewport(),
-        current_preview(), current_interactive_tile(), current_final_zoom(),
+        current_preview(), preview_panel(), current_interactive_tile(), current_final_zoom(),
         final_cache_pending(false), cached_display_list(NULL),
         cached_display_list_page(-1), prev_slot(), next_slot(), incremental(),
         worker(NULL), worker_init_attempted(false), reporter(NULL),

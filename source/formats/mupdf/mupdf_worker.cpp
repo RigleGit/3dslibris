@@ -65,6 +65,7 @@ void ReleaseMuPdfMemoryForSuspendImpl(Book::MuPdfState *mupdf_state) {
   // touches the bitmaps cleared below — it only writes job_pixel_buf, which
   // aliases incremental.partial_pixels.)
   CancelMuPdfIncrementalRenderState(mupdf_state);
+  mupdf_state->preview_panel.valid = false;
   ReleaseBitmapCacheMemory(&mupdf_state->current_preview);
   ReleaseBitmapCacheMemory(&mupdf_state->current_interactive_tile);
   ReleaseBitmapCacheMemory(&mupdf_state->current_final_zoom);
@@ -175,6 +176,7 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
   PromoteMuPdfAdjacentSlotIfMatching(mupdf_state, page_index);
   if (BitmapCacheValid(mupdf_state->current_preview, page_index))
     return true;
+  mupdf_state->preview_panel.valid = false;
 
   RenderedMuPdfBitmap rendered;
   float page_width = mupdf_state->page_width;

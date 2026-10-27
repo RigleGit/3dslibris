@@ -441,10 +441,13 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
 
   fixed_perf::ViewStage("pdf.prepare", fixed_perf::Now() - perf_phase);
   perf_phase = fixed_perf::Now();
+  if (!BitmapCacheValid(mupdf_state->current_preview, page_index))
+    mupdf_state->preview_panel.valid = false;
   const bool preview_ok = EnsureCurrentMuPdfPreviewCache(mupdf_state, page_index);
   fixed_perf::ViewStage("pdf.ensure_preview", fixed_perf::Now() - perf_phase,
                         preview_ok ? 1 : 0);
   if (!preview_ok) {
+    mupdf_state->preview_panel.valid = false;
     IStatusReporter *reporter = GetStatusReporter();
     if (reporter) {
       DBG_LOGF_CAT(reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
@@ -606,36 +609,6 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   }
   fixed_perf::ViewStage("pdf.blit_main", fixed_perf::Now() - perf_phase);
   perf_phase = fixed_perf::Now();
-  ts->SetScreen(ts->screenright);
-  if (!DrawBottomGradientBackground())
-    ts->ClearScreen();
-  else
-    ts->MarkScreenDirty(ts->screenright);
-
-  fixed_perf::ViewStage("pdf.preview_background", fixed_perf::Now() - perf_phase);
-  perf_phase = fixed_perf::Now();
-  if (!mupdf_state->current_preview.pixels.empty() &&
-      mupdf_state->current_preview.bitmap_width > 0 &&
-      mupdf_state->current_preview.bitmap_height > 0) {
-    fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
-        ts, ts->screenright, mupdf_state->target_bottom_height, preview_layout.x,
-        preview_layout.y, preview_layout.width, preview_layout.height,
-        mupdf_state->current_preview.pixels,
-        mupdf_state->current_preview.bitmap_width,
-        mupdf_state->current_preview.bitmap_height, 0, 0,
-        mupdf_state->current_preview.bitmap_width,
-        mupdf_state->current_preview.bitmap_height, true);
-  } else {
-    ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
-                 (u16)(preview_layout.x + preview_layout.width),
-                 (u16)(preview_layout.y + preview_layout.height), kPdfPaper);
-  }
-  fixed_perf::ViewStage("pdf.blit_preview", fixed_perf::Now() - perf_phase);
-  perf_phase = fixed_perf::Now();
-  ts->DrawRect((u16)preview_layout.x, (u16)preview_layout.y,
-               (u16)(preview_layout.x + preview_layout.width),
-               (u16)(preview_layout.y + preview_layout.height), kPdfFrame);
-
   const int viewport_x = preview_layout.x +
                          (int)(std::max(0.0f, viewport.left) * preview_layout.width + 0.5f);
   const int viewport_y = preview_layout.y +
@@ -644,8 +617,18 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
       1, (int)(std::min(1.0f, viewport.width) * preview_layout.width + 0.5f));
   const int viewport_h = std::max(
       1, (int)(std::min(1.0f, viewport.height) * preview_layout.height + 0.5f));
-  ts->DrawRect((u16)viewport_x, (u16)viewport_y, (u16)(viewport_x + viewport_w),
-               (u16)(viewport_y + viewport_h), kPdfAccent);
+  const fixed_layout_preview_panel::Rect viewport_rect = {
+      viewport_x, viewport_y, viewport_w, viewport_h};
+  fixed_layout_preview_panel::Draw(
+      this, ts, &mupdf_state->preview_panel,
+      mupdf_state->current_preview.PixelData(),
+      mupdf_state->current_preview.PixelCount(),
+      mupdf_state->current_preview.bitmap_width,
+      mupdf_state->current_preview.bitmap_height,
+      page_index, mupdf_state->viewport.zoom_index, wide,
+      preview_layout, viewport_rect);
+  fixed_perf::ViewStage("pdf.preview_panel", fixed_perf::Now() - perf_phase);
+  perf_phase = fixed_perf::Now();
   ts->SetStyle(saved_style);
   ts->SetColorMode(saved_color);
   ts->SetScreen(saved_screen);

@@ -2,6 +2,7 @@
 
 #include "book/book.h"
 #include "formats/common/fixed_layout_bitmap_cache.h"
+#include "formats/common/fixed_layout_preview_panel.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "formats/cbz/cbz_types.h"
 #include "formats/cbz/cbz_archive.h"
@@ -79,6 +80,7 @@ struct Book::CbzState {
   float page_height;
   PageBitmap current_source;
   BitmapCache current_preview;
+  fixed_layout_preview_panel::State preview_panel;
   BitmapCache current_interactive;
   AdjacentSlot prev_slot;
   AdjacentSlot next_slot;
@@ -95,7 +97,7 @@ struct Book::CbzState {
         page_count(0), is_new_3ds(false),
         viewport(), page_width(1.0f), page_height(1.0f),
         current_source(),
-        current_preview(), current_interactive(), prev_slot(), next_slot(),
+        current_preview(), preview_panel(), current_interactive(), prev_slot(), next_slot(),
         worker(NULL), worker_init_attempted(false), preload_pending(false),
         failed_page(-1), logged_failed_page(-1), last_error() {}
 };

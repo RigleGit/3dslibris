@@ -35,6 +35,7 @@ struct Book {
     fz_document *doc = &document;
     IStatusReporter *reporter = nullptr;
     Cache current_preview, current_interactive_tile, current_final_zoom;
+    struct { bool valid = false; } preview_panel;
     Cache prev_slot, next_slot;
     bool final_cache_pending = true;
     float page_width = 600, page_height = 900;
@@ -87,10 +88,13 @@ int main() {
   assert(s.current_interactive_tile.page == -1 && s.current_final_zoom.page == -1);
   assert(cancels > 0 && !s.final_cache_pending);
 
+  s.preview_panel.valid = true;
   assert(EnsureCurrentMuPdfPreviewCache(&s, 0) && renders == 1);
+  assert(s.preview_panel.valid && "unchanged preview must preserve the displayed panel");
   // Rebuilding just the bitmap (e.g. geometry) can reuse the same list.
   s.current_preview.page = -1;
   assert(EnsureCurrentMuPdfPreviewCache(&s, 0) && builds == 1);
+  assert(!s.preview_panel.valid && "regenerated pixels must invalidate the displayed panel");
   events.clear();
   assert(EnsureCurrentMuPdfPreviewCache(&s, 1) && builds == 2 && drops == 1);
   assert((events == std::vector<std::string>{"cancel", "drop", "render"}));

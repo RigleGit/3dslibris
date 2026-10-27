@@ -26,7 +26,9 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
                                 int src_width, int src_height,
                                 int crop_x, int crop_y,
                                 int crop_width, int crop_height,
-                                bool high_quality_filter) {
+                                bool high_quality_filter,
+                                int clip_x0, int clip_y0,
+                                int clip_x1, int clip_y1) {
   if (!screen || !pixels || draw_width <= 0 || draw_height <= 0 ||
       src_width <= 0 || src_height <= 0 || crop_width <= 0 ||
       crop_height <= 0) {
@@ -42,15 +44,23 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
   crop_width = std::max(1, std::min(src_width - crop_x, crop_width));
   crop_height = std::max(1, std::min(src_height - crop_y, crop_height));
 
+  // Clip destination writes without changing the original sampling grid.
+  clip_x0 = std::max(0, clip_x0);
+  clip_y0 = std::max(0, clip_y0);
+  clip_x1 = std::min(logical_width, clip_x1);
+  clip_y1 = std::min(logical_height, clip_y1);
+  if (clip_x0 >= clip_x1 || clip_y0 >= clip_y1)
+    return;
+
   if (crop_width == draw_width && crop_height == draw_height) {
-    const int col0 = std::max(0, -x);
-    const int col1 = std::min(draw_width, logical_width - x);
+    const int col0 = std::max(0, clip_x0 - x);
+    const int col1 = std::min(draw_width, clip_x1 - x);
     if (col0 >= col1)
       return;
     const size_t copy_bytes = (size_t)(col1 - col0) * sizeof(u16);
     for (int row = 0; row < draw_height; row++) {
       const int dy = y + row;
-      if (dy < 0 || dy >= logical_height)
+      if (dy < clip_y0 || dy >= clip_y1)
         continue;
       const int src_y = crop_y + row;
       const int src_x = crop_x + col0;
@@ -62,10 +72,10 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
     return;
   }
 
-  const int col0 = std::max(0, -x);
-  const int col1 = std::min(draw_width, logical_width - x);
-  const int row0 = std::max(0, -y);
-  const int row1 = std::min(draw_height, logical_height - y);
+  const int col0 = std::max(0, clip_x0 - x);
+  const int col1 = std::min(draw_width, clip_x1 - x);
+  const int row0 = std::max(0, clip_y0 - y);
+  const int row1 = std::min(draw_height, clip_y1 - y);
   if (col0 >= col1 || row0 >= row1)
     return;
 
