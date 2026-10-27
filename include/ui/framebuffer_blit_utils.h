@@ -209,6 +209,11 @@ inline void CopyLogicalRectFromPhysicalBgr888(
   const size_t col1 = std::max(a / column_bytes, b / column_bytes);
   const size_t row0 = std::min(a % column_bytes, b % column_bytes);
   const size_t row1 = std::max(a % column_bytes, b % column_bytes);
+  if (row0 == 0 && row1 + 3u == column_bytes) {
+    const size_t offset = col0 * column_bytes;
+    memcpy(dst + offset, src + offset, (col1 - col0 + 1u) * column_bytes);
+    return;
+  }
   for (size_t col = col0; col <= col1; ++col) {
     const size_t offset = col * column_bytes + row0;
     memcpy(dst + offset, src + offset, row1 - row0 + 3u);
