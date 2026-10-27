@@ -30,6 +30,25 @@ static size_t Utf8BytesForCharCount(Text *ts, const char *s, u8 count) {
   return text_unicode_utils::Utf8BytesForDisplayChars(s, count);
 }
 
+static u8 ButtonCharCountInsideWidth(Text *ts, const char *s, u8 style,
+                                     u8 pixels) {
+  // Footer labels are plain ASCII: each byte is one grapheme, so measuring
+  // advances directly avoids allocating and shaping an identical run per draw.
+  for (const unsigned char *p = (const unsigned char *)s; *p; ++p) {
+    if (*p < 0x20 || *p > 0x7E)
+      return ts->GetCharCountInsideWidth(s, style, pixels);
+  }
+  unsigned int width = 0;
+  u8 count = 0;
+  for (const unsigned char *p = (const unsigned char *)s; *p && count < 255; ++p) {
+    width += ts->GetAdvance((u32)*p, style);
+    if (width > pixels)
+      break;
+    ++count;
+  }
+  return count;
+}
+
 static int MeasureStringWidth(Text *ts, const char *s) {
   int w = 0;
   while (*s) {
@@ -93,20 +112,28 @@ static void PrepareButtonLabel(const std::string &raw, std::string *display,
 }
 
 void Button::Label(const char *s) {
-  SetLabel1(std::string(s));
+  if (s && text1 == s)
+    return;
+  SetLabel1(s ? std::string(s) : std::string());
 }
 
 void Button::SetLabel1(std::string s) {
+  if (text1 == s)
+    return;
   text1 = s;
   PrepareButtonLabel(text1, &display1, &text1_rtl);
 }
 
 void Button::SetLabel2(std::string s) {
+  if (text2 == s)
+    return;
   text2 = s;
   PrepareButtonLabel(text2, &display2, &text2_rtl);
 }
 
 void Button::SetLabel3(std::string s) {
+  if (text3 == s)
+    return;
   text3 = s;
   PrepareButtonLabel(text3, &display3, &text3_rtl);
 }
@@ -189,7 +216,7 @@ void Button::Draw(u16 *screen, bool highlight) {
     // For RTL labels use the display-ready (shaped + reordered) string.
     const char *src1 = text1_rtl ? display1.c_str() : text1.c_str();
     char line1[256];
-    u8 len1 = ts->GetCharCountInsideWidth(src1, text.style, (u8)text_width);
+    u8 len1 = ButtonCharCountInsideWidth(ts, src1, text.style, (u8)text_width);
     size_t bytes1 = Utf8BytesForCharCount(ts, src1, len1);
     if (bytes1 > sizeof(line1) - 1)
       bytes1 = sizeof(line1) - 1;
@@ -205,7 +232,7 @@ void Button::Draw(u16 *screen, bool highlight) {
       const char *src2 = text2_rtl ? display2.c_str() : text2.c_str();
       char line2[256];
       u8 len2 =
-          ts->GetCharCountInsideWidth(src2, text.style, (u8)text_width);
+          ButtonCharCountInsideWidth(ts, src2, text.style, (u8)text_width);
       size_t bytes2 = Utf8BytesForCharCount(ts, src2, len2);
       if (bytes2 > sizeof(line2) - 1)
         bytes2 = sizeof(line2) - 1;
@@ -222,7 +249,7 @@ void Button::Draw(u16 *screen, bool highlight) {
       const char *src3 = text3_rtl ? display3.c_str() : text3.c_str();
       char line3[256];
       u8 len3 =
-          ts->GetCharCountInsideWidth(src3, text.style, (u8)text_width);
+          ButtonCharCountInsideWidth(ts, src3, text.style, (u8)text_width);
       size_t bytes3 = Utf8BytesForCharCount(ts, src3, len3);
       if (bytes3 > sizeof(line3) - 1)
         bytes3 = sizeof(line3) - 1;
