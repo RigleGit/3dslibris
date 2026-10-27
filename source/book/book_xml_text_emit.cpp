@@ -246,6 +246,19 @@ void AppendParsedCodepointsRaw(parsedata_t *p, const char *utf8,
   AppendParsedCodepointsImpl(p, utf8, utf8_len, false);
 }
 
+static void AppendShapedCodepoints(
+    parsedata_t *p, const std::vector<text_layout_utils::ShapedGlyph> &run,
+    size_t start, size_t end, bool apply_text_transform) {
+  const u8 transform =
+      apply_text_transform ? parse_resolve_text_transform(p) : 0;
+  for (size_t i = start; i < end; ++i) {
+    uint32_t cp = run[i].text.codepoint;
+    if (transform)
+      cp = ApplyTextTransform(cp, transform, &p->text_transform_word_start);
+    parse_append_page_byte(p, (u32)cp);
+  }
+}
+
 void EmitBidiSegment(parsedata_t *p,
                      const std::vector<text_layout_utils::ShapedGlyph> &run,
                      size_t seg_start, size_t seg_end,
@@ -467,13 +480,8 @@ void EmitFlowedShapedText(
         if (nbsp_did_wrap && p->pen.y == pen_y_before_nbsp)
           p->pen.y += (metrics.lineheight + metrics.linespacing);
         EmitFreshLineStartX(p, metrics);
-        if (metrics.text_already_transformed) {
-          AppendParsedCodepointsRaw(p, txt + unit.text.byte_offset,
-                                    unit.text.byte_length);
-        } else {
-          AppendParsedCodepoints(p, txt + unit.text.byte_offset,
-                                 unit.text.byte_length);
-        }
+        AppendShapedCodepoints(p, run, unit_index, unit_index + 1,
+                               !metrics.text_already_transformed);
         p->pen.x += unit_advance;
         p->linebegan = true;
         p->current_screen_has_drawable_content = true;
@@ -492,9 +500,6 @@ void EmitFlowedShapedText(
     if (segment_end_index <= unit_index)
       segment_end_index = unit_index + 1;
     u16 advance = (u16)segment.width;
-    size_t segment_start = unit.text.byte_offset;
-    size_t segment_end = run[segment_end_index - 1].text.byte_offset +
-                         run[segment_end_index - 1].text.byte_length;
 
     const bool attached_closing_punctuation =
         SegmentIsOnlyClosingAttachedPunctuation(run, unit_index,
@@ -514,8 +519,10 @@ void EmitFlowedShapedText(
         ((p->pen.x + advance) >= limits.right_edge &&
          !(p->linebegan && attached_closing_punctuation));
 #if defined(DSLIBRIS_DEBUG) && EPUB_LINE_TRACE
-    const std::string segment_text =
-        DebugSegmentText(txt, segment_start, segment_end);
+    const std::string segment_text = DebugSegmentText(
+        txt, unit.text.byte_offset,
+        run[segment_end_index - 1].text.byte_offset +
+            run[segment_end_index - 1].text.byte_length);
     const int segment_y_before = p->pen.y;
     const int segment_x_before = p->pen.x;
 #endif
@@ -576,9 +583,6 @@ void EmitFlowedShapedText(
             if (segment_end_index <= unit_index)
               segment_end_index = unit_index + 1;
             advance = (u16)segment.width;
-            segment_start = unit.text.byte_offset;
-            segment_end = run[segment_end_index - 1].text.byte_offset +
-                          run[segment_end_index - 1].text.byte_length;
           }
         }
       }
@@ -587,11 +591,9 @@ void EmitFlowedShapedText(
     if (has_rtl)
       EmitBidiSegment(p, run, unit_index, segment_end_index, bidi_runs,
                       !metrics.text_already_transformed);
-    else if (metrics.text_already_transformed)
-      AppendParsedCodepointsRaw(p, txt + segment_start,
-                                segment_end - segment_start);
     else
-      AppendParsedCodepoints(p, txt + segment_start, segment_end - segment_start);
+      AppendShapedCodepoints(p, run, unit_index, segment_end_index,
+                             !metrics.text_already_transformed);
     p->linebegan = true;
     p->current_screen_has_drawable_content = true;
     p->pen.x += advance;
