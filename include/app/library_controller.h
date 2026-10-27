@@ -27,6 +27,7 @@ public:
   void browser_draw();
   void browser_handleevent(const FrameInput &input);
   void browser_init();
+  void LayoutBrowserNavButtons();
   void UnloadNonVisibleBrowserCoverCaches();
   void browser_nextpage();
   void browser_prevpage();

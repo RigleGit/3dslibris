@@ -89,30 +89,30 @@ static int CurrentBrowserColumnCount(const App &app) {
   return browser_view_utils::ColumnCount(CurrentBrowserViewMode(app));
 }
 
-static void LayoutBrowserNavButtons(App *app) {
-  const bool in_folder = app->IsBrowserInsideFolder();
-  app->buttonback.Move(in_folder ? 130 : screen_layout::kFooterLeftX, screen_layout::kFooterY);
-  app->buttonback.Resize(52, screen_layout::kFooterButtonH);
-  app->buttonback.Label("back");
-  app->buttonback.SetIcon(UI_BUTTON_ICON_BACK);
-
-  app->buttonprev.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
-  app->buttonprev.Resize(in_folder ? 52 : screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
-  app->buttonprev.Label("prev");
-  app->buttonprev.SetIcon(UI_BUTTON_ICON_PREV);
-
-  app->buttonnext.Move(in_folder ? 186 : screen_layout::kFooterRightX, screen_layout::kFooterY);
-  app->buttonnext.Resize(in_folder ? 52 : screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
-  app->buttonnext.Label("next");
-  app->buttonnext.SetIcon(UI_BUTTON_ICON_NEXT);
-
-  app->buttonprefs.Move(in_folder ? 56 : screen_layout::kFooterMidX, screen_layout::kFooterY);
-  app->buttonprefs.Resize(in_folder ? 70 : screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
-  app->buttonprefs.Label("settings");
-  app->buttonprefs.SetIcon(UI_BUTTON_ICON_GEAR);
-}
-
 } // namespace
+
+void LibraryController::LayoutBrowserNavButtons() {
+  const bool in_folder = app_.IsBrowserInsideFolder();
+  app_.buttonback.Move(in_folder ? 130 : screen_layout::kFooterLeftX, screen_layout::kFooterY);
+  app_.buttonback.Resize(52, screen_layout::kFooterButtonH);
+  app_.buttonback.Label("back");
+  app_.buttonback.SetIcon(UI_BUTTON_ICON_BACK);
+
+  app_.buttonprev.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
+  app_.buttonprev.Resize(in_folder ? 52 : screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  app_.buttonprev.Label("prev");
+  app_.buttonprev.SetIcon(UI_BUTTON_ICON_PREV);
+
+  app_.buttonnext.Move(in_folder ? 186 : screen_layout::kFooterRightX, screen_layout::kFooterY);
+  app_.buttonnext.Resize(in_folder ? 52 : screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  app_.buttonnext.Label("next");
+  app_.buttonnext.SetIcon(UI_BUTTON_ICON_NEXT);
+
+  app_.buttonprefs.Move(in_folder ? 56 : screen_layout::kFooterMidX, screen_layout::kFooterY);
+  app_.buttonprefs.Resize(in_folder ? 70 : screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
+  app_.buttonprefs.Label("settings");
+  app_.buttonprefs.SetIcon(UI_BUTTON_ICON_GEAR);
+}
 
 // NOTE: UnloadNonVisibleBrowserCoverCaches / LoadVisibleBrowserCoverCaches
 // moved to app_browser_covers.cpp.
@@ -132,9 +132,6 @@ void LibraryController::ResetBrowserMarquee() { g_marquee.Reset(); }
 void LibraryController::browser_handleevent(const FrameInput &input) {
   if (app_.ShouldAbortWork())
     return;
-
-  // Re-apply browser layout in case another view reused/moved shared buttons.
-  LayoutBrowserNavButtons(&app_);
 
   const u32 keys = input.keys_down;
 #ifdef DSLIBRIS_DEBUG
@@ -404,7 +401,7 @@ void LibraryController::browser_init(void) {
   app_.buttonnext.Init(app_.ts.get());
   app_.buttonprefs.Init(app_.ts.get());
   app_.buttonback.Init(app_.ts.get());
-  LayoutBrowserNavButtons(&app_);
+  LayoutBrowserNavButtons();
 
   if (app_.BookCount() <= 0) {
     app_.SetBrowserPageStart(0);
@@ -456,9 +453,6 @@ void LibraryController::browser_prevpage() {
 }
 
 void LibraryController::browser_draw(void) {
-  // Keep footer controls stable after view switches.
-  LayoutBrowserNavButtons(&app_);
-
   // save state
   int colorMode = app_.ts->GetColorMode();
   u16 *screen = app_.ts->GetScreen();
