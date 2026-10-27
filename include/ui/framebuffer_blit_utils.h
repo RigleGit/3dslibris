@@ -253,12 +253,16 @@ inline void ConvertLogicalRgb565ToPhysicalBgr888(
     return;
   }
 
-  std::memset(dst, 0xFF, geometry.byte_size);
-
   const int max_sy = MaxConvertibleLogicalY(geometry, logical_height, orientation);
   const int max_sx = MaxConvertibleLogicalX(geometry, logical_width, orientation);
   const bool double_density = geometry.phys_width == 800 &&
       (orientation_utils::IsLandscape(orientation) ? logical_width : logical_height) == 400;
+  const size_t converted_bytes = (size_t)max_sx * (size_t)max_sy * 3u *
+                                  (double_density ? 2u : 1u);
+  // Partial logical surfaces still need white padding. A full surface
+  // overwrites every destination byte, including doubled wide samples.
+  if (converted_bytes != geometry.byte_size)
+    std::memset(dst, 0xFF, geometry.byte_size);
   if (!double_density) {
     // Keep the ordinary/native path direct. At -Og devkitARM leaves a
     // density-helper call per pixel, penalising 400px presentation.
