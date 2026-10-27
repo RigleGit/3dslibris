@@ -85,6 +85,8 @@ private:
   std::array<FT_Face, 9> faces;
   std::map<u8, std::string> filenames;
   std::map<FT_Face, Cache *> textCache;
+  FT_Face cached_face_ = nullptr;
+  Cache *cached_face_data_ = nullptr;
   std::map<FT_Face, std::unordered_map<u32, u8>> advanceCache;
 #ifdef DSLIBRIS_DEBUG
   struct AdvancePerf {
@@ -111,6 +113,7 @@ private:
 
   FT_Face FindFallbackFace(u32 ucs);
   void EnsureFacePixelSize(FT_Face face);
+  Cache *GetFaceCache(FT_Face face);
 
   FT_Error InitFreeTypeCache();
   int InitCache();

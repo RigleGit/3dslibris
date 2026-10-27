@@ -152,6 +152,14 @@ void FontManager::EnsureFacePixelSize(FT_Face face) {
     FT_Set_Pixel_Sizes(face, 0, size);
 }
 
+Cache *FontManager::GetFaceCache(FT_Face face) {
+  if (cached_face_ != face) {
+    cached_face_ = face;
+    cached_face_data_ = text_cache_utils::FindFaceCache(textCache, face);
+  }
+  return cached_face_data_;
+}
+
 FT_Error FontManager::InitFreeTypeCache(void) {
   auto init_error = FT_Init_FreeType(&library);
   if (init_error)
@@ -287,7 +295,7 @@ void FontManager::ReportFace(FT_Face face) {
 
 int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
   EnsureFacePixelSize(face);
-  Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
+  Cache *face_cache = GetFaceCache(face);
   if (!face || !face_cache)
     return -1;
   const u32 cache_key = GlyphCacheKey(ucs, face);
@@ -352,8 +360,8 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
   // immediately without any FreeType calls. This must happen before the ghost
   // check below, which would otherwise call FT_Load_Char on every glyph even
   // when the result is already in the cache.
-  if (face && fallback_count_ > 0) {
-    Cache *primary_cache = text_cache_utils::FindFaceCache(textCache, face);
+  if (face) {
+    Cache *primary_cache = GetFaceCache(face);
     if (primary_cache) {
       auto fast_iter = primary_cache->cacheMap.find(GlyphCacheKey(ucs, face));
       if (fast_iter != primary_cache->cacheMap.end()) {
@@ -389,7 +397,7 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     }
   }
 
-  Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
+  Cache *face_cache = GetFaceCache(face);
   if (!face || !face_cache) {
     if (parent->tr)
       parent->tr->SetHit(false);
@@ -469,9 +477,12 @@ void FontManager::ClearCache() {
 void FontManager::ClearCache(u8 style) { ClearCache(GetFace(style)); }
 
 void FontManager::ClearRenderCache(FT_Face face) {
-  Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
+  Cache *face_cache = GetFaceCache(face);
   if (!face_cache)
     return;
+  // ClearCache runs before a face's Cache object is deleted or replaced.
+  cached_face_ = nullptr;
+  cached_face_data_ = nullptr;
   for (auto iter = face_cache->cacheMap.begin();
        iter != face_cache->cacheMap.end(); iter++) {
     delete[] iter->second->bitmap.buffer;
