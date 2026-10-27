@@ -21,6 +21,7 @@
 #include "library/browser_view_utils.h"
 #include "library/cover_cache.h"
 #include "settings/prefs.h"
+#include "shared/app_flow_utils.h"
 
 namespace {
 
@@ -105,6 +106,23 @@ void LibraryController::UnloadNonVisibleBrowserCoverCaches() {
 void LibraryController::LoadVisibleBrowserCoverCaches() {
   if (app_.BookCount() <= 0)
     return;
+
+  // Filename/date sorting does not need metadata for hidden books. Populate
+  // only visible labels, including list mode where covers are disabled.
+  if (app_.prefs &&
+      (app_.prefs->library_sort_mode == LIBRARY_SORT_FILENAME ||
+       app_.prefs->library_sort_mode == LIBRARY_SORT_DATE_MODIFIED)) {
+    const browser_cover_cache_utils::VisibleRange metadata_visible =
+        browser_cover_cache_utils::ComputeVisibleRange(
+            app_.GetBrowserPageStart(), app_.BookCount(),
+            CurrentBrowserPageSize(app_));
+    for (int i = metadata_visible.start; i < metadata_visible.end; ++i) {
+      Book *book = app_.books[i];
+      if (book && !book->IsBrowserFolder() &&
+          app_flow_utils::SupportsMetadataIndexing(book->format))
+        book->TryLoadMetadataFromCache();
+    }
+  }
 
   if (!ShouldCurrentBrowserLoadCovers(app_)) {
     UnloadNonVisibleBrowserCoverCaches();

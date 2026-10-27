@@ -674,16 +674,6 @@ int LibraryController::FindBooks() {
 }
 
 void LibraryController::PrepareLibrary() {
-  // Pre-populate metadata from the disk cache before sorting so the initial
-  // sort uses real titles. Cache hits are ~2ms each; misses return quickly
-  // (no source file is opened). Books without a cache entry are left for the
-  // warmup job system to handle after the browser opens.
-  for (auto &book : app_.books) {
-    if (book->IsBrowserFolder())
-      continue;
-    book->TryLoadMetadataFromCache();
-  }
-
   SortBooks();
   for (auto &book : app_.books)
     book->GetBookmarks().sort();
@@ -693,6 +683,15 @@ void LibraryController::SortBooks() {
   const LibrarySortMode mode = app_.prefs
       ? app_.prefs->library_sort_mode
       : LIBRARY_SORT_TITLE;
+  // These modes compare only filenames or mtimes. Other sorts need cached
+  // titles/authors (including their tie-breakers) before ordering the list.
+  if (mode != LIBRARY_SORT_FILENAME && mode != LIBRARY_SORT_DATE_MODIFIED) {
+    for (auto book : app_.books) {
+      if (!book->IsBrowserFolder() &&
+          app_flow_utils::SupportsMetadataIndexing(book->format))
+        book->TryLoadMetadataFromCache();
+    }
+  }
   switch (mode) {
   case LIBRARY_SORT_FILENAME:
     std::sort(app_.books.begin(), app_.books.end(), &BookFilenameLessThan);
