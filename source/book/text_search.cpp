@@ -60,6 +60,7 @@ struct Engine::State {
   std::vector<Character> ring, cluster, ready;
   Character decomposition[32];
   size_t decomposition_count = 0, decomposition_index = 0, ready_index = 0;
+  size_t event_index = 0;
   size_t matched = 0, ring_next = 0, ring_count = 0;
   unsigned unit = 0, tail = 0;
   uint64_t scanned = 0;
@@ -71,6 +72,7 @@ struct Engine::State {
   void ResetUnit() {
     cursor = Position(!backwards && wrapped ? 0 : (unit ? unit - 1 : 0), 0);
     annotated = raw_end = in_rtl = false;
+    event_index = 0;
     matched = ring_next = ring_count = tail = 0;
     cluster.clear(); ready.clear(); ready_index = 0;
     decomposition_count = decomposition_index = 0;
@@ -116,7 +118,13 @@ struct Engine::State {
         (page.length && !page.text) || !page.events || cursor.token > page.length) {
       Fail("Invalid page data"); return -1;
     }
-    unsigned flags = page_search::FlagsAt(*page.events, cursor.token);
+    // Tokens and their sparse annotations advance together within a page.
+    // Keep only an index, so no borrowed page/event pointer survives a pump.
+    const page_search::Events &events = *page.events;
+    while (event_index < events.size() && (events[event_index] >> 5) < cursor.token)
+      ++event_index;
+    const unsigned flags = event_index < events.size() &&
+        (events[event_index] >> 5) == cursor.token ? events[event_index] & 31 : 0;
     if (!annotated) {
       annotated = true;
       if (flags & page_search::RtlEnd) in_rtl = false;
@@ -128,7 +136,9 @@ struct Engine::State {
       if (flags & page_search::Space) { *out = Character(' ', cursor, cursor); return 1; }
     }
     annotated = false;
-    if (cursor.token == page.length) { in_rtl = false; ++cursor.page; cursor.token = 0; return 0; }
+    if (cursor.token == page.length) {
+      in_rtl = false; ++cursor.page; cursor.token = 0; event_index = 0; return 0;
+    }
     Position start = cursor;
     uint32_t cp = page.text[cursor.token++];
     ++scanned;
