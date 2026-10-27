@@ -14,6 +14,7 @@
 #include <algorithm>
 
 namespace {
+const uint64_t kSearchSliceMs = 12;
 std::string ShortLabel(const std::string &s, size_t chars) {
   const size_t bytes = text_unicode_utils::Utf8BytesForDisplayChars(s.c_str(), chars);
   return bytes < s.size() ? s.substr(0, bytes) + "..." : s;
@@ -248,7 +249,8 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
     if (s.engine.GetStatus() == text_search::Searching) {
       const uint64_t started = osGetTime();
       do { s.engine.Pump(32); }
-      while (s.engine.GetStatus() == text_search::Searching && osGetTime() - started < 2);
+      while (s.engine.GetStatus() == text_search::Searching &&
+             osGetTime() - started < kSearchSliceMs && !app_.ShouldAbortWork());
       const uint64_t elapsed = osGetTime() - started;
       s.scan_ms += elapsed; s.max_slice_ms = std::max(s.max_slice_ms, elapsed);
       if (s.engine.GetStatus() != text_search::Searching) {
