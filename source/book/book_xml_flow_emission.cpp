@@ -197,7 +197,10 @@ static bool FlowedTextFitsCurrentVisualLine(
     parsedata_t *p, const char *txt, size_t txtlen,
     const ParsedTextMeasureContext &measure_ctx,
     const book_xml_text_emit::FlowEmitMetrics &emit_metrics,
-    book_xml_css_style_utils::WhiteSpaceMode white_space) {
+    book_xml_css_style_utils::WhiteSpaceMode white_space,
+    bool *run_prepared, bool *run_has_rtl) {
+  *run_prepared = false;
+  *run_has_rtl = false;
   if (!p || !txt || txtlen == 0)
     return false;
   if (white_space == book_xml_css_style_utils::WhiteSpaceMode::Pre ||
@@ -207,8 +210,7 @@ static bool FlowedTextFitsCurrentVisualLine(
   std::string normalized;
   const char *measure_txt = txt;
   size_t measure_len = txtlen;
-  if (white_space == book_xml_css_style_utils::WhiteSpaceMode::Normal ||
-      white_space == book_xml_css_style_utils::WhiteSpaceMode::Nowrap ||
+  if (white_space == book_xml_css_style_utils::WhiteSpaceMode::Nowrap ||
       white_space == book_xml_css_style_utils::WhiteSpaceMode::PreLine) {
     normalized = book_xml_css_style_utils::NormalizeWhiteSpaceText(
         txt, txtlen, white_space);
@@ -228,6 +230,10 @@ static bool FlowedTextFitsCurrentVisualLine(
           measure_txt, measure_len, NULL, MeasureParsedTextAdvance,
           (void *)&measure_ctx, &run, &has_rtl, &p->bidi_cps, &p->bidi_runs))
     return false;
+  // Normal whitespace uses the same raw bytes and run for the subsequent
+  // emission. Other modes normalize/split their text separately below.
+  *run_prepared = white_space == book_xml_css_style_utils::WhiteSpaceMode::Normal;
+  *run_has_rtl = has_rtl;
 
   size_t start = 0;
   while (start < run.size() && run[start].text.whitespace &&
@@ -607,6 +613,8 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
     }
   }
 
+  bool run_prepared = false;
+  bool run_has_rtl = false;
   if (p->buflen == 0) {
     p->pen.x = ts->margin.left;
     p->pen.y = ts->margin.top + lineheight;
@@ -649,7 +657,7 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
           if (slot1 && !slot2 && IsSimpleParagraphTextFlush(p)) {
             one_line_paragraph = FlowedTextFitsCurrentVisualLine(
                 p, flow_txt, flow_txtlen, measure_ctx, emit_metrics,
-                white_space);
+                white_space, &run_prepared, &run_has_rtl);
           }
           const bool should_advance =
               text_render_layout_utils::ShouldAdvanceParagraphStartGuard(
@@ -743,8 +751,15 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
     return;
   }
 
-  EmitFlowedUtf8Segment(p, flow_txt, flow_txtlen, measure_ctx, emit_metrics,
-                        fns);
+  if (run_prepared) {
+    OverflowThunkCtx thunk_ctx{&fns};
+    book_xml_text_emit::EmitFlowedShapedText(
+        p, flow_txt, p->shaped_run, run_has_rtl, p->bidi_runs, emit_metrics,
+        OverflowThunkLocal, &thunk_ctx);
+  } else {
+    EmitFlowedUtf8Segment(p, flow_txt, flow_txtlen, measure_ctx, emit_metrics,
+                          fns);
+  }
 }
 
 void QueueFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
