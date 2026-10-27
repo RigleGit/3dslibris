@@ -243,6 +243,66 @@ inline void StoreLogicalPixel(uint8_t *dst, const FramebufferGeometry &geometry,
   }
 }
 
+// Ordinary/native-density surfaces write contiguous physical spans. Landscape
+// uses short row tiles so strided source reads can reuse nearby cache lines.
+inline void ConvertLogicalRgb565RegionToPhysicalBgr888(
+    uint8_t *dst, const FramebufferGeometry &geometry, const uint16_t *src,
+    int src_stride, int x0, int y0, int x1, int y1,
+    unsigned char orientation, bool preserve_white) {
+  if (orientation_utils::IsLandscape(orientation)) {
+    const int kTileRows = 16;
+    for (int tile_y = y0; tile_y < y1; tile_y += kTileRows) {
+      const int tile_end = std::min(y1, tile_y + kTileRows);
+      for (int sx = x0; sx < x1; ++sx) {
+        uint8_t *out = dst +
+            ((size_t)sx * geometry.stride + geometry.stride - tile_end) * 3u;
+        for (int sy = tile_end - 1; sy >= tile_y; --sy, out += 3) {
+          const uint16_t pixel = src[(size_t)sy * src_stride + sx];
+          if (preserve_white && pixel == 0xFFFF) {
+            out[0] = out[1] = out[2] = 0xFF;
+          } else {
+            out[0] = (uint8_t)((pixel & 0x1F) << 3);
+            out[1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
+            out[2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
+          }
+        }
+      }
+    }
+  } else if (orientation_utils::IsTurnedRight(orientation)) {
+    for (int sy = y0; sy < y1; ++sy) {
+      const uint16_t *row = src + (size_t)sy * src_stride;
+      uint8_t *out = dst + ((size_t)sy * geometry.stride + x0) * 3u;
+      for (int sx = x0; sx < x1; ++sx, out += 3) {
+        const uint16_t pixel = row[sx];
+        if (preserve_white && pixel == 0xFFFF) {
+          out[0] = out[1] = out[2] = 0xFF;
+        } else {
+          out[0] = (uint8_t)((pixel & 0x1F) << 3);
+          out[1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
+          out[2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
+        }
+      }
+    }
+  } else {
+    for (int sy = y1 - 1; sy >= y0; --sy) {
+      const uint16_t *row = src + (size_t)sy * src_stride;
+      uint8_t *out = dst +
+          ((size_t)(geometry.phys_width - 1 - sy) * geometry.stride +
+           geometry.stride - x1) * 3u;
+      for (int sx = x1 - 1; sx >= x0; --sx, out += 3) {
+        const uint16_t pixel = row[sx];
+        if (preserve_white && pixel == 0xFFFF) {
+          out[0] = out[1] = out[2] = 0xFF;
+        } else {
+          out[0] = (uint8_t)((pixel & 0x1F) << 3);
+          out[1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
+          out[2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
+        }
+      }
+    }
+  }
+}
+
 inline void ConvertLogicalRgb565ToPhysicalBgr888(
     uint8_t *dst, const FramebufferGeometry &geometry, const uint16_t *src,
     int src_stride, int logical_width, int logical_height,
@@ -264,17 +324,8 @@ inline void ConvertLogicalRgb565ToPhysicalBgr888(
   if (converted_bytes != geometry.byte_size)
     std::memset(dst, 0xFF, geometry.byte_size);
   if (!double_density) {
-    // Keep the ordinary/native path direct. At -Og devkitARM leaves a
-    // density-helper call per pixel, penalising 400px presentation.
-    for (int sy = 0; sy < max_sy; ++sy) {
-      for (int sx = 0; sx < max_sx; ++sx) {
-        const uint16_t pixel = src[(size_t)sy * (size_t)src_stride + (size_t)sx];
-        const size_t off = PhysicalOffsetBytes(geometry, sx, sy, orientation);
-        dst[off] = (uint8_t)((pixel & 0x1F) << 3);
-        dst[off + 1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
-        dst[off + 2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
-      }
-    }
+    ConvertLogicalRgb565RegionToPhysicalBgr888(
+        dst, geometry, src, src_stride, 0, 0, max_sx, max_sy, orientation, false);
     return;
   }
   for (int sy = 0; sy < max_sy; sy++) {
@@ -308,19 +359,8 @@ inline void ConvertLogicalRgb565RectToPhysicalBgr888(
   const bool double_density = geometry.phys_width == 800 &&
       (orientation_utils::IsLandscape(orientation) ? logical_width : logical_height) == 400;
   if (!double_density) {
-    for (int sy = y0; sy < y1; ++sy) {
-      for (int sx = x0; sx < x1; ++sx) {
-        const uint16_t pixel = src[(size_t)sy * (size_t)src_stride + (size_t)sx];
-        const size_t off = PhysicalOffsetBytes(geometry, sx, sy, orientation);
-        if (pixel == 0xFFFF) {
-          dst[off] = dst[off + 1] = dst[off + 2] = 0xFF;
-        } else {
-          dst[off] = (uint8_t)((pixel & 0x1F) << 3);
-          dst[off + 1] = (uint8_t)(((pixel >> 5) & 0x3F) << 2);
-          dst[off + 2] = (uint8_t)(((pixel >> 11) & 0x1F) << 3);
-        }
-      }
-    }
+    ConvertLogicalRgb565RegionToPhysicalBgr888(
+        dst, geometry, src, src_stride, x0, y0, x1, y1, orientation, true);
     return;
   }
 
