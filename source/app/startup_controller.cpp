@@ -181,7 +181,14 @@ void StartupController::DrawBootStatus(const char *title,
   app_.ts->SetPixelSize(10);
 
   app_.ts->SetScreen(app_.ts->screenleft);
-  app_.ts->PrintSplash(app_.ts->screenleft);
+  const int orientation = app_.ts->GetOrientation();
+  if (!splash_drawn_ || splash_orientation_ != orientation ||
+      splash_color_mode_ != savedColorMode) {
+    app_.ts->PrintSplash(app_.ts->screenleft);
+    splash_drawn_ = true;
+    splash_orientation_ = orientation;
+    splash_color_mode_ = savedColorMode;
+  }
 
   app_.ts->SetScreen(app_.ts->screenright);
   app_.ts->ClearScreen();

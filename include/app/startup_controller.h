@@ -21,4 +21,6 @@ private:
   int HaltOnFatalBootStatus();
 
   App &app_;
+  bool splash_drawn_ = false;
+  int splash_orientation_ = -1, splash_color_mode_ = -1;
 };
