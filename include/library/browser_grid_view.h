@@ -18,6 +18,7 @@ struct BrowserGridMarqueeState {
   int strip_y;
   int blit_w;
   int scroll_offset;
+  int painted_offset;
   int scroll_timer;
   int end_timer;
   int color_mode;

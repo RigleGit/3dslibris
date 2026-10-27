@@ -13,7 +13,8 @@
 
 BrowserGridMarqueeState::BrowserGridMarqueeState()
     : book(NULL), strip(NULL), bg_strip(NULL), strip_w(0), strip_h(0),
-      strip_x(0), strip_y(0), blit_w(0), scroll_offset(0), scroll_timer(0),
+      strip_x(0), strip_y(0), blit_w(0), scroll_offset(0), painted_offset(-1),
+      scroll_timer(0),
       end_timer(0), color_mode(-1), bg_color(0xFFFF), active(false) {}
 
 void BrowserGridMarqueeState::Reset() {
@@ -25,6 +26,7 @@ void BrowserGridMarqueeState::Reset() {
   display_name.clear();
   strip_w = strip_h = strip_x = strip_y = blit_w = 0;
   scroll_offset = scroll_timer = end_timer = 0;
+  painted_offset = -1;
   color_mode = -1;
   bg_color = 0xFFFF;
   active = false;
@@ -133,6 +135,7 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
         ctx.ts->SetAutoWrapEnabled(false);
 
         if (is_selected && overflows) {
+          marquee.painted_offset = -1;
           const int glyph_top = btnY + kTitleOffsetY - ctx.ts->GetHeight();
           const int title_y = (glyph_top >= 0) ? glyph_top : 0;
           const int sh = ctx.ts->GetHeight() + 2;
@@ -296,6 +299,9 @@ void TickMarquee(Text *ts, BrowserGridMarqueeState &marquee) {
     marquee.scroll_offset++;
   }
 
+  if (marquee.painted_offset == marquee.scroll_offset)
+    return;
+
   const int fb_stride = ts->display.height;
   const int tx = marquee.strip_x;
   const int ty = marquee.strip_y;
@@ -322,6 +328,7 @@ void TickMarquee(Text *ts, BrowserGridMarqueeState &marquee) {
     }
   }
 
+  marquee.painted_offset = off;
   ts->MarkScreenDirtyRect(ts->screenright, tx, ty, tx + bw, ty + sh);
 }
 
