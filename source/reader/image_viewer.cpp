@@ -138,6 +138,7 @@ void ReaderController::SuspendImageViewer() {
   s.preview = raster_image::Bitmap();
   s.source.clear();
   s.preview_ready = false;
+  s.panel_dirty = true;
   s.suspended = true;
   s.loading = true;
   s.dirty = true;
@@ -291,15 +292,27 @@ void ReaderController::DrawImageViewer() {
   ReaderImageViewerSession &s = *image_viewer_;
   Text *ts = app_.ts.get();
   const uint64_t started = osGetTime();
-  app_.ApplyRenderOrientation(app_.reader_layout.orientation);
+  const bool orientation_changed = ts->GetOrientation() != app_.reader_layout.orientation;
+  if (orientation_changed)
+    app_.ApplyRenderOrientation(app_.reader_layout.orientation);
   TextState saved(ts);
   const auto top = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
   const auto bottom = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
+  const char *status = s.loading ? "Loading image..." : s.message.empty()
+      ? "move: D-pad, Circle Pad / stylus" : s.message.c_str();
+  const bool enabled = s.image.pixels && !s.loading && !s.suspended;
+  const bool redraw_panel = s.panel_dirty || orientation_changed ||
+      s.panel_orientation != app_.reader_layout.orientation ||
+      s.panel_zoom != s.viewport.zoom_index || s.panel_enabled != enabled ||
+      s.panel_status != status || s.panel_fg != ts->GetFgColor() ||
+      s.panel_bg != ts->GetBgColor();
   ts->SetScreen(ts->screenleft);
   ts->ClearScreen();
   ts->SetScreen(ts->screenright);
-  ts->ClearScreen();
-  LayoutControls(s, bottom.width, bottom.height);
+  if (redraw_panel) {
+    ts->ClearScreen();
+    LayoutControls(s, bottom.width, bottom.height);
+  }
   if (s.image.pixels) {
     auto rect = image_view::Viewport(
         s.image.original_width, s.image.original_height, top.width, top.height,
@@ -353,14 +366,18 @@ void ReaderController::DrawImageViewer() {
         ts->GetFgColor());
   }
   ts->SetScreen(ts->screenright);
-  DrawViewerStatus(ts,
-                   s.loading           ? "Loading image..."
-                   : s.message.empty() ? "move: D-pad, Circle Pad / stylus"
-                                       : s.message.c_str(),
-                   bottom.width, bottom.height);
-  for (int i = 0; i < ReaderImageViewerSession::ControlCount; ++i)
-    s.controls[i].Draw(false);
-  ts->MarkAllScreensDirty();
+  if (redraw_panel) {
+    DrawViewerStatus(ts, status, bottom.width, bottom.height);
+    for (int i = 0; i < ReaderImageViewerSession::ControlCount; ++i)
+      s.controls[i].Draw(false);
+    s.panel_orientation = app_.reader_layout.orientation;
+    s.panel_zoom = s.viewport.zoom_index;
+    s.panel_enabled = enabled;
+    s.panel_status = status;
+    s.panel_fg = ts->GetFgColor();
+    s.panel_bg = ts->GetBgColor();
+    s.panel_dirty = false;
+  }
   s.dirty = false;
   DBG_LOGF(&app_,
            "IMAGE draw ms=%llu quality=%d zoom=%d bitmap_bytes=%lu "

@@ -20,6 +20,10 @@ struct ReaderImageViewerSession {
   std::string message;
   bool dirty = true, loading = true, wait_release = true, suspended = false;
   bool preview_ready = false;
+  bool panel_dirty = true, panel_enabled = false;
+  int panel_orientation = -1, panel_zoom = -1;
+  uint16_t panel_fg = 0, panel_bg = 0;
+  std::string panel_status;
   enum Control { ZoomIn, ZoomOut, Fit, Back, Library, Settings, ControlCount };
   Button controls[ControlCount];
   bool touch_panning = false;
