@@ -457,15 +457,19 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
   if (resolved_path)
     *resolved_path = image_path;
 
-  int info_w = 0, info_h = 0, info_c = 0;
-  if (stbi_info_from_memory(out->data(), (int)out->size(), &info_w, &info_h,
-                            &info_c) != 0) {
-    if (close_uf)
-      unzClose(uf);
-    return true;
+  const bool is_svg_wrapper = LooksLikeSvgWrapper(image_path, *out);
+  if (is_svg_wrapper) {
+    // An extension or a textual marker may misidentify a raster. Probe only
+    // that ambiguous case; ordinary raster bytes are validated by the decoder.
+    int info_w = 0, info_h = 0, info_c = 0;
+    if (stbi_info_from_memory(out->data(), (int)out->size(), &info_w, &info_h,
+                              &info_c) != 0) {
+      if (close_uf)
+        unzClose(uf);
+      return true;
+    }
   }
 
-  bool is_svg_wrapper = LooksLikeSvgWrapper(image_path, *out);
   image_memory::Bytes resolved_svg_image;
   std::string resolved_svg_path;
   if (is_svg_wrapper && reporter) {
