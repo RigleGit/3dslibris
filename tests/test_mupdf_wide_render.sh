@@ -23,7 +23,7 @@ done
 python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_draw.cpp" 'static bool BlitBitmapCacheViewport(' > "$TASK_TMP/viewport_blit.inc"
 # Exercise the actual interactive-cache owner with real MuPDF. Only inactive
 # worker platform operations are substituted in the test.
-for signature in 'void ResetMuPdfRenderFailureState(' 'bool HasMuPdfInteractiveRenderFailed(' 'void CancelMuPdfIncrementalRenderState(' 'bool PromoteMuPdfAdjacentSlotIfMatching(' 'bool EnsureMuPdfDisplayListForPage(' 'bool EnsureCurrentMuPdfInteractiveTile('; do
+for signature in 'void ResetMuPdfRenderFailureState(' 'bool HasMuPdfInteractiveRenderFailed(' 'void CancelMuPdfIncrementalRenderState(' 'bool PromoteMuPdfAdjacentSlotIfMatching(' 'bool EnsureMuPdfDisplayListForPage(' 'bool EnsureCurrentMuPdfInteractiveTile(' 'bool EnsureCurrentMuPdfPreviewCache('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_worker.cpp" "$signature" >> "$TASK_TMP/interactive_owner.inc"
 done
 for signature in 'MuPdfNavigationBounds GetMuPdfNavigationBounds(' 'static void GetMuPdfPreviewContentBounds(' 'pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport('; do

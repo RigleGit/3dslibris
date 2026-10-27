@@ -1,4 +1,6 @@
 #include "formats/mupdf/mupdf_render.h"
+#include "formats/mupdf/mupdf_worker.h"
+#include "formats/mupdf/mupdf_render_policy_utils.h"
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -221,18 +223,21 @@ struct ControlledAllocation {
   bool reject = false;
   size_t attempts = 0;
   size_t live = 0;
+  size_t largest = 0, reject_at = (size_t)-1;
 };
 static void *ControlledMalloc(void *user, size_t size) {
   auto *control = static_cast<ControlledAllocation *>(user);
   ++control->attempts;
-  void *result = control->reject ? nullptr : std::malloc(size);
+  control->largest = std::max(control->largest, size);
+  void *result = control->reject || size >= control->reject_at ? nullptr : std::malloc(size);
   if (result) ++control->live;
   return result;
 }
 static void *ControlledRealloc(void *user, void *ptr, size_t size) {
   auto *control = static_cast<ControlledAllocation *>(user);
   ++control->attempts;
-  if (control->reject) return nullptr;
+  control->largest = std::max(control->largest, size);
+  if (control->reject || size >= control->reject_at) return nullptr;
   if (!size && ptr) { std::free(ptr); --control->live; return nullptr; }
   void *result = std::realloc(ptr,size);
   if (result && !ptr) ++control->live;
@@ -241,6 +246,48 @@ static void *ControlledRealloc(void *user, void *ptr, size_t size) {
 static void ControlledFree(void *user, void *ptr) {
   if (ptr) --static_cast<ControlledAllocation *>(user)->live;
   std::free(ptr);
+}
+static void TestFitPreviewReusesFullPageRaster(const char *path) {
+  WritePdf(path, "1 0 0 rg 170 90 60 60 re f\n", 400, 240);
+  for (bool wide : {false, true}) {
+    ControlledAllocation control;
+    fz_alloc_context allocator{&control,ControlledMalloc,ControlledRealloc,ControlledFree};
+    fz_context *ctx = fz_new_context(&allocator, NULL, FZ_STORE_DEFAULT); assert(ctx);
+    fz_register_document_handlers(ctx);
+    fz_document *doc = fz_open_document(ctx, path); assert(doc);
+    Book::MuPdfState state;
+    state.ctx=ctx; state.doc=doc; state.page_width=400; state.page_height=240;
+    state.document_kind=app_flow_utils::MuPdfDocumentKind::Pdf;
+    state.viewport.zoom_index=pdf_view_utils::DefaultZoomIndex();
+    state.wide_top_screen=wide;
+    assert(EnsureCurrentMuPdfPreviewCache(&state, 0));
+    assert(BitmapCacheValid(state.current_interactive_tile, 0));
+    const u16 *tile=state.current_interactive_tile.PixelData();
+    ResetBitmapCache(&state.current_preview);
+    // Another MuPDF pixmap would exceed this threshold for this fixture.
+    // Small page-object allocations remain permitted by the real allocator.
+    control.largest=0; control.reject_at=16384;
+    assert(EnsureCurrentMuPdfPreviewCache(&state, 0));
+    assert(control.largest < control.reject_at);
+    assert(state.current_interactive_tile.PixelData()==tile);
+    const auto &preview=state.current_preview;
+    assert(preview.left==0 && preview.top==0 && preview.width==1 && preview.height==1);
+    assert(preview.bitmap_width>0 && preview.bitmap_height>0);
+    int x0=preview.bitmap_width, x1=-1, y0=preview.bitmap_height, y1=-1;
+    for (int y=0; y<preview.bitmap_height; ++y) for (int x=0; x<preview.bitmap_width; ++x) {
+      const u16 pixel=preview.PixelData()[y*preview.bitmap_width+x];
+      if (x==0 || y==0 || x==preview.bitmap_width-1 || y==preview.bitmap_height-1)
+        assert(pixel==0xffff);
+      if (pixel==0xf800) {
+        x0=std::min(x0,x); x1=std::max(x1,x);
+        y0=std::min(y0,y); y1=std::max(y1,y);
+      }
+    }
+    assert(x1>=x0 && y1>=y0 && std::abs((x1-x0)-(y1-y0))<=2);
+    if (state.cached_display_list) fz_drop_display_list(ctx, state.cached_display_list);
+    fz_drop_document(ctx, doc); fz_drop_context(ctx);
+    assert(control.live==0);
+  }
 }
 static void TestPanReusesBoundedRaster(const char *path) {
   WritePdf(path,"1 0 0 rg 170 270 60 60 re f\n",400,600);
@@ -389,5 +436,6 @@ int main(int argc, char **argv) {
   TestLandscapePageVisibleTile(argv[1]);
   TestFailedTileKeepsRequestIdentity(argv[1]);
   TestInitialPageFitKeepsMarginsAndSquare(argv[1]);
+  TestFitPreviewReusesFullPageRaster(argv[1]);
   puts("PASS: real PDF native detail, bounded horizontal-page tiles, proportions, pan and allocation recovery");
 }

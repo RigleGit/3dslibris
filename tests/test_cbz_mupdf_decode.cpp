@@ -120,5 +120,26 @@ int main(int argc, char **argv) {
     test::ExpectTrue("JPEG/PNG preserves vertical gradient", ((page.source_bitmap.pixels[56] >> 5) & 63) >
                      ((page.source_bitmap.pixels[0] >> 5) & 63) + 30);
   }
+  fz_context *context = nullptr;
+  context_drop_calls = teardown_errors = 0;
+  for (int i = 0; i < 20; ++i) {
+    const fz_context *previous = context;
+    {
+      std::vector<unsigned char> entry = (i % 2) ? jpeg : png;
+      test::ExpectTrue("reader decodes with a persistent context",
+          DecodeCbzPageImageWithContext(entry, 5, 240, 400, &page, &context));
+      test::ExpectTrue("reader retains the same context", context && (!previous || context == previous));
+    }
+    test::ExpectTrue("reader pixels survive borrowed entry destruction",
+        (page.source_bitmap.pixels[7] >> 11) > (page.source_bitmap.pixels[0] >> 11) + 15);
+    std::vector<unsigned char> corrupt(12, 'x');
+    test::ExpectTrue("reader handles corrupt input on the reused context",
+        !DecodeCbzPageImageWithContext(corrupt, 5, 240, 400, &page, &context));
+    test::ExpectEqU("reader does not destroy its context between pages", context_drop_calls, 0);
+  }
+  ResetCbzDecodeContext(&context);
+  test::ExpectTrue("reader clears its context on close", !context);
+  test::ExpectEqU("reader destroys the context once on close", context_drop_calls, 1);
+  test::ExpectEqU("reader consumes errors before final context teardown", teardown_errors, 0);
   puts("PASS: real MuPDF CBZ borrowed input, pixels, errors and repeated cleanup");
 }
