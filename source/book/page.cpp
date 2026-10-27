@@ -452,6 +452,7 @@ bool Page::DrawState::AdvanceToNextScreen() {
 #endif
     on_first_screen = false;
     ts->margin.bottom = second_render_bottom_margin;
+#ifdef OFFSCREEN
     if (book) {
       if (ts->GetScreen() == ts->screenright)
         book->DrawBottomGradientBackground();
@@ -461,6 +462,8 @@ bool Page::DrawState::AdvanceToNextScreen() {
     } else {
       ts->ClearScreen();
     }
+#endif
+    // BeginDrawing already cleared both physical page buffers.
     ts->InitPen();
     ts->linebegan = false;
 #if defined(DSLIBRIS_DEBUG) && PAGE_RENDER_TRACE
@@ -713,6 +716,7 @@ bool Page::DrawState::DrawNewLine() {
 #endif
       on_first_screen = false;
       ts->margin.bottom = second_render_bottom_margin;
+#ifdef OFFSCREEN
       if (book) {
         if (ts->GetScreen() == ts->screenright)
           book->DrawBottomGradientBackground();
@@ -722,6 +726,8 @@ bool Page::DrawState::DrawNewLine() {
       } else {
         ts->ClearScreen();
       }
+#endif
+      // BeginDrawing already cleared both physical page buffers.
       ts->InitPen();
       ts->linebegan = false;
     } else
