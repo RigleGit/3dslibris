@@ -85,7 +85,11 @@ public:
     u8 layout_mode;
     u16 width;
     u16 height;
-    image_memory::Pixels pixels;  // ARGB8888
+    image_memory::Pixels pixels;  // ARGB8888 when transparency needs live composition
+    image_memory::Buffer<u16> opaque_pixels;
+    size_t ByteSize() const {
+      return pixels.size() * sizeof(u32) + opaque_pixels.size() * sizeof(u16);
+    }
   };
 
 private:

@@ -777,8 +777,13 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     if (draw_w_local <= 0)
       return;
     for (int y = first_y; y < end_y; ++y) {
-      const u32 *src_row = entry.pixels.data() + (y * entry.width) + src_x;
       u16 *dst_row = dst + ((dst_y + y) * stride) + dst_x + src_x;
+      if (!entry.opaque_pixels.empty()) {
+        const u16 *src_row = entry.opaque_pixels.data() + y * entry.width + src_x;
+        memcpy(dst_row, src_row, draw_w_local * sizeof(u16));
+        continue;
+      }
+      const u32 *src_row = entry.pixels.data() + (y * entry.width) + src_x;
       for (int px = 0; px < draw_w_local; px++) {
         u32 argb = src_row[px];
         u8 a = (argb >> 24) & 0xFF;
@@ -857,14 +862,30 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     }
   }
 
-  const size_t entry_bytes = entry.pixels.size() * sizeof(u32);
+  bool opaque = true;
+  for (size_t i = 0; i < entry.pixels.size(); ++i) {
+    if ((entry.pixels[i] >> 24) != 255) { opaque = false; break; }
+  }
+  // Transparent images must blend with the actual framebuffer: composing with
+  // a single theme color would erase text/background detail below transparent
+  // pixels. Opaque images can retain exactly the existing conversion once.
+  if (opaque && entry.opaque_pixels.resize(entry.pixels.size())) {
+    u16 *dst = entry.opaque_pixels.mutable_data();
+    for (size_t i = 0; i < entry.pixels.size(); ++i) {
+      const u32 argb = entry.pixels[i];
+      dst[i] = (u16)(((argb >> 19) & 31) << 11) |
+               (u16)(((argb >> 10) & 63) << 5) | (u16)((argb >> 3) & 31);
+    }
+    entry.pixels.clear();
+  }
+  const size_t entry_bytes = entry.ByteSize();
   if (entry_bytes <= kInlineImageCacheMaxBytes) {
     while (
         !inline_image_cache.empty() &&
         (inline_image_cache_bytes + entry_bytes > kInlineImageCacheMaxBytes ||
          inline_image_cache.size() >= kInlineImageCacheMaxEntries)) {
       inline_image_cache_bytes -=
-          inline_image_cache.back().pixels.size() * sizeof(u32);
+          inline_image_cache.back().ByteSize();
       inline_image_cache.pop_back();
     }
     inline_image_cache.push_front(std::move(entry));

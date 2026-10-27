@@ -1279,6 +1279,7 @@ PageData ImagePagesWithoutResourceIds(Book *book) {
 }
 
 #include "page_alignment_rendering_cases.h"
+#include "inline_rgb565_cases.h"
 
 // Exercise the real token consumer; the Text spy records the selected face,
 // not a second implementation of the style-token state machine.
@@ -1947,6 +1948,7 @@ int main(int argc, char **argv) {
       TestLateFigureScreenTransition();
     else if(std::string(argv[1])=="reading-geometry") TestReadingGeometryParserBoundaries();
     else if(std::string(argv[1])=="image-cache") TestInlineImageCacheRetainsDistinctDimensions();
+    else if(std::string(argv[1])=="opaque-cache") TestOpaqueInlineCacheBudget();
     else if(std::string(argv[1])=="image-widths") TestRepeatedImageWidthsRemainPerOccurrence();
     else if(std::string(argv[1])=="toc-cache") TestWarmEpubTocRepairIsDeferred();
     else if(std::string(argv[1])=="mobi-diagnostics") TestMobiParseCloseCachedReopenAndRecovery();
@@ -1958,6 +1960,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   TestPageFontFaceTransitions();
+  TestOpaqueInlineCacheBudget();
   TestPageAlignmentRedrawMeasurements();
   TestPageAlignmentCacheInvalidation();
   TestRepeatedInlineImageWidthsAndCachedDraw();
