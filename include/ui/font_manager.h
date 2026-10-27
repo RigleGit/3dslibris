@@ -107,6 +107,7 @@ private:
   FT_Error error;
   bool ftc;
   std::array<FT_Face, 9> faces;
+  std::array<bool, 9> face_load_attempted_;
   std::map<u8, std::string> filenames;
   std::map<FT_Face, Cache *> textCache;
   FT_Face cached_face_ = nullptr;

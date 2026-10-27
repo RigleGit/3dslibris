@@ -83,6 +83,7 @@ FontManager::FontManager(Text *owner)
     : parent(owner), library(nullptr), error(0), ftc(false), charmap_index(0),
       pixelsize(12), fallback_count_(0) {
   faces.fill(NULL);
+  face_load_attempted_.fill(false);
   for (int i = 0; i < kMaxFallbackFaces; i++)
     fallback_faces_[i] = nullptr;
   filenames[TEXT_STYLE_REGULAR] = FONTREGULARFILE;
@@ -133,7 +134,12 @@ FontManager::~FontManager() {
 }
 
 FT_Face FontManager::GetFace(u8 style) {
+  if (style < faces.size() && !faces[style] && library && !ftc &&
+      !face_load_attempted_[style])
+    CreateConfiguredFace(style);
   FT_Face face = style < faces.size() ? faces[style] : NULL;
+  if (!face && style >= TEXT_STYLE_MONO && style <= TEXT_STYLE_MONO_BOLDITALIC)
+    return GetFace((u8)(style - TEXT_STYLE_MONO));
   EnsureFacePixelSize(face);
   return face;
 }
@@ -193,6 +199,7 @@ FT_Error FontManager::InitFreeTypeCache(void) {
 FT_Error FontManager::CreateFace(int style) {
   if (style < 0 || (size_t)style >= faces.size())
     return FT_Err_Invalid_Argument;
+  face_load_attempted_[(size_t)style] = true;
   const std::string path = ResolveFontPath(fontdir_, filenames[style]);
   FT_Face loaded_face = nullptr;
   error = FT_New_Face(library, path.c_str(), 0, &loaded_face);
@@ -268,16 +275,15 @@ int FontManager::InitCache(void) {
 
   const int styles[] = {TEXT_STYLE_BROWSER, TEXT_STYLE_REGULAR,
                         TEXT_STYLE_ITALIC, TEXT_STYLE_BOLD,
-                        TEXT_STYLE_BOLDITALIC, TEXT_STYLE_MONO,
-                        TEXT_STYLE_MONO_BOLD, TEXT_STYLE_MONO_ITALIC,
-                        TEXT_STYLE_MONO_BOLDITALIC};
+                        TEXT_STYLE_BOLDITALIC};
+  FT_Error first_error = 0;
   for (int i = 0; i < (int)(sizeof(styles) / sizeof(styles[0])); i++) {
     FT_Error err = CreateConfiguredFace(styles[i]);
-    if (err && !error)
-      error = err;
+    if (err && !first_error)
+      first_error = err;
   }
 
-  return error;
+  return first_error;
 }
 
 int FontManager::Init() {
