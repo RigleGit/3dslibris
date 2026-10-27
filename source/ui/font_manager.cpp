@@ -82,6 +82,7 @@ static FT_Error TextFaceRequester(FTC_FaceID face_id, FT_Library library,
 FontManager::FontManager(Text *owner)
     : parent(owner), library(nullptr), error(0), ftc(false), charmap_index(0),
       pixelsize(12), fallback_count_(0) {
+  faces.fill(NULL);
   for (int i = 0; i < kMaxFallbackFaces; i++)
     fallback_faces_[i] = nullptr;
   filenames[TEXT_STYLE_REGULAR] = FONTREGULARFILE;
@@ -123,17 +124,16 @@ FontManager::~FontManager() {
   }
   textCache.clear();
 
-  for (std::map<u8, FT_Face>::iterator iter = faces.begin(); iter != faces.end();
-       iter++) {
-    FT_Done_Face(iter->second);
+  for (FT_Face face : faces) {
+    if (face)
+      FT_Done_Face(face);
   }
   if (library)
     FT_Done_FreeType(library);
 }
 
 FT_Face FontManager::GetFace(u8 style) {
-  auto it = faces.find(style);
-  FT_Face face = (it != faces.end()) ? it->second : NULL;
+  FT_Face face = style < faces.size() ? faces[style] : NULL;
   EnsureFacePixelSize(face);
   return face;
 }
@@ -147,9 +147,7 @@ void FontManager::EnsureFacePixelSize(FT_Face face) {
     if (fallback_faces_[i] == face)
       return;
   }
-  const auto browser = faces.find(TEXT_STYLE_BROWSER);
-  const int size = browser != faces.end() && browser->second == face
-                       ? 12 : pixelsize;
+  const int size = faces[TEXT_STYLE_BROWSER] == face ? 12 : pixelsize;
   if (!face->size || face->size->metrics.y_ppem != size)
     FT_Set_Pixel_Sizes(face, 0, size);
 }
@@ -185,6 +183,8 @@ FT_Error FontManager::InitFreeTypeCache(void) {
 }
 
 FT_Error FontManager::CreateFace(int style) {
+  if (style < 0 || (size_t)style >= faces.size())
+    return FT_Err_Invalid_Argument;
   const std::string path = ResolveFontPath(fontdir_, filenames[style]);
   FT_Face loaded_face = nullptr;
   error = FT_New_Face(library, path.c_str(), 0, &loaded_face);
@@ -218,12 +218,9 @@ FT_Error FontManager::CreateFace(int style) {
     return FT_Err_Out_Of_Memory;
   }
 
-  FT_Face old_face = nullptr;
-  std::map<u8, FT_Face>::iterator old_face_it = faces.find((u8)style);
-  if (old_face_it != faces.end())
-    old_face = old_face_it->second;
+  FT_Face old_face = faces[(size_t)style];
 
-  faces[(u8)style] = loaded_face;
+  faces[(size_t)style] = loaded_face;
   textCache[loaded_face] = new_cache;
   advanceCache.erase(loaded_face);
 
@@ -459,9 +456,9 @@ void FontManager::ClearCache() {
 #ifdef DSLIBRIS_DEBUG
   LogAdvancePerf();
 #endif
-  for (std::map<u8, FT_Face>::iterator iter = faces.begin(); iter != faces.end();
-       iter++) {
-    ClearCache(iter->second);
+  for (FT_Face face : faces) {
+    if (face)
+      ClearCache(face);
   }
   advanceCache.clear();
 #ifdef DSLIBRIS_DEBUG
@@ -639,7 +636,7 @@ bool FontManager::GetFontName(std::string &s) {
 }
 
 void FontManager::SetFontFile(const char *path, u8 style) {
-  if (!path || !*path)
+  if (style >= faces.size() || !path || !*path)
     return;
   if (!strcmp(filenames[style].c_str(), path))
     return;

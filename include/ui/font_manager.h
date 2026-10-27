@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <map>
 #include <string>
 #include <vector>
@@ -81,7 +82,7 @@ private:
   FT_Library library;
   FT_Error error;
   bool ftc;
-  std::map<u8, FT_Face> faces;
+  std::array<FT_Face, 9> faces;
   std::map<u8, std::string> filenames;
   std::map<FT_Face, Cache *> textCache;
   std::map<FT_Face, std::unordered_map<u32, u8>> advanceCache;
