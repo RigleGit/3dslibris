@@ -172,14 +172,34 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
     const bool landscape = orientation_utils::IsLandscape(ts->GetOrientation());
     const int dx = landscape ? 2 : 1, dy = landscape ? 1 : 2;
     u16 *wide = ts->BeginWideTopBlit(x, y, draw_width, draw_height);
-    BlitRgb565SurfaceScaledCrop(wide, logical_width * dx, logical_width * dx,
-                logical_height * dy, x * dx, y * dy,
-                draw_width * dx, draw_height * dy, pixels, pixel_count,
-                src_width, src_height, crop_x, crop_y, crop_width, crop_height,
-                high_quality_filter);
-  } else {
-    ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
+    if (wide) {
+      const int wide_stride = logical_width * dx;
+      BlitRgb565SurfaceScaledCrop(wide, wide_stride, wide_stride,
+                  logical_height * dy, x * dx, y * dy,
+                  draw_width * dx, draw_height * dy, pixels, pixel_count,
+                  src_width, src_height, crop_x, crop_y, crop_width, crop_height,
+                  high_quality_filter);
+      // Keep the logical mirror for alpha-blended UI and screen snapshots.
+      // Average each native pair instead of running a second source scaler.
+      const int x0 = std::max(0, x);
+      const int x1 = std::min(logical_width, x + draw_width);
+      const int y0 = std::max(0, y);
+      const int y1 = std::min(logical_height, y + draw_height);
+      const int stride = ts->BufferStride();
+      const int pair_offset = dx == 2 ? 1 : wide_stride;
+      for (int sy = y0; sy < y1; ++sy) {
+        for (int sx = x0; sx < x1; ++sx) {
+          const u16 *pair = wide + (size_t)(sy * dy) * wide_stride + sx * dx;
+          // Halve each RGB565 channel separately, without cross-channel carry.
+          const u16 pixel = (pair[0] & pair[pair_offset]) +
+              (((pair[0] ^ pair[pair_offset]) & 0xF7DEu) >> 1);
+          screen[(size_t)sy * stride + sx] = pixel;
+        }
+      }
+      return;
+    }
   }
+  ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
   BlitRgb565SurfaceScaledCrop(screen, ts->BufferStride(), logical_width, logical_height,
               x, y, draw_width, draw_height, pixels, pixel_count,
               src_width, src_height, crop_x, crop_y, crop_width, crop_height,
