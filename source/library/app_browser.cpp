@@ -478,8 +478,8 @@ void LibraryController::browser_draw(void) {
   }
 
   app_.ts->SetScreen(app_.ts->screenright);
-  app_.ts->ClearScreen();
   app_.DrawBottomGradientBackground();
+  app_.ts->MarkScreenDirty(app_.ts->screenright);
 
   const BrowserViewMode view_mode = CurrentBrowserViewMode(app_);
   const int page_size = CurrentBrowserPageSize(app_);
