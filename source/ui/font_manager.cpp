@@ -133,7 +133,19 @@ FontManager::~FontManager() {
 
 FT_Face FontManager::GetFace(u8 style) {
   auto it = faces.find(style);
-  return (it != faces.end()) ? it->second : NULL;
+  FT_Face face = (it != faces.end()) ? it->second : NULL;
+  EnsureFacePixelSize(face);
+  return face;
+}
+
+void FontManager::EnsureFacePixelSize(FT_Face face) {
+  if (ftc || !face)
+    return;
+  const auto browser = faces.find(TEXT_STYLE_BROWSER);
+  const int size = browser != faces.end() && browser->second == face
+                       ? 12 : pixelsize;
+  if (!face->size || face->size->metrics.y_ppem != size)
+    FT_Set_Pixel_Sizes(face, 0, size);
 }
 
 FT_Error FontManager::InitFreeTypeCache(void) {
@@ -271,6 +283,7 @@ void FontManager::ReportFace(FT_Face face) {
 }
 
 int FontManager::CacheGlyph(u32 ucs, FT_Face face) {
+  EnsureFacePixelSize(face);
   Cache *face_cache = text_cache_utils::FindFaceCache(textCache, face);
   if (!face || !face_cache)
     return -1;
@@ -330,6 +343,8 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
   if (ftc)
     halt(parent, "error: GetGlyph() called with ftc enabled");
 
+  EnsureFacePixelSize(face);
+
   // Fast path: if glyph is already cached for the primary face, return it
   // immediately without any FreeType calls. This must happen before the ghost
   // check below, which would otherwise call FT_Load_Char on every glyph even
@@ -366,6 +381,7 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     if (needs_fallback) {
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
+        EnsureFacePixelSize(fb);
         face = fb;
       }
     }
@@ -469,6 +485,7 @@ void FontManager::ClearCache(FT_Face face) {
 }
 
 u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
+  EnsureFacePixelSize(face);
   FONT_ADVANCE_COUNT(calls);
   if (ftc) {
     auto gindex = GetGlyphIndex(ucs);
@@ -534,6 +551,7 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       FONT_ADVANCE_COUNT(fallback_searches);
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
+        EnsureFacePixelSize(fb);
 #ifdef ADVANCE_NO_CACHE
         FONT_ADVANCE_COUNT(loads);
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
@@ -643,15 +661,9 @@ void FontManager::SetPixelSize(u8 size) {
   if (ftc) {
     imagetype.height = pixelsize;
     imagetype.width = pixelsize;
-  } else {
-    for (auto &it : faces) {
-      if (it.first == TEXT_STYLE_BROWSER)
-        continue;
-      FT_Set_Pixel_Sizes(it.second, 0, pixelsize);
-      // Keep bitmaps of other sizes within the same 512-entry LRU budget.
-      // Browser draws temporarily select 10px before restoring reader size.
-    }
   }
+  // Faces are resized on first use. Temporary browser sizes must not resize
+  // all reader faces that will not be used by this draw.
 }
 
 int FontManager::GetPixelSize() const { return pixelsize; }

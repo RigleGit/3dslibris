@@ -109,6 +109,7 @@ private:
   std::string fontdir_;
 
   FT_Face FindFallbackFace(u32 ucs);
+  void EnsureFacePixelSize(FT_Face face);
 
   FT_Error InitFreeTypeCache();
   int InitCache();
