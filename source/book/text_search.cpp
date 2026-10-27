@@ -14,20 +14,26 @@ struct Character {
       : cp(c), start(s), end(e), word_before(false) {}
 };
 bool Rtl(uint32_t cp) {
+  if (cp < 0x80) return false;
   const int bidi = utf8proc_get_property(cp)->bidi_class;
   return bidi == UTF8PROC_BIDI_CLASS_R || bidi == UTF8PROC_BIDI_CLASS_AL ||
          bidi == UTF8PROC_BIDI_CLASS_RLE || bidi == UTF8PROC_BIDI_CLASS_RLO ||
          bidi == UTF8PROC_BIDI_CLASS_RLI;
 }
 bool Mark(uint32_t cp) {
+  if (cp < 0x80) return false;
   int c = utf8proc_category(cp);
   return c == UTF8PROC_CATEGORY_MN || c == UTF8PROC_CATEGORY_MC || c == UTF8PROC_CATEGORY_ME;
 }
 bool Word(uint32_t cp) {
+  if (cp < 0x80)
+    return (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
+           (cp >= '0' && cp <= '9') || cp == '_';
   int c = utf8proc_category(cp);
   return (c >= UTF8PROC_CATEGORY_LU && c <= UTF8PROC_CATEGORY_NO) || c == UTF8PROC_CATEGORY_PC;
 }
 bool Space(uint32_t cp) {
+  if (cp < 0x80) return cp == ' ' || (cp >= 9 && cp <= 13);
   int c = utf8proc_category(cp);
   return (cp >= 9 && cp <= 13) || cp == 0x85 ||
          c == UTF8PROC_CATEGORY_ZS || c == UTF8PROC_CATEGORY_ZL || c == UTF8PROC_CATEGORY_ZP;
