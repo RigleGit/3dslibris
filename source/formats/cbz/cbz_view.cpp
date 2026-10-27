@@ -427,10 +427,6 @@ void DrawCbzPreviewPanel(Book *book, Text *ts,
   ts->SetScreen(ts->screenright);
   if (!book->DrawBottomGradientBackground())
     ts->ClearScreen();
-  ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
-               (u16)(preview_layout.x + preview_layout.width),
-               (u16)(preview_layout.y + preview_layout.height),
-               fixed_layout_preview::kPaper);
   if (CbzPreviewCacheValid(cbz_state->current_preview, page_index)) {
     fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
         ts, ts->screenright, cbz_state->target_bottom_height,
@@ -440,6 +436,11 @@ void DrawCbzPreviewPanel(Book *book, Text *ts,
         cbz_state->current_preview.bitmap_height, 0, 0,
         cbz_state->current_preview.bitmap_width,
         cbz_state->current_preview.bitmap_height, true);
+  } else {
+    ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
+                 (u16)(preview_layout.x + preview_layout.width),
+                 (u16)(preview_layout.y + preview_layout.height),
+                 fixed_layout_preview::kPaper);
   }
   ts->DrawRect((u16)preview_layout.x, (u16)preview_layout.y,
                (u16)(preview_layout.x + preview_layout.width),

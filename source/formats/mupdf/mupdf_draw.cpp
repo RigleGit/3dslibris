@@ -607,9 +607,6 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   ts->SetScreen(ts->screenright);
   if (!DrawBottomGradientBackground())
     ts->ClearScreen();
-  ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
-               (u16)(preview_layout.x + preview_layout.width),
-               (u16)(preview_layout.y + preview_layout.height), kPdfPaper);
 
   fixed_perf::ViewStage("pdf.preview_background", fixed_perf::Now() - perf_phase);
   perf_phase = fixed_perf::Now();
@@ -624,6 +621,10 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
         mupdf_state->current_preview.bitmap_height, 0, 0,
         mupdf_state->current_preview.bitmap_width,
         mupdf_state->current_preview.bitmap_height, true);
+  } else {
+    ts->FillRect((u16)preview_layout.x, (u16)preview_layout.y,
+                 (u16)(preview_layout.x + preview_layout.width),
+                 (u16)(preview_layout.y + preview_layout.height), kPdfPaper);
   }
   fixed_perf::ViewStage("pdf.blit_preview", fixed_perf::Now() - perf_phase);
   perf_phase = fixed_perf::Now();
