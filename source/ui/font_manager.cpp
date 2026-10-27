@@ -141,6 +141,12 @@ FT_Face FontManager::GetFace(u8 style) {
 void FontManager::EnsureFacePixelSize(FT_Face face) {
   if (ftc || !face)
     return;
+  // Fallbacks retain their own active size, as before the lazy primary-face
+  // update. Do not resize them to a temporary browser/reader request.
+  for (int i = 0; i < fallback_count_; ++i) {
+    if (fallback_faces_[i] == face)
+      return;
+  }
   const auto browser = faces.find(TEXT_STYLE_BROWSER);
   const int size = browser != faces.end() && browser->second == face
                        ? 12 : pixelsize;
@@ -381,7 +387,6 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     if (needs_fallback) {
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
-        EnsureFacePixelSize(fb);
         face = fb;
       }
     }
@@ -551,7 +556,6 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       FONT_ADVANCE_COUNT(fallback_searches);
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
-        EnsureFacePixelSize(fb);
 #ifdef ADVANCE_NO_CACHE
         FONT_ADVANCE_COUNT(loads);
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
