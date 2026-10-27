@@ -221,16 +221,17 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
                "MUPDF preview: render-done page=%d bmp=%dx%d", page_index,
                rendered.width, rendered.height);
 
-  float left = 0.0f, top = 0.0f, width = 1.0f, height = 1.0f;
-  ComputeBitmapContentBoundsNormalized(rendered, &left, &top, &width, &height);
-  StoreBitmapCache(&mupdf_state->current_preview, page_index, -1, left, top,
-                   width, height, &rendered);
+  // The preview raster covers the complete page, including white margins.
+  // Navigation uses full-page bounds; ink bounds would mislabel this bitmap
+  // as a crop when it is used as the main view's fallback.
+  StoreBitmapCache(&mupdf_state->current_preview, page_index, -1, 0.0f, 0.0f,
+                   1.0f, 1.0f, &rendered);
   mupdf_state->page_width = page_width;
   mupdf_state->page_height = page_height;
   DBG_LOGF_CAT(
       mupdf_state->reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
       "MUPDF preview: cache-store-done page=%d content=(%.3f,%.3f %.3f x %.3f)",
-      page_index, (double)left, (double)top, (double)width, (double)height);
+      page_index, 0.0, 0.0, 1.0, 1.0);
   return true;
 }
 
@@ -805,9 +806,7 @@ bool PrepareAdjacentMuPdfSlot(Book::MuPdfState *mupdf_state, int current_page,
     return false;
   }
 
-  float left = 0.0f, top = 0.0f, width = 1.0f, height = 1.0f;
-  ComputeBitmapContentBoundsNormalized(preview, &left, &top, &width, &height);
-  StoreBitmapCache(&slot->preview, page_index, -1, left, top, width, height,
+  StoreBitmapCache(&slot->preview, page_index, -1, 0.0f, 0.0f, 1.0f, 1.0f,
                    &preview);
 
   RenderedMuPdfBitmap interactive;
