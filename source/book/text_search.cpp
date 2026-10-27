@@ -200,16 +200,16 @@ struct Engine::State {
     }
   }
   void FeedNormalized(Character c) {
-  const bool collapsed_space = Space(c.cp) && previous_space;
-  Feed(c);
-  if (status != Searching) return;
-  if (!collapsed_space) {
-    // Forward search keeps the normalization/KMP stream across pages. Only
-    // its wrapped prefix needs lookahead beyond the final eligible start.
-    const bool beyond = backwards ? c.start.page > unit :
-        wrapped && !(c.start < anchor);
-    if (beyond && ++tail > query.size() + 2) FinishUnit();
-  }
+    const bool collapsed_space = Space(c.cp) && previous_space;
+    Feed(c);
+    if (status != Searching) return;
+    if (!collapsed_space) {
+      // Forward search keeps the normalization/KMP stream across pages. Only
+      // its wrapped prefix needs lookahead beyond the final eligible start.
+      const bool beyond = backwards ? c.start.page > unit :
+          wrapped && !(c.start < anchor);
+      if (beyond && ++tail > query.size() + 2) FinishUnit();
+    }
   }
   void Step() {
     if (ready_index < ready.size()) {
@@ -247,6 +247,14 @@ struct Engine::State {
     if (status != Searching) return;
     if (got < 0) { raw_end = true; return; }
     if (!got) return;
+    if (c.cp < 0x80 && cluster.empty()) {
+      // ASCII has no canonical decomposition beyond case folding. Feed the
+      // starter now; following Unicode marks still accumulate and sort before
+      // the next starter. Feed retains its pending-match mark lookahead.
+      if (c.cp >= 'A' && c.cp <= 'Z') c.cp += 'a' - 'A';
+      FeedNormalized(c);
+      return;
+    }
     int32_t cps[32];
     int count = c.cp ? Decompose(c.cp, cps) : 1;
     if (!c.cp) cps[0] = 0;
