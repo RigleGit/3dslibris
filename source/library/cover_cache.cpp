@@ -13,6 +13,7 @@
 
 #include <dirent.h>
 #include <list>
+#include <map>
 #include <set>
 #include <stdint.h>
 #include <stdio.h>
@@ -187,32 +188,19 @@ static void EnsureCoverCacheDirs() {
   initialized = true;
 }
 
-static std::string BuildCoverCachePath(Book *book,
-                                       const std::string &book_path) {
-  auto IsRegularFilePath = [](const std::string &path) -> bool {
-    struct stat st;
-    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
-  };
+struct CoverSourcePaths {
+  std::string cache_path;
+  std::string adjacent_path;
+};
 
-  auto FindAdjacentOverrideCoverPath =
-      [&](const std::string &path, std::string *out_path) -> bool {
-    if (out_path)
-      out_path->clear();
-    if (path.empty())
-      return false;
-    std::vector<std::string> candidates =
-        cover_override_utils::BuildBookCandidates(path);
+// Cache only identities, never decoded images. Rebuilt when the library is
+// scanned; bounded independently of the number of directories visited.
+static std::map<std::string, CoverSourcePaths> g_source_paths;
+static const size_t kMaxSourcePaths = 512;
 
-    for (size_t i = 0; i < candidates.size(); i++) {
-      if (IsRegularFilePath(candidates[i])) {
-        if (out_path)
-          *out_path = candidates[i];
-        return true;
-      }
-    }
-    return false;
-  };
-
+static CoverSourcePaths ResolveCoverSourcePaths(Book *book,
+                                                const std::string &book_path) {
+  CoverSourcePaths paths;
   struct stat st;
   long long fsize = 0;
   long long fmtime = 0;
@@ -227,21 +215,27 @@ static std::string BuildCoverCachePath(Book *book,
   key.push_back('|');
   key += std::to_string(fmtime);
 
-  std::string adjacent_cover;
-  if ((!book || !book->IsBrowserFolder()) &&
-      FindAdjacentOverrideCoverPath(book_path, &adjacent_cover)) {
-    struct stat cover_st;
-    long long cover_size = 0;
-    long long cover_mtime = 0;
-    if (stat(adjacent_cover.c_str(), &cover_st) == 0) {
-      cover_size = (long long)cover_st.st_size;
-      cover_mtime = (long long)cover_st.st_mtime;
+  struct stat cover_st;
+  if (book && book->IsBrowserFolder()) {
+    // Folder entries already carry the resolved sidecar path.
+    paths.adjacent_path = book_path;
+  } else {
+    const std::vector<std::string> candidates =
+        cover_override_utils::BuildBookCandidates(book_path);
+    for (size_t i = 0; i < candidates.size(); ++i) {
+      if (stat(candidates[i].c_str(), &cover_st) == 0 &&
+          S_ISREG(cover_st.st_mode)) {
+        paths.adjacent_path = candidates[i];
+        break;
+      }
     }
-    key += "|adj:" + adjacent_cover;
+  }
+  if ((!book || !book->IsBrowserFolder()) && !paths.adjacent_path.empty()) {
+    key += "|adj:" + paths.adjacent_path;
     key.push_back('|');
-    key += std::to_string(cover_size);
+    key += std::to_string((long long)cover_st.st_size);
     key.push_back('|');
-    key += std::to_string(cover_mtime);
+    key += std::to_string((long long)cover_st.st_mtime);
   } else {
     key += "|adj:none";
   }
@@ -264,29 +258,35 @@ static std::string BuildCoverCachePath(Book *book,
   char out[512];
   snprintf(out, sizeof(out), "%s/%s_%08llx.cvr", kCoverCacheDir.c_str(), label.c_str(),
            (unsigned long long)(h & 0xFFFFFFFFULL));
-  return std::string(out);
+  paths.cache_path = out;
+  return paths;
+}
+
+static const CoverSourcePaths &GetCoverSourcePaths(
+    Book *book, const std::string &book_path) {
+  const std::string key = (book && book->IsBrowserFolder() ? "folder:" : "book:") +
+                          book_path;
+  auto it = g_source_paths.find(key);
+  if (it != g_source_paths.end())
+    return it->second;
+  if (g_source_paths.size() >= kMaxSourcePaths)
+    g_source_paths.erase(g_source_paths.begin());
+  return g_source_paths.emplace(key, ResolveCoverSourcePaths(book, book_path))
+      .first->second;
 }
 
 } // namespace
 
 namespace cover_cache {
 
+void ClearPathCache() { g_source_paths.clear(); }
+
 bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
   if (!book || book_path.empty())
     return false;
 
-  const std::vector<std::string> candidates = book->IsBrowserFolder()
-      ? std::vector<std::string>(1, book_path)
-      : cover_override_utils::BuildBookCandidates(book_path);
-
-  std::string chosen_path;
-  for (size_t i = 0; i < candidates.size(); i++) {
-    struct stat st;
-    if (stat(candidates[i].c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
-      chosen_path = candidates[i];
-      break;
-    }
-  }
+  const std::string chosen_path =
+      GetCoverSourcePaths(book, book_path).adjacent_path;
   if (chosen_path.empty())
     return false;
 
@@ -320,7 +320,7 @@ bool Save(Book *book, const std::string &book_path) {
     return false;
 
   EnsureCoverCacheDirs();
-  std::string cache_path = BuildCoverCachePath(book, book_path);
+  std::string cache_path = GetCoverSourcePaths(book, book_path).cache_path;
   FILE *fp = fopen(cache_path.c_str(), "wb");
   if (!fp)
     return false;
@@ -368,18 +368,10 @@ bool TryLoad(Book *book, const std::string &book_path) {
     return false;
   EnsureCoverCacheDirs();
 
-  std::string cache_path = BuildCoverCachePath(book, book_path);
+  std::string cache_path = GetCoverSourcePaths(book, book_path).cache_path;
   FILE *fp = fopen(cache_path.c_str(), "rb");
   if (!fp) {
-    // Folder sidecars are decoded by idle jobs; cache misses must stay cheap
-    // when browser navigation asks for the visible thumbnails.
-    if (book->IsBrowserFolder())
-      return false;
-    if (!book_path.empty() && !book->coverPixels &&
-        TryLoadAdjacentOverride(book, book_path)) {
-      Save(book, book_path);
-      return true;
-    }
+    // All sidecars are decoded by idle jobs; page changes only read .cvr.
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
     if (book->GetStatusReporter()) {
       DBG_LOGF(book->GetStatusReporter(), "COVER: cache miss book=%s path=%s",
@@ -387,6 +379,8 @@ bool TryLoad(Book *book, const std::string &book_path) {
                cache_path.c_str());
     }
 #endif
+    if (book->IsBrowserFolder())
+      return false;
     if (debug_runtime::BackgroundWorkersDisabled() &&
         debug_runtime::BrowserWarmupDisabled() && !book_path.empty() &&
         !book->coverPixels && book->coverAttempts < kMaxAttempts) {

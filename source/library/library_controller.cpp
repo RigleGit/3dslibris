@@ -13,6 +13,7 @@
 
 #include "library/library_sort_mode.h"
 #include "library/cover_override_utils.h"
+#include "library/cover_cache.h"
 #include "settings/prefs.h"
 
 // Forward declared from app_book.cpp
@@ -567,6 +568,7 @@ LibraryController::LibraryController(App &app)
     : app_(app), inside_folder_(false) {}
 
 int LibraryController::FindBooks() {
+  cover_cache::ClearPathCache();
   gradient_ctx_.ts = app_.ts.get();
   gradient_ctx_.color_mode = &app_.colorMode;
 
@@ -774,6 +776,7 @@ void LibraryController::LoadFolderPath(const std::string &folder_path,
 #endif
   PauseBrowserJobs();
   ResetBrowserMarquee();
+  cover_cache::ClearPathCache();
   ClearBrowserBooksAndButtons(&app_);
   inside_folder_ = true;
   current_folder_path_ = path_copy;
