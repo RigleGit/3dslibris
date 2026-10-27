@@ -14,6 +14,14 @@ class Text;
 
 namespace fixed_layout_blit_utils {
 
+// Scale into a caller-owned RGB565 surface without Text or screen state.
+void BlitRgb565SurfaceScaledCrop(
+    u16 *surface, int stride, int logical_width, int logical_height,
+    int x, int y, int draw_width, int draw_height,
+    const u16 *pixels, size_t pixel_count, int src_width, int src_height,
+    int crop_x, int crop_y, int crop_width, int crop_height,
+    bool high_quality_filter);
+
 void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int x, int y, int draw_width,
                                 int draw_height,

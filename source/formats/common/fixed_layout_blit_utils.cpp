@@ -20,7 +20,7 @@ static inline u16 InterpolateRgb565(u16 first, u16 second, float t) {
                      b0 * (1.0f - t) + b1 * t + 0.5f);
 }
 
-static void BlitSurface(u16 *screen, int stride, int logical_width, int logical_height,
+void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int logical_height,
                                 int x, int y, int draw_width,
                                 int draw_height,
                                 const u16 *pixels, size_t pixel_count,
@@ -172,7 +172,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
     const bool landscape = orientation_utils::IsLandscape(ts->GetOrientation());
     const int dx = landscape ? 2 : 1, dy = landscape ? 1 : 2;
     u16 *wide = ts->BeginWideTopBlit(x, y, draw_width, draw_height);
-    BlitSurface(wide, logical_width * dx, logical_width * dx,
+    BlitRgb565SurfaceScaledCrop(wide, logical_width * dx, logical_width * dx,
                 logical_height * dy, x * dx, y * dy,
                 draw_width * dx, draw_height * dy, pixels, pixel_count,
                 src_width, src_height, crop_x, crop_y, crop_width, crop_height,
@@ -180,7 +180,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
   } else {
     ts->MarkScreenDirtyRect(screen, x, y, x + draw_width, y + draw_height);
   }
-  BlitSurface(screen, ts->BufferStride(), logical_width, logical_height,
+  BlitRgb565SurfaceScaledCrop(screen, ts->BufferStride(), logical_width, logical_height,
               x, y, draw_width, draw_height, pixels, pixel_count,
               src_width, src_height, crop_x, crop_y, crop_width, crop_height,
               high_quality_filter);
