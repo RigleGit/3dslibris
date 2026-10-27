@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <vector>
 
 #include <3ds.h>
@@ -64,19 +65,13 @@ static bool CoverCacheEntryOlderFirst(const CoverCacheEntry &a,
   return a.path < b.path;
 }
 
-static void PruneCoverCache(bool force) {
-  static u64 last_prune_ms = 0;
-  u64 now = osGetTime();
-  if (!force && now - last_prune_ms < 5000)
-    return;
-  last_prune_ms = now;
+static std::list<CoverCacheEntry> g_cache_entries;
+static size_t g_cache_bytes = 0;
 
+static void LoadCoverCacheIndex() {
   DIR *dp = opendir(kCoverCacheDir.c_str());
   if (!dp)
     return;
-
-  std::list<CoverCacheEntry> entries;
-  size_t total_bytes = 0;
 
   struct dirent *ent;
   while ((ent = readdir(dp)) != NULL) {
@@ -95,10 +90,31 @@ static void PruneCoverCache(bool force) {
     ce.path = full;
     ce.mtime = (long long)st.st_mtime;
     ce.size = (st.st_size > 0) ? (size_t)st.st_size : 0;
-    total_bytes += ce.size;
-    entries.push_back(ce);
+    g_cache_bytes += ce.size;
+    g_cache_entries.push_back(ce);
   }
   closedir(dp);
+}
+
+static void RecordCoverCacheSave(const std::string &path, size_t size) {
+  for (auto it = g_cache_entries.begin(); it != g_cache_entries.end(); ++it) {
+    if (it->path == path) {
+      g_cache_bytes -= it->size;
+      g_cache_entries.erase(it);
+      break;
+    }
+  }
+  CoverCacheEntry entry;
+  entry.path = path;
+  entry.mtime = (long long)time(NULL);
+  entry.size = size;
+  g_cache_entries.push_back(entry);
+  g_cache_bytes += size;
+}
+
+static void PruneCoverCache() {
+  std::list<CoverCacheEntry> &entries = g_cache_entries;
+  size_t &total_bytes = g_cache_bytes;
 
   if (entries.size() <= kCoverCacheMaxFiles &&
       total_bytes <= kCoverCacheMaxBytes)
@@ -184,7 +200,8 @@ static void EnsureCoverCacheDirs() {
     closedir(legacy_dp);
   }
 
-  PruneCoverCache(true);
+  LoadCoverCacheIndex();
+  PruneCoverCache();
   initialized = true;
 }
 
@@ -349,7 +366,8 @@ bool Save(Book *book, const std::string &book_path) {
       fprintf(mf, "%s\t%s\t%s\n", cache_base.c_str(), display, book_path.c_str());
       fclose(mf);
     }
-    PruneCoverCache(false);
+    RecordCoverCacheSave(cache_path, sizeof(header) + count * sizeof(u16));
+    PruneCoverCache();
   }
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
   if (book->GetStatusReporter()) {
