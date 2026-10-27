@@ -302,8 +302,8 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     if (bbox.x1 <= bbox.x0 || bbox.y1 <= bbox.y0)
       fz_throw(ctx, FZ_ERROR_FORMAT, "invalid pdf render bbox");
 
-    // Grayscale rendering: 3x less memory bandwidth for MuPDF's rasterizer.
-    // Manga pages are B&W, so visual quality is identical.
+    // Preserve document colours. The grayscale conversion path below handles
+    // one-channel pixmaps; document kind alone cannot prove a page is B&W.
     DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                  "MUPDF render: pixmap-begin page=%d bbox=%d,%d %dx%d",
                  page_index, bbox.x0, bbox.y0, bbox.x1 - bbox.x0,
