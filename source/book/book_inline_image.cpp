@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <utility>
+#include <vector>
 
 
 namespace {
@@ -765,26 +766,16 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     }
     u16 *dst = ts->GetScreen();
     const int stride = ts->BufferStride();
-    for (int y = 0; y < entry.height; y++) {
-      int dy = dst_y + y;
-      if (dy < 0 || dy >= screen_h)
-        continue;
-
-      int draw_x = dst_x;
-      int draw_w_local = entry.width;
-      int src_x = 0;
-      if (draw_x < 0) {
-        src_x = -draw_x;
-        draw_w_local -= src_x;
-        draw_x = 0;
-      }
-      if (draw_x + draw_w_local > screen_w)
-        draw_w_local = screen_w - draw_x;
-      if (draw_w_local <= 0)
-        continue;
-
+    const int src_x = std::max(0, -dst_x);
+    const int src_end = std::min((int)entry.width, screen_w - dst_x);
+    const int first_y = std::max(0, -dst_y);
+    const int end_y = std::min((int)entry.height, screen_h - dst_y);
+    const int draw_w_local = src_end - src_x;
+    if (draw_w_local <= 0)
+      return;
+    for (int y = first_y; y < end_y; ++y) {
       const u32 *src_row = entry.pixels.data() + (y * entry.width) + src_x;
-      u16 *dst_row = dst + (dy * stride) + draw_x;
+      u16 *dst_row = dst + ((dst_y + y) * stride) + dst_x + src_x;
       for (int px = 0; px < draw_w_local; px++) {
         u32 argb = src_row[px];
         u8 a = (argb >> 24) & 0xFF;
@@ -847,12 +838,16 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     entry.pixels=std::move(decoded.pixels);
   } else {
     if(!entry.pixels.resize((size_t)draw_w*draw_h,6000000)) return false;
+    // Every destination row uses the same nearest-neighbor source columns.
+    std::vector<size_t> source_x((size_t)draw_w);
+    for (int x = 0; x < draw_w; ++x)
+      source_x[(size_t)x] = (size_t)x * decoded.width / draw_w;
     for(int y=0;y<draw_h;++y) {
       const size_t sy=(size_t)y*decoded.height/draw_h;
-      for(int x=0;x<draw_w;++x) {
-        const size_t sx=(size_t)x*decoded.width/draw_w;
-        entry.pixels.mutable_data()[(size_t)y*draw_w+x]=decoded.pixels[sy*decoded.width+sx];
-      }
+      const u32 *src = decoded.pixels.data() + sy * decoded.width;
+      u32 *dst = entry.pixels.mutable_data() + (size_t)y * draw_w;
+      for(int x=0;x<draw_w;++x)
+        dst[x] = src[source_x[(size_t)x]];
     }
   }
 
