@@ -103,7 +103,8 @@ private:
   std::string browser_display_name_cache;
   std::string browser_folder_path;
   std::string browser_folder_display_name;
-  std::string browser_folder_cover_path;
+  mutable std::string browser_folder_cover_path;
+  mutable bool browser_folder_cover_checked_ = false;
   bool browser_display_name_cached;
   bool browser_folder_entry;
   int position;             //! as page index.
@@ -289,10 +290,7 @@ public:
   {
     return browser_folder_display_name;
   }
-  inline const std::string &GetBrowserFolderCoverPath() const
-  {
-    return browser_folder_cover_path;
-  }
+  const std::string &GetBrowserFolderCoverPath() const;
   inline TocQuality GetTocQuality() const { return toc_quality; }
   inline u16 GetTocDirectCount() const { return toc_direct_count; }
   inline u16 GetTocHeuristicCount() const { return toc_heuristic_count; }

@@ -431,17 +431,8 @@ static void AppendFolderEntry(App *app, const std::string &source_dir,
   ctx.on_spine_progress = &DrawOpeningSplashWithProgress;
   ctx.on_spine_progress_user_data = app;
 
-  std::string cover_path;
-  const std::vector<std::string> cover_candidates =
-      cover_override_utils::BuildStemCandidates(source_dir + "/" + folder_name);
-  for (size_t i = 0; i < cover_candidates.size(); ++i) {
-    if (PathIsRegularFile(cover_candidates[i])) {
-      cover_path = cover_candidates[i];
-      break;
-    }
-  }
   Book *folder = new Book(ctx);
-  folder->SetBrowserFolderEntry(folder_path, folder_name, cover_path);
+  folder->SetBrowserFolderEntry(folder_path, folder_name, std::string());
   app->books.push_back(folder);
 }
 

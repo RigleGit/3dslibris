@@ -330,6 +330,7 @@ void Book::SetBrowserFolderEntry(const std::string &path,
   browser_folder_path = path;
   browser_folder_display_name = display_name;
   browser_folder_cover_path = cover_path;
+  browser_folder_cover_checked_ = !cover_path.empty();
   foldername = path;
   filename.clear();
   title = display_name;
