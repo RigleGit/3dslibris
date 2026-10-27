@@ -6,6 +6,7 @@
 #include "shared/string_utils.h"
 #include "shared/text_unicode_utils.h"
 
+#include <climits>
 #include <string>
 
 namespace book_xml_css_style_utils {
@@ -29,17 +30,23 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
   int value = 0;
   bool has_digit = false;
   while (p < lc.size() && lc[p] >= '0' && lc[p] <= '9') {
-    value = value * 10 + (lc[p] - '0');
+    const int digit = lc[p] - '0';
+    if (value > (INT_MAX - digit) / 10)
+      return result;
+    value = value * 10 + digit;
     has_digit = true;
     p++;
   }
   if (!has_digit)
     return result;
-  // Consume optional fractional part; track whether it is non-zero.
+  // Other units retain their existing one-digit fractional precision.
   int frac_x10 = 0;
+  size_t frac_start = p;
+  size_t frac_end = p;
   bool has_decimal = false;
   if (p < lc.size() && lc[p] == '.') {
     p++;
+    frac_start = p;
     has_decimal = true;
     if (p < lc.size() && lc[p] >= '0' && lc[p] <= '9') {
       frac_x10 = lc[p] - '0';
@@ -47,18 +54,19 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
       while (p < lc.size() && lc[p] >= '0' && lc[p] <= '9')
         p++;
     }
+    frac_end = p;
   }
   while (p < lc.size() && lc[p] == ' ')
     p++;
+  long long converted = value;
   if (p < lc.size() && lc[p] == '%') {
     // Keep integer storage for percentages but preserve one decimal digit by
     // rounding half-up (e.g. 1.5% -> 2%).
-    result.value = value + ((has_decimal && frac_x10 >= 5) ? 1 : 0);
+    converted += ((has_decimal && frac_x10 >= 5) ? 1 : 0);
     result.unit = MarginTopResult::Unit::Percent;
     result.negative = negative;
     p++;
   } else if (p + 1 < lc.size() && lc[p] == 'p' && lc[p + 1] == 'x') {
-    result.value = value;
     result.unit = MarginTopResult::Unit::Px;
     result.negative = negative;
     p += 2;
@@ -66,30 +74,43 @@ MarginTopResult ParseOneLengthToken(const std::string &lc, size_t *pos) {
              (p + 2 < lc.size() && lc[p] == 'r' && lc[p + 1] == 'e' &&
               lc[p + 2] == 'm')) {
     const int unit_len = (lc[p] == 'r') ? 3 : 2;
-    result.value = value * 100 + frac_x10 * 10;
+    converted = value * 100LL + frac_x10 * 10;
     result.unit = MarginTopResult::Unit::Em;
     result.negative = negative;
     p += unit_len;
   } else if (p + 1 < lc.size() && lc[p] == 'p' && lc[p + 1] == 't') {
     // 1pt = 4/3 px (96dpi, 72pt/inch).
-    result.value = (value * 4 + 1) / 3;
+    converted = (value * 4LL + 1) / 3;
     result.unit = MarginTopResult::Unit::Px;
     result.negative = negative;
     p += 2;
   } else if (p + 1 < lc.size() && lc[p] == 'i' && lc[p + 1] == 'n') {
     // 1in = 96px (96dpi).
-    result.value = value * 96 + (frac_x10 * 96 + 9) / 10;
+    // Multiply the fractional digits from right to left. Carry stays below 96,
+    // so any number of decimal digits is exact without a growing denominator.
+    int frac_px = 0;
+    bool remainder = false;
+    for (size_t f = frac_end; f > frac_start; f--) {
+      const int product = (lc[f - 1] - '0') * 96 + frac_px;
+      frac_px = product / 10;
+      remainder = remainder || product % 10 != 0;
+    }
+    // Preserve the existing rounding of fractional pixels away from zero.
+    converted = value * 96LL + frac_px + (remainder ? 1 : 0);
     result.unit = MarginTopResult::Unit::Px;
     result.negative = negative;
     p += 2;
   } else if (value == 0 && !has_decimal) {
     // CSS allows bare unitless zero for lengths (e.g. "margin: 0").
-    result.value = 0;
+    converted = 0;
     result.unit = MarginTopResult::Unit::Px;
     result.negative = negative;
   } else {
     return result;
   }
+  if (converted > INT_MAX)
+    return MarginTopResult{};
+  result.value = (int)converted;
   *pos = p;
   return result;
 }

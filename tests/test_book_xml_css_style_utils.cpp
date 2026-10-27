@@ -146,7 +146,6 @@ void TestParseMarginTopInUnit() {
   test::ExpectEq("1in -> 96px", one_in.value, 96);
   R frac = book_xml_css_style_utils::ParseMarginTop("margin-top: 0.5in;");
   test::ExpectEq("0.5in -> Px unit", (int)frac.unit, (int)R::Unit::Px);
-  // frac_x10=5 → (5*96+9)/10 = 489/10 = 48
   test::ExpectEq("0.5in -> 48px", frac.value, 48);
 }
 
@@ -428,13 +427,75 @@ void TestParseTextIndent() {
   R neg = book_xml_css_style_utils::ParseTextIndent("text-indent: -8px;");
   test::ExpectEq("negative text-indent -> Px", (int)neg.unit, (int)R::Unit::Px);
   test::ExpectTrue("negative text-indent is negative", neg.negative);
+}
 
-  // 0.25in at 96dpi = 24px (first decimal digit 2 → (2*96+9)/10 = 19 fractional,
-  // plus 0 whole inches = 19px). Verify unit resolves and value is positive.
-  R in_indent = book_xml_css_style_utils::ParseTextIndent("text-indent: 0.25in;");
-  test::ExpectEq("0.25in -> Px unit", (int)in_indent.unit, (int)R::Unit::Px);
-  test::ExpectTrue("0.25in -> positive value", in_indent.value > 0);
-  test::ExpectFalse("0.25in -> not negative", in_indent.negative);
+void TestParseTextIndentInchesAt96Dpi() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  const struct {
+    const char *css;
+    int expected_px;
+    bool negative;
+  } cases[] = {
+    {"text-indent: 0.25in;", 24, false},
+    {"text-indent: 0.125in;", 12, false},
+    {"text-indent: 0.1in;", 10, false},
+    {"text-indent: 1in;", 96, false},
+    {"text-indent: 1.25in;", 120, false},
+    {"text-indent: -0.25in;", 24, true},
+    {"text-indent: 0.3333333333333333333333in;", 32, false},
+    {"text-indent: 0.3333333333333333333334in;", 33, false},
+    {"text-indent: 0.0000000000000000000001in;", 1, false},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    const R r = book_xml_css_style_utils::ParseTextIndent(cases[i].css);
+    test::ExpectEq((std::string(cases[i].css) + " unit").c_str(),
+                   (int)r.unit, (int)R::Unit::Px);
+    test::ExpectEq((std::string(cases[i].css) + " pixels").c_str(),
+                   r.value, cases[i].expected_px);
+    test::ExpectEq((std::string(cases[i].css) + " sign").c_str(),
+                   r.negative, cases[i].negative);
+  }
+}
+
+void TestParseLengthDecimalCompatibility() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  const struct {
+    const char *css;
+    R::Unit unit;
+    int value;
+  } cases[] = {
+    {"text-indent: 1.25em;", R::Unit::Em, 120},
+    {"text-indent: 1.25rem;", R::Unit::Em, 120},
+    {"text-indent: 1.49%;", R::Unit::Percent, 1},
+    {"text-indent: 12.75px;", R::Unit::Px, 12},
+    {"text-indent: 12.75pt;", R::Unit::Px, 16},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+    const R r = book_xml_css_style_utils::ParseTextIndent(cases[i].css);
+    test::ExpectEq((std::string(cases[i].css) + " unit").c_str(),
+                   (int)r.unit, (int)cases[i].unit);
+    test::ExpectEq(cases[i].css, r.value, cases[i].value);
+  }
+}
+
+void TestParseLengthRejectsOverflow() {
+  using R = book_xml_css_style_utils::MarginTopResult;
+  const char *invalid[] = {
+    "text-indent: 999999999999999999999999px;",
+    "text-indent: 22369621.323in;",
+  };
+  for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+    const R r = book_xml_css_style_utils::ParseTextIndent(invalid[i]);
+    test::ExpectEq(invalid[i], (int)r.unit, (int)R::Unit::None);
+  }
+  const R largest_px = book_xml_css_style_utils::ParseTextIndent(
+      "text-indent: 2147483647px;");
+  test::ExpectEq("largest px unit", (int)largest_px.unit, (int)R::Unit::Px);
+  test::ExpectEq("largest px value", largest_px.value, 2147483647);
+  const R largest_in = book_xml_css_style_utils::ParseTextIndent(
+      "text-indent: 22369621.322in;");
+  test::ExpectEq("largest inch unit", (int)largest_in.unit, (int)R::Unit::Px);
+  test::ExpectEq("largest inch value", largest_in.value, 2147483647);
 }
 
 void TestParseTextAlignStartEnd() {
@@ -621,6 +682,9 @@ int main() {
   TestResolveFontSizePxHandlesRelativeValues();
   TestParseInlineFlagsResets();
   TestParseTextIndent();
+  TestParseTextIndentInchesAt96Dpi();
+  TestParseLengthDecimalCompatibility();
+  TestParseLengthRejectsOverflow();
   TestParseTextAlignStartEnd();
   TestParseWhiteSpaceModes();
   TestNormalizeWhiteSpaceText();
