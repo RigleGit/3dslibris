@@ -319,7 +319,7 @@ static void CleanupDecodedMobiText(IStatusReporter *reporter, std::string *text,
       *text = mobi_text_cleanup::RepairCommonMojibakePreservingMobiImageTokens(
           text_before_mobi_cleanup);
     } else {
-      *text = mobi_text_cleanup::RepairCommonMojibake(*text);
+      mobi_text_cleanup::RepairCommonMojibakeInPlace(text);
     }
   } else if (track_image_tokens) {
     // The original stays available for the wrap-fix image-ID rollback.

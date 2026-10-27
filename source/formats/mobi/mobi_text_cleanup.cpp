@@ -292,30 +292,32 @@ static void AppendMergedSpace(std::string *out) {
 
 } // namespace
 
-std::string RepairCommonMojibake(const std::string &text) {
-  std::string out;
-  out.reserve(text.size());
-
-  for (size_t i = 0; i < text.size();) {
-    // UTF-8 mojibake of Latin-1 supplements often appears as "Ã" followed by a
-    // re-encoded Latin-1 byte. Rebuild the original two-byte UTF-8 sequence.
-    if (i + 1 < text.size() && (unsigned char)text[i] == 0xC3 &&
-        (unsigned char)text[i + 1] == 0x83) {
+void RepairCommonMojibakeInPlace(std::string *text) {
+  if (!text)
+    return;
+  size_t write = 0;
+  for (size_t read = 0; read < text->size();) {
+    if (read + 1 < text->size() && (unsigned char)(*text)[read] == 0xC3 &&
+        (unsigned char)(*text)[read + 1] == 0x83) {
       size_t consumed = 0;
       unsigned int cp = 0;
-      if (DecodeLatin1Supplement(text, i + 2, &consumed, &cp)) {
-        if (cp >= 0xA0 && cp <= 0xBF) {
-          AppendUtf8Codepoint(&out, 0x00C0u + (cp - 0x80u));
-          i += 2 + consumed;
-          continue;
-        }
+      if (DecodeLatin1Supplement(*text, read + 2, &consumed, &cp) &&
+          cp >= 0xA0 && cp <= 0xBF) {
+        // The repaired U+00E0..U+00FF is always a two-byte UTF-8 sequence.
+        (*text)[write++] = (char)0xC3;
+        (*text)[write++] = (char)cp;
+        read += 2 + consumed;
+        continue;
       }
     }
-
-    out.push_back(text[i]);
-    i++;
+    (*text)[write++] = (*text)[read++];
   }
+  text->resize(write);
+}
 
+std::string RepairCommonMojibake(const std::string &text) {
+  std::string out = text;
+  RepairCommonMojibakeInPlace(&out);
   return out;
 }
 

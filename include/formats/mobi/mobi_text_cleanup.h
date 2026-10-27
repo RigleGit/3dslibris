@@ -12,6 +12,7 @@
 
 namespace mobi_text_cleanup {
 
+void RepairCommonMojibakeInPlace(std::string *text);
 std::string RepairCommonMojibake(const std::string &text);
 std::string RepairCommonMojibakePreservingMobiImageTokens(
     const std::string &text);
