@@ -110,7 +110,8 @@ namespace
   // Collects any missing runtime files. Checks the book directory and the
   // bundled fonts against both sdmc:/ and romfs:/ so a partial install is
   // reported accurately regardless of install method.
-  static void CollectMissingRuntimeFiles(std::vector<std::string> *missing)
+  static void CollectMissingRuntimeFiles(std::vector<std::string> *missing,
+                                         bool check_fonts = true)
   {
     if (!missing)
       return;
@@ -119,6 +120,11 @@ namespace
     if (!RuntimePathExistsEither(paths::GetBookDir().c_str(),
                                  paths::kRomfsBookDir, true))
       missing->push_back("book/ (sdmc or romfs)");
+
+    // Successful Text::Init already loaded every required face, including
+    // configured fonts and per-file fallbacks outside the bundled directory.
+    if (!check_fonts)
+      return;
 
     // Check the first 5 bundled fonts (the ones shipped with every release).
     // Romfs paths are derived from paths::kRomfsFontDir to stay in sync with
@@ -274,7 +280,7 @@ int StartupController::RunBootSequence()
   DrawBootStatus("Booting", {"Searching for books..."}, false);
 
   std::vector<std::string> missing_runtime;
-  CollectMissingRuntimeFiles(&missing_runtime);
+  CollectMissingRuntimeFiles(&missing_runtime, false);
   if (!missing_runtime.empty())
   {
     app_.PrintStatus("error: incomplete sdmc install");
