@@ -479,6 +479,33 @@ int epub(Book *book, std::string name, bool metadataonly) {
   if (reporter && (!metadataonly || EPUB_METADATA_TRACE))
     DBG_LOG(reporter, "EPUB: parse begin");
 
+  bool cache_loaded = false;
+  if (!metadataonly && !ShouldAbortEpubOpen(book)) {
+    // The metadata cache supplies fields not stored in .epc (author, language,
+    // etc.). A complete page/TOC hit needs no ZIP or package XML at all.
+    const bool have_metadata = book->TryLoadMetadataFromCache();
+    cache_loaded = epub_page_cache::TryLoad(book, name.c_str(),
+                                deps.ts ? (int)deps.ts->GetPixelSize() : 0,
+                                deps.ts ? (int)deps.ts->linespacing : 0,
+                                deps.paragraph_spacing, deps.paragraph_indent,
+                                deps.orientation,
+                                deps.ts ? (int)deps.ts->margin.left : 0,
+                                deps.ts ? (int)deps.ts->margin.right : 0,
+                                deps.ts ? (int)deps.ts->margin.top : 0,
+                                deps.ts ? (int)deps.ts->margin.bottom : 0,
+                                deps.ts ? deps.ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : NULL);
+    if (cache_loaded && have_metadata && !book->GetChapters().empty()) {
+      if (reporter)
+        DBG_LOGF(reporter, "EPUB: page cache hit pages=%u chapters=%u (no ZIP)",
+                 (unsigned)book->GetPageCount(),
+                 (unsigned)book->GetChapters().size());
+      return FinalizeEpubParse(NULL, &parsedata, book, name, deps, 0, false);
+    }
+    if (ShouldAbortEpubOpen(book))
+      return FinalizeEpubParse(NULL, &parsedata, book, name, deps,
+                               BOOK_ERR_CANCELLED, false);
+  }
+
   unzFile uf = NULL;
   rc = OpenEpubArchive(name, &uf);
   if (rc != 0)
@@ -520,16 +547,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
     return rc;
   }
 
-  if (epub_page_cache::TryLoad(book, name.c_str(),
-                                deps.ts ? (int)deps.ts->GetPixelSize() : 0,
-                                deps.ts ? (int)deps.ts->linespacing : 0,
-                                deps.paragraph_spacing, deps.paragraph_indent,
-                                deps.orientation,
-                                deps.ts ? (int)deps.ts->margin.left : 0,
-                                deps.ts ? (int)deps.ts->margin.right : 0,
-                                deps.ts ? (int)deps.ts->margin.top : 0,
-                                deps.ts ? (int)deps.ts->margin.bottom : 0,
-                                deps.ts ? deps.ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : NULL)) {
+  if (cache_loaded) {
     if (reporter) {
       DBG_LOGF(reporter, "EPUB: page cache hit pages=%u chapters=%u",
                (unsigned)book->GetPageCount(),
