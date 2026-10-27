@@ -24,6 +24,7 @@ public:
     int bottom = 36;
   } margin;
   bool landscape = false, wrap = true;
+  u8 orientation = 0;
   int pixelsize = 14, style = 0, x = 0, y = 0;
   int GetPixelSize() const {
     return pixelsize;
@@ -74,6 +75,9 @@ public:
   }
   int BufferStride() const {
     return 400;
+  }
+  u8 GetOrientation() const {
+    return orientation;
   }
   u16 GetBgColor() const {
     return 0;

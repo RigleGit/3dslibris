@@ -129,6 +129,7 @@ struct App {
     return false;
   }
   void ApplyRenderOrientation(unsigned char value) {
+    ts->orientation = value;
     ts->landscape = value == 2;
   }
   void ResetPageRepeat() {}
@@ -186,6 +187,9 @@ struct Fixture {
     skins.clear();
     app.ts->printed.clear();
     qualities.clear();
+    // This helper requests a fresh control-layout capture. Input frames below
+    // retain the actual cached panel and exercise its invalidation separately.
+    reader.image_viewer_->panel_dirty = true;
     reader.DrawImageViewer();
   }
   void Input(u32 down, u32 held = 0, int x = 0, int y = 0) {
