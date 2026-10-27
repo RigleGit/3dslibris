@@ -31,6 +31,7 @@
 #include "settings/prefs.h"
 #include "shared/boot_trace.h"
 #include "shared/debug_log.h"
+#include "shared/debug_runtime_mode.h"
 #include "ui/text.h"
 #include "ui/text_limits.h"
 
@@ -87,6 +88,9 @@ u8 ReaderController::OpenBook()
 
   ApplyEffectiveTextLayoutSettings(&app_, selected_book);
 
+  const bool use_async_reflow =
+      !debug_runtime::BackgroundWorkersDisabled() &&
+      selected_book->SupportsAsyncReflowOpen();
   const bool needs_relayout = app_.BookNeedsRelayout(selected_book);
   const bool switching_books =
       (bookcurrent_ && bookcurrent_ != selected_book);
@@ -99,7 +103,7 @@ u8 ReaderController::OpenBook()
            "BOOK switch: request session=%u current_session=%u current=%s selected=%s needs_relayout=%u async=%u",
            session_id, app_.GetCurrentBookSessionId(), SafeBookName(bookcurrent_),
            SafeBookName(selected_book), needs_relayout ? 1u : 0u,
-           selected_book->SupportsAsyncReflowOpen() ? 1u : 0u);
+           use_async_reflow ? 1u : 0u);
 
   // Switching books closes the previous one in DetachCurrentBookForSwitch().
   // Persist first so Close() cannot reset/write it back as page 1.
@@ -149,7 +153,7 @@ u8 ReaderController::OpenBook()
     return BOOK_ERR_CANCELLED;
   }
 
-  if (selected_book->SupportsAsyncReflowOpen())
+  if (use_async_reflow)
   {
     boot_trace::Boot("open book async path begin");
     if (switching_books)
