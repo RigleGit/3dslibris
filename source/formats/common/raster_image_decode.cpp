@@ -176,6 +176,20 @@ void Convert(const unsigned char *samples, int width, int height, int stride,
   const int bg[3] = {((background >> 11) & 31) * 255 / 31,
                      ((background >> 5) & 63) * 255 / 63,
                      (background & 31) * 255 / 31};
+  if (width == out->width && height == out->height) {
+    for (int y = 0; y < height; ++y) {
+      const unsigned char *src = samples + (size_t)y * stride;
+      for (int x = 0; x < width; ++x, src += components) {
+        const int opacity = alpha ? src[components - 1] : 255;
+        const float factor = premultiplied || opacity == 255 ? 1.0f : opacity / 255.0f;
+        float rgb[3];
+        for (int c = 0; c < 3; ++c)
+          rgb[c] = src[colors == 1 ? 0 : c] * factor;
+        StorePixel(out, (size_t)y * width + x, rgb, (float)opacity, bg);
+      }
+    }
+    return;
+  }
   for (int y = 0; y < out->height; ++y) {
     const float fy = std::max(0.0f, ((y + 0.5f) * height / out->height) - 0.5f);
     const int y0 = std::min(height - 1, (int)fy),
@@ -194,14 +208,16 @@ void Convert(const unsigned char *samples, int width, int height, int stride,
       const float weights[4] = {(1 - tx) * (1 - ty), tx * (1 - ty),
                                 (1 - tx) * ty, tx * ty};
       float rgb[3] = {0, 0, 0}, a = 0;
+      bool opaque = true;
       for (int k = 0; k < 4; ++k) {
         const int opacity = alpha ? p[k][components - 1] : 255;
+        opaque = opaque && opacity == 255;
         a += weights[k] * opacity;
         for (int c = 0; c < 3; ++c)
           rgb[c] += weights[k] * p[k][colors == 1 ? 0 : c] *
                     (premultiplied ? 1.0 : opacity / 255.0);
       }
-      StorePixel(out,(size_t)y*out->width+x,rgb,a,bg);
+      StorePixel(out,(size_t)y*out->width+x,rgb,opaque ? 255.0f : a,bg);
     }
   }
 }
