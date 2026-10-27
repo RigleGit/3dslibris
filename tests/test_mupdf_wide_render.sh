@@ -40,7 +40,7 @@ done
   "$ROOT/source/formats/mupdf/mupdf_render.cpp" \
   "$ROOT/source/ui/text.cpp" "$ROOT/source/ui/text_screen_surface.cpp" \
   "$ROOT/source/ui/text_wide_surface.cpp" \
-  "$ROOT/source/formats/common/fixed_layout_blit_utils.cpp" \
+  "$ROOT/source/formats/common/fixed_layout_blit_utils.cpp" "$ROOT/source/formats/common/fixed_layout_surface.cpp" \
   "$ROOT/source/formats/common/pdf_view_utils.cpp" \
   "$ROOT/source/shared/app_flow_utils.cpp" \
   "$MUPDF_HOST_LIB_DIR/libmupdf.a" "$MUPDF_HOST_LIB_DIR/libmupdf-third.a" \

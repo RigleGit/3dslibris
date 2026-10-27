@@ -10,7 +10,7 @@ mkdir -p "$OUTDIR" "$WORKDIR"
   "$ROOT/tests/test_cbz_decode.cpp" \
   "$ROOT/source/formats/cbz/cbz_decode.cpp" \
   "$ROOT/source/core/stb_image_impl.cpp" \
-  "$ROOT/source/formats/common/pdf_view_utils.cpp" \
+  "$ROOT/source/formats/common/pdf_view_utils.cpp" "$ROOT/source/formats/common/fixed_layout_surface.cpp" \
   -I"$ROOT/include" \
   -I"$ROOT/third_party/stb" \
   ${LDFLAGS:-} \
@@ -74,7 +74,7 @@ if [ -n "${MUPDF_HOST_LIB_DIR:-}" ]; then
   "${CXX:-c++}" -std=c++11 ${CXXFLAGS:-} -fno-exceptions -fno-rtti \
     -I"$ROOT/tests" -I"$ROOT/include" -I"$ROOT/third_party/mupdf/include" \
     "$ROOT/tests/test_cbz_mupdf_decode.cpp" "$WORKDIR/cbz_decode_mupdf.o" \
-    "$ROOT/source/formats/common/pdf_view_utils.cpp" \
+    "$ROOT/source/formats/common/pdf_view_utils.cpp" "$ROOT/source/formats/common/fixed_layout_surface.cpp" \
     "$MUPDF_HOST_LIB_DIR/libmupdf.a" "$MUPDF_HOST_LIB_DIR/libmupdf-third.a" \
     ${LDFLAGS:-} "$MUPDF_GC_FLAG" -lm -o "$OUTDIR/test_cbz_mupdf_decode"
   "$OUTDIR/test_cbz_mupdf_decode" "$PNG_PATH" "$JPG_PATH"

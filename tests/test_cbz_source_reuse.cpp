@@ -25,7 +25,7 @@ bool CbzArchiveReader::Read(const std::string &, const CbzPageEntry &, std::vect
 }
 const char *GetLastCbzArchiveError() { return "read failed"; }
 const char *GetLastCbzDecodeError() { return "decode failed"; }
-bool DecodeCbzPageImage(const std::vector<unsigned char> &, int z, int, int, CbzDecodedPage *d) {
+bool DecodeCbzPageImageWithContext(const std::vector<unsigned char> &, int z, int, int, CbzDecodedPage *d, fz_context **) {
   ++decodes; attempted_zooms.push_back(z);
   if (z > max_decode_zoom) return false;
   d->original_width = 600; d->original_height = 900;

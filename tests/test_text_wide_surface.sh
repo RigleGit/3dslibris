@@ -24,4 +24,4 @@ build_test test_text_wide_surface -- -ffunction-sections -fdata-sections "$DEAD_
   "$ROOT/tests/test_text_wide_surface.cpp" \
   "$ROOT/source/ui/text.cpp" "$ROOT/source/ui/text_screen_surface.cpp" \
   "$ROOT/source/ui/text_wide_surface.cpp" \
-  "$ROOT/source/formats/common/fixed_layout_blit_utils.cpp"
+  "$ROOT/source/formats/common/fixed_layout_blit_utils.cpp" "$ROOT/source/formats/common/fixed_layout_surface.cpp"

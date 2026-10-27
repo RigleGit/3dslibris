@@ -3,20 +3,32 @@
 #include <cstddef>
 #include <vector>
 #include <string>
+#include <algorithm>
+#include "formats/common/fixed_layout_blit_utils.h"
+#include "formats/common/pdf_view_utils.h"
+#include "formats/common/fixed_layout_preview_constants.h"
 struct fz_context {};
 struct fz_document {};
 struct fz_display_list { int page; };
 struct IStatusReporter {};
-struct RenderedMuPdfBitmap { int width = 10, height = 10; };
+struct RenderedMuPdfBitmap { int width = 10, height = 10; std::vector<u16> pixels; };
 #define DBG_LOGF_CAT(...) ((void)0)
 namespace app_flow_utils { enum class MuPdfDocumentKind { Pdf }; }
 namespace mupdf_render_policy_utils {
   static bool skip = false;
   bool ShouldSkipPdfPageRender(app_flow_utils::MuPdfDocumentKind, int, size_t) { return skip; }
 }
-struct Cache { int page = -1; };
+struct Cache {
+  int page = -1, bitmap_width = 0, bitmap_height = 0;
+  float left = 0, top = 0, width = 1, height = 1;
+  std::vector<u16> pixels;
+  const u16 *PixelData() const { return pixels.data(); }
+  size_t PixelCount() const { return pixels.size(); }
+};
 struct Book {
   struct MuPdfState {
+    typedef Cache BitmapCache;
+    struct { int zoom_index = 0; } viewport;
     fz_context context;
     fz_document document;
     fz_context *ctx = &context;
@@ -32,6 +44,12 @@ struct Book {
     fz_display_list *cached_display_list = nullptr;
   };
 };
+// Keep this display-list fixture on the independent preview path; it does
+// not validate reuse of the full-page interactive raster.
+namespace debug_runtime { bool ForceSynchronousMuPdfRender() { return false; } }
+const int kPdfPreviewPadding = fixed_layout_preview::kPadding;
+pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport(const Book::MuPdfState *) { return {0, 0, 1, 1}; }
+bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *, int) { return false; }
 static int renders = 0, builds = 0, drops = 0, cancels = 0;
 static bool fail = false;
 static std::vector<std::string> events;
