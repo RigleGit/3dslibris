@@ -121,6 +121,7 @@ void Book::ResetCbzState() {
     return;
 
   ShutdownCbzWorker(cbz_state);
+  ResetCbzDecodeContext(&cbz_state->decode_context);
   delete cbz_state;
   cbz_state = NULL;
 }

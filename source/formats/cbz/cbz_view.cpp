@@ -126,12 +126,13 @@ bool DecodeCbzPageImageWithFallback(const std::vector<unsigned char> &bytes,
                                     int preferred_zoom_index,
                                     int target_width, int target_height,
                                     CbzDecodedPage *decoded,
-                                    int *used_zoom_index) {
+                                    int *used_zoom_index,
+                                    fz_context **decode_context) {
   if (!decoded)
     return false;
   for (int try_zoom = preferred_zoom_index; try_zoom >= 0; --try_zoom) {
-    if (DecodeCbzPageImage(bytes, try_zoom, target_width, target_height,
-                           decoded)) {
+    if (DecodeCbzPageImageWithContext(bytes, try_zoom, target_width, target_height,
+                                      decoded, decode_context)) {
       if (used_zoom_index)
         *used_zoom_index = try_zoom;
       return true;
@@ -254,7 +255,8 @@ bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
   if (!DecodeCbzPageImageWithFallback(
           bytes, decode_zoom_index, cbz_state->target_top_width,
           cbz_state->target_top_height, &decoded,
-                                      &used_zoom_index)) {
+                                      &used_zoom_index,
+                                      &cbz_state->decode_context)) {
     perf_decode.End(0, bytes.size());
     cbz_state->last_error = GetLastCbzDecodeError();
     cbz_state->failed_page = page_index;
@@ -501,6 +503,7 @@ void Book::ResetCbzTransientViewState(bool restart_worker) {
     return;
 
   ShutdownCbzWorker(cbz_state);
+  ResetCbzDecodeContext(&cbz_state->decode_context);
   // Reopen lazily after HOME/resume instead of reusing an old SD handle.
   cbz_state->archive_reader.Close();
   InitCbzWorker(cbz_state);

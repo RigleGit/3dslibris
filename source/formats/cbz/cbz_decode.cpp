@@ -187,16 +187,15 @@ bool ResampleRgb8ToBitmap(const unsigned char *src, int src_width,
 
 bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
                                   int max_zoom_index, int target_width,
-                                  int target_height, CbzDecodedPage *out) {
-  if (!out || bytes.empty()) {
+                                  int target_height, CbzDecodedPage *out,
+                                  fz_context **context) {
+  if (!out || !context || bytes.empty()) {
     ClearDecodedPage(out);
     SetLastCbzDecodeError("invalid mupdf image decode parameters");
     return false;
   }
 
-  InitMuPdfLocks();
-
-  fz_context *ctx = NULL;
+  fz_context *ctx = *context;
   fz_buffer *buffer = NULL;
   fz_image *image = NULL;
   fz_pixmap *pixmap = NULL;
@@ -207,7 +206,11 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
   fz_var(pixmap);
 
   const uint64_t context_start = fixed_perf::Now();
-  ctx = fz_new_context(NULL, &g_mupdf_locks_ctx, FZ_STORE_DEFAULT);
+  if (!ctx) {
+    InitMuPdfLocks();
+    ctx = fz_new_context(NULL, &g_mupdf_locks_ctx, 4u * 1024u * 1024u);
+    *context = ctx;
+  }
   fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_context",
                      fixed_perf::Now() - context_start, ctx ? 1 : 0);
   if (!ctx) {
@@ -218,7 +221,7 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
 
   fz_try(ctx) {
     const uint64_t buffer_start = fixed_perf::Now();
-    // All MuPDF references, including the context's store, are dropped below
+    // All image references, including the context's store, are dropped below
     // before this synchronous call returns. Borrow the caller's immutable
     // entry bytes; the shared buffer never frees the vector's storage.
     buffer = fz_new_buffer_from_shared_data(ctx, bytes.data(), bytes.size());
@@ -310,7 +313,9 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
   fz_drop_pixmap(ctx, pixmap);
   fz_drop_image(ctx, image);
   fz_drop_buffer(ctx, buffer);
-  fz_drop_context(ctx);
+  // Store keys can retain the compressed image and its shared input buffer.
+  // Empty the store before the caller releases/replaces the ZIP entry bytes.
+  fz_empty_store(ctx);
   fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_release",
                      fixed_perf::Now() - release_start, ok ? 1 : 0);
 
@@ -351,10 +356,30 @@ const char *GetLastCbzDecodeError() {
   return g_last_cbz_decode_error;
 }
 
+void ResetCbzDecodeContext(fz_context **context) {
+  if (!context || !*context)
+    return;
+#ifdef __3DS__
+  fz_drop_context(*context);
+#endif
+  *context = NULL;
+}
+
 bool DecodeCbzPageImage(const std::vector<unsigned char> &bytes,
                         int max_zoom_index, int target_width,
                         int target_height, CbzDecodedPage *out) {
-  if (!out)
+  fz_context *context = NULL;
+  const bool ok = DecodeCbzPageImageWithContext(
+      bytes, max_zoom_index, target_width, target_height, out, &context);
+  ResetCbzDecodeContext(&context);
+  return ok;
+}
+
+bool DecodeCbzPageImageWithContext(const std::vector<unsigned char> &bytes,
+                                  int max_zoom_index, int target_width,
+                                  int target_height, CbzDecodedPage *out,
+                                  fz_context **context) {
+  if (!out || !context)
     return false;
 
   ClearDecodedPage(out);
@@ -367,7 +392,7 @@ bool DecodeCbzPageImage(const std::vector<unsigned char> &bytes,
 
 #ifdef __3DS__
   return DecodeImageToBitmapWithMuPdf(bytes, max_zoom_index, target_width,
-                                      target_height, out);
+                                      target_height, out, context);
 #else
   int src_width = 0;
   int src_height = 0;

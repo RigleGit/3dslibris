@@ -5,6 +5,7 @@
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "formats/cbz/cbz_types.h"
 #include "formats/cbz/cbz_archive.h"
+#include "formats/cbz/cbz_decode.h"
 
 #include <3ds.h>
 
@@ -64,6 +65,7 @@ struct Book::CbzState {
 
   // Main-thread reader; background/cover reads keep their own handles.
   CbzArchiveReader archive_reader;
+  fz_context *decode_context;
   std::string archive_path;
   int target_top_width;
   int target_top_height;
@@ -88,7 +90,7 @@ struct Book::CbzState {
   std::string last_error;
 
   CbzState()
-      : archive_path(), target_top_width(240), target_top_height(400),
+      : decode_context(NULL), archive_path(), target_top_width(240), target_top_height(400),
         target_bottom_width(240), target_bottom_height(320), entries(),
         page_count(0), is_new_3ds(false),
         viewport(), page_width(1.0f), page_height(1.0f),

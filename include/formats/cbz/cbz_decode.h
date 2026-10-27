@@ -4,6 +4,8 @@
 
 #include <vector>
 
+struct fz_context;
+
 struct CbzDecodedPage {
   int original_width;
   int original_height;
@@ -17,5 +19,12 @@ const char *GetLastCbzDecodeError();
 bool DecodeCbzPageImage(const std::vector<unsigned char> &bytes,
                         int max_zoom_index, int target_width,
                         int target_height, CbzDecodedPage *out);
+// The reader owns one context; cover/worker callers retain the temporary API.
+// Each decode clears its store before the borrowed entry bytes can expire.
+bool DecodeCbzPageImageWithContext(const std::vector<unsigned char> &bytes,
+                                  int max_zoom_index, int target_width,
+                                  int target_height, CbzDecodedPage *out,
+                                  fz_context **context);
+void ResetCbzDecodeContext(fz_context **context);
 bool ScaleCbzBitmap(const CbzBitmap &src, int dst_width, int dst_height,
                     bool high_quality, CbzBitmap *out);
