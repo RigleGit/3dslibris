@@ -550,37 +550,13 @@ void EmitFlowedFragmentRaw(parsedata_t *p, const char *txt, int txtlen,
   if (p->in_paragraph && !p->paragraph_has_content &&
       p->book->GetPublisherTextIndentEnabled()) {
     using book_xml_css_style_utils::MarginTopResult;
-    MarginTopResult ti = book_xml_css_style_utils::ParseTextIndent(
-        p->last_p_style.c_str());
+    // These values are resolved once when their owning block opens. Resolve
+    // relative units here, since screen width and active font can change.
+    MarginTopResult ti = p->paragraph_text_indent;
     if (ti.unit == MarginTopResult::Unit::None)
-      ti = epub_css_class_map::LookupTextIndentForClassAttr(
-          p->last_p_class, p->css_class_map);
-    if (ti.unit == MarginTopResult::Unit::None) {
-      epub_css_class_map::CssClassMargins tag_css;
-      if (epub_css_class_map::LookupAllForTag("p", p->css_class_map,
-                                               &tag_css))
-        ti = tag_css.text_indent;
-    }
-    // CSS text-indent is inherited. Resolve the paragraph itself first, then
-    // its active div and body ancestors.
+      ti = p->div_text_indent;
     if (ti.unit == MarginTopResult::Unit::None)
-      ti = book_xml_css_style_utils::ParseTextIndent(
-          p->last_div_style.c_str());
-    if (ti.unit == MarginTopResult::Unit::None && !p->last_div_class.empty())
-      ti = epub_css_class_map::LookupTextIndentForClassAttr(
-          p->last_div_class, p->css_class_map);
-    if (ti.unit == MarginTopResult::Unit::None)
-      ti = book_xml_css_style_utils::ParseTextIndent(
-          p->last_body_style.c_str());
-    if (ti.unit == MarginTopResult::Unit::None && !p->last_body_class.empty())
-      ti = epub_css_class_map::LookupTextIndentForClassAttr(
-          p->last_body_class, p->css_class_map);
-    if (ti.unit == MarginTopResult::Unit::None) {
-      epub_css_class_map::CssClassMargins tag_css;
-      if (epub_css_class_map::LookupAllForTag("body", p->css_class_map,
-                                               &tag_css))
-        ti = tag_css.text_indent;
-    }
+      ti = p->body_text_indent;
 // TEXTINDENT_TRACE: per-paragraph TextIndent diagnostics. Off by default;
 // fires once per paragraph (thousands per large EPUB), enough to slow parse
 // noticeably via fflush. Flip to 1 only when debugging text-indent rules.

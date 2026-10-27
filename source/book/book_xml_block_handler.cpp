@@ -155,6 +155,21 @@ ParsePublisherElementMarginBottom(
       style, klass, css_class_map, element_name);
 }
 
+static book_xml_css_style_utils::MarginTopResult ResolveBlockTextIndent(
+    parsedata_t *p, const std::string &style, const std::string &klass,
+    const epub_css_class_map::CssClassMargins &elem_css, bool include_tag) {
+  using book_xml_css_style_utils::MarginTopResult;
+  if (!p->book || !p->book->GetPublisherTextIndentEnabled())
+    return MarginTopResult();
+  MarginTopResult indent = book_xml_css_style_utils::ParseTextIndent(style.c_str());
+  // Preserve the existing first-matching-class precedence for text-indent.
+  if (indent.unit == MarginTopResult::Unit::None)
+    indent = epub_css_class_map::LookupTextIndentForClassAttr(klass, p->css_class_map);
+  if (indent.unit == MarginTopResult::Unit::None && include_tag)
+    indent = elem_css.text_indent;
+  return indent;
+}
+
 static FlowEmissionFns MakeLocalFlowEmissionFns() {
   FlowEmissionFns f;
   f.advance_screen = [](parsedata_t *p) {
@@ -244,6 +259,8 @@ bool HandleBlockElementStart(
     parse_push(p, TAG_BODY);
     p->last_body_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_body_class = book_xml_css_resolver::ExtractClassAttr(attr);
+    p->body_text_indent = ResolveBlockTextIndent(
+        p, p->last_body_style, p->last_body_class, elem_css, true);
   } else if (!strcmp(el, "div")) {
     // Image-only spacing suppression must not join later text divisions.
     if (!p->last_block_was_standalone_band_image || p->linebegan)
@@ -252,6 +269,8 @@ bool HandleBlockElementStart(
     parse_push(p, TAG_DIV);
     p->last_div_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_div_class = book_xml_css_resolver::ExtractClassAttr(attr);
+    p->div_text_indent = ResolveBlockTextIndent(
+        p, p->last_div_style, p->last_div_class, elem_css, false);
     ApplyPublisherBlockMargins(p, ts, attr, elem_css);
     {
       const book_xml_css_style_utils::MarginTopResult mtr =
@@ -384,6 +403,8 @@ bool HandleBlockElementStart(
     p->text_transform_word_start = true;
     p->last_p_style = book_xml_css_resolver::ExtractStyleAttr(attr);
     p->last_p_class = book_xml_css_resolver::ExtractClassAttr(attr);
+    p->paragraph_text_indent = ResolveBlockTextIndent(
+        p, p->last_p_style, p->last_p_class, elem_css, true);
     const book_xml_css_style_utils::TextAlign align =
         book_xml_css_resolver::ResolveElementTextAlignWithClass(
             p->last_p_style, p->last_p_class,
@@ -719,6 +740,7 @@ bool HandleBlockElementEnd(parsedata_t *p, Text *ts, const char *el) {
     p->block_margin_right = 0;
     p->last_div_class.clear();
     p->last_div_style.clear();
+    p->div_text_indent = book_xml_css_style_utils::MarginTopResult();
   } else if (!strcmp(el, "h1")) {
     book_xml_flow_emission::FlushInlineTailAndDeferredStyle(p, ts, fns);
     {

@@ -231,6 +231,9 @@ void parse_init(parsedata_t *data) {
   data->doc_title.clear();
   data->doc_heading.clear();
   data->doc_heading_complete = false;
+  data->paragraph_text_indent = book_xml_css_style_utils::MarginTopResult();
+  data->div_text_indent = book_xml_css_style_utils::MarginTopResult();
+  data->body_text_indent = book_xml_css_style_utils::MarginTopResult();
   data->last_p_style.clear();
   data->last_h1_style.clear();
   data->last_h2_style.clear();

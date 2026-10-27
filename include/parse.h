@@ -190,6 +190,9 @@ struct parsedata_t {
 	std::string last_figure_class;
 	std::string last_caption_class;
 	std::string last_dd_class;
+	book_xml_css_style_utils::MarginTopResult paragraph_text_indent;
+	book_xml_css_style_utils::MarginTopResult div_text_indent;
+	book_xml_css_style_utils::MarginTopResult body_text_indent;
 	epub_css_class_map::CssClassMap css_class_map;
 	int block_margin_left;
 	int block_margin_right;
