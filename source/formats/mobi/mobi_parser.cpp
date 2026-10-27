@@ -392,7 +392,7 @@ static void BuildMobiTocMetadataFromUtf8(
 
 static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
                                      const MobiHeaderInfo &header,
-                                     const std::string &merged,
+                                     std::string &merged,
                                      bool collect_toc_metadata,
                                      MobiDecodedText *decoded,
                                      u64 *t_after_decode,
@@ -415,6 +415,9 @@ static void DecodeAndCleanupMobiText(Book *book, const BookParseDeps &deps,
   decoded->utf8 = DecodeMobiBytesToUtf8(merged, header.encoding,
                                         &decoded->used_utf8_guess,
                                         &decoded->used_legacy_guess);
+  // No later phase reads the decompressed source bytes. Release them before
+  // markup extraction and cleanup allocate their own large text buffers.
+  std::string().swap(merged);
   fixed_perf::SampleMemory(book, -1, -1, "mobi.utf8_decoded");
   if (t_after_decode)
     *t_after_decode = osGetTime();
@@ -890,7 +893,6 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
       book, deps, header, merged, decode_plan.capture_toc_metadata, &decoded,
       &t_after_decode, &t_after_markup_scan, &t_after_cleanup, &t_after_markup,
       hooks);
-  { std::string().swap(merged); }
 #ifdef DSLIBRIS_DEBUG
   LogMobiBuffer(reporter, "merged_released", "merged", merged);
 #endif
