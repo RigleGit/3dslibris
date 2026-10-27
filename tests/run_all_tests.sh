@@ -10,6 +10,7 @@ fi
 trap 'exit 130' INT
 trap 'exit 143' TERM
 export TMPDIR="$TEST_TMP_ROOT"
+export DSLIBRIS_HOST_NAMESPACE_DIR="$TEST_TMP_ROOT/host-namespaces"
 test_errors="$TEST_TMP_ROOT/test-errors.txt"
 passed=0
 failed=0

@@ -20,6 +20,24 @@ CXX_BIN="${CXX:-c++}"
 # in integration runners that source this helper.
 export CXXFLAGS="${CXXFLAGS:-} -UNDEBUG"
 
+# Keep executable/fixture output isolated per run, but reuse immutable objects.
+# Ephemeral CI runners do not benefit from a persistent object cache by default.
+cache_default=1
+case "${CI:-}" in true|1) cache_default=0;; esac
+export DSLIBRIS_TEST_CACHE="${DSLIBRIS_TEST_CACHE:-$cache_default}"
+if [ "$DSLIBRIS_TEST_CACHE" != 0 ]; then
+  if [ "$CC_BIN" != "$TEST_ROOT/tests/host_cc.sh" ]; then
+    export DSLIBRIS_HOST_REAL_CC="$CC_BIN"
+  fi
+  if [ "$CXX_BIN" != "$TEST_ROOT/tests/host_cxx.sh" ]; then
+    export DSLIBRIS_HOST_REAL_CXX="$CXX_BIN"
+  fi
+  export DSLIBRIS_HOST_CACHE_DIR="${DSLIBRIS_HOST_CACHE_DIR:-$TEST_ROOT/build-tests/host-cache}"
+  export CC="$TEST_ROOT/tests/host_cc.sh" CXX="$TEST_ROOT/tests/host_cxx.sh"
+  CC_BIN="$CC"
+  CXX_BIN="$CXX"
+fi
+
 split_flags() {
   if [ -n "${1:-}" ]; then
     # Intentionally split on shell whitespace for compiler flag env vars.

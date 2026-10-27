@@ -1947,6 +1947,7 @@ int main(int argc, char **argv) {
     else if(std::string(argv[1])=="image-cache") TestInlineImageCacheRetainsDistinctDimensions();
     else if(std::string(argv[1])=="image-widths") TestRepeatedImageWidthsRemainPerOccurrence();
     else if(std::string(argv[1])=="toc-cache") TestWarmEpubTocRepairIsDeferred();
+    else if(std::string(argv[1])=="mobi-diagnostics") TestMobiParseCloseCachedReopenAndRecovery();
     else return 2;
     return 0;
   }

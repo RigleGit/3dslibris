@@ -356,7 +356,7 @@ $(MUPDF_LIB_A) $(MUPDF_LIB_THIRD_A): $(MUPDF_STAMP)
 clean:
 	@echo clean ...
 	@rm -fr $(BUILD) $(DEBUG_BUILD) $(TARGET).3dsx $(OUTPUT).smdh $(TARGET).elf \
-		$(GFXBUILD) $(DISTDIR) $(MUPDF_OUT) build-tests/mupdf \
+		$(GFXBUILD) $(DISTDIR) $(MUPDF_OUT) build-tests/mupdf build-tests/host-cache \
 		$(BASE_TARGET).3dsx $(BASE_TARGET).smdh $(BASE_TARGET).elf \
 		$(BASE_TARGET).cia $(BASE_TARGET)-debug.cia $(BASE_TARGET)-debug-safe.cia \
 		$(DEBUG_TARGET).3dsx $(DEBUG_TARGET).smdh $(DEBUG_TARGET).elf

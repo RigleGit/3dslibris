@@ -8,6 +8,7 @@
 # Build artifacts (devkitPro / 3DS)
 /build/
 /build-debug/
+/build-tests/host-cache/
 /dist/
 *.o
 *.d
