@@ -374,6 +374,29 @@ void TestTouchOwnership() {
     assert(s.viewport.center_x == 0.5f && s.viewport.center_y == 0.5f);
   }
 }
+void TestPanRetainsControlsUntilStatusChanges() {
+  for (unsigned char orientation : {0, 1, 2}) {
+    Fixture f(orientation);
+    auto &s = *f.reader.image_viewer_;
+    s.viewport.zoom_index = 4;
+    f.Draw();
+    skins.clear();
+    f.app.ts->printed.clear();
+    qualities.clear();
+    f.Input(KEY_DRIGHT, KEY_DRIGHT);
+    assert(!qualities.empty() && !qualities.front());
+    assert(skins.empty() && f.app.ts->printed.empty());
+    f.Input(0);
+    assert(skins.empty() && f.app.ts->printed.empty());
+    s.message = "Image load failed";
+    f.Input(KEY_DLEFT, KEY_DLEFT);
+    assert(skins.size() == 6);
+    bool showed_error = false;
+    for (const auto &p : f.app.ts->printed)
+      showed_error |= p.text == "Image load failed";
+    assert(showed_error);
+  }
+}
 int main(int argc, char **argv) {
   if (argc == 1 || strcmp(argv[1], "layout") == 0)
     TestLayout();
@@ -383,5 +406,7 @@ int main(int argc, char **argv) {
     TestUnavailableControls();
   if (argc == 1 || strcmp(argv[1], "touch") == 0)
     TestTouchOwnership();
+  if (argc == 1 || strcmp(argv[1], "pan") == 0)
+    TestPanRetainsControlsUntilStatusChanges();
   puts("PASS: image viewer controls, bounded layout and touch ownership");
 }
