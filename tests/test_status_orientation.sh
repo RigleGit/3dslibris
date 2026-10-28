@@ -13,5 +13,5 @@ done
 python3 "$ROOT/tests/extract_test_function.py" \
   "$ROOT/source/shared/app_flow_utils.cpp" 'StatusSnapshot ComputeStatusSnapshot(' \
   > "$TASK_TMP/status_snapshot_under_test.inc"
-build_test test_status_orientation -- -I"$ROOT/tests/stubs" -I"$TASK_TMP" \
+build_test test_status_orientation -- -DDSLIBRIS_TEST_CLOCK -I"$ROOT/tests/stubs" -I"$TASK_TMP" \
   "$ROOT/tests/test_status_orientation.cpp"

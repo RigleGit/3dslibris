@@ -102,7 +102,9 @@ namespace
 StatusController::StatusController(App &app)
     : app_(app), last_minute_(-1), last_display_token_(-1),
       progress_lock_book_(nullptr), progress_pagecount_lock_(0),
-      force_redraw_(true) {}
+      force_redraw_(true), battery_checked_ms_(0), battery_percent_(0),
+      battery_sampled_(false), battery_valid_(false), battery_charging_(false),
+      battery_approx_(false) {}
 
 void StatusController::RequestStatusRedraw() { force_redraw_ = true; }
 
@@ -292,16 +294,22 @@ void StatusController::UpdateStatus()
     app_.ts->PrintString(tmsg);
     int clockWidth = app_.ts->GetStringWidth(tmsg, TEXT_STYLE_BROWSER);
 
-    u8 batt_percent = 0;
-    bool batt_charging = false;
-    bool batt_approx = false;
+    // Page damage requires a HUD redraw, not a new synchronous IPC/I2C read.
+    // Cache failures too, so unavailable services do not stall every page.
+    const uint64_t now_ms = osGetTime();
+    if (!battery_sampled_ || now_ms < battery_checked_ms_ ||
+        now_ms - battery_checked_ms_ >= 30000) {
+      battery_checked_ms_ = now_ms;
+      battery_sampled_ = true;
+      battery_valid_ = battery_utils::ReadBatteryState(
+          &battery_percent_, &battery_charging_, &battery_approx_);
+    }
     char bmsg[12] = {};
     int battWidth = 0;
-    if (battery_utils::ReadBatteryState(&batt_percent, &batt_charging,
-                                        &batt_approx))
+    if (battery_valid_)
     {
-      battery_utils::FormatBatteryString(bmsg, sizeof(bmsg), batt_percent,
-                                         batt_charging, batt_approx);
+      battery_utils::FormatBatteryString(bmsg, sizeof(bmsg), battery_percent_,
+                                         battery_charging_, battery_approx_);
       battWidth = app_.ts->GetStringWidth(bmsg, TEXT_STYLE_BROWSER);
       app_.ts->SetPen(8 + clockWidth + 8, textY);
       app_.ts->PrintString(bmsg);

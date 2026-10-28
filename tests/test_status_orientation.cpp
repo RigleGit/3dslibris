@@ -88,9 +88,19 @@ struct App {
   bool IsInlineLinkFocusActive() const { return false; }
 };
 
+long long dslibris_test_clock = 1000;
+long long dslibris_test_clock_step = 0;
+static int battery_reads = 0;
+static bool battery_available = false;
 namespace battery_utils {
-bool ReadBatteryState(u8 *, bool *, bool *) { return false; }
-void FormatBatteryString(char *, size_t, u8, bool, bool) {}
+bool ReadBatteryState(u8 *percent, bool *charging, bool *approx) {
+  ++battery_reads;
+  *percent = 42; *charging = false; *approx = false;
+  return battery_available;
+}
+void FormatBatteryString(char *out, size_t size, u8 percent, bool, bool) {
+  std::snprintf(out, size, "%u%%", percent);
+}
 }
 
 static const char *kOpeningStatusLabel = "opening";
@@ -130,6 +140,38 @@ static void CheckOpening(u8 orientation) {
   test::ExpectEq("HUD restores margin", text.margin.bottom, 36);
 }
 
+static void CheckBatteryRefreshBudget() {
+  App app;
+  Book book;
+  app.book = &book;
+  app.mode = AppMode::Book;
+  app.ts->orientation = orientation_utils::ORIENT_TURNED_RIGHT;
+  StatusController status(app);
+  battery_reads = 0;
+  battery_available = true;
+  status.UpdateStatus();
+  for (int i = 0; i < 20; ++i) {
+    dslibris_test_clock += 100;
+    status.RequestStatusRedraw();
+    status.UpdateStatus();
+  }
+  test::ExpectEq("forced HUD redraws reuse the battery sample", battery_reads, 1);
+  int displayed = 0;
+  for (const auto &line : app.ts->printed) displayed += line.value == "42%";
+  test::ExpectEq("battery stays visible on every redraw", displayed, 21);
+  dslibris_test_clock += 30000;
+  battery_available = false;
+  status.RequestStatusRedraw(); status.UpdateStatus();
+  test::ExpectEq("battery refreshes after its interval", battery_reads, 2);
+  status.RequestStatusRedraw(); status.UpdateStatus();
+  test::ExpectEq("unavailable service is not retried every page", battery_reads, 2);
+  dslibris_test_clock += 30000;
+  battery_available = true;
+  status.RequestStatusRedraw(); status.UpdateStatus();
+  test::ExpectEq("battery service is retried after its interval", battery_reads, 3);
+  battery_available = false;
+}
+
 int main() {
   CheckOpening(orientation_utils::ORIENT_LANDSCAPE);
   CheckOpening(orientation_utils::ORIENT_TURNED_LEFT);
@@ -144,5 +186,6 @@ int main() {
   test::ExpectEq("fixed-layout book retains clock and page HUD", app.ts->cleared.size(), 2);
   test::ExpectStrEq("fixed-layout book retains page counter",
                      app.ts->printed.back().value.c_str(), "3/10");
+  CheckBatteryRefreshBudget();
   return 0;
 }
