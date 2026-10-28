@@ -7,6 +7,7 @@
 #include "formats/common/fixed_layout_blit_utils.h"
 #include "formats/common/pdf_view_utils.h"
 #include "formats/common/fixed_layout_preview_constants.h"
+typedef unsigned char u8;
 struct fz_context {};
 struct fz_document {};
 struct fz_display_list { int page; };
@@ -42,6 +43,7 @@ struct Book {
     int target_bottom_width = 240, target_bottom_height = 320;
     app_flow_utils::MuPdfDocumentKind document_kind = app_flow_utils::MuPdfDocumentKind::Pdf;
     int page_too_complex_for_device = -1, cached_display_list_page = -1;
+    std::vector<unsigned char> page_complexity_status = std::vector<unsigned char>(4, 0);
     fz_display_list *cached_display_list = nullptr;
   };
 };
@@ -51,7 +53,7 @@ namespace debug_runtime { bool ForceSynchronousMuPdfRender() { return false; } }
 const int kPdfPreviewPadding = fixed_layout_preview::kPadding;
 pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport(const Book::MuPdfState *) { return {0, 0, 1, 1}; }
 bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *, int) { return false; }
-static int renders = 0, builds = 0, drops = 0, cancels = 0;
+static int renders = 0, builds = 0, drops = 0, cancels = 0, complexity_checks = 0;
 static bool fail = false;
 static std::vector<std::string> events;
 bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *, int) { return false; }
@@ -59,7 +61,7 @@ void CancelMuPdfIncrementalRenderState(Book::MuPdfState *) { ++cancels; events.p
 void fz_drop_display_list(fz_context *, fz_display_list *p) { assert(!events.empty() && events.back() == "cancel" && "each old list must be cancelled before disposal"); events.push_back("drop"); ++drops; delete p; }
 bool BitmapCacheValid(const Cache &c, int p) { return c.page == p; }
 float ComputeMuPdfPreviewScale(float, float, int, int) { return 0.2f; }
-bool EstimateMuPdfPageRenderComplexity(fz_context *, fz_document *, int, int *, size_t *) { return true; }
+bool EstimateMuPdfPageRenderComplexity(fz_context *, fz_document *, int, int *, size_t *) { ++complexity_checks; return true; }
 bool RenderMuPdfBitmap(fz_context *, fz_document *, int p, float, RenderedMuPdfBitmap *, float *, float *, const void *, fz_display_list *reuse, fz_display_list **out, IStatusReporter *, const char * = nullptr) {
   ++renders; events.push_back("render");
   if (fail) return false;
@@ -94,6 +96,7 @@ int main() {
   // Rebuilding just the bitmap (e.g. geometry) can reuse the same list.
   s.current_preview.page = -1;
   assert(EnsureCurrentMuPdfPreviewCache(&s, 0) && builds == 1);
+  assert(complexity_checks == 1 && "regenerating a preview must reuse the page's complexity result");
   assert(!s.preview_panel.valid && "regenerated pixels must invalidate the displayed panel");
   events.clear();
   assert(EnsureCurrentMuPdfPreviewCache(&s, 1) && builds == 2 && drops == 1);
@@ -110,6 +113,9 @@ int main() {
   assert(!EnsureCurrentMuPdfPreviewCache(&s, 3));
   assert(s.page_too_complex_for_device == 3 && builds == 3 && renders == before_skip);
   assert(s.current_preview.page == 2 && s.cached_display_list->page == 2);
+  const int after_skip = complexity_checks;
+  assert(!EnsureCurrentMuPdfPreviewCache(&s, 3));
+  assert(complexity_checks == after_skip && "rejected pages must not reload streams on every retry");
   assert(!EnsureMuPdfDisplayListForPage(&s, 2, nullptr));
   assert(!EnsureMuPdfDisplayListForPage(nullptr, 2, &list));
   assert(!EnsureCurrentMuPdfPreviewCache(nullptr, 0));

@@ -108,6 +108,8 @@ struct Book::MuPdfState {
   std::vector<float> page_width_cache;
   std::vector<float> page_height_cache;
   std::vector<u8> page_metrics_valid;
+  // 0: unchecked, 1: render allowed, 2: over the PDF complexity limit.
+  std::vector<u8> page_complexity_status;
   bool is_new_3ds;
   app_flow_utils::MuPdfDocumentKind document_kind;
   bool keep_preview_cache;

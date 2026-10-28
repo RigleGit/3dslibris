@@ -187,20 +187,32 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
       "MUPDF preview: render-begin page=%d scale=%.4f page_size=(%.2f,%.2f)",
       page_index, (double)preview_scale, (double)page_width,
       (double)page_height);
-  int xobject_count = 0;
-  size_t content_bytes = 0;
-  if (mupdf_state->document_kind == app_flow_utils::MuPdfDocumentKind::Pdf &&
-      EstimateMuPdfPageRenderComplexity(mupdf_state->ctx, mupdf_state->doc,
-                                        page_index, &xobject_count,
-                                        &content_bytes) &&
-      mupdf_render_policy_utils::ShouldSkipPdfPageRender(
-          mupdf_state->document_kind, xobject_count, content_bytes)) {
-    DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
-                 "MUPDF preview: skip-complex page=%d xobjects=%d "
-                 "content_bytes=%u",
-                 page_index, xobject_count, (unsigned)content_bytes);
-    mupdf_state->page_too_complex_for_device = page_index;
-    return false;
+  if (mupdf_state->document_kind == app_flow_utils::MuPdfDocumentKind::Pdf) {
+    u8 *status = page_index >= 0 &&
+        (size_t)page_index < mupdf_state->page_complexity_status.size()
+        ? &mupdf_state->page_complexity_status[(size_t)page_index] : NULL;
+    bool skip = status && *status == 2;
+    if (!status || *status == 0) {
+      int xobject_count = 0;
+      size_t content_bytes = 0;
+      if (EstimateMuPdfPageRenderComplexity(
+              mupdf_state->ctx, mupdf_state->doc, page_index,
+              &xobject_count, &content_bytes)) {
+        skip = mupdf_render_policy_utils::ShouldSkipPdfPageRender(
+            mupdf_state->document_kind, xobject_count, content_bytes);
+        if (status)
+          *status = skip ? 2 : 1;
+        if (skip)
+          DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
+                       "MUPDF preview: skip-complex page=%d xobjects=%d "
+                       "content_bytes=%u",
+                       page_index, xobject_count, (unsigned)content_bytes);
+      }
+    }
+    if (skip) {
+      mupdf_state->page_too_complex_for_device = page_index;
+      return false;
+    }
   }
   // Reuse a complete bounded top raster at any zoom. A cropped high-zoom tile
   // still needs the independent overview render below.
