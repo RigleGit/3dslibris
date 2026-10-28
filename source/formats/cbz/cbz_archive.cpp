@@ -329,9 +329,11 @@ bool CbzArchiveReader::Read(const std::string &archive_path,
     fixed_perf::Record(&entry, -1, -1, "cbz.zip_reuse", 0, 1);
   }
 
-  const auto read_entry = [&]() {
+  const auto read_entry = [&](bool indexed_size) {
     fixed_perf::Timer perf_read(&entry, -1, -1, "cbz.zip_read_inflate");
-    const bool ok = ReadLocatedZipEntry(archive_, out, max_bytes);
+    const bool ok = indexed_size
+        ? ReadCurrentZipEntry(archive_, entry.uncompressed_size, out, max_bytes)
+        : ReadLocatedZipEntry(archive_, out, max_bytes);
     perf_read.End(ok ? 1 : 0, out->size());
     return ok;
   };
@@ -339,7 +341,7 @@ bool CbzArchiveReader::Read(const std::string &archive_path,
     fixed_perf::Timer perf_locate(&entry, -1, -1, "cbz.zip_locate_offset");
     const int rc = unzSetOffset(archive_, entry.offset);
     perf_locate.End(rc == UNZ_OK ? 1 : 0);
-    if (rc == UNZ_OK && read_entry())
+    if (rc == UNZ_OK && read_entry(true))
       return true;
   }
 
@@ -352,7 +354,7 @@ bool CbzArchiveReader::Read(const std::string &archive_path,
     return false;
   }
 
-  const bool ok = read_entry();
+  const bool ok = read_entry(false);
   if (!ok)
     Close();
   else

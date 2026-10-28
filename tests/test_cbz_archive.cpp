@@ -1,9 +1,20 @@
 #include "formats/cbz/cbz_archive.h"
+#include "minizip/unzip.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <vector>
+
+static int read_calls = 0;
+static unsigned int read_limit = 0;
+static bool fail_reads = false;
+extern "C" int CountedUnzReadCurrentFile(unzFile file, void *buffer, unsigned int size) {
+  ++read_calls;
+  if (fail_reads) return UNZ_ERRNO;
+  if (read_limit && size > read_limit) size = read_limit;
+  return unzReadCurrentFile(file, buffer, size);
+}
 
 namespace {
 
@@ -86,6 +97,25 @@ int main() {
   ExpectTrue("missing member supplies error", GetLastCbzArchiveError()[0] != '\0');
   ExpectTrue("valid member after locate failure", reader.Read(archive, entries[0], &bytes, 1024));
   ExpectTrue("successful read clears stale error", GetLastCbzArchiveError()[0] == '\0');
+
+  // A sized image read should not bounce through hundreds of small copies.
+  CbzPageEntry large;
+  large.path = "notes.txt";
+  read_calls = 0;
+  ExpectTrue("read large sized entry", reader.Read(archive, large, &bytes, 1024 * 1024));
+  ExpectEqInt("large payload size", (int)bytes.size(), 256 * 1024);
+  ExpectTrue("sized read uses bounded inflate calls", read_calls <= 3);
+  for (size_t i = 0; i < bytes.size(); ++i)
+    ExpectEqInt("large payload bytes", bytes[i], (int)(i % 251));
+  read_limit = 7;
+  ExpectTrue("partial reads still assemble the whole entry", reader.Read(archive, entries[0], &bytes, 1024));
+  ExpectEq("partial read payload", std::string(bytes.begin(), bytes.end()), expected[0]);
+  read_limit = 0;
+  fail_reads = true;
+  ExpectTrue("inflate failures are rejected", !reader.Read(archive, entries[0], &bytes, 1024));
+  ExpectTrue("inflate failure clears output", bytes.empty());
+  fail_reads = false;
+  ExpectTrue("reader recovers after inflate failure", reader.Read(archive, entries[0], &bytes, 1024));
 
   const char *invalid_archive = std::getenv("TEST_CBZ_INVALID_PATH");
   ExpectTrue("invalid archive fixture supplied", invalid_archive != NULL);

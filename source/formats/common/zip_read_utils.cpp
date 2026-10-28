@@ -36,11 +36,25 @@ bool ReadOpenedCurrentEntryBinary(unzFile uf,
                                   size_t max_bytes,
                                   size_t reserve_bytes,
                                   const char **error_message) {
-  if (reserve_bytes > 0)
-    out->reserve(reserve_bytes);
+  size_t total = 0;
+  // Sized entries can inflate straight into their final storage. Keep the
+  // streaming tail for callers without metadata or an outdated size hint.
+  out->resize(reserve_bytes);
+  while (total < reserve_bytes) {
+    const int n = unzReadCurrentFile(uf, out->data() + total,
+                                     (unsigned int)(reserve_bytes - total));
+    if (n < 0) {
+      out->clear();
+      SetError(error_message, "zip entry read failed");
+      return false;
+    }
+    if (n == 0)
+      break;
+    total += (size_t)n;
+  }
+  out->resize(total);
 
   unsigned char buf[8 * 1024];
-  size_t total = 0;
   while (true) {
     const int n = unzReadCurrentFile(uf, buf, sizeof(buf));
     if (n < 0) {

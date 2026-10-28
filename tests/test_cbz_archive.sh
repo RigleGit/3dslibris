@@ -27,7 +27,7 @@ with zipfile.ZipFile(sys.argv[1], "w", compression=zipfile.ZIP_DEFLATED) as zf:
         while normalized.startswith("./"):
             normalized = normalized[2:]
         zf.writestr(name, normalized.encode("ascii"))
-    zf.writestr("notes.txt", b"not a page")
+    zf.writestr("notes.txt", bytes(i % 251 for i in range(256 * 1024)))
     zf.writestr("__MACOSX/", b"")
     zf.writestr("ComicInfo.xml", b'<ComicInfo><Page Image="3" Bookmark="Outside pages"/><Pages>'
                 b'<Page Image="-1" Bookmark="Invalid index"/>'
@@ -47,10 +47,16 @@ for name in unzip ioapi; do
   "$CC_BIN" ${CFLAGS:-} -c "$MINIZIP/$name.c" -o "$WORKDIR/$name.o"
 done
 
+# Count read calls at the real ZIP boundary without a production test hook.
+"$CXX_BIN" -std=c++11 ${CXXFLAGS:-} -I"$TEST_ROOT/include" -I"$TEST_ROOT/tests/stubs" \
+  -I"$MINIZIP/.." \
+  -DunzReadCurrentFile=CountedUnzReadCurrentFile \
+  -c "$TEST_ROOT/source/formats/common/zip_read_utils.cpp" -o "$WORKDIR/zip_read.o"
+
 build_test test_cbz_archive \
   "$TEST_ROOT/tests/test_cbz_archive.cpp" \
   "$TEST_ROOT/source/formats/cbz/cbz_archive.cpp" \
-  "$TEST_ROOT/source/formats/common/zip_read_utils.cpp" \
+  "$WORKDIR/zip_read.o" \
   "$TEST_ROOT/source/formats/common/xml_parse_utils.cpp" \
   "$WORKDIR/unzip.o" "$WORKDIR/ioapi.o" \
   --expat -lz
