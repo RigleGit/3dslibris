@@ -50,6 +50,7 @@ public:
           bottom[(size_t)y * stride + x] = color;
   }
   void ClearScreen() { FillRect(0, 0, width, height, 0xffff); }
+  bool HasDirtyScreens() const { return screenright_dirty || screenleft_dirty; }
   void Present() {
     if (screenright_dirty) ++screenright_cache_generation;
     screenright_dirty = false;

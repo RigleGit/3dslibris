@@ -158,8 +158,10 @@ int MainLoopController::RunMainLoop()
     switch (app_.GetMode())
     {
     case AppMode::Book:
-      app_.UpdateStatus();
       app_.HandleEventInBook(input);
+      // Present the page and its HUD together. Painting the HUD first marks
+      // the retained preview dirty before each pan and then gets erased by it.
+      app_.UpdateStatus();
       break;
 
     case AppMode::Opening:
