@@ -193,8 +193,44 @@ static void TestAlternatingScreenBackgrounds() {
   assert(gradient_powers == before && "warm page backgrounds must not recompute powers");
 }
 
+static void TestHudBackgroundCache() {
+  static const unsigned golden[6][4] = {
+      {2547446135u, 3306610791u, 76431804u, 3321294271u},
+      {461802711u, 1655955863u, 1544945077u, 3951209975u},
+      {1578205283u, 2911837619u, 928633102u, 2714108309u},
+      {2894736645u, 2894736645u, 572771536u, 3381132482u},
+      {389414373u, 389414373u, 389414373u, 389414373u},
+      {2759991072u, 3392274609u, 3212470437u, 3713206908u}};
+  Text text;
+  size_t warm_powers = 0;
+  for (int mode = 0; mode < 6; ++mode) {
+    TextRenderer renderer(&text, mode);
+    for (unsigned char orientation : {0, 2}) {
+      text.orientation = orientation;
+      for (bool top : {true, false}) {
+        text.screen = top ? text.screenleft : text.screenright;
+        renderer.ClearRect(17, 33, 41, 72);
+        unsigned hash = 2166136261u;
+        for (int y = 33; y < 72; ++y)
+          for (int x = 17; x < 41; ++x)
+            hash = (hash ^ text.screen[y * text.BufferStride() + x]) * 16777619u;
+        const int column = (orientation == 2 ? 2 : 0) + (top ? 0 : 1);
+        assert(hash == golden[mode][column] && "HUD background pixels must be preserved");
+      }
+      const size_t before = gradient_powers;
+      for (bool top : {true, false}) {
+        text.screen = top ? text.screenleft : text.screenright;
+        renderer.ClearRect(17, 33, 41, 72);
+      }
+      warm_powers += gradient_powers - before;
+    }
+  }
+  assert(!warm_powers && "HUD redraws must reuse the theme background");
+}
+
 int main() {
   TestAlternatingScreenBackgrounds();
+  TestHudBackgroundCache();
   TestGradientRectAndEndpoints();
   TestSplashContainAndStride();
   puts("PASS: gradient rect clears and splash respect logical screen geometry");

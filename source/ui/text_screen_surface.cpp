@@ -21,26 +21,21 @@
 
 namespace {
 
-static inline u16 ThemeGradientPixel(int x, int y, int w, int h,
-                                     const ThemePalette &p) {
+static inline u16 ThemeGradientPixel(int y, int h,
+                                     const ThemePalette &p, float vignette) {
   const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
-  const float dx =
-      (w > 1) ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
-              : 0.0f;
-  const float edge = fabsf(dx);
 
   float r = p.bgTopR + (p.bgBotR - p.bgTopR) * tY;
   float g = p.bgTopG + (p.bgBotG - p.bgTopG) * tY;
   float b = p.bgTopB + (p.bgBotB - p.bgTopB) * tY;
 
-  const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
   r *= vignette;
   g *= vignette;
   b *= vignette;
   return RGB565FromU8(r, g, b);
 }
 
-static inline u16 SepiaGradientPixel(int x, int y, int w, int h) {
+static inline u16 SepiaGradientPixel(int x, int y, int h, float vignette) {
   static const u8 kBayer4x4[4][4] = {
       {0, 8, 2, 10},
       {12, 4, 14, 6},
@@ -49,16 +44,11 @@ static inline u16 SepiaGradientPixel(int x, int y, int w, int h) {
   };
 
   const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
-  const float dx =
-      (w > 1) ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
-              : 0.0f;
-  const float edge = fabsf(dx);
 
   float r = 244.0f + (238.0f - 244.0f) * tY;
   float g = 226.0f + (220.0f - 226.0f) * tY;
   float b = 195.0f + (185.0f - 195.0f) * tY;
 
-  const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
 
   const float bayer = (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) - 0.5f;
   const u32 h0 = (u32)x * 73856093u;
@@ -83,19 +73,19 @@ struct GradientCache {
   std::vector<u16> pixels;
   int width;
   int height;
+  int color_mode;
 
-  GradientCache() : pixels(), width(0), height(0) {}
+  GradientCache() : pixels(), width(0), height(0), color_mode(-1) {}
 };
 
-// Keep two bounded slots per theme, replacing a slot when geometry changes.
-static GradientCache sepia_gradients[2];
-static GradientCache dark_sepia_gradients[2];
+// Keep only the current theme, with one bounded slot for each screen size.
+static GradientCache gradients[2];
 #ifdef DSLIBRIS_DEBUG
 static int g_blit_geometry_diag_budget = 12;
 static int g_blit_page_diag_budget = 48;
 #endif
 
-static inline u16 DarkSepiaGradientPixel(int x, int y, int w, int h) {
+static inline u16 DarkSepiaGradientPixel(int x, int y, int h, float vignette) {
   static const u8 kBayer4x4[4][4] = {
       {0, 8, 2, 10},
       {12, 4, 14, 6},
@@ -104,16 +94,11 @@ static inline u16 DarkSepiaGradientPixel(int x, int y, int w, int h) {
   };
 
   const float tY = (h > 1) ? ((float)y / (float)(h - 1)) : 0.0f;
-  const float dx =
-      (w > 1) ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
-              : 0.0f;
-  const float edge = fabsf(dx);
 
   float r = 80.0f + (50.0f - 80.0f) * tY;
   float g = 60.0f + (35.0f - 60.0f) * tY;
   float b = 40.0f + (20.0f - 40.0f) * tY;
 
-  const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
 
   const float bayer = (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) - 0.5f;
 
@@ -128,19 +113,29 @@ static inline u16 DarkSepiaGradientPixel(int x, int y, int w, int h) {
   return RGB565FromU8(r, g, b);
 }
 
-static const std::vector<u16> &EnsureSepiaGradient(int w, int h, bool dark) {
+static const std::vector<u16> &EnsureGradient(int w, int h, int color_mode) {
   const int slot = (std::max(w, h) <= 320) ? 0 : 1;
-  GradientCache &cache = dark ? dark_sepia_gradients[slot]
-                              : sepia_gradients[slot];
-  if (cache.pixels.empty() || cache.width != w || cache.height != h) {
+  GradientCache &cache = gradients[slot];
+  if (cache.pixels.empty() || cache.width != w || cache.height != h ||
+      cache.color_mode != color_mode) {
     cache.pixels.resize((size_t)w * (size_t)h);
     cache.width = w;
     cache.height = h;
+    cache.color_mode = color_mode;
+    std::vector<float> vignette(w);
+    for (int x = 0; x < w; ++x) {
+      const float dx = w > 1
+          ? ((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f)
+          : 0.0f;
+      vignette[x] = 1.0f - 0.12f * powf(fabsf(dx), 1.8f);
+    }
+    const ThemePalette &palette = GetThemePalette(color_mode);
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
-        cache.pixels[(size_t)y * (size_t)w + (size_t)x] =
-            dark ? DarkSepiaGradientPixel(x, y, w, h)
-                 : SepiaGradientPixel(x, y, w, h);
+        cache.pixels[(size_t)y * (size_t)w + (size_t)x] = color_mode == 5
+            ? DarkSepiaGradientPixel(x, y, h, vignette[x])
+            : color_mode == 2 ? SepiaGradientPixel(x, y, h, vignette[x])
+            : ThemeGradientPixel(y, h, palette, vignette[x]);
       }
     }
   }
@@ -150,7 +145,7 @@ static const std::vector<u16> &EnsureSepiaGradient(int w, int h, bool dark) {
 static void FillSepiaGradient(u16 *dst, int stride, int w, int h, bool dark) {
   if (!dst || stride <= 0 || w <= 0 || h <= 0)
     return;
-  const std::vector<u16> &grad = EnsureSepiaGradient(w, h, dark);
+  const std::vector<u16> &grad = EnsureGradient(w, h, dark ? 5 : 2);
   for (int y = 0; y < h; y++) {
     memcpy(dst + (size_t)y * (size_t)stride,
            grad.data() + (size_t)y * (size_t)w, (size_t)w * sizeof(u16));
@@ -192,25 +187,11 @@ void TextRenderer::ClearRect(u16 xl, u16 yl, u16 xh, u16 yh) {
   xh = std::min((int)xh, maxWidth);
   yh = std::min((int)yh, (int)maxHeight);
   if (xh <= xl || yh <= yl) return;
-  // Gradient modes: copy from cached gradient instead of per-pixel powf
-  if (colorMode == 2 || colorMode == 5) {
-    const std::vector<u16> &grad =
-        EnsureSepiaGradient(maxWidth, maxHeight, colorMode == 5);
-    const int rw = (int)xh - (int)xl;
-    const int rh = (int)yh - (int)yl;
-    for (int y = 0; y < rh; y++) {
-      memcpy(parent->screen + (size_t)(yl + y) * (size_t)parent->BufferStride() + (size_t)xl,
-             grad.data() + (size_t)(yl + y) * (size_t)maxWidth + (size_t)xl,
-             (size_t)rw * sizeof(u16));
-    }
-    return;
-  }
-  const ThemePalette &palette = GetThemePalette(colorMode);
-  for (u16 y = yl; y < yh; y++) {
-    u16 *row = parent->screen + (size_t)y * (size_t)parent->BufferStride() + (size_t)xl;
-    for (u16 x = xl; x < xh; x++) {
-      *row++ = ThemeGradientPixel(x, y, maxWidth, maxHeight, palette);
-    }
+  const std::vector<u16> &grad = EnsureGradient(maxWidth, maxHeight, colorMode);
+  for (int y = yl; y < yh; ++y) {
+    memcpy(parent->screen + (size_t)y * (size_t)parent->BufferStride() + xl,
+           grad.data() + (size_t)y * (size_t)maxWidth + xl,
+           (size_t)(xh - xl) * sizeof(u16));
   }
 }
 
