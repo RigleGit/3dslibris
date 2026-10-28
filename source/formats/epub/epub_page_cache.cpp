@@ -831,9 +831,8 @@ StreamWriter::StepResult StreamWriter::Step(Book *book, size_t max_bytes,
     }
     ++records;
   }
-  // Flush this bounded batch here; do not defer a large hidden write to Close.
-  if (ok && state_->fp && fflush(state_->fp) != 0)
-    ok = false;
+  // stdio already has a bounded 16 KiB buffer. Let full buffers drain during
+  // Write; Commit flushes/checks the final tail before publishing the cache.
   const StepResult result = !ok ? Failed : state_->stage == State::Done ? Complete : Pending;
   state_->Record(book, begin, closing, result);
   if (!ok)

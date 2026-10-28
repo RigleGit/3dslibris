@@ -14,6 +14,14 @@
 #include <unistd.h>
 #include <vector>
 
+#undef fflush
+extern "C" int fflush(FILE *);
+static unsigned cache_flushes = 0;
+extern "C" int ObserveCacheFlush(FILE *fp) {
+  ++cache_flushes;
+  return fflush(fp);
+}
+
 #ifdef DSLIBRIS_TEST_CLOCK
 long long dslibris_test_clock = 0;
 long long dslibris_test_clock_step = 1;
@@ -301,12 +309,16 @@ void TestSaveStepsBudgetMetadataAndPreserveContent() {
   epub_page_cache::StreamWriter writer;
   Require(fixture.Begin(&writer), "begin stepped cache save");
   unsigned steps = 0;
+  cache_flushes = 0;
   epub_page_cache::StreamWriter::StepResult result;
   do {
     result = writer.Step(&fixture.source, 1, 0);
     ++steps;
+    if (result == epub_page_cache::StreamWriter::Pending)
+      Check(cache_flushes == 0, "pending slices do not force stdio writes to SD");
     Require(steps < 1100, "stepped writer finishes without an unbounded retry");
   } while (result == epub_page_cache::StreamWriter::Pending);
+  Check(cache_flushes == 1, "cache is flushed before atomic publication");
   Check(result == epub_page_cache::StreamWriter::Complete && steps >= 1000,
         "byte budget covers anchors as well as page buffers");
   Book loaded(fixture.ctx);
