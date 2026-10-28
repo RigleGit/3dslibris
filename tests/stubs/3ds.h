@@ -33,4 +33,11 @@ static inline long long osGetTime(void) {
 #else
 static inline long long osGetTime(void) { return 0; }
 #endif
-static inline void aptSetHomeAllowed(bool) {}
+static inline bool &TestHomeAllowedState() {
+  static bool allowed = true;
+  return allowed;
+}
+static inline bool aptIsHomeAllowed() { return TestHomeAllowedState(); }
+static inline void aptSetHomeAllowed(bool allowed) {
+  TestHomeAllowedState() = allowed;
+}
