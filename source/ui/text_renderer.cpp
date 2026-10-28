@@ -151,8 +151,9 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   buffer = bitmap.buffer;
 
   int maxY = ScreenHeightPx(parent->screen, parent);
+  const bool is_browser_style = (face == parent->GetFace(TEXT_STYLE_BROWSER));
   int bottomClip = parent->margin.bottom;
-  if (face == parent->GetFace(TEXT_STYLE_BROWSER))
+  if (is_browser_style)
     bottomClip = 0;
   if (!text_render_layout_utils::CurrentLineFitsScreen(
           (int)pen.y, parent->GetHeight(), parent->linespacing, maxY,
@@ -171,8 +172,6 @@ void TextRenderer::PrintChar(u32 ucs, FT_Face face) {
   const int contentRight = screenWidth - (int)parent->margin.right;
   int clipRight = text_render_layout_utils::ResolveClipRight(
       screenWidth, contentRight, clip_to_content_enabled);
-
-  const bool is_browser_style = (face == parent->GetFace(TEXT_STYLE_BROWSER));
 
   if (script_scale_ != 1.0f && script_scale_ > 0.0f) {
     const float s = script_scale_;
