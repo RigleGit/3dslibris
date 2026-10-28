@@ -109,15 +109,19 @@ static void TestLandscapePageVisibleTile(const char *path) {
       assert(blue);
       assert(state.cached_display_list == interpreted);
     }
-    // Every zoom remains a bounded visible tile, instead of allocating the
-    // full page and dropping native density at higher zoom presets.
+    // Preserve native density with a bounded full raster when it fits, and
+    // retain visible tiles at higher zoom instead of allocating the full page.
     for (int zoom : {3,4,5,6}) {
       state.viewport.zoom_index = zoom;
       assert(EnsureCurrentMuPdfInteractiveTile(&state, 0));
-      assert(std::abs(cache.bitmap_width - (landscape ? 800 : 240)) <= 2);
-      const int portrait_heights[] = {432,576,800,800};
-      assert(std::abs(cache.bitmap_height - (landscape ? 240 : portrait_heights[zoom-3])) <= 2);
-      assert(cache.PixelCount() <= 802u * 242u);
+      if (cache.width == 1 && cache.height == 1) {
+        assert(cache.PixelCount() <= 1024u * 1024u);
+      } else {
+        assert(std::abs(cache.bitmap_width - (landscape ? 800 : 240)) <= 2);
+        const int portrait_heights[] = {432,576,800,800};
+        assert(std::abs(cache.bitmap_height - (landscape ? 240 : portrait_heights[zoom-3])) <= 2);
+        assert(cache.PixelCount() <= 802u * 242u);
+      }
     }
     ResetBitmapCache(&cache);
     state.viewport.zoom_index = 6;
@@ -249,7 +253,7 @@ static void ControlledFree(void *user, void *ptr) {
 }
 static void TestFitPreviewReusesFullPageRaster(const char *path) {
   WritePdf(path, "1 0 0 rg 170 90 60 60 re f\n", 400, 240);
-  for (bool wide : {false, true}) {
+  for (bool wide : {false, true}) for (int zoom : {2, 3, 4}) {
     ControlledAllocation control;
     fz_alloc_context allocator{&control,ControlledMalloc,ControlledRealloc,ControlledFree};
     fz_context *ctx = fz_new_context(&allocator, NULL, FZ_STORE_DEFAULT); assert(ctx);
@@ -258,10 +262,14 @@ static void TestFitPreviewReusesFullPageRaster(const char *path) {
     Book::MuPdfState state;
     state.ctx=ctx; state.doc=doc; state.page_width=400; state.page_height=240;
     state.document_kind=app_flow_utils::MuPdfDocumentKind::Pdf;
-    state.viewport.zoom_index=pdf_view_utils::DefaultZoomIndex();
+    state.viewport.zoom_index=zoom;
     state.wide_top_screen=wide;
     assert(EnsureCurrentMuPdfPreviewCache(&state, 0));
     assert(BitmapCacheValid(state.current_interactive_tile, 0));
+    assert(state.current_interactive_tile.width == 1 &&
+           state.current_interactive_tile.height == 1 &&
+           "moderate zoom must prepare a complete bounded raster before panning");
+    assert(state.current_interactive_tile.PixelCount() <= 1024u * 1024u);
     const u16 *tile=state.current_interactive_tile.PixelData();
     ResetBitmapCache(&state.current_preview);
     // Another MuPDF pixmap would exceed this threshold for this fixture.
@@ -270,6 +278,10 @@ static void TestFitPreviewReusesFullPageRaster(const char *path) {
     assert(EnsureCurrentMuPdfPreviewCache(&state, 0));
     assert(control.largest < control.reject_at);
     assert(state.current_interactive_tile.PixelData()==tile);
+    state.viewport.interaction_active = true;
+    state.viewport.center_x = 0.6f;
+    assert(EnsureCurrentMuPdfInteractiveTile(&state, 0));
+    assert(state.current_interactive_tile.PixelData() == tile);
     const auto &preview=state.current_preview;
     assert(preview.left==0 && preview.top==0 && preview.width==1 && preview.height==1);
     assert(preview.bitmap_width>0 && preview.bitmap_height>0);

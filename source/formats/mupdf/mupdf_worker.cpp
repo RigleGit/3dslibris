@@ -202,14 +202,9 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
     mupdf_state->page_too_complex_for_device = page_index;
     return false;
   }
-  // At page fit the top raster contains the complete page. Render it once and
-  // derive the overview, retaining the independent preview render as fallback.
-  // A cropped tile at higher zoom cannot supply the missing parts of the page.
-  const pdf_view_utils::NormalizedRect viewport =
-      ComputeCurrentMuPdfViewport(mupdf_state);
+  // Reuse a complete bounded top raster at any zoom. A cropped high-zoom tile
+  // still needs the independent overview render below.
   if (debug_runtime::ForceSynchronousMuPdfRender() &&
-      viewport.left == 0.0f && viewport.top == 0.0f &&
-      viewport.width == 1.0f && viewport.height == 1.0f &&
       EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index)) {
     const Book::MuPdfState::BitmapCache &tile =
         mupdf_state->current_interactive_tile;
@@ -328,15 +323,18 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   const float density_x = mupdf_state->wide_top_screen && mupdf_state->target_top_width == 400 ? 2.0f : 1.0f;
   const float density_y = mupdf_state->wide_top_screen && mupdf_state->target_top_height == 400 ? 2.0f : 1.0f;
   pdf_view_utils::NormalizedRect region = viewport;
-  bool expanded = visible_tile && mupdf_state->viewport.interaction_active;
-  if (expanded) {
-    // Keep the existing 1M-pixel ceiling. A complete page avoids any further
-    // raster work during pan when it fits; otherwise retain a small border.
+  bool expanded = false;
+  if (visible_tile) {
+    // Prepare the full page immediately through 2x zoom. Higher zooms keep
+    // cheap visible tiles until interaction needs a border or a complete page.
+    // The existing 1M-pixel ceiling includes native-wide density.
     const double full_pixels = std::ceil(page_width * render_scale + 1.0f) *
         std::ceil(page_height * render_scale + 1.0f) * density_x * density_y;
-    if (full_pixels <= 1024.0 * 1024.0) {
+    if (full_pixels <= 1024.0 * 1024.0 &&
+        (mupdf_state->viewport.interaction_active ||
+         pdf_view_utils::ZoomForIndex(mupdf_state->viewport.zoom_index) <= 2.0f)) {
       region = pdf_view_utils::NormalizedRect{0, 0, 1, 1};
-    } else {
+    } else if (mupdf_state->viewport.interaction_active) {
       region.width = std::min(1.0f, viewport.width * 1.5f);
       region.height = std::min(1.0f, viewport.height * 1.5f);
       region.left = std::max(0.0f, std::min(1.0f - region.width,
