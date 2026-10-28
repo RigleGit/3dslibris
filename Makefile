@@ -209,6 +209,8 @@ CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables -fno-asynchro
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=3dsx.specs $(ARCH) -Wl,-Map,$(notdir $*.map) -Wl,--gc-sections
+# Also cover the SD descriptors owned internally by libctru/newlib and fonts.
+LDFLAGS += -Wl,--wrap=FSFILE_Close,--wrap=FSDIR_Close
 
 LIBS	:= -lmupdf -lmupdf-third -lfreetype -lpng -lbz2 -lminizip -lz -lm -lctru
 
