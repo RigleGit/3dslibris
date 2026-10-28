@@ -66,7 +66,17 @@ public:
   void DrawFallbackSplash() { assert(false && "prepared splash must be available"); }
   void PrintSplash(u16 *screen);
 };
+static size_t gradient_powers = 0;
+static float ObserveGradientPower(float base, float exponent) {
+  ++gradient_powers;
+  return std::pow(base, exponent);
+}
+#define powf ObserveGradientPower
+namespace gradient_utils {
+#include "gradient_under_test.inc"
+}
 #include "text_surface_under_test.inc"
+#undef powf
 
 static const u16 kSentinel=0x1234;
 
@@ -145,7 +155,46 @@ static void TestSplashContainAndStride() {
   }
 }
 
+static void TestAlternatingScreenBackgrounds() {
+  // RGB565 golden frames captured before the cache repair, all six themes.
+  static const unsigned golden[6][4] = {
+      {3602151166u, 1979039723u, 1799347959u, 4179269120u},
+      {3643178807u, 1706284919u, 970629249u, 4202552023u},
+      {585461695u, 2883790297u, 80033814u, 1750973361u},
+      {1848249553u, 1158038647u, 2149816647u, 2211524756u},
+      {2118896069u, 1792380357u, 2118896069u, 1792380357u},
+      {1716388757u, 1996630179u, 1451075063u, 2920528057u}};
+  Text text;
+  for (int mode = 0; mode < 6; ++mode) {
+    for (unsigned char orientation : {0, 2}) {
+      text.orientation = orientation;
+      const size_t cold = gradient_powers;
+      for (bool top : {true, false}) {
+        u16 *screen = top ? text.screenleft : text.screenright;
+        gradient_utils::DrawToScreen(&text, mode, screen, text.LogicalHeightFor(top));
+        unsigned hash = 2166136261u;
+        for (int y = 0; y < text.LogicalHeightFor(top); ++y)
+          for (int x = 0; x < text.LogicalWidthFor(top); ++x)
+            hash = (hash ^ screen[y * text.BufferStride() + x]) * 16777619u;
+        const int column = (orientation == 2 ? 2 : 0) + (top ? 0 : 1);
+        assert(hash == golden[mode][column] && "background pixels must be preserved");
+      }
+      assert(gradient_powers - cold <= (size_t)(text.LogicalWidthFor(true) +
+             text.LogicalWidthFor(false)) && "cold backgrounds need one power per column");
+      const size_t before = gradient_powers;
+      gradient_utils::DrawToScreen(&text, mode, text.screenleft, text.LogicalHeightFor(true));
+      gradient_utils::DrawToScreen(&text, mode, text.screenright, text.LogicalHeightFor(false));
+      assert(gradient_powers == before && "alternating screens must retain both backgrounds");
+    }
+  }
+  const size_t before = gradient_powers;
+  gradient_utils::DrawToScreen(&text, 5, text.screenleft, text.LogicalHeightFor(true));
+  gradient_utils::DrawToScreen(&text, 5, text.screenright, text.LogicalHeightFor(false));
+  assert(gradient_powers == before && "warm page backgrounds must not recompute powers");
+}
+
 int main() {
+  TestAlternatingScreenBackgrounds();
   TestGradientRectAndEndpoints();
   TestSplashContainAndStride();
   puts("PASS: gradient rect clears and splash respect logical screen geometry");

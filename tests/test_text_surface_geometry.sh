@@ -20,4 +20,5 @@ done
 for signature in 'u16 *TextRenderer::GetScreen(' 'void TextRenderer::SetScreen(' 'int TextRenderer::GetColorMode(' 'void TextRenderer::SetColorMode(' 'void TextRenderer::PrintSplash('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/ui/text_renderer.cpp" "$signature" >> "$TASK_TMP/text_surface_under_test.inc"
 done
+python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/ui/gradient_utils.cpp" 'void DrawToScreen(' > "$TASK_TMP/gradient_under_test.inc"
 build_test test_text_surface_geometry -- -I"$TASK_TMP" -I"$ROOT/include" "$ROOT/tests/test_text_surface_geometry.cpp"

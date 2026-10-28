@@ -1,5 +1,6 @@
 #include "ui/gradient_utils.h"
 
+#include <algorithm>
 #include <math.h>
 #include <string.h>
 #include <vector>
@@ -19,20 +20,32 @@ void DrawToScreen(Text *ts, int color_mode, u16 *target_screen, int logical_h)
   if (w <= 0 || stride <= 0 || logical_h <= 0)
     return;
 
-  static std::vector<u16> gradient;
-  static int cachedW = 0;
-  static int cachedH = 0;
-  static int cachedColorMode = -1;
+  struct GradientCache {
+    std::vector<u16> pixels;
+    int width = 0, height = 0, color_mode = -1;
+  };
+  // The 400px and 320px screens alternate on every page. Retain one bounded
+  // slot for each, replacing its contents on theme or orientation changes.
+  static GradientCache caches[2];
+  GradientCache &cache = caches[std::max(w, logical_h) <= 320 ? 0 : 1];
+  std::vector<u16> &gradient = cache.pixels;
 
   const ThemePalette &palette = GetThemePalette(color_mode);
 
-  if (gradient.empty() || cachedW != w || cachedH != logical_h ||
-      cachedColorMode != color_mode)
+  if (gradient.empty() || cache.width != w || cache.height != logical_h ||
+      cache.color_mode != color_mode)
   {
     gradient.resize((size_t)w * (size_t)logical_h);
-    cachedW = w;
-    cachedH = logical_h;
-    cachedColorMode = color_mode;
+    cache.width = w;
+    cache.height = logical_h;
+    cache.color_mode = color_mode;
+    std::vector<float> column_vignette(w);
+    for (int x = 0; x < w; ++x) {
+      const float dx = w > 1
+          ? ((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f)
+          : 0.0f;
+      column_vignette[x] = 1.0f - 0.12f * powf(fabsf(dx), 1.8f);
+    }
     static const u8 kBayer4x4[4][4] = {
         {0, 8, 2, 10},
         {12, 4, 14, 6},
@@ -46,17 +59,11 @@ void DrawToScreen(Text *ts, int color_mode, u16 *target_screen, int logical_h)
           (logical_h > 1) ? ((float)y / (float)(logical_h - 1)) : 0.0f;
       for (int x = 0; x < w; x++)
       {
-        const float dx =
-            (w > 1)
-                ? (((float)x - (float)(w - 1) * 0.5f) / ((float)(w - 1) * 0.5f))
-                : 0.0f;
-        const float edge = fabsf(dx);
-
         float r = palette.bgTopR + (palette.bgBotR - palette.bgTopR) * tY;
         float g = palette.bgTopG + (palette.bgBotG - palette.bgTopG) * tY;
         float b = palette.bgTopB + (palette.bgBotB - palette.bgTopB) * tY;
 
-        const float vignette = 1.0f - 0.12f * powf(edge, 1.8f);
+        const float vignette = column_vignette[x];
 
         const float bayer =
             (((float)kBayer4x4[y & 3][x & 3] + 0.5f) / 16.0f) - 0.5f;
