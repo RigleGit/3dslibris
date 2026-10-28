@@ -233,7 +233,12 @@ Index::Index() : bytes_(0), dirty_(false) {
   const long length = ok ? ftell(fp) : -1;
   ok = ok && length >= 6 && length <= kIndexFileLimit &&
        fseek(fp, 0, SEEK_SET) == 0 && ReadIndexHeader(fp);
-  while (ok && ftell(fp) < length) {
+  // EOF probing stays inside stdio's sequential buffer. ftell may consult
+  // the underlying SD stream, so avoid asking for its position per record.
+  while (ok) {
+    const int next = fgetc(fp);
+    if (next == EOF) { ok = !ferror(fp); break; }
+    if (ungetc(next, fp) == EOF) { ok = false; break; }
     uint64_t key = 0; MetaEntry entry;
     ok = ReadRecord(fp, &key, &entry);
     if (ok) Remember(key, entry);

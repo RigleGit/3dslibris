@@ -8,6 +8,14 @@
 #include <unistd.h>
 #include <vector>
 
+#undef ftell
+extern "C" long ftell(FILE *);
+static size_t index_tells = 0;
+extern "C" long ObserveMetadataTell(FILE *fp) {
+  ++index_tells;
+  return ftell(fp);
+}
+
 namespace {
 
 static int g_pass = 0;
@@ -171,8 +179,10 @@ void TestConsolidatedIndex() {
       ExpectTrue("index migrates individual caches", index.Load(caches[i], &loaded));
   }
   for (const auto &path : caches) ExpectTrue("remove individual cache", unlink(path.c_str()) == 0);
+  index_tells = 0;
   {
     Index index;
+    ExpectTrue("index streams records without per-book position queries", index_tells == 1);
     MetaEntry loaded;
     for (int i = 0; i < 300; ++i) {
       ExpectTrue("consolidated index serves a 300-book library", index.Load(caches[i], &loaded));
