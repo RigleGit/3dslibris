@@ -6,10 +6,11 @@ class Book {
 public:
   Text *text;
   int background_draws;
+  unsigned cache_pumps = 0;
   bool background_available;
   explicit Book(Text *value)
       : text(value), background_draws(0), background_available(true) {}
-  void PumpPendingEpubPageCacheSave() {}
+  void PumpPendingEpubPageCacheSave() { ++cache_pumps; }
   bool DrawBottomGradientBackground() {
     if (!background_available) return false;
     ++background_draws;

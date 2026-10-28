@@ -22,6 +22,7 @@ public:
   std::unique_ptr<Text> ts;
   std::unique_ptr<Prefs> prefs;
   int pans, presentations, visible_huds;
+  bool simulate_pan = true;
   static const u16 kHudPixel = 0x5a5a;
   App() : mode_(AppMode::Book), status_dirty_(true), book_(NULL),
       preview_(7 * 11), ts(new Text(64, 64)), prefs(new Prefs),
@@ -50,6 +51,7 @@ public:
     status_dirty_ = false;
   }
   void HandleEventInBook(const FrameInput &) {
+    if (!simulate_pan) return;
     const pdf_view_utils::PreviewLayout layout = {4, 6, 23, 31};
     const fixed_layout_preview_panel::Rect viewport = {5 + pans, 8, 9, 12};
     fixed_layout_preview_panel::Draw(&book_, ts.get(), &panel_,

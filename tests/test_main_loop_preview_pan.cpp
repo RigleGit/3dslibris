@@ -2,7 +2,8 @@
 #include "app/main_loop_controller.h"
 #include <cstdio>
 
-int g_main_loop_frames = 0;
+int g_main_loop_frames = 0, g_main_loop_limit = 6, g_frame_ms = 16;
+bool g_cache_idle_scenario = false;
 
 int main() {
   App app;
@@ -20,6 +21,18 @@ int main() {
     ok = false;
   }
   if (!ok) return 1;
+  g_main_loop_frames = 0; g_main_loop_limit = 36; g_frame_ms = 100;
+  g_cache_idle_scenario = true;
+  App idle;
+  idle.simulate_pan = false;
+  MainLoopController idle_loop(idle);
+  idle_loop.RunMainLoop();
+  // Interactions at 100 and 1500ms; save only at 1100..1400 and 2500..3600.
+  if (idle.GetCurrentBook()->cache_pumps != 16) {
+    std::fprintf(stderr, "FAIL: expected 16 idle save opportunities, got %u\n",
+                 idle.GetCurrentBook()->cache_pumps);
+    return 1;
+  }
   std::puts("Main-loop preview pan passed: six pans, one background draw, HUD visible in every frame");
   return 0;
 }
