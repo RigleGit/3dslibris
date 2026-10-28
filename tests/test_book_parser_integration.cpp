@@ -38,6 +38,20 @@
 #include <utime.h>
 #include <vector>
 
+#undef unzOpen
+#undef unzClose
+extern "C" unzFile unzOpen(const char *);
+extern "C" int unzClose(unzFile);
+static unsigned inline_zip_opens = 0, inline_zip_closes = 0;
+extern "C" unzFile ObserveInlineZipOpen(const char *path) {
+  ++inline_zip_opens;
+  return unzOpen(path);
+}
+extern "C" int ObserveInlineZipClose(unzFile file) {
+  ++inline_zip_closes;
+  return unzClose(file);
+}
+
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
 #endif
@@ -1939,9 +1953,45 @@ void TestNullAndEmptyInputHandling() {
 
 } // namespace
 
+static void TestInlineZipLifetime() {
+  BookContext context;
+  Book book(context);
+  const char *folder = std::getenv("TEST_IMAGE_VIEWER_DIR");
+  book.SetFolderName(folder); book.SetFileName("images.epub");
+  const u16 image = book.RegisterInlineImage("OEBPS/tiny.png");
+  inline_zip_opens = inline_zip_closes = 0;
+  InlineImageMetadata metadata{};
+  test::ExpectTrue("probe real zipped image", book.GetInlineImageMetadata(image, &metadata));
+  image_memory::Bytes bytes;
+  test::ExpectTrue("read image after metadata", book.ReadInlineImageSource(image, &bytes));
+  test::ExpectEq("probe and decode share one archive", inline_zip_opens, 1u);
+  test::ExpectEq("archive stays owned by book", inline_zip_closes, 0u);
+  const u16 missing = book.RegisterInlineImage("OEBPS/not-found.png");
+  test::ExpectFalse("missing entry fails safely", book.ReadInlineImageSource(missing, &bytes));
+  test::ExpectTrue("archive recovers after missing entry", book.ReadInlineImageSource(image, &bytes));
+  book.Close();
+  test::ExpectEq("book close releases archive once", inline_zip_closes, 1u);
+  book.Close();
+  test::ExpectEq("repeated close is safe", inline_zip_closes, 1u);
+  const std::string archive = std::string(folder) + "/images.epub";
+  unzFile borrowed = unzOpen(archive.c_str());
+  test::ExpectTrue("open borrowed probe archive", borrowed != NULL);
+  Book parsing(context);
+  parsing.SetFolderName(folder); parsing.SetFileName("images.epub");
+  parsing.SetInlineImageProbeZip(borrowed);
+  const u16 probe_image = parsing.RegisterInlineImage("OEBPS/tiny.png");
+  test::ExpectTrue("borrowed metadata probe works", parsing.GetInlineImageMetadata(probe_image, &metadata));
+  test::ExpectTrue("borrowed image read works", parsing.ReadInlineImageSource(probe_image, &bytes));
+  parsing.Close();
+  test::ExpectEq("borrowed archive never closed by book", inline_zip_closes, 1u);
+  test::ExpectTrue("borrowed owner can still locate entries", unzLocateFile(borrowed, "OEBPS/tiny.png", 0) == UNZ_OK);
+  unzClose(borrowed);
+}
+
 int main(int argc, char **argv) {
   if(argc==2) {
-    if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
+    if(std::string(argv[1])=="inline-zip") TestInlineZipLifetime();
+    else if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
     else if(std::string(argv[1])=="image-overlap") TestImagePagesDoNotCoverText();
     else if(std::string(argv[1])=="image-toggle") TestDisableEbookImages();
     else if (std::string(argv[1]) == "figure-transition")
@@ -1959,6 +2009,7 @@ int main(int argc, char **argv) {
     else return 2;
     return 0;
   }
+  TestInlineZipLifetime();
   TestPageFontFaceTransitions();
   TestOpaqueInlineCacheBudget();
   TestPageAlignmentRedrawMeasurements();

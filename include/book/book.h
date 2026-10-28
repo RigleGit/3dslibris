@@ -126,7 +126,9 @@ private:
   std::unordered_map<std::string, u16> chapter_anchor_pages;
   std::unordered_map<std::string, u16> chapter_doc_start_pages;
   std::unordered_map<std::string, image_memory::Bytes> fb2_inline_images;
-  void *inline_image_probe_uf;
+  void *inline_image_probe_uf; // Borrowed while the parser owns its ZIP handle.
+  void *inline_image_read_uf_ = NULL; // Lazy, owned until Close/ClearInlineImages.
+  void *GetInlineImageReadZip();
   bool inline_image_zip_index_built;
   std::unordered_map<std::string, unsigned long> inline_image_zip_offsets;
   bool mobi_inline_index_ready;

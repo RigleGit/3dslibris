@@ -232,6 +232,10 @@ void Book::ClearInlineImageCache() {
 }
 
 void Book::ClearInlineImages() {
+  if (inline_image_read_uf_) {
+    unzClose((unzFile)inline_image_read_uf_);
+    inline_image_read_uf_ = NULL;
+  }
   inline_images.clear();
   inline_image_path_index.clear();
   inline_image_probe_uf = NULL;
@@ -243,6 +247,16 @@ void Book::ClearInlineImages() {
   fb2_inline_images.clear();
   fb2_inline_images_bytes = 0;
   ClearInlineImageCache();
+}
+
+void *Book::GetInlineImageReadZip() {
+  if (inline_image_probe_uf)
+    return inline_image_probe_uf;
+  if (!inline_image_read_uf_) {
+    const std::string path = foldername + "/" + filename;
+    inline_image_read_uf_ = unzOpen(path.c_str());
+  }
+  return inline_image_read_uf_;
 }
 
 void Book::SetInlineImageProbeZip(void *uf) {
@@ -407,25 +421,15 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
     return true;
   }
 
-  std::string epubpath = foldername + "/" + filename;
-  unzFile uf = (unzFile)inline_image_probe_uf;
-  bool close_uf = false;
-  if (!uf) {
-    uf = unzOpen(epubpath.c_str());
-    close_uf = true;
-  }
+  unzFile uf = (unzFile)GetInlineImageReadZip();
   if (!uf)
     return false;
 
   if (!LocateBookInlineZipEntry(uf, &inline_image_zip_index_built,
                                 &inline_image_zip_offsets, image_path)) {
-    if (close_uf)
-      unzClose(uf);
     return false;
   }
   if (unzOpenCurrentFile(uf) != UNZ_OK) {
-    if (close_uf)
-      unzClose(uf);
     return false;
   }
 
@@ -434,13 +438,11 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
       fi.uncompressed_size == 0 ||
       fi.uncompressed_size > kEpubInlineImageMaxBytes) {
     unzCloseCurrentFile(uf);
-    if (close_uf)
-      unzClose(uf);
     return false;
   }
 
   if(!out->resize(fi.uncompressed_size)) {
-    unzCloseCurrentFile(uf);if(close_uf) unzClose(uf);return false;
+    unzCloseCurrentFile(uf);return false;
   }
   size_t total=0;
   bool ok=true;
@@ -450,7 +452,6 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
   }
   if(unzCloseCurrentFile(uf)!=UNZ_OK) ok=false;
   if(!ok) {
-    if(close_uf) unzClose(uf);
     out->clear();return false;
   }
 
@@ -464,8 +465,6 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
     int info_w = 0, info_h = 0, info_c = 0;
     if (stbi_info_from_memory(out->data(), (int)out->size(), &info_w, &info_h,
                               &info_c) != 0) {
-      if (close_uf)
-        unzClose(uf);
       return true;
     }
   }
@@ -494,12 +493,9 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
                (unsigned)out->size());
       DBG_LOG(reporter, msg);
     }
-    if (close_uf)
-      unzClose(uf);
     return true;
   }
-  if (close_uf)
-    unzClose(uf);
+
   if (is_svg_wrapper) {
     if (reporter) {
       char msg[192];
@@ -543,13 +539,7 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
         already_loaded_full = true;
       }
     } else {
-      unzFile uf = (unzFile)inline_image_probe_uf;
-      bool close_uf = false;
-      if (!uf) {
-        std::string epubpath = foldername + "/" + filename;
-        uf = unzOpen(epubpath.c_str());
-        close_uf = true;
-      }
+      unzFile uf = (unzFile)GetInlineImageReadZip();
       if (!uf) {
         // Zip open failed (likely transient memory pressure).
         // Leave metadata_probed=false so we retry next frame.
@@ -565,8 +555,6 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
           resolved_path = image_path;
         }
       }
-      if (close_uf)
-        unzClose(uf);
     }
 
     if (!already_loaded_full && need_full_load &&
