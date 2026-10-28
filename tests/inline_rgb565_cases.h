@@ -35,9 +35,24 @@ void TestOpaqueInlineCacheBudget() {
   // exceed 1 MiB and evict the early variants. No cache internals are exposed.
   for (int width = 180; width < 192; ++width) draw(width);
   test::ExpectEq("remove opaque-cache source", remove(archive.c_str()), 0);
+  // A retained descriptor survives unlink on the host; fail reads as well.
+  reject_zip_reads = true;
   image_memory::Bytes unavailable;
-  test::ExpectFalse("no source remains to decode evicted variants",
+  test::ExpectFalse("storage cannot reload evicted image variants",
                     book.ReadInlineImageSource(image, &unavailable));
   text.bgcolor.r = text.bgcolor.g = text.bgcolor.b = 255;
   for (int width = 180; width < 192; ++width) draw(width);
+  reject_zip_reads = false;
+  // Beyond 1 MiB, the earliest variant must be evicted. Recreate the path so
+  // fresh reads work with either retained or freshly opened ZIP descriptors.
+  WriteFileBytes(archive, ReadFileBytes(folder + "/images.epub"));
+  for (int width = 192; width < 198; ++width) draw(width);
+  reject_zip_reads = true;
+  InlineImageLayoutPlan evicted{};
+  evicted.mode = INLINE_IMAGE_LAYOUT_INLINE;
+  evicted.draw_width = 180; evicted.draw_height = 180;
+  test::ExpectFalse("cache remains bounded after exceeding 1 MiB",
+                    book.DrawInlineImage(&text, image, &evicted, 0, 0));
+  reject_zip_reads = false;
+  remove(archive.c_str());
 }

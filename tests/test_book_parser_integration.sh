@@ -183,7 +183,7 @@ PYFIXTURE
 
 "$CXX_BIN" -std=c++11 ${IMAGE_ALLOC_FLAGS[@]+"${IMAGE_ALLOC_FLAGS[@]}"} \
   ${CXXFLAGS:-} \
-  -DunzOpen=ObserveInlineZipOpen -DunzClose=ObserveInlineZipClose \
+  -DunzOpen=ObserveInlineZipOpen -DunzClose=ObserveInlineZipClose -DunzReadCurrentFile=ObserveInlineZipRead \
   -DDSLIBRIS_HOST_TEST -DDSLIBRIS_REAL_CBZ_TEST -DDSLIBRIS_REAL_MOBI_TEST -DDSLIBRIS_REAL_ODT_TEST \
   -include "$TEST_ROOT/tests/stubs/cbz_platform.h" \
   "-I$TEST_ROOT/tests/stubs" \

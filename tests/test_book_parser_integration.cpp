@@ -40,8 +40,14 @@
 
 #undef unzOpen
 #undef unzClose
+#undef unzReadCurrentFile
 extern "C" unzFile unzOpen(const char *);
 extern "C" int unzClose(unzFile);
+extern "C" int unzReadCurrentFile(unzFile, void *, unsigned);
+static bool reject_zip_reads = false;
+extern "C" int ObserveInlineZipRead(unzFile file, void *buffer, unsigned count) {
+  return reject_zip_reads ? UNZ_ERRNO : unzReadCurrentFile(file, buffer, count);
+}
 static unsigned inline_zip_opens = 0, inline_zip_closes = 0;
 extern "C" unzFile ObserveInlineZipOpen(const char *path) {
   ++inline_zip_opens;
@@ -537,9 +543,11 @@ void TestInlineImageCacheRetainsDistinctDimensions() {
     draw(40, 20);
     draw(changed_dimension == 0 ? 296 : 40, changed_dimension == 0 ? 20 : 30);
     test::ExpectEq("remove only isolated image cache archive", remove(copied_path.c_str()), 0);
-    // Both variants fit the cache. The first must remain usable after the
-    // source disappears, including widths separated by 256 and distinct heights.
+    // Removing a pathname does not invalidate a retained ZIP descriptor.
+    // Fail the real storage boundary so a cache miss cannot silently reload.
+    reject_zip_reads = true;
     draw(40, 20);
+    reject_zip_reads = false;
   }
 }
 
