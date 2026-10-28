@@ -48,7 +48,7 @@ bool iswhitespace(u32 c) {
 void parse_reset_page_buffer(parsedata_t *data) {
   if (!data)
     return;
-  memset(data->buf, 0, PAGEBUFSIZE * sizeof(u32));
+  // Page consumers use buflen; stale tokens beyond it are never published.
   data->buflen = 0;
   data->search_events.clear();
   data->pagebuf_overflowed = false;
