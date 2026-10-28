@@ -238,8 +238,12 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                  "MUPDF render: load-page-begin page=%d", page_index);
     perf_phase = fixed_perf::Now();
-    page = fz_load_page(ctx, doc, page_index);
-    bounds = fz_bound_page(ctx, page);
+    if (reuse_list) {
+      bounds = fz_bound_display_list(ctx, reuse_list);
+    } else {
+      page = fz_load_page(ctx, doc, page_index);
+      bounds = fz_bound_page(ctx, page);
+    }
     if (!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0))
       fz_throw(ctx, FZ_ERROR_FORMAT, "empty pdf page bounds");
 

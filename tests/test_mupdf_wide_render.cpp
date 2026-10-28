@@ -389,8 +389,44 @@ static void TestFailedTileKeepsRequestIdentity(const char *path) {
   }
 }
 
+static fz_document_load_page_fn *original_load_page = nullptr;
+static int reused_page_loads = 0;
+static fz_page *CountReusedPageLoads(fz_context *ctx, fz_document *doc,
+                                    int chapter, int page) {
+  ++reused_page_loads;
+  return original_load_page(ctx, doc, chapter, page);
+}
+
+static void TestDisplayListRenderDoesNotReloadPage(const char *path) {
+  WritePdf(path, "1 0 0 rg 170 270 60 60 re f\n", 400, 600);
+  fz_context *ctx = fz_new_context(NULL, NULL, FZ_STORE_DEFAULT); assert(ctx);
+  fz_register_document_handlers(ctx);
+  fz_document *doc = fz_open_document(ctx, path); assert(doc);
+  fz_display_list *list = nullptr;
+  RenderedMuPdfBitmap initial;
+  assert(RenderMuPdfBitmap(ctx, doc, 0, 1, &initial, NULL, NULL,
+                           NULL, NULL, &list));
+  assert(list && initial.width == 400 && initial.height == 600);
+  original_load_page = doc->load_page;
+  doc->load_page = CountReusedPageLoads;
+  reused_page_loads = 0;
+  RenderedMuPdfBitmap reused;
+  float width = 0, height = 0;
+  const pdf_view_utils::NormalizedRect crop = {0.25f, 0.25f, 0.5f, 0.5f};
+  assert(RenderMuPdfBitmap(ctx, doc, 0, 1, &reused, &width, &height,
+                           &crop, list));
+  assert(reused_page_loads == 0 && "a retained display list must not reload the PDF page");
+  assert(width == 400 && height == 600 && reused.width == 200 && reused.height == 300);
+  assert(reused.PixelData()[150 * 200 + 100] == 0xf800);
+  assert(reused.PixelData()[0] == 0xffff);
+  doc->load_page = original_load_page;
+  fz_drop_display_list(ctx, list);
+  fz_drop_document(ctx, doc); fz_drop_context(ctx);
+}
+
 int main(int argc, char **argv) {
   assert(argc == 2);
+  TestDisplayListRenderDoesNotReloadPage(argv[1]);
   TestPanReusesBoundedRaster(argv[1]);
   TestNormalLandscapePageRetainsVisibleDetail(argv[1]);
   std::string stripes = "0 g\n";
