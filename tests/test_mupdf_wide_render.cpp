@@ -436,9 +436,66 @@ static void TestDisplayListRenderDoesNotReloadPage(const char *path) {
   fz_drop_document(ctx, doc); fz_drop_context(ctx);
 }
 
+static void TestNew3dsHighZoomPanRetainsSharpDetail(const char *path) {
+  std::string bands="0 g\n";
+  for(int y=0;y<600;++y)
+    bands+="0 "+std::to_string(y)+" 400 0.5 re f\n";
+  WritePdf(path,bands,400,600);
+  for(bool wide : {false,true}) {
+    ControlledAllocation control;
+    fz_alloc_context allocator{&control,ControlledMalloc,ControlledRealloc,ControlledFree};
+    fz_context *ctx=fz_new_context(&allocator,NULL,FZ_STORE_DEFAULT); assert(ctx);
+    fz_register_document_handlers(ctx);
+    fz_document *doc=fz_open_document(ctx,path); assert(doc);
+    Book::MuPdfState state; state.ctx=ctx; state.doc=doc;
+    state.page_width=400; state.page_height=600;
+    state.document_kind=app_flow_utils::MuPdfDocumentKind::Pdf;
+    state.is_new_3ds=true; state.wide_top_screen=wide;
+    state.viewport.zoom_index=6;
+    assert(EnsureCurrentMuPdfPreviewCache(&state,0));
+    const auto *pixels=state.current_interactive_tile.PixelData();
+    const size_t attempts=control.attempts;
+    control.reject=true;
+    Text text; text.SetOrientation(0);
+    for(int frame=0;frame<30;++frame) {
+      state.viewport.center_x=0.2f+0.6f*frame/29;
+      state.viewport.center_y=0.8f-0.6f*frame/29;
+      state.viewport.interaction_active=frame!=29;
+      assert(EnsureCurrentMuPdfInteractiveTile(&state,0) &&
+             "high zoom must reuse sharp page pixels during motion and release");
+      const auto &cache=state.current_interactive_tile;
+      assert(control.attempts==attempts && cache.PixelData()==pixels);
+      assert(cache.PixelCount()<=4u*1024u*1024u);
+      assert(cache.bitmap_width==960 && cache.bitmap_height==(wide?2880:1440));
+      const auto viewport=ComputeCurrentMuPdfViewport(&state);
+      assert(BlitBitmapCacheViewport(&text,text.screenleft,400,240,400,
+                                     cache,viewport,true));
+      int transitions=0; bool previous=false;
+      for(int y=0;y<400;++y) {
+        const bool dark=((text.screenleft[y*text.BufferStride()+120]>>11)&31)<16;
+        if(y && dark!=previous) ++transitions;
+        previous=dark;
+      }
+      assert(transitions>=200 && "pan frames must keep fine bands, not enlarge the overview");
+    }
+    control.reject=false;
+    ResetBitmapCache(&state.current_interactive_tile);
+    reject_native_pixels=true;
+    assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
+    const auto &fallback=state.current_interactive_tile;
+    assert(fallback.width<1 && fallback.height<1);
+    assert(fallback.bitmap_width==240 && fallback.bitmap_height==(wide?800:400));
+    assert(fz_caught(ctx)==FZ_ERROR_NONE);
+    fz_drop_display_list(ctx,state.cached_display_list);
+    fz_drop_document(ctx,doc); fz_drop_context(ctx);
+    assert(control.live==0);
+  }
+}
+
 int main(int argc, char **argv) {
   assert(argc == 2);
   TestDisplayListRenderDoesNotReloadPage(argv[1]);
+  TestNew3dsHighZoomPanRetainsSharpDetail(argv[1]);
   TestPanReusesBoundedRaster(argv[1]);
   TestNormalLandscapePageRetainsVisibleDetail(argv[1]);
   std::string stripes = "0 g\n";

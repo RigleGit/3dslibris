@@ -205,7 +205,8 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
                        fz_display_list *reuse_list,
                        fz_display_list **out_list,
                        IStatusReporter *reporter, const char *perf_stage,
-                       float density_x, float density_y, bool optional_output) {
+                       float density_x, float density_y, bool optional_output,
+                       size_t density_pixel_limit) {
   if (!ctx || !doc || !out || scale <= 0.0f)
     return false;
   DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
@@ -295,9 +296,9 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
       const fz_irect dense_bbox = fz_round_rect(fz_transform_rect(render_rect, dense));
       const double pixel_count = (double)(dense_bbox.x1 - dense_bbox.x0) *
                                 (double)(dense_bbox.y1 - dense_bbox.y0);
-      // Wide is optional: cap the additional-density raster at 1M pixels
-      // (roughly 5 MiB for RGB888 + RGB565), then retain the normal raster.
-      if (pixel_count > 0 && pixel_count <= 1024.0 * 1024.0)
+      // Wide is optional. The caller's bounded raster budget includes native
+      // density, so a cached full page must retain its extra samples too.
+      if (pixel_count > 0 && pixel_count <= (double)density_pixel_limit)
         ctm = dense;
       else
         DBG_LOGF(reporter, "WIDE: PDF normal-density fallback pixels=%.0f", pixel_count);

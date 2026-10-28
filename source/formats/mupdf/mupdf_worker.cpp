@@ -334,16 +334,20 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
                                       mupdf_state->viewport.zoom_index);
   const float density_x = mupdf_state->wide_top_screen && mupdf_state->target_top_width == 400 ? 2.0f : 1.0f;
   const float density_y = mupdf_state->wide_top_screen && mupdf_state->target_top_height == 400 ? 2.0f : 1.0f;
+  // Keep one current-page raster, never adjacent pages. New3DS can retain up
+  // to 8 MiB of RGB565 pixels; Old3DS keeps its existing 2 MiB ceiling.
+  const size_t raster_pixel_limit = mupdf_state->is_new_3ds
+      ? 4u * 1024u * 1024u : 1024u * 1024u;
   pdf_view_utils::NormalizedRect region = viewport;
   bool expanded = false;
   if (visible_tile) {
-    // Prepare the full page immediately through 2x zoom. Higher zooms keep
-    // cheap visible tiles until interaction needs a border or a complete page.
-    // The existing 1M-pixel ceiling includes native-wide density.
+    // Prepare all of the current page at the requested resolution when it fits.
+    // New3DS does this before a high-zoom gesture, avoiding tile crossings.
+    // Count native-wide samples in the same bounded memory budget.
     const double full_pixels = std::ceil(page_width * render_scale + 1.0f) *
         std::ceil(page_height * render_scale + 1.0f) * density_x * density_y;
-    if (full_pixels <= 1024.0 * 1024.0 &&
-        (mupdf_state->viewport.interaction_active ||
+    if (full_pixels <= (double)raster_pixel_limit &&
+        (mupdf_state->is_new_3ds || mupdf_state->viewport.interaction_active ||
          pdf_view_utils::ZoomForIndex(mupdf_state->viewport.zoom_index) <= 2.0f)) {
       region = pdf_view_utils::NormalizedRect{0, 0, 1, 1};
     } else if (mupdf_state->viewport.interaction_active) {
@@ -362,7 +366,7 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
                        render_scale, &rendered, &page_width, &page_height, crop,
                        display_list, display_list ? NULL : &new_list,
                        mupdf_state->reporter, NULL,
-                       density_x, density_y, expanded);
+                       density_x, density_y, expanded, raster_pixel_limit);
   if (!render_ok && expanded) {
     // The border is optional. Retry just the visible area before reducing density.
     region = viewport;
