@@ -244,31 +244,66 @@ static void XMLCALL ComicInfoEndElement(void *user_data, const XML_Char *name) {
     state->in_pages = false;
 }
 
+void ReadCurrentComicInfo(unzFile uf, std::vector<CbzComicInfoBookmark> *out) {
+  ScopedCurrentZipEntry current(uf);
+  if (!current.Open())
+    return;
+
+  ComicInfoParseState state;
+  state.out = out;
+  state.in_pages = false;
+
+  xml_parse_utils::XmlParserOptions opts;
+  opts.start_element = ComicInfoStartElement;
+  opts.end_element = ComicInfoEndElement;
+  opts.user_data = &state;
+  xml_parse_utils::ParseXmlZipEntry(uf, opts, 4096);
+}
+
 } // namespace
 
 bool IndexCbzArchiveEntries(const std::string &archive_path,
                             std::vector<CbzPageEntry> *entries) {
+  CbzArchiveReader reader;
+  return reader.Index(archive_path, entries);
+}
+
+bool CbzArchiveReader::Index(const std::string &archive_path,
+                             std::vector<CbzPageEntry> *entries,
+                             std::vector<CbzComicInfoBookmark> *bookmarks) {
+  Close();
+  if (bookmarks)
+    bookmarks->clear();
+  if (entries)
+    entries->clear();
   if (!entries || archive_path.empty())
     return false;
 
-  entries->clear();
   SetLastCbzArchiveError("");
 
-  ScopedZipArchive archive(archive_path);
-  if (!archive.ok()) {
+  archive_ = unzOpen(archive_path.c_str());
+  if (!archive_) {
     SetLastCbzArchiveError("unable to open CBZ archive");
     return false;
   }
+  path_ = archive_path;
 
-  ForEachZipEntry(archive.uf, [&](const ZipEntryInfo &zip_entry) {
+  bool comic_info_checked = false;
+  ForEachZipEntry(archive_, [&](const ZipEntryInfo &zip_entry) {
     const std::string &normalized = zip_entry.normalized_name;
+    if (bookmarks && !comic_info_checked && IsComicInfoXmlEntry(normalized) &&
+        zip_entry.file_info.uncompressed_size > 0 &&
+        zip_entry.file_info.uncompressed_size < 2u * 1024u * 1024u) {
+      comic_info_checked = true;
+      ReadCurrentComicInfo(archive_, bookmarks);
+    }
 
     if (!normalized.empty() && normalized[normalized.size() - 1] != '/' &&
         IsSupportedCbzImagePath(normalized)) {
       CbzPageEntry entry;
       entry.path = zip_entry.raw_name;
       entry.normalized_path = normalized;
-      entry.offset = unzGetOffset(archive.uf);
+      entry.offset = unzGetOffset(archive_);
       entry.uncompressed_size = zip_entry.file_info.uncompressed_size;
       entries->push_back(entry);
     }
@@ -283,15 +318,28 @@ bool IndexCbzArchiveEntries(const std::string &archive_path,
 
   if (entries->empty()) {
     SetLastCbzArchiveError("no supported image entries found in CBZ");
+    if (bookmarks)
+      bookmarks->clear();
+    Close();
     return false;
   }
 
+  if (bookmarks)
+    std::sort(bookmarks->begin(), bookmarks->end(),
+              [](const CbzComicInfoBookmark &a, const CbzComicInfoBookmark &b) {
+                return a.image_index < b.image_index;
+              });
   return true;
 }
 
 CbzArchiveReader::CbzArchiveReader() : archive_(NULL), path_() {}
 
 CbzArchiveReader::~CbzArchiveReader() { Close(); }
+
+void CbzArchiveReader::Swap(CbzArchiveReader &other) {
+  std::swap(archive_, other.archive_);
+  path_.swap(other.path_);
+}
 
 void CbzArchiveReader::Close() {
   if (archive_)
@@ -396,21 +444,7 @@ bool ReadComicInfoBookmarks(const std::string &archive_path,
     if (fi.uncompressed_size == 0 || fi.uncompressed_size >= 2u * 1024u * 1024u)
       return false;
 
-    ScopedCurrentZipEntry current(archive.uf);
-    if (!current.Open())
-      return true;
-
-    ComicInfoParseState state;
-    state.out = out;
-    state.in_pages = false;
-
-    xml_parse_utils::XmlParserOptions opts;
-    opts.start_element = ComicInfoStartElement;
-    opts.end_element = ComicInfoEndElement;
-    opts.user_data = &state;
-
-    xml_parse_utils::ParseXmlZipEntry(archive.uf, opts, 4096);
-
+    ReadCurrentComicInfo(archive.uf, out);
     found = true;
     return true;
   });

@@ -37,7 +37,7 @@ bool Book::HasPendingCbzDeferredWork() const { return false; }
 u32 Book::GetCbzDeferredDelayMs() const { return 0; }
 
 void Book::InitCbzView(const std::string &, const std::vector<CbzPageEntry> &,
-                       bool) {}
+                       bool, CbzArchiveReader *) {}
 
 #endif
 

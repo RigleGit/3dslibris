@@ -29,6 +29,10 @@ public:
   CbzArchiveReader();
   ~CbzArchiveReader();
   void Close();
+  // Transfer the retained archive together with its path identity.
+  void Swap(CbzArchiveReader &other);
+  bool Index(const std::string &archive_path, std::vector<CbzPageEntry> *entries,
+             std::vector<CbzComicInfoBookmark> *bookmarks = NULL);
   bool Read(const std::string &archive_path, const CbzPageEntry &entry,
             std::vector<unsigned char> *out, size_t max_bytes);
 

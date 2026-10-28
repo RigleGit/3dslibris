@@ -9,6 +9,11 @@
 static int read_calls = 0;
 static unsigned int read_limit = 0;
 static bool fail_reads = false;
+static int archive_opens = 0;
+extern "C" unzFile CountedUnzOpen(const char *path) {
+  ++archive_opens;
+  return unzOpen(path);
+}
 extern "C" int CountedUnzReadCurrentFile(unzFile file, void *buffer, unsigned int size) {
   ++read_calls;
   if (fail_reads) return UNZ_ERRNO;
@@ -131,6 +136,20 @@ int main() {
   ExpectEq("chapter bookmark", entries[bookmarks[1].image_index].normalized_path,
            "Chapter 5/1.png");
   ExpectEq("chapter title", bookmarks[1].title, "Chapter five");
+  reader.Close();
+  archive_opens = 0;
+  ExpectTrue("index pages and ComicInfo with one retained archive",
+             reader.Index(archive, &entries, &bookmarks));
+  ExpectEqInt("combined index retains bookmarks", (int)bookmarks.size(), 2);
+  ExpectEq("combined index preserves chapter title", bookmarks[1].title, "Chapter five");
+  CbzArchiveReader transferred;
+  transferred.Swap(reader);
+  ExpectTrue("read after ownership transfer", transferred.Read(archive, entries[0], &bytes, 1024));
+  ExpectEq("transferred archive payload", std::string(bytes.begin(), bytes.end()), expected[0]);
+  ExpectEqInt("index and first page open the archive once", archive_opens, 1);
+  transferred.Close();
+  ExpectTrue("failed combined index clears pages", !reader.Index(invalid_archive, &entries, &bookmarks));
+  ExpectTrue("failed combined index clears outputs", entries.empty() && bookmarks.empty());
   ExpectTrue("bad archive has no bookmarks", !ReadComicInfoBookmarks(invalid_archive, &bookmarks));
   ExpectTrue("bad archive clears previous bookmarks", bookmarks.empty());
   puts("PASS: CBZ natural order, ZIP reads and ComicInfo bookmarks");

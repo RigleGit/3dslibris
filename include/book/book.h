@@ -30,6 +30,7 @@ class Page;
 class Text;
 class Prefs;
 struct CbzPageEntry;
+class CbzArchiveReader;
 struct fz_context;
 struct fz_document;
 struct fz_display_list;
@@ -411,7 +412,7 @@ public:
                      app_flow_utils::MuPdfDocumentKind document_kind);
   void InitCbzView(const std::string &archive_path,
                    const std::vector<CbzPageEntry> &entries,
-                   bool is_new_3ds);
+                   bool is_new_3ds, CbzArchiveReader *reader = NULL);
   // HOME/APT-sensitive worker lifecycle. Kept on Book until fixed-layout
   // worker ownership is split safely.
   void SuspendFixedLayoutWorkers();

@@ -93,13 +93,10 @@ bool IndexCbzEntriesWithLog(Book *book, const char *path,
   return false;
 }
 
-void LoadCbzChaptersFromComicInfo(Book *book, const char *path,
-                                  const std::vector<CbzPageEntry> &entries) {
-  if (!book || !path || entries.empty())
-    return;
-
-  std::vector<CbzComicInfoBookmark> bookmarks;
-  if (!ReadComicInfoBookmarks(path, &bookmarks))
+void LoadCbzChaptersFromComicInfo(Book *book,
+                                  const std::vector<CbzPageEntry> &entries,
+                                  const std::vector<CbzComicInfoBookmark> &bookmarks) {
+  if (!book || entries.empty())
     return;
 
   for (const CbzComicInfoBookmark &bm : bookmarks) {
@@ -128,7 +125,7 @@ void Book::ResetCbzState() {
 
 void Book::InitCbzView(const std::string &archive_path,
                        const std::vector<CbzPageEntry> &entries,
-                       bool is_new_3ds) {
+                       bool is_new_3ds, CbzArchiveReader *reader) {
   ResetCbzState();
 
   cbz_state = new CbzState();
@@ -137,6 +134,8 @@ void Book::InitCbzView(const std::string &archive_path,
       pdf_view_utils::GetDevicePolicy(is_new_3ds);
 
   cbz_state->archive_path = archive_path;
+  if (reader)
+    cbz_state->archive_reader.Swap(*reader);
   cbz_state->entries = entries;
   cbz_state->page_count = (u16)std::min<size_t>(entries.size(), 65535);
   cbz_state->is_new_3ds = is_new_3ds;
@@ -153,8 +152,13 @@ uint8_t ParseCbzFile(Book *book, const char *path) {
     return 255;
 
   const uint64_t perf_open_start = fixed_perf::Now();
+  CbzArchiveReader reader;
+  std::vector<CbzComicInfoBookmark> bookmarks;
   std::vector<CbzPageEntry> entries;
-  if (!IndexCbzEntriesWithLog(book, path, &entries, "open")) {
+  if (!reader.Index(path, &entries, &bookmarks)) {
+    DBG_LOGF_CAT(book->GetStatusReporter(), DBG_LEVEL_WARN, DBG_CAT_RENDER,
+                 "CBZ open failed path=%s reason=%s", path,
+                 GetLastCbzArchiveError());
     fixed_perf::Document(book, "CBZ_OPEN", path);
     fixed_perf::Record(book, -1, -1, "cbz.index_zip", fixed_perf::Now()-perf_open_start, 0);
     return BOOK_ERR_CORRUPT;
@@ -164,9 +168,9 @@ uint8_t ParseCbzFile(Book *book, const char *path) {
   book->ClearChapters();
   book->ClearTocConfidence();
 
-  LoadCbzChaptersFromComicInfo(book, path, entries);
+  LoadCbzChaptersFromComicInfo(book, entries, bookmarks);
 
-  book->InitCbzView(path, entries, DetectCbzNew3ds());
+  book->InitCbzView(path, entries, DetectCbzNew3ds(), &reader);
 
 #ifdef DSLIBRIS_DEBUG
   if (debug_runtime::ForceSynchronousCbzDecode() && book->GetStatusReporter()) {
@@ -195,12 +199,13 @@ int cbz_extract_cover(Book *book, const std::string &cbzpath) {
   if (!book || cbzpath.empty())
     return 1;
 
+  CbzArchiveReader reader;
   std::vector<CbzPageEntry> entries;
-  if (!IndexCbzArchiveEntries(cbzpath, &entries) || entries.empty())
+  if (!reader.Index(cbzpath, &entries) || entries.empty())
     return 2;
 
   std::vector<unsigned char> bytes;
-  if (!ReadCbzArchiveEntryBytes(cbzpath, entries[0], &bytes,
+  if (!reader.Read(cbzpath, entries[0], &bytes,
                                 format_limits::kMaxCbzCoverEntryBytes)) {
     return 3;
   }

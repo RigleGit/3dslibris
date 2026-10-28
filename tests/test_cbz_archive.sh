@@ -52,10 +52,13 @@ done
   -I"$MINIZIP/.." \
   -DunzReadCurrentFile=CountedUnzReadCurrentFile \
   -c "$TEST_ROOT/source/formats/common/zip_read_utils.cpp" -o "$WORKDIR/zip_read.o"
+"$CXX_BIN" -std=c++11 ${CXXFLAGS:-} -I"$TEST_ROOT/include" -I"$TEST_ROOT/tests/stubs" \
+  -I"$MINIZIP/.." -DunzOpen=CountedUnzOpen \
+  -c "$TEST_ROOT/source/formats/cbz/cbz_archive.cpp" -o "$WORKDIR/cbz_archive.o"
 
 build_test test_cbz_archive \
   "$TEST_ROOT/tests/test_cbz_archive.cpp" \
-  "$TEST_ROOT/source/formats/cbz/cbz_archive.cpp" \
+  "$WORKDIR/cbz_archive.o" \
   "$WORKDIR/zip_read.o" \
   "$TEST_ROOT/source/formats/common/xml_parse_utils.cpp" \
   "$WORKDIR/unzip.o" "$WORKDIR/ioapi.o" \
