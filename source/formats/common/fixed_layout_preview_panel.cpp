@@ -107,9 +107,13 @@ void Draw(Book *book, Text *text, State *state,
                     old.x + old.width, old.y + old.height - 1);
     }
   }
-  // An old accent may overlap the preview frame, so restore the frame before
-  // drawing the new accent, in the same order as the full redraw.
-  DrawOutline(text, content.layout, fixed_layout_preview::kFrame);
+  // Restore the frame only when the old accent could have overwritten it.
+  // Drawing its whole outline for an interior pan also dirties its whole box.
+  const Rect interior = {content.layout.x + 1, content.layout.y + 1,
+      std::max(0, content.layout.width - 2),
+      std::max(0, content.layout.height - 2)};
+  if (full_redraw || !Contains(interior, state->viewport))
+    DrawOutline(text, content.layout, fixed_layout_preview::kFrame);
   DrawOutline(text, viewport, fixed_layout_preview::kViewportAccent);
   state->content = content;
   state->viewport = viewport;

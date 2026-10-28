@@ -14,6 +14,7 @@ public:
   bool screenright_dirty, screenleft_dirty;
   uint64_t screenright_cache_generation;
   unsigned writes;
+  int dirty_x0 = 0, dirty_y0 = 0, dirty_x1 = 0, dirty_y1 = 0;
   std::vector<u16> bottom;
 
   Text(int w, int h, int o = 0)
@@ -31,8 +32,14 @@ public:
   int GetColorMode() const { return color_mode; }
   unsigned char GetOrientation() const { return orientation; }
   void SetScreen(u16 *value) { screen = value; }
-  void MarkScreenDirty(u16 *) { screenright_dirty = true; ++writes; }
-  void MarkScreenDirtyRect(u16 *, int, int, int, int) {
+  void MarkScreenDirty(u16 *target) { MarkScreenDirtyRect(target, 0, 0, width, height); }
+  void MarkScreenDirtyRect(u16 *, int x0, int y0, int x1, int y1) {
+    if (screenright_dirty) {
+      dirty_x0 = std::min(dirty_x0, x0); dirty_y0 = std::min(dirty_y0, y0);
+      dirty_x1 = std::max(dirty_x1, x1); dirty_y1 = std::max(dirty_y1, y1);
+    } else {
+      dirty_x0 = x0; dirty_y0 = y0; dirty_x1 = x1; dirty_y1 = y1;
+    }
     screenright_dirty = true;
     ++writes;
   }

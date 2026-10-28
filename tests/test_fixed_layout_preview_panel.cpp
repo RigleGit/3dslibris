@@ -149,10 +149,23 @@ void TestClippingAndOutlyingRoundedViewport() {
   f.Draw(rect); f.ExpectFullReference(rect);
 }
 
+void TestInteriorPanDamagesOnlyTheViewport() {
+  Fixture f(240, 320);
+  f.layout = {20, 30, 150, 240};
+  f.Draw({50, 80, 30, 50});
+  f.text.Present();
+  f.Draw({55, 85, 30, 50});
+  f.ExpectFullReference({55, 85, 30, 50});
+  assert(f.text.dirty_x0 == 50 && f.text.dirty_y0 == 80 &&
+         f.text.dirty_x1 == 85 && f.text.dirty_y1 == 135 &&
+         "interior pan must not invalidate the whole preview frame");
+}
+
 int main() {
   TestPanningMatchesFullRedrawWithoutBackgroundWork();
   TestNativeSizePreviewRestoresClippedStrips();
   TestExternalInvalidationAndContentChanges();
   TestClippingAndOutlyingRoundedViewport();
+  TestInteriorPanDamagesOnlyTheViewport();
   puts("Fixed-layout preview panel passed");
 }
