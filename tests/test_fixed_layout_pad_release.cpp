@@ -1,6 +1,7 @@
 #include "reader/reader_layout_state.h"
 #include "reader/reader_controls.h"
 #include "app/frame_input.h"
+#include "app/status_layout_utils.h"
 #include "formats/common/pdf_view_utils.h"
 #include "shared/orientation_utils.h"
 #include <algorithm>
@@ -41,11 +42,21 @@ struct App {
 };
 struct Book {
   bool interaction=false, can_move=true, pending=false;
+  int damage=0;
   format_t format=FORMAT_PDF;
   std::vector<int> chapters;
   const std::vector<int> &GetChapters() const { return chapters; }
 };
-struct Text {};
+static const int TEXT_STYLE_BROWSER=1;
+struct Text {
+  bool screenright_dirty=false;
+  struct { bool valid=false; int x0=0, y0=0, x1=0, y1=0; } screenright_dirty_rect;
+  int style=7;
+  int GetStyle() const { return style; }
+  void SetStyle(int value) { style=value; }
+  int GetHeight() const { assert(style == TEXT_STYLE_BROWSER); return 12; }
+  int LogicalHeightFor(bool) const { return 320; }
+};
 static std::vector<bool> draw_interactions;
 static int pumps=0, pans=0, touch_moves=0;
 static float last_pan_x=0.0f, last_pan_y=0.0f;
@@ -66,7 +77,13 @@ bool HasPendingFixedLayoutDeferredWork(Book *b) { return b->pending; }
 bool PumpDeferredFixedLayoutWork(Book *, uint32_t budget) { assert(budget == 4); ++pumps; return true; }
 }
 namespace book_nav {
-void DrawPage(Book *b, Text *) { draw_interactions.push_back(b->interaction); }
+void DrawPage(Book *b, Text *t) {
+  draw_interactions.push_back(b->interaction);
+  t->screenright_dirty=true; t->screenright_dirty_rect.valid=true;
+  t->screenright_dirty_rect.x0=20; t->screenright_dirty_rect.x1=160;
+  t->screenright_dirty_rect.y0=b->damage == 1 ? 60 : b->damage == 3 ? 280 : 0;
+  t->screenright_dirty_rect.y1=b->damage == 1 ? 160 : b->damage == 2 ? 15 : 320;
+}
 bool TurnPage(Book *, Text *, uint16_t *, uint16_t, int direction) {
   ++turn_calls; turn_direction=direction; return turn_succeeds;
 }
@@ -76,6 +93,8 @@ namespace fixed_layout_input {
 #include "pad_handler.inc"
 }
 static bool Frame(App &app, Book &book, Text &text, uint32_t down=0, uint32_t held=0, int x=0, int y=0, const ReaderControls *controls=nullptr) {
+  text.screenright_dirty=false;
+  text.screenright_dirty_rect.valid=false;
   const FrameInput input(down, held, (held & KEY_TOUCH) != 0, x, y, now);
   const ReaderControls empty={};
   const ReaderControls &ctrl=controls ? *controls : empty; uint16_t page=0;
@@ -164,6 +183,22 @@ static void TestPadPanDirection() {
   Frame(app, book, text);
   draw_interactions.clear();
 }
+static void TestPanPreservesUndamagedHud() {
+  App app; Book book; Text text;
+  pad={0,0}; stick={0,0}; Frame(app, book, text);
+  for (int damage : {0,1,2,3}) {
+    book.damage=damage; book.pending=true;
+    const int before_pumps=pumps;
+    pad.dx=60;
+    assert(Frame(app,book,text) == (damage != 1) &&
+           "viewport-only redraws must preserve HUD; damaged HUD strips must repaint");
+    assert(pumps == before_pumps && "drawing a viewport must defer background work even without a HUD redraw");
+    assert(draw_interactions.back() && text.style == 7);
+    book.pending=false; pad.dx=0;
+    assert(Frame(app,book,text) == (damage != 1));
+    assert(!draw_interactions.back());
+  }
+}
 int main() {
   TestControlRouting();
   TestPadPanDirection();
@@ -207,5 +242,6 @@ int main() {
   assert(app.ready_at == now + 20);
   now=app.ready_at; pad.dx=60;
   assert(Frame(app, book, text) && pumps == 1); // A pan redraw defers expensive work.
+  TestPanPreservesUndamagedHud();
   puts("PASS: full input handler schedules interaction/release draws and eligible idle work");
 }

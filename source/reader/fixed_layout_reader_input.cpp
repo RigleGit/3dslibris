@@ -14,6 +14,7 @@
 #include <3ds.h>
 
 #include "app/app.h"
+#include "app/status_layout_utils.h"
 #include "settings/prefs.h"
 #include "book/book.h"
 #include "book/book_renderer.h"
@@ -30,6 +31,26 @@ static const int kViewportStickDeadZone = 15;
 static const int kViewportCStickDeadZone = 8;
 static const float kViewportStickBaseScale = 0.048f / 154.0f;
 static const int kViewportStickAccelFrames = 24;
+
+static bool ViewportDrawOverwroteHud(Text *ts) {
+  if (!ts->screenright_dirty)
+    return false;
+  const auto &damage = ts->screenright_dirty_rect;
+  if (!damage.valid)
+    return true;
+  const int saved_style = ts->GetStyle();
+  ts->SetStyle(TEXT_STYLE_BROWSER);
+  const int font_height = ts->GetHeight();
+  ts->SetStyle(saved_style);
+  const status_layout_utils::FixedLayoutBottomHudLayout hud =
+      status_layout_utils::ComputeFixedLayoutBottomHudLayout(
+          ts->LogicalHeightFor(false), font_height);
+  // Be conservative across the full width of both HUD strips. A full preview,
+  // failure page or border crossing either strip needs the status painted again.
+  const int time_bottom = std::max(hud.time_clear_bottom, hud.time_y + font_height);
+  const int page_top = std::min(hud.page_clear_top, hud.page_y - font_height);
+  return damage.y0 < time_bottom || damage.y1 > page_top;
+}
 
 static float BuildViewportStickAxis(int raw_value, int dead_zone, float scale) {
   return (std::abs(raw_value) > dead_zone) ? ((float)raw_value * scale) : 0.0f;
@@ -75,10 +96,17 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
   const uint32_t keys = input.keys_down;
   const uint32_t held = input.keys_held;
   bool status_dirty = false;
+  bool viewport_drawn = false;
 
   const auto delay_deferred = [&]() {
     const uint32_t delay_ms = book_renderer::GetFixedLayoutDeferredDelayMs(book);
     app.SetPdfDeferredReadyAtMs(delay_ms ? (osGetTime() + delay_ms) : 0);
+  };
+  const auto draw_viewport = [&]() {
+    book_nav::DrawPage(book, ts);
+    viewport_drawn = true;
+    status_dirty = ViewportDrawOverwroteHud(ts) || status_dirty;
+    delay_deferred();
   };
 
   if (keys & ctrl.zoom_in) {
@@ -147,9 +175,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
     app.SetPdfTouchLastY((int)mapped.py);
     if (book_renderer::MoveFixedLayoutViewportToPreview(book, (int)mapped.px,
                                                         (int)mapped.py)) {
-      book_nav::DrawPage(book, ts);
-      status_dirty = true;
-      delay_deferred();
+      draw_viewport();
     }
   } else if (held & KEY_TOUCH) {
     touchPosition mapped = app.MapTouch(input);
@@ -163,9 +189,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
       app.SetPdfTouchLastY((int)mapped.py);
       if (book_renderer::MoveFixedLayoutViewportToPreview(book, (int)mapped.px,
                                                           (int)mapped.py)) {
-        book_nav::DrawPage(book, ts);
-        status_dirty = true;
-        delay_deferred();
+        draw_viewport();
       }
     }
   } else if (keys & ctrl.back_to_library) {
@@ -178,9 +202,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
   if (!(held & KEY_TOUCH)) {
     if (app.IsPdfTouchDragActive()) {
       book_renderer::SetFixedLayoutViewportInteraction(book, false);
-      book_nav::DrawPage(book, ts);
-      status_dirty = true;
-      delay_deferred();
+      draw_viewport();
     }
     book_renderer::SetFixedLayoutViewportInteraction(book, false);
     app.SetPdfTouchDragActive(false);
@@ -223,23 +245,19 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
     if (stick_active &&
         book_renderer::TranslateFixedLayoutViewport(book, viewport_dx, viewport_dy)) {
       book_renderer::SetFixedLayoutViewportInteraction(book, true);
-      book_nav::DrawPage(book, ts);
-      status_dirty = true;
-      delay_deferred();
+      draw_viewport();
     } else if (!stick_active && stick_was_active) {
       // Like stylus release, replace the last fast pan frame with a filtered
       // frame. Synchronous PDF/CBZ have no deferred job to trigger this redraw.
       book_renderer::SetFixedLayoutViewportInteraction(book, false);
-      book_nav::DrawPage(book, ts);
-      status_dirty = true;
-      delay_deferred();
+      draw_viewport();
     }
   } else {
     // Stylus release owns the final redraw if touch takes over a pad gesture.
     s_viewport_stick_active_frames = 0;
   }
 
-  if (!status_dirty &&
+  if (!status_dirty && !viewport_drawn &&
       !(held & KEY_TOUCH) && keys == 0 &&
       book_renderer::HasPendingFixedLayoutDeferredWork(book) &&
       osGetTime() >= app.GetPdfDeferredReadyAtMs()) {
