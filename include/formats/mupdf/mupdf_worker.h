@@ -20,6 +20,8 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state,
                                     int page_index);
 bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
                                        int page_index);
+bool UseMuPdfPreviewForInteraction(const Book::MuPdfState *mupdf_state,
+                                  int page_index);
 void InitMuPdfWorker(Book::MuPdfState *mupdf_state);
 void SignalMuPdfWorkerShutdown(Book::MuPdfState *mupdf_state);
 void ShutdownMuPdfWorker(Book::MuPdfState *mupdf_state);

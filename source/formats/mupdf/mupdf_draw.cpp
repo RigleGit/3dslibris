@@ -487,7 +487,8 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
       BitmapCacheValid(mupdf_state->current_final_zoom, page_index) &&
       mupdf_state->current_final_zoom.zoom_index >= mupdf_state->viewport.max_zoom_index;
   const bool has_interactive_tile =
-      BitmapCacheValid(mupdf_state->current_interactive_tile, page_index);
+      BitmapCacheValid(mupdf_state->current_interactive_tile, page_index) &&
+      !UseMuPdfPreviewForInteraction(mupdf_state, page_index);
   const bool wants_final_cache =
       app_flow_utils::MuPdfWantsFinalQualityRender(mupdf_state->document_kind);
   mupdf_state->final_cache_pending =

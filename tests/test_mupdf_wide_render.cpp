@@ -436,9 +436,63 @@ static void TestDisplayListRenderDoesNotReloadPage(const char *path) {
   fz_drop_document(ctx, doc); fz_drop_context(ctx);
 }
 
+static void TestHighZoomDragUsesExistingPageUntilRelease(const char *path) {
+  std::string bands = "0 g\n";
+  for (int y=0; y<600; ++y)
+    bands += "0 " + std::to_string(y) + " 400 0.5 re f\n";
+  WritePdf(path,bands,400,600);
+  for (bool wide : {false,true}) {
+    ControlledAllocation control;
+    fz_alloc_context allocator{&control,ControlledMalloc,ControlledRealloc,ControlledFree};
+    fz_context *ctx=fz_new_context(&allocator,NULL,FZ_STORE_DEFAULT); assert(ctx);
+    fz_register_document_handlers(ctx);
+    fz_document *doc=fz_open_document(ctx,path); assert(doc);
+    Book::MuPdfState state; state.ctx=ctx; state.doc=doc;
+    state.page_width=400; state.page_height=600; state.wide_top_screen=wide;
+    state.document_kind=app_flow_utils::MuPdfDocumentKind::Pdf;
+    state.viewport.zoom_index=6;
+    assert(EnsureCurrentMuPdfPreviewCache(&state,0));
+    const u16 *overview=state.current_preview.PixelData();
+    const u16 *detail=state.current_interactive_tile.PixelData();
+    const size_t attempts=control.attempts;
+    control.reject=true;
+    state.viewport.interaction_active=true;
+    // Cross several old tile boundaries, including a large stylus jump.
+    for (int frame=0; frame<30; ++frame) {
+      state.viewport.center_x=0.2f+0.6f*frame/29;
+      state.viewport.center_y=0.8f-0.6f*frame/29;
+      assert(!EnsureCurrentMuPdfInteractiveTile(&state,0));
+      assert(control.attempts==attempts &&
+             "dragging with an overview must not rasterize or allocate on tile crossings");
+      assert(state.current_preview.PixelData()==overview);
+      assert(state.current_interactive_tile.PixelData()==detail);
+    }
+    control.reject=false;
+    state.viewport.interaction_active=false;
+    assert(EnsureCurrentMuPdfInteractiveTile(&state,0));
+    assert(control.attempts>attempts && BitmapCacheValid(state.current_interactive_tile,0));
+    assert(state.current_interactive_tile.PixelCount()>=240u*400u);
+    Text text; text.SetOrientation(0);
+    const auto viewport=ComputeCurrentMuPdfViewport(&state);
+    assert(BlitBitmapCacheViewport(&text,text.screenleft,400,240,400,
+        state.current_interactive_tile,viewport,true));
+    int transitions=0; bool previous=false;
+    for(int y=0;y<400;++y) {
+      const bool dark=((text.screenleft[y*text.BufferStride()+120]>>11)&31)<16;
+      if(y && dark!=previous) ++transitions;
+      previous=dark;
+    }
+    assert(transitions>=200 && "release must restore fine detail at the requested zoom");
+    fz_drop_display_list(ctx,state.cached_display_list);
+    fz_drop_document(ctx,doc); fz_drop_context(ctx);
+    assert(control.live==0);
+  }
+}
+
 int main(int argc, char **argv) {
   assert(argc == 2);
   TestDisplayListRenderDoesNotReloadPage(argv[1]);
+  TestHighZoomDragUsesExistingPageUntilRelease(argv[1]);
   TestPanReusesBoundedRaster(argv[1]);
   TestNormalLandscapePageRetainsVisibleDetail(argv[1]);
   std::string stripes = "0 g\n";
