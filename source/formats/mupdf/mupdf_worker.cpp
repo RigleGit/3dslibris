@@ -278,30 +278,11 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
   return true;
 }
 
-bool UseMuPdfPreviewForInteraction(const Book::MuPdfState *mupdf_state,
-                                  int page_index) {
-  if (!mupdf_state || !debug_runtime::ForceSynchronousMuPdfRender() ||
-      !mupdf_state->viewport.interaction_active ||
-      !BitmapCacheValid(mupdf_state->current_preview, page_index))
-    return false;
-  const Book::MuPdfState::BitmapCache &tile =
-      mupdf_state->current_interactive_tile;
-  // A complete raster can pan at constant cost. Cropped high-zoom tiles need
-  // synchronous rasterization on crossings: use the retained overview for the
-  // whole gesture and restore the requested detail when interaction ends.
-  return !BitmapCacheValid(tile, page_index) ||
-      tile.zoom_index != mupdf_state->viewport.zoom_index ||
-      tile.left != 0.0f || tile.top != 0.0f ||
-      tile.width != 1.0f || tile.height != 1.0f;
-}
-
 bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
                                          int page_index) {
   if (!mupdf_state)
     return false;
   PromoteMuPdfAdjacentSlotIfMatching(mupdf_state, page_index);
-  if (UseMuPdfPreviewForInteraction(mupdf_state, page_index))
-    return false;
   const bool visible_tile = debug_runtime::ForceSynchronousMuPdfRender();
   const pdf_view_utils::NormalizedRect viewport = visible_tile
       ? ComputeCurrentMuPdfViewport(mupdf_state)
