@@ -127,7 +127,7 @@ OUTCOME_BACKEND(pdf_parser, 3)
 OUTCOME_BACKEND(cbz_parser, 4)
 namespace epub_parser { int ResolveToc(Book *, const std::string &) { std::abort(); } }
 namespace cover_cache {
-bool TryLoad(Book *, const std::string &) { std::abort(); }
+bool TryLoad(Book *, const std::string &) { return false; }
 bool Save(Book *book, const std::string &path) {
   assert(book == expected_extraction_book && !book->IsBrowserFolder());
   assert(path == expected_extraction_path && book->coverPixels);

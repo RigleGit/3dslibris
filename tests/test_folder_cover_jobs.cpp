@@ -102,6 +102,19 @@ int main() {
   Expect(test_source_reads==4 && test_decodes==4 && RetainedBytes(app)==78200,"revisit reloads thumbnail cache without sidecar decode");
   Expect(app.books[4]->coverPixels[0]==original,"cache preserves decoded pixels");
   controller.TickBrowserWarmup(); Expect(controller.job_queue_.empty(),"loaded covers not requeued");
+  // Returning from the reader can reorder visible books before the next cache
+  // preload. A queued extraction must still reuse its persisted thumbnail,
+  // including when there is too little RAM to decode the source again.
+  Book *cached = app.books[4];
+  delete[] cached->coverPixels; cached->coverPixels=nullptr;
+  cached->coverWidth=cached->coverHeight=0; cached->coverAttempts=0;
+  controller.EnqueueJob(APP_JOB_EXTRACT_COVER,cached);
+  app.is_new=false; test_free_bytes=1;
+  controller.ProcessJobs(3);
+  Expect(cached->coverPixels && cached->coverPixels[0]==original &&
+         test_source_reads==4 && test_decodes==4,
+         "queued cover restores disk cache before decode admission");
+  app.is_new=true; test_free_bytes=64u*1024u*1024u;
   // Same file path, changed sidecar identity must invalidate the .cvr entry.
   app.prefs->browser_view_mode=BROWSER_VIEW_LIST; controller.LoadVisibleBrowserCoverCaches();
   Write(root+"/folder-4.png",png+"changed");

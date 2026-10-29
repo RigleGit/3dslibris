@@ -447,13 +447,17 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           book->coverAttempts = kCoverMaxAttempts; // path failure is permanent
         } else {
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
-        DBG_LOGF(&app_, "COVER: extract start book=%s format=%d attempt=%u",
+        DBG_LOGF(&app_, "COVER: load start book=%s format=%d attempt=%u",
                  book->GetFileName() ? book->GetFileName() : "(null)",
                  (int)book->format, (unsigned)book->coverAttempts);
 #endif
+        // Visible books can change on reader return (recent sorting) without
+        // another preload pass. Recheck disk before admitting an expensive
+        // extraction; a cached thumbnail needs only a small bounded allocation.
+        const bool cached_cover = cover_cache::TryLoad(book, path);
         const bool is_selected_book = (book == app_.GetSelectedBook());
         const u64 free_bytes = (u64)osGetMemRegionFree(MEMREGION_ALL);
-        if (!browser_warmup_utils::HasCoverExtractionHeadroom(
+        if (!cached_cover && !browser_warmup_utils::HasCoverExtractionHeadroom(
                 app_.IsNew3dsDevice(), is_selected_book, free_bytes)) {
           book->coverAttempts++;
           const u64 retry_delay_ms = browser_warmup_utils::CoverRetryDelayMs(
@@ -471,7 +475,10 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
           continue;
         }
 
-        if (cover_cache::TryLoadAdjacentOverride(book, path)) {
+        if (cached_cover) {
+          book->coverAttempts = kCoverMaxAttempts;
+          book->coverRetryAfterMs = 0;
+        } else if (cover_cache::TryLoadAdjacentOverride(book, path)) {
           cover_cache::Save(book, path);
           book->coverAttempts = kCoverMaxAttempts;
           book->coverRetryAfterMs = 0;
