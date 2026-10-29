@@ -23,6 +23,8 @@ Versions determined by devkitPro portlibs release channel; no pinned version in 
 | libpng | devkitPro portlib | zlib | PNG decoding |
 | zlib | devkitPro portlib | zlib | Compression (minizip dependency) |
 | libctru | devkitPro SDK | zlib | 3DS system library |
+| citro3d | devkitPro SDK | zlib | GPU context, textures and display transfers |
+| citro2d | devkitPro SDK | zlib | Fixed-layout top-screen drawing |
 | bzip2 | devkitPro portlib | BSD-4 | BZ2 decompression |
 
 ## Build tools
