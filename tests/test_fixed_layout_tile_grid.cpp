@@ -53,15 +53,29 @@ int main() {
                           count, streamed.data() + first));
     }
     assert(streamed == out);
-    // Halo samples a neighbour, padding and outer edges clamp to the page.
+    // Halo samples a neighbour; unused complete 8x8 padding blocks are zero.
     for (int y = 0; y < t.tex_height; ++y)
       for (int x = 0; x < t.tex_width; ++x) {
         int sx =
             std::max(0, std::min(1022, t.x + std::min(x, t.width + 1) - 1));
         int sy = std::max(0, std::min(2, t.y + std::min(y, t.height + 1) - 1));
-        assert(out[MortonOffset(x, y, t.tex_width)] == image[sy * 1023 + sx]);
+        const bool unused = (x & ~7) >= t.width + 2 ||
+                            (y & ~7) >= t.height + 2;
+        assert(out[MortonOffset(x, y, t.tex_width)] ==
+               (unused ? 0 : image[sy * 1023 + sx]));
       }
   }
+  // Unused complete padding blocks must not read image rows. They are never
+  // sampled by visible quads, even with the one-pixel linear-filter halo.
+  assert(BuildGrid(53, 21, &tiles, &bytes));
+  std::vector<uint16_t> solid(53 * 21, 0x1234);
+  std::vector<uint16_t> padded(64 * 32, 0xffff);
+  assert(SwizzleChunk(tiles[0], solid.data(), solid.size(), 53, 53, 21, 0,
+                      padded.size(), padded.data()));
+  for (unsigned y = 0; y < 32; ++y)
+    for (unsigned x = 0; x < 64; ++x)
+      assert(padded[MortonOffset(x, y, 64)] ==
+             (x >= 56 || y >= 24 ? 0 : 0x1234));
   assert(BuildGrid(1800, 1800, &tiles, &bytes));
   Rect source = {0, 0, 1, 1}, viewport = {0.4f, 0.4f, 0.3f, 0.3f};
   Rect dst = {7, 11, 237, 391};

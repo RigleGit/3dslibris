@@ -20,6 +20,7 @@ bool BuildGrid(int width, int height, std::vector<Tile> *tiles, size_t *bytes);
 size_t MortonOffset(unsigned x, unsigned y, unsigned tex_width);
 // Output is a contiguous range in Morton order, so VRAM uploads need only a
 // small reusable linear staging buffer. No complete swizzled copy is needed.
+// Complete padding blocks outside the halo are zero and never sampled.
 bool SwizzleChunk(const Tile &tile, const uint16_t *pixels, size_t pixel_count,
                   int stride, int width, int height, size_t first, size_t count,
                   uint16_t *out);

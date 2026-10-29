@@ -1,6 +1,7 @@
 #include "formats/common/fixed_layout_tile_grid_utils.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace fixed_layout_tiles {
 namespace {
@@ -115,18 +116,49 @@ bool SwizzleChunk(const Tile &t, const uint16_t *pixels, size_t pixel_count,
   while ((1u << row_shift) < blocks_per_row)
     ++row_shift;
   const unsigned column_mask = blocks_per_row - 1;
-  for (size_t i = 0; i < count; ++i) {
-    const size_t index = first + i, block = index / 64;
-    const unsigned m = index & 63;
-    const int x = (int)(block & column_mask) * 8 +
-                  (int)((m & 1) | ((m >> 1) & 2) | ((m >> 2) & 4));
-    const int y = (int)(block >> row_shift) * 8 +
-                  (int)(((m >> 1) & 1) | ((m >> 2) & 2) | ((m >> 3) & 4));
-    const int sx =
-        std::max(0, std::min(width - 1, t.x + std::min(x, t.width + 1) - 1));
-    const int sy =
-        std::max(0, std::min(height - 1, t.y + std::min(y, t.height + 1) - 1));
-    out[i] = pixels[(size_t)sy * stride + sx];
+  const int last_x = std::min(width - 1, t.x + t.width);
+  const int last_y = std::min(height - 1, t.y + t.height);
+  const unsigned row_offsets[8] = {0, 2, 8, 10, 32, 34, 40, 42};
+  const size_t end = first + count;
+  for (size_t index = first; index < end;) {
+    const size_t block = index >> 6;
+    const int x = (int)(block & column_mask) * 8;
+    const int y = (int)(block >> row_shift) * 8;
+    const size_t offset = index & 63;
+    const size_t n = std::min((size_t)64 - offset, end - index);
+    uint16_t partial[64];
+    uint16_t *dst = offset == 0 && n == 64 ? out + index - first : partial;
+    if (x >= t.width + 2 || y >= t.height + 2) {
+      // Visible UVs stop at the halo. Do not sample the source for the rest
+      // of the POT allocation; whole unused blocks are deterministic zeroes.
+      std::memset(dst, 0, 64 * sizeof(uint16_t));
+    } else {
+      const int sx = t.x + x - 1;
+      const bool interior = sx >= 0 && sx + 7 <= last_x;
+      int columns[8];
+      if (!interior)
+        for (int c = 0; c < 8; ++c)
+          columns[c] = std::max(0, std::min(last_x, sx + c));
+      for (int r = 0; r < 8; ++r) {
+        const int sy = std::max(0, std::min(last_y, t.y + y + r - 1));
+        const uint16_t *row = pixels + (size_t)sy * stride;
+        uint16_t *d = dst + row_offsets[r];
+        // Read each eight-pixel source row consecutively. Its Morton writes
+        // stay in one 128-byte block, without per-texel coordinate decoding.
+        const uint16_t *p = interior ? row + sx : nullptr;
+        d[0] = p ? p[0] : row[columns[0]];
+        d[1] = p ? p[1] : row[columns[1]];
+        d[4] = p ? p[2] : row[columns[2]];
+        d[5] = p ? p[3] : row[columns[3]];
+        d[16] = p ? p[4] : row[columns[4]];
+        d[17] = p ? p[5] : row[columns[5]];
+        d[20] = p ? p[6] : row[columns[6]];
+        d[21] = p ? p[7] : row[columns[7]];
+      }
+    }
+    if (dst == partial)
+      std::memcpy(out + index - first, partial + offset, n * sizeof(uint16_t));
+    index += n;
   }
   return true;
 }
