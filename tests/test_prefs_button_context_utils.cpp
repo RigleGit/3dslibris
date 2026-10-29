@@ -160,9 +160,9 @@ int main() {
     for (int p = 0; p < 3; ++p) {
       page.page = p;
       CheckDrawablePage(page);
-        test::ExpectTrue("search only appears for reflow book actions",
+        test::ExpectTrue("library search appears on the global general page",
             HasButton(page, PREFS_BUTTON_SEARCH) ==
-            (page.from_book && !page.fixed_layout && page.page == 0));
+            (page.page == 0));
       test::ExpectFalse("general preferences exclude bookmarks",
                         HasButton(page, PREFS_BUTTON_BOOKMARKS));
       test::ExpectFalse("general preferences exclude book information",

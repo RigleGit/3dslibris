@@ -888,7 +888,7 @@ void SettingsController::PrefsRefreshButton(int index) {
   char msg[64];
   switch (index) {
   case PREFS_BUTTON_SEARCH:
-    button.SetLabel2("word or phrase >");
+    button.SetLabel2(is_book_ctx ? "word or phrase >" : "name, title or author >");
     break;
   case PREFS_BUTTON_FONT_CONFIG:
     button.SetLabel2(
@@ -1200,7 +1200,10 @@ void SettingsController::PrefsHandlePress() {
   const int selected_button = EffectiveButtonForSlot(app_.GetPrefsSelectedIndex());
 
   if (selected_button == PREFS_BUTTON_SEARCH) {
-    app_.OpenSearch();
+    if (is_book_ctx)
+      app_.OpenSearch();
+    else
+      app_.OpenLibrarySearch();
     return;
   }
 

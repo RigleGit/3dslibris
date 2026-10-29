@@ -203,6 +203,8 @@ public:
   void OpenSearch();
   void RunSearchFrame(const FrameInput &input);
   void InvalidateSearch(bool forget_query);
+  void OpenLibrarySearch();
+  void RunLibrarySearchFrame(const FrameInput &input);
   bool IsOpeningPending() const;
   void SetOpeningPending(bool pending);
   Book *GetOpeningBook() const;

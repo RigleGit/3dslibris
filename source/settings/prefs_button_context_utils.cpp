@@ -27,6 +27,7 @@ static const int kGeneralPrefsButtons[] = {
     PREFS_BUTTON_COLORMODE,
     PREFS_BUTTON_LIBRARY_VIEW,
     PREFS_BUTTON_LIBRARY_SORT,
+    PREFS_BUTTON_SEARCH,
 };
 
 static const int kGeneralExtraButtons[] = {

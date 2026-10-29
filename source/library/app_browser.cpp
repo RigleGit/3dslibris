@@ -298,7 +298,11 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
     app_.SetBrowserDirty(true);
   }
 
-  else if (keys & (app_.key.select | app_.key.y)) {
+  else if (keys & app_.key.y) {
+    OpenLibrarySearch();
+  }
+
+  else if (keys & app_.key.select) {
     app_.ShowSettingsView(false);
   }
 

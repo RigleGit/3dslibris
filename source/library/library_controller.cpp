@@ -1,4 +1,5 @@
 #include "app/library_controller.h"
+#include "library/library_search_session.h"
 
 #include <algorithm>
 #include <dirent.h>

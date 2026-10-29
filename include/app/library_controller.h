@@ -5,6 +5,7 @@
 #include <deque>
 #include <string>
 #include <vector>
+#include <memory>
 
 #include "library/library_sort_mode.h"
 
@@ -15,6 +16,8 @@ struct FrameInput;
 class Book;
 class Text;
 class Button;
+struct LibrarySearchSession;
+namespace library_search { struct Entry; struct MetadataValue; enum class MetadataStatus; }
 
 struct LibraryGradientContext {
   Text *ts;
@@ -49,6 +52,9 @@ public:
   size_t PauseBrowserJobs();
   bool IsInsideFolder() const;
   Book *RestoreSavedBookSelection(const char *folder, const char *filename);
+  void OpenLibrarySearch();
+  void RunLibrarySearchFrame(const FrameInput &input);
+  void ResumeLibrarySearch();
 
 private:
   App &app_;
@@ -63,6 +69,15 @@ private:
   LibrarySortMode root_sort_mode_;
   bool root_cached_;
   bool browser_assets_pending_;
+  std::unique_ptr<LibrarySearchSession> search_;
+  void DrawLibrarySearch();
+  void EditLibrarySearch();
+  void StartLibrarySearch();
+  void CloseLibrarySearch();
+  void RestoreSearchOrigin();
+  void ActivateLibrarySearchResult(size_t index);
+  static bool SearchRoot(void *, size_t, library_search::Entry *);
+  static library_search::MetadataStatus SearchMetadata(void *, const std::string &, library_search::MetadataValue *);
 
   void RebuildRoot();
   void EnterFolder(Book *folder);
