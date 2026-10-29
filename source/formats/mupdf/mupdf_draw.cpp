@@ -184,7 +184,8 @@ static bool BlitBitmapCacheViewport(Text *ts, u16 *screen, int logical_height,
                                     const Book::MuPdfState::BitmapCache &cache,
                                     const pdf_view_utils::NormalizedRect &viewport,
                                     bool high_quality_filter, int dst_x = 0, int dst_y = 0) {
-  if (!ts || !screen || !BitmapCacheValid(cache, cache.page))
+  if (!ts || !screen || !BitmapCacheValid(cache, cache.page) ||
+      !cache.PixelData() || cache.PixelCount() == 0)
     return false;
 
   const float cache_right = cache.left + cache.width;
@@ -228,7 +229,8 @@ static bool BlitBitmapCacheViewportRegion(
     int dst_y0, int dst_y1, const Book::MuPdfState::BitmapCache &cache,
     const pdf_view_utils::NormalizedRect &viewport,
     bool high_quality_filter, int dst_x = 0, int dst_y = 0) {
-  if (!ts || !screen || !BitmapCacheValid(cache, cache.page))
+  if (!ts || !screen || !BitmapCacheValid(cache, cache.page) ||
+      !cache.PixelData() || cache.PixelCount() == 0)
     return false;
   dst_y0 = std::max(0, dst_y0);
   dst_y1 = std::min(draw_height, dst_y1);
@@ -426,7 +428,8 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   if (mupdf_state->current_preview.page != page_index)
     ResetBitmapCache(&mupdf_state->current_preview);
   if (mupdf_state->current_interactive_tile.page != page_index ||
-      mupdf_state->current_interactive_tile.zoom_index != mupdf_state->viewport.zoom_index)
+      (!debug_runtime::ForceSynchronousMuPdfRender() &&
+       mupdf_state->current_interactive_tile.zoom_index != mupdf_state->viewport.zoom_index))
     ResetBitmapCache(&mupdf_state->current_interactive_tile);
   if (mupdf_state->current_final_zoom.page != page_index)
     ResetBitmapCache(&mupdf_state->current_final_zoom);
@@ -516,95 +519,131 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
 
   fixed_perf::ViewStage("pdf.view_setup", fixed_perf::Now() - perf_phase);
   perf_phase = fixed_perf::Now();
-  ts->SetScreen(ts->screenleft);
-  ts->ClearScreen();
-  DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
-               "MUPDF draw: left-screen-blit-begin page=%d final=%d interactive=%d incremental=%d",
-               page_index, has_final_cache ? 1 : 0,
-               has_interactive_tile ? 1 : 0,
-               mupdf_state->incremental.active ? 1 : 0);
-
-  if (has_final_cache) {
-    BlitBitmapCacheViewport(ts, ts->screenleft, mupdf_state->target_top_height,
-                            top_layout.width, top_layout.height,
-                            mupdf_state->current_final_zoom, viewport,
-                            high_quality_viewport, top_layout.x, top_layout.y);
-  } else if (mupdf_state->incremental.active &&
-             mupdf_state->incremental.strips_completed > 0 &&
-             mupdf_state->incremental.target_page == page_index) {
-    Book::MuPdfState::IncrementalRenderState &inc = mupdf_state->incremental;
-    const int rendered_h = (inc.strips_completed * inc.partial_height) /
-                           inc.strips_total;
-    const float rendered_top_norm =
-        (inc.partial_height > 0)
-            ? (float)rendered_h / (float)inc.partial_height
-            : 0.0f;
-
-    const float vp_h = std::max(0.0001f, viewport.height);
-    const float rendered_in_vp =
-        std::min(rendered_top_norm, viewport.top + vp_h) - viewport.top;
-    const int split_y = (rendered_in_vp > 0.0f)
-        ? std::min(top_layout.height,
-                   (int)(rendered_in_vp / vp_h * top_layout.height + 0.5f))
-        : 0;
-
-    if (split_y > 0) {
-      BlitRawBitmapViewportRegion(ts, ts->screenleft, mupdf_state->target_top_height,
-                                  top_layout.width, top_layout.height,
-                                  0, split_y, inc.partial_pixels,
-                                  inc.partial_width, inc.partial_height,
-                                  0.0f, 0.0f, 1.0f, 1.0f, viewport, top_layout.x, top_layout.y);
+  bool gpu_drawn = false;
+  if (debug_runtime::ForceSynchronousMuPdfRender() && !has_final_cache &&
+      !mupdf_state->incremental.active && has_interactive_tile &&
+      !mupdf_state->gpu_draw_failed) {
+    Book::MuPdfState::BitmapCache &cache =
+        mupdf_state->current_interactive_tile;
+    if (cache.gpu.Upload(ts, cache.PixelData(), cache.PixelCount(),
+                         cache.bitmap_width, cache.bitmap_height,
+                         cache.bitmap_width, cache.generation)) {
+      gpu_drawn = fixed_layout_gpu::Queue(
+          ts, cache.gpu, {cache.left, cache.top, cache.width, cache.height},
+          {viewport.left, viewport.top, viewport.width, viewport.height},
+          {(float)top_layout.x, (float)top_layout.y, (float)top_layout.width,
+           (float)top_layout.height});
+      if (gpu_drawn) {
+        std::vector<u16>().swap(cache.pixels);
+        cache.native_pixels.reset();
+      } else {
+        cache.gpu.Reset();
+        if (!cache.PixelData() || !cache.PixelCount()) {
+          ResetBitmapCache(&cache);
+          EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index);
+        }
+        // Reset/reconstruction clears render failures. Latch this queue failure
+        // afterwards so a retained fallback cannot retry on every pan.
+        mupdf_state->gpu_draw_failed = true;
+      }
     }
-    if (split_y < top_layout.height) {
-      // Cascade through available sources for the unrendered portion.
-      // Each blit can fail if the cached bitmap doesn't cover the region
-      // (e.g. stale interactive tile after viewport change on o3DS), so
-      // check return values and fall through to the next source.
-      bool bottom_ok = false;
+  }
+  if (!gpu_drawn) {
+    ts->SetScreen(ts->screenleft);
+    ts->ClearScreen();
+    DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
+                 "MUPDF draw: left-screen-blit-begin page=%d final=%d "
+                 "interactive=%d incremental=%d",
+                 page_index, has_final_cache ? 1 : 0,
+                 has_interactive_tile ? 1 : 0,
+                 mupdf_state->incremental.active ? 1 : 0);
+
+    if (has_final_cache) {
+      BlitBitmapCacheViewport(
+          ts, ts->screenleft, mupdf_state->target_top_height, top_layout.width,
+          top_layout.height, mupdf_state->current_final_zoom, viewport,
+          high_quality_viewport, top_layout.x, top_layout.y);
+    } else if (mupdf_state->incremental.active &&
+               mupdf_state->incremental.strips_completed > 0 &&
+               mupdf_state->incremental.target_page == page_index) {
+      Book::MuPdfState::IncrementalRenderState &inc = mupdf_state->incremental;
+      const int rendered_h =
+          (inc.strips_completed * inc.partial_height) / inc.strips_total;
+      const float rendered_top_norm =
+          (inc.partial_height > 0)
+              ? (float)rendered_h / (float)inc.partial_height
+              : 0.0f;
+
+      const float vp_h = std::max(0.0001f, viewport.height);
+      const float rendered_in_vp =
+          std::min(rendered_top_norm, viewport.top + vp_h) - viewport.top;
+      const int split_y =
+          (rendered_in_vp > 0.0f)
+              ? std::min(
+                    top_layout.height,
+                    (int)(rendered_in_vp / vp_h * top_layout.height + 0.5f))
+              : 0;
+
+      if (split_y > 0) {
+        BlitRawBitmapViewportRegion(
+            ts, ts->screenleft, mupdf_state->target_top_height,
+            top_layout.width, top_layout.height, 0, split_y, inc.partial_pixels,
+            inc.partial_width, inc.partial_height, 0.0f, 0.0f, 1.0f, 1.0f,
+            viewport, top_layout.x, top_layout.y);
+      }
+      if (split_y < top_layout.height) {
+        // Cascade through available sources for the unrendered portion.
+        // Each blit can fail if the cached bitmap doesn't cover the region
+        // (e.g. stale interactive tile after viewport change on o3DS), so
+        // check return values and fall through to the next source.
+        bool bottom_ok = false;
+        if (has_interactive_tile) {
+          bottom_ok = BlitBitmapCacheViewportRegion(
+              ts, ts->screenleft, mupdf_state->target_top_height,
+              top_layout.width, top_layout.height, split_y, top_layout.height,
+              mupdf_state->current_interactive_tile, viewport,
+              high_quality_viewport, top_layout.x, top_layout.y);
+        }
+        if (!bottom_ok &&
+            BitmapCacheValid(mupdf_state->current_preview, page_index)) {
+          bottom_ok = BlitBitmapCacheViewportRegion(
+              ts, ts->screenleft, mupdf_state->target_top_height,
+              top_layout.width, top_layout.height, split_y, top_layout.height,
+              mupdf_state->current_preview, viewport, high_quality_viewport,
+              top_layout.x, top_layout.y);
+        }
+        if (!bottom_ok) {
+          // Final fallback: blit the partial buffer itself — unrendered strips
+          // are initialised to kPdfPaper (white), so the lower portion shows
+          // paper colour instead of the background left by ClearScreen.
+          BlitRawBitmapViewportRegion(
+              ts, ts->screenleft, mupdf_state->target_top_height,
+              top_layout.width, top_layout.height, split_y, top_layout.height,
+              inc.partial_pixels, inc.partial_width, inc.partial_height, 0.0f,
+              0.0f, 1.0f, 1.0f, viewport, top_layout.x, top_layout.y);
+        }
+      }
+    } else {
+      // No incremental render in progress — use best available full-page
+      // source.
+      bool ok = false;
       if (has_interactive_tile) {
-        bottom_ok = BlitBitmapCacheViewportRegion(
-            ts, ts->screenleft, mupdf_state->target_top_height, top_layout.width,
-            top_layout.height, split_y, top_layout.height,
+        ok = BlitBitmapCacheViewport(
+            ts, ts->screenleft, mupdf_state->target_top_height,
+            top_layout.width, top_layout.height,
             mupdf_state->current_interactive_tile, viewport,
             high_quality_viewport, top_layout.x, top_layout.y);
       }
-      if (!bottom_ok &&
-          BitmapCacheValid(mupdf_state->current_preview, page_index)) {
-        bottom_ok = BlitBitmapCacheViewportRegion(
-            ts, ts->screenleft, mupdf_state->target_top_height, top_layout.width,
-            top_layout.height, split_y, top_layout.height,
-            mupdf_state->current_preview, viewport, high_quality_viewport, top_layout.x, top_layout.y);
+      if (!ok && BitmapCacheValid(mupdf_state->current_preview, page_index)) {
+        ok = BlitBitmapCacheViewport(
+            ts, ts->screenleft, mupdf_state->target_top_height,
+            top_layout.width, top_layout.height, mupdf_state->current_preview,
+            viewport, high_quality_viewport, top_layout.x, top_layout.y);
       }
-      if (!bottom_ok) {
-        // Final fallback: blit the partial buffer itself — unrendered strips
-        // are initialised to kPdfPaper (white), so the lower portion shows
-        // paper colour instead of the background left by ClearScreen.
-        BlitRawBitmapViewportRegion(ts, ts->screenleft, mupdf_state->target_top_height,
-                                    top_layout.width, top_layout.height,
-                                    split_y, top_layout.height,
-                                    inc.partial_pixels,
-                                    inc.partial_width, inc.partial_height,
-                                    0.0f, 0.0f, 1.0f, 1.0f, viewport, top_layout.x, top_layout.y);
+      if (!ok) {
+        ts->SetPen(18, 28);
+        ts->PrintString("MuPDF render unavailable");
       }
-    }
-  } else {
-    // No incremental render in progress — use best available full-page source.
-    bool ok = false;
-    if (has_interactive_tile) {
-      ok = BlitBitmapCacheViewport(ts, ts->screenleft, mupdf_state->target_top_height,
-                                   top_layout.width, top_layout.height,
-                                   mupdf_state->current_interactive_tile,
-                                   viewport, high_quality_viewport, top_layout.x, top_layout.y);
-    }
-    if (!ok && BitmapCacheValid(mupdf_state->current_preview, page_index)) {
-      ok = BlitBitmapCacheViewport(ts, ts->screenleft, mupdf_state->target_top_height,
-                                   top_layout.width, top_layout.height,
-                                   mupdf_state->current_preview, viewport,
-                                   high_quality_viewport, top_layout.x, top_layout.y);
-    }
-    if (!ok) {
-      ts->SetPen(18, 28);
-      ts->PrintString("MuPDF render unavailable");
     }
   }
   fixed_perf::ViewStage("pdf.blit_main", fixed_perf::Now() - perf_phase);

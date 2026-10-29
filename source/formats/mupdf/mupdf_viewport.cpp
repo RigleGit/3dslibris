@@ -11,6 +11,39 @@
 #include "shared/debug_runtime_mode.h"
 #include "ui/text.h"
 
+bool CanReuseMuPdfInteractiveRaster(
+    const Book::MuPdfState *state, int page_index,
+    const pdf_view_utils::NormalizedRect &viewport) {
+  if (!state)
+    return false;
+  const Book::MuPdfState::BitmapCache &cache = state->current_interactive_tile;
+  const float epsilon = 0.000001f;
+  if (!BitmapCacheValid(cache, page_index) || cache.width <= 0 ||
+      cache.height <= 0 || viewport.width <= 0 || viewport.height <= 0 ||
+      cache.left > viewport.left + epsilon ||
+      cache.top > viewport.top + epsilon ||
+      cache.left + cache.width < viewport.left + viewport.width - epsilon ||
+      cache.top + cache.height < viewport.top + viewport.height - epsilon)
+    return false;
+  // Preserve a successful lower-density fallback at its original zoom. Retry
+  // only after the request changes, rather than rerasterizing every frame.
+  if (cache.zoom_index == state->viewport.zoom_index)
+    return true;
+  const auto layout = pdf_view_utils::ComputePreviewLayout(
+      state->page_width * viewport.width, state->page_height * viewport.height,
+      state->target_top_width, state->target_top_height);
+  if (layout.width <= 0 || layout.height <= 0)
+    return false;
+  const int dx =
+      state->wide_top_screen && state->target_top_width == 400 ? 2 : 1;
+  const int dy =
+      state->wide_top_screen && state->target_top_height == 400 ? 2 : 1;
+  return cache.bitmap_width * viewport.width / cache.width + 0.001f >=
+             layout.width * dx &&
+         cache.bitmap_height * viewport.height / cache.height + 0.001f >=
+             layout.height * dy;
+}
+
 namespace {
 
 static void ResetMuPdfDeferredCachesForSynchronousRender(
@@ -18,7 +51,10 @@ static void ResetMuPdfDeferredCachesForSynchronousRender(
   if (!mupdf_state)
     return;
   CancelMuPdfIncrementalRenderState(mupdf_state);
-  ResetBitmapCache(&mupdf_state->current_interactive_tile);
+  const auto viewport = ComputeCurrentMuPdfViewport(mupdf_state);
+  if (!CanReuseMuPdfInteractiveRaster(
+          mupdf_state, mupdf_state->current_interactive_tile.page, viewport))
+    ResetBitmapCache(&mupdf_state->current_interactive_tile);
   ResetBitmapCache(&mupdf_state->current_final_zoom);
   // Zoom changes raster dimensions, not the page's drawing commands.
   // Keep the list; EnsureMuPdfDisplayListForPage invalidates it on page change.

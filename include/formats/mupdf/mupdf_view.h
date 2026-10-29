@@ -4,6 +4,10 @@
 #include "formats/mupdf/mupdf_worker.h"
 #include "formats/common/pdf_view_utils.h"
 
+bool CanReuseMuPdfInteractiveRaster(
+    const Book::MuPdfState *state, int page_index,
+    const pdf_view_utils::NormalizedRect &viewport);
+
 MuPdfNavigationBounds GetMuPdfNavigationBounds(float content_left,
                                                float content_top,
                                                float content_width,

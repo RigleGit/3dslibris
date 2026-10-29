@@ -36,6 +36,7 @@ inline void ReleaseAdjacentSlotMemory(Book::MuPdfState::AdjacentSlot *slot,
 void ResetMuPdfRenderFailureState(Book::MuPdfState *mupdf_state) {
   if (!mupdf_state)
     return;
+  mupdf_state->gpu_draw_failed = false;
   mupdf_state->interactive_render_failed_page = -1;
   mupdf_state->interactive_render_failed_zoom = -1;
   mupdf_state->final_render_failed_page = -1;
@@ -220,7 +221,7 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
       EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index)) {
     const Book::MuPdfState::BitmapCache &tile =
         mupdf_state->current_interactive_tile;
-    if (BitmapCacheValid(tile, page_index) && tile.left == 0.0f &&
+    if (tile.PixelCount() > 0 && tile.PixelData() && tile.left == 0.0f &&
         tile.top == 0.0f && tile.width == 1.0f && tile.height == 1.0f) {
       // Use page geometry: a native-wide bitmap has twice the samples along
       // one axis, but the preview must keep the document's aspect ratio.
@@ -288,6 +289,8 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
       ? ComputeCurrentMuPdfViewport(mupdf_state)
       : pdf_view_utils::NormalizedRect{0.0f, 0.0f, 1.0f, 1.0f};
   Book::MuPdfState::BitmapCache &cache = mupdf_state->current_interactive_tile;
+  if (visible_tile && CanReuseMuPdfInteractiveRaster(mupdf_state,page_index,viewport))
+    return true;
   if (visible_tile &&
       (cache.page != page_index ||
        cache.zoom_index != mupdf_state->viewport.zoom_index ||

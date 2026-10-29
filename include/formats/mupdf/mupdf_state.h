@@ -2,6 +2,7 @@
 
 #include "book/book.h"
 #include "formats/common/fixed_layout_bitmap_cache.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
 #include "formats/common/fixed_layout_preview_panel.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "shared/app_flow_utils.h"
@@ -12,6 +13,8 @@
 
 struct Book::MuPdfState {
   struct BitmapCache : fixed_layout_bitmap_cache::Base {
+    uint64_t generation = 0;
+    fixed_layout_gpu::TextureCache gpu;
     std::unique_ptr<u16[]> native_pixels;
     const u16 *PixelData() const {
       return native_pixels ? native_pixels.get() : pixels.data();
@@ -125,6 +128,7 @@ struct Book::MuPdfState {
   AdjacentSlot prev_slot;
   AdjacentSlot next_slot;
   IncrementalRenderState incremental;
+  bool gpu_draw_failed = false;
   MuPdfWorker *worker;
   bool worker_init_attempted;
   IStatusReporter *reporter;
