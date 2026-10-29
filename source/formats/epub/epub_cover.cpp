@@ -241,6 +241,7 @@ static bool DecodePngCoverThumbnail(const std::vector<u8> &decodebuf,
   return true;
 }
 
+#ifndef __3DS__
 static bool DecodeImageCoverThumbnailWithMuPdf(const std::vector<u8> &decodebuf,
                                                std::vector<u16> *thumb_pixels,
                                                int *thumb_w_out,
@@ -331,6 +332,7 @@ static bool DecodeImageCoverThumbnailWithMuPdf(const std::vector<u8> &decodebuf,
   fz_drop_context(ctx);
   return ok;
 }
+#endif
 
 } // namespace
 
@@ -426,6 +428,8 @@ int Extract(Book *book, const std::string &epubpath) {
     return 0;
   }
 
+  const bool jpeg_payload = decodebuf.size() >= 3 && decodebuf[0] == 0xFF &&
+                            decodebuf[1] == 0xD8 && decodebuf[2] == 0xFF;
   auto IsJpegCover = [&]() -> bool {
     if (decode_path.size() >= 4) {
       std::string lower = decode_path;
@@ -435,8 +439,7 @@ int Extract(Book *book, const std::string &epubpath) {
           lower.rfind(".jpeg") == lower.size() - 5)
         return true;
     }
-    return decodebuf.size() >= 3 && decodebuf[0] == 0xFF &&
-           decodebuf[1] == 0xD8 && decodebuf[2] == 0xFF;
+    return jpeg_payload;
   };
 
   if (decodebuf.size() > epub_limits::kCoverMaxNonJpegBytes && !IsJpegCover())
@@ -449,6 +452,11 @@ int Extract(Book *book, const std::string &epubpath) {
 
   const bool jpeg_cover = IsJpegCover();
   const bool png_cover = LooksLikePngPayload(decode_path, decodebuf);
+  int max_dimension = epub_limits::kCoverMaxDimension;
+#ifdef __3DS__
+  if (jpeg_payload)
+    max_dimension = epub_limits::kCoverMaxJpegDimension;
+#endif
   int infoW = 0, infoH = 0, infoChannels = 0;
   bool hasInfo = stbi_info_from_memory(decodebuf.data(), (int)decodebuf.size(),
                                        &infoW, &infoH, &infoChannels) != 0;
@@ -456,8 +464,8 @@ int Extract(Book *book, const std::string &epubpath) {
     return 9;
 
   if (hasInfo) {
-    if (infoW <= 0 || infoH <= 0 || infoW > epub_limits::kCoverMaxDimension ||
-        infoH > epub_limits::kCoverMaxDimension)
+    if (infoW <= 0 || infoH <= 0 || infoW > max_dimension ||
+        infoH > max_dimension)
       return 7;
     size_t decoded_bytes = 0;
     if (!epub_cover_decode_utils::EstimateDecodedRgbBytes(
@@ -476,6 +484,13 @@ int Extract(Book *book, const std::string &epubpath) {
     }
 
     if (jpeg_cover) {
+#ifdef __3DS__
+      // Never fall through to an unbounded decoder for a large JPEG. The
+      // shared path subsamples during decoding and caps allocations at 16 MiB.
+      return cover_decode_utils::DecodeImageToCoverThumb(
+                 book, decodebuf.data(), decodebuf.size(), max_dimension)
+                 ? 0 : 4;
+#else
       std::vector<u16> jpg_pixels;
       int jpg_w = 0;
       int jpg_h = 0;
@@ -484,6 +499,7 @@ int Extract(Book *book, const std::string &epubpath) {
           AdoptCoverPixels(book, jpg_pixels, jpg_w, jpg_h)) {
         return 0;
       }
+#endif
     }
 
     if (decoded_bytes > epub_limits::kCoverMaxDecodedRgbBytes)

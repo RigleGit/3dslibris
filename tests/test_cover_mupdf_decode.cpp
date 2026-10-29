@@ -1,5 +1,6 @@
 #include "book/book.h"
 #include "shared/cover_decode_utils.h"
+#include "formats/epub/epub_cover.h"
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
@@ -25,7 +26,7 @@ fz_locks_context g_mupdf_locks_ctx = {nullptr, NoLock, NoLock};
 void InitMuPdfLocks() {}
 
 int main(int argc, char **argv) {
-  assert(argc == 2);
+  assert(argc == 3);
   std::ifstream input(argv[1], std::ios::binary);
   const std::vector<unsigned char> image((std::istreambuf_iterator<char>(input)), {});
   assert(!image.empty());
@@ -45,5 +46,22 @@ int main(int argc, char **argv) {
   const unsigned char corrupt[] = {0, 1, 2};
   assert(!cover_decode_utils::DecodeImageToCoverThumb(&book, corrupt, 3));
   assert(book.coverPixels == previous);
+  // Exercise EPUB's actual archive/preflight/decoder path. A 4800x6400 JPEG
+  // must produce a bounded thumbnail, while the PNG dimension policy remains.
+  Book epub;
+  epub.coverImagePath = "cover.jpg";
+  assert(epub_cover::Extract(&epub, argv[2]) == 0);
+  assert(epub.coverWidth == 85 && epub.coverHeight == 113);
+  for (int i = 0; i < epub.coverWidth * epub.coverHeight; ++i)
+    assert(((epub.coverPixels[i] >> 5) & 63) > 50 &&
+           (epub.coverPixels[i] >> 11) < 4);
+  assert(largest_stbi_allocation < 128u * 1024u);
+  epub.coverImagePath = "oversized.png";
+  previous = epub.coverPixels;
+  assert(epub_cover::Extract(&epub, argv[2]) == 7);
+  assert(epub.coverPixels == previous);
+  epub.coverImagePath = "oversized.jpg";
+  assert(epub_cover::Extract(&epub, argv[2]) == 7);
+  assert(epub.coverPixels == previous);
   puts("PASS: large JPEG cover subsampling, pixels and failure ownership");
 }
