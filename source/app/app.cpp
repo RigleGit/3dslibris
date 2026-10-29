@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/iosupport.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -438,6 +439,14 @@ void App::ApplyRenderOrientation(u8 new_orientation)
 // Initialize the top and bottom screens with double buffering and the correct pixel format, then clear the software buffers for both screens.
 void App::InitScreens()
 {
+  // The boot console keeps an RGB565 pointer even after gfx changes format.
+  // Lazy font loads and decoder warnings can still print during book opening;
+  // hand both streams to the debugger before taking over its framebuffer.
+  fflush(stdout);
+  fflush(stderr);
+  consoleDebugInit(debugDevice_SVC);
+  devoptab_list[STD_OUT] = devoptab_list[STD_ERR];
+
   // consoleInit() set the bottom screen to single-buffered and may have
   // changed the pixel format.  Take full control back before the main loop.
   gfxSetDoubleBuffering(GFX_TOP, true);
