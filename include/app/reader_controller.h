@@ -34,6 +34,7 @@ public:
 private:
   void DrawImageViewer();
   bool LoadImageViewer(int zoom);
+  bool RestoreImageViewerBitmap(bool refresh = false);
   void CloseImageViewer();
   bool ImageViewerValid() const;
   std::unique_ptr<ReaderImageViewerSession> image_viewer_;

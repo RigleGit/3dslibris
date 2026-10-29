@@ -71,7 +71,7 @@ void LayoutControls(ReaderImageViewerSession &s, int width, int height) {
                 height - kControlFooter + (i / 3) * (kControlHeight + kControlGap));
     button.Resize(button_width, kControlHeight);
     button.SetEnabled(i >= ReaderImageViewerSession::Back ||
-                      (s.image.pixels && !s.loading && !s.suspended));
+                      (s.HasImage() && !s.loading && !s.suspended));
   }
   s.controls[ReaderImageViewerSession::ZoomIn].SetEnabled(
       s.controls[ReaderImageViewerSession::ZoomIn].IsEnabled() &&
@@ -205,8 +205,6 @@ bool ReaderController::LoadImageViewer(int zoom) {
   if (!ImageViewerValid() || app_.ShouldAbortWork())
     return false;
   ReaderImageViewerSession &s = *image_viewer_;
-  s.gpu.Reset();
-  s.gpu_reset_pending = false;
   s.loading = true;
   s.message = "Loading image...";
   DrawImageViewer();
@@ -245,6 +243,9 @@ bool ReaderController::LoadImageViewer(int zoom) {
   s.loading = false;
   s.suspended = false;
   if (decoded) {
+    s.gpu.Reset();
+    s.gpu_reset_pending = false;
+    s.gpu_draw_failed = false;
     ++s.image_generation;
     s.viewport.zoom_index = zoom;
     s.message.clear();
@@ -267,8 +268,32 @@ bool ReaderController::LoadImageViewer(int zoom) {
            decoded ? 1 : 0, (unsigned long long)read_ms,
            (unsigned long long)(osGetTime() - started - read_ms),
            (unsigned long)source_bytes,
-           (unsigned long)(s.image.PixelCount() * sizeof(u16)),
+           (unsigned long)(s.image.pixels ? s.image.PixelCount() * sizeof(u16) : 0),
            (unsigned long)s.image.decoder_peak, zoom);
+  return decoded;
+}
+
+bool ReaderController::RestoreImageViewerBitmap(bool refresh) {
+  if (!ImageViewerValid() || app_.ShouldAbortWork())
+    return false;
+  ReaderImageViewerSession &s = *image_viewer_;
+  if (s.image.pixels && !refresh)
+    return true;
+  const uint64_t started = osGetTime();
+  const bool read = !s.source.empty() ||
+      s.book->ReadInlineImageSource(s.image_id, &s.source);
+  const char *error = "Image unavailable (resource/memory limit)";
+  const bool decoded = read && raster_image::Decode(
+      s.source.data(), s.source.size(), s.image.width, s.image.height,
+      app_.ts->GetBgColor(), &s.image, &error);
+  if (s.source.size() > kSourceCacheMaxBytes)
+    s.source.clear();
+  if (!decoded)
+    s.message = error ? error : "Image recovery failed";
+  (void)started;
+  DBG_LOGF(&app_, "IMAGE recover_cpu ok=%d ms=%llu bitmap_bytes=%lu",
+           decoded ? 1 : 0, (unsigned long long)(osGetTime() - started),
+           (unsigned long)(s.image.pixels ? s.image.PixelCount() * sizeof(u16) : 0));
   return decoded;
 }
 
@@ -310,10 +335,32 @@ void ReaderController::DrawImageViewer() {
       fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
   const auto bottom =
       fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
+  const auto overview = OverviewLayout(s, bottom.width, bottom.height);
+  const bool preview_geometry_changed = s.preview.pixels &&
+      (s.preview.width != overview.width || s.preview.height != overview.height);
+  const bool background_changed = s.panel_orientation >= 0 &&
+      s.panel_bg != ts->GetBgColor();
+  if (s.HasImage() && !s.loading && !s.suspended) {
+    if (background_changed && RestoreImageViewerBitmap(true)) {
+      ++s.image_generation;
+      s.gpu.Reset();
+      s.gpu_draw_failed = false;
+      s.preview_ready = false;
+      s.preview_viewport_valid = false;
+    } else if (preview_geometry_changed && !s.image.pixels) {
+      RestoreImageViewerBitmap();
+    }
+    if (preview_geometry_changed && s.image.pixels &&
+        s.preview.Allocate(std::max(1, overview.width), std::max(1, overview.height))) {
+      s.preview_ready = false;
+      s.preview_viewport_valid = false;
+      s.panel_dirty = true;
+    }
+  }
   const char *status = s.loading           ? "Loading image..."
                        : s.message.empty() ? "move: D-pad, Circle Pad / stylus"
                                            : s.message.c_str();
-  const bool enabled = s.image.pixels && !s.loading && !s.suspended;
+  const bool enabled = s.HasImage() && !s.loading && !s.suspended;
   const bool redraw_panel =
       s.panel_dirty || orientation_changed ||
       s.panel_orientation != app_.reader_layout.orientation ||
@@ -322,7 +369,7 @@ void ReaderController::DrawImageViewer() {
       s.panel_bg != ts->GetBgColor() || ts->screenright_dirty ||
       (s.preview_viewport_valid &&
        s.preview_expected_generation != ts->screenright_cache_generation);
-  if (!s.image.pixels) {
+  if (!s.HasImage()) {
     ts->SetScreen(ts->screenleft);
     ts->ClearScreen();
   }
@@ -332,7 +379,7 @@ void ReaderController::DrawImageViewer() {
     ts->ClearScreen();
     LayoutControls(s, bottom.width, bottom.height);
   }
-  if (s.image.pixels) {
+  if (s.HasImage()) {
     auto rect = image_view::Viewport(
         s.image.original_width, s.image.original_height, top.width, top.height,
         s.viewport.zoom_index, s.viewport.center_x, s.viewport.center_y);
@@ -352,8 +399,8 @@ void ReaderController::DrawImageViewer() {
     const auto placement = pdf_view_utils::ComputePreviewLayout(
         s.image.original_width * rect.width,
         s.image.original_height * rect.height, top.width, top.height);
-    const bool gpu_drawn =
-        !s.loading && !s.suspended &&
+    const bool try_gpu = !s.loading && !s.suspended && !s.gpu_draw_failed;
+    const bool gpu_drawn = try_gpu &&
         s.gpu.Upload(ts, s.image.pixels.get(), s.image.PixelCount(),
                      s.image.width, s.image.height, s.image.width,
                      s.image_generation) &&
@@ -362,7 +409,17 @@ void ReaderController::DrawImageViewer() {
                                 {(float)placement.x, (float)placement.y,
                                  (float)placement.width,
                                  (float)placement.height});
-    if (!gpu_drawn) {
+    if (!gpu_drawn && try_gpu) {
+      s.gpu.Reset();
+      s.gpu_draw_failed = true;
+      if (!RestoreImageViewerBitmap()) {
+        // Keep exit/navigation responsive and report the failed recovery on
+        // the next frame; the rejected generation is never decoded every pan.
+        s.panel_dirty = s.dirty = true;
+        return;
+      }
+    }
+    if (!gpu_drawn && s.image.pixels) {
       ts->SetScreen(ts->screenleft);
       ts->ClearScreen();
       Blit(ts, ts->screenleft, top.height, placement.x, placement.y,
@@ -423,6 +480,9 @@ void ReaderController::DrawImageViewer() {
             vy};
     s.preview_viewport_valid = s.preview.pixels && s.preview_ready;
     s.preview_expected_generation = ts->screenright_cache_generation + 1;
+    if (gpu_drawn && s.preview_ready && s.preview.pixels &&
+        s.preview.width == s.overview.width && s.preview.height == s.overview.height)
+      s.image.pixels.reset();
   }
   ts->SetScreen(ts->screenright);
   if (redraw_panel) {
@@ -443,7 +503,7 @@ void ReaderController::DrawImageViewer() {
            "preview_bytes=%lu",
            (unsigned long long)(osGetTime() - started),
            s.viewport.interaction_active ? 0 : 1, s.viewport.zoom_index,
-           (unsigned long)(s.image.PixelCount() * sizeof(u16)),
+           (unsigned long)(s.image.pixels ? s.image.PixelCount() * sizeof(u16) : 0),
            (unsigned long)(s.preview.PixelCount() * sizeof(u16)));
 }
 
@@ -474,7 +534,7 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
         break;
       }
     }
-    if (control < 0 && s.image.pixels && touch.x >= s.overview.x &&
+    if (control < 0 && s.HasImage() && touch.x >= s.overview.x &&
         touch.x < s.overview.x + s.overview.width && touch.y >= s.overview.y &&
         touch.y < s.overview.y + s.overview.height)
       s.touch_panning = true;
@@ -501,7 +561,7 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     if (app_.ShouldAbortWork())
       return;
   }
-  if (!s.image.pixels) {
+  if (!s.HasImage()) {
     if (s.dirty)
       DrawImageViewer();
     return;

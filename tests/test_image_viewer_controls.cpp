@@ -51,14 +51,27 @@ void UiButtonSkin_Draw(u16 *, int, int, int, int x, int y, int w, int h,
 }
 void UiButtonSkin_DrawIcon(u16 *, int, int, int, int, int, int, int,
                            UiButtonIconId, bool) {}
+static unsigned viewer_decodes = 0, viewer_reads = 0;
+static bool viewer_decode_ok = true;
 namespace raster_image {
+bool Bitmap::Allocate(int w, int h) {
+  pixels.reset(new u16[(size_t)w*h]()); width=w; height=h; return true;
+}
+bool Decode(const unsigned char *, size_t, int w, int h, u16, Bitmap *out, const char **error) {
+  ++viewer_decodes;
+  if (!viewer_decode_ok) { if (error) *error = "Decode failed"; return false; }
+  out->Allocate(w,h); out->original_width=out->original_height=1000;
+  if (error) *error=nullptr;
+  return true;
+}
 void FreePixels::operator()(uint16_t *p) const {
   delete[] p;
 }
 } // namespace raster_image
 static std::vector<bool> qualities;
 static size_t bottom_blit_pixels = 0;
-unsigned viewer_gpu_upload_attempts = 0;
+unsigned viewer_gpu_upload_attempts = 0, viewer_gpu_resets = 0;
+bool viewer_gpu_available = false, viewer_gpu_queue_ok = true;
 namespace fixed_layout_blit_utils {
 void BlitRgb565BitmapScaledCrop(Text *text, u16 *screen, int, int, int, int w, int h,
                                 const u16 *, size_t, int, int, int, int, int,
@@ -79,7 +92,12 @@ struct Page {
     return items;
   }
 };
+struct InlineImageMetadata { int width=0, height=0; };
 struct Book {
+  bool ReadInlineImageSource(u16, image_memory::Bytes *source) {
+    ++viewer_reads; return source->resize(16);
+  }
+  bool GetInlineImageMetadata(u16, InlineImageMetadata *) { return false; }
   Page page;
   const char *GetFileName() {
     return "book.epub";
@@ -135,6 +153,7 @@ struct App {
     ts->orientation = value;
     ts->landscape = value == 2;
   }
+  bool PresentIfDirty() { return true; }
   void ResetPageRepeat() {}
   void SetMode(AppMode value) {
     mode = value;
@@ -162,10 +181,8 @@ struct ReaderController {
     image_viewer_.reset();
     app_.mode = AppMode::Book;
   }
-  bool LoadImageViewer(int zoom) {
-    image_viewer_->viewport.zoom_index = zoom;
-    return true;
-  }
+  bool LoadImageViewer(int zoom);
+  bool RestoreImageViewerBitmap(bool refresh = false);
   void OpenImageViewer();
   void DrawImageViewer();
   void RunImageViewerFrame(const FrameInput &);
@@ -400,7 +417,66 @@ void TestPanRetainsControlsUntilStatusChanges() {
     assert(showed_error);
   }
 }
+static void TestGpuOnlyViewer() {
+  viewer_gpu_available = viewer_gpu_queue_ok = viewer_decode_ok = true;
+  {
+    Fixture f(0);
+    auto &s = *f.reader.image_viewer_;
+    s.viewport.zoom_index = 4;
+    s.preview.Allocate(s.overview.width, s.overview.height);
+    s.preview_ready = true;
+    f.Draw();
+    assert(!s.image.pixels && s.gpu.Matches(s.image_generation));
+    const unsigned uploads = viewer_gpu_upload_attempts;
+    viewer_decodes = viewer_reads = 0;
+    f.Input(KEY_DRIGHT, KEY_DRIGHT);
+    f.Input(KEY_B, KEY_B);
+    assert(s.viewport.zoom_index == 3 && s.viewport.interaction_active == false);
+    assert(!s.image.pixels && viewer_decodes == 0 && viewer_reads == 0);
+    assert(viewer_gpu_upload_attempts == uploads);
+    // Failure to decode a larger source must preserve the usable GPU image.
+    viewer_decode_ok = false;
+    assert(!f.reader.LoadImageViewer(5));
+    assert(s.gpu.Matches(s.image_generation) && !s.image.pixels);
+    viewer_decode_ok = true;
+    // A rejected queue reconstructs once, then stays on CPU during panning.
+    viewer_gpu_queue_ok = false;
+    viewer_decodes = 0;
+    f.Input(KEY_DLEFT, KEY_DLEFT);
+    assert(s.image.pixels && viewer_decodes == 1);
+    f.Input(KEY_DRIGHT, KEY_DRIGHT);
+    assert(s.image.pixels && viewer_decodes == 1);
+  }
+  viewer_gpu_queue_ok = true;
+  {
+    Fixture f(0);
+    auto &s = *f.reader.image_viewer_;
+    s.preview.Allocate(s.overview.width, s.overview.height);
+    s.preview_ready = true;
+    f.Draw();
+    assert(!s.image.pixels);
+    viewer_gpu_queue_ok = viewer_decode_ok = false;
+    viewer_decodes = 0;
+    f.Input(KEY_DRIGHT, KEY_DRIGHT);
+    f.Input(KEY_DLEFT, KEY_DLEFT);
+    assert(viewer_decodes == 1 && !s.image.pixels);
+    assert(f.app.mode == AppMode::ImageViewer);
+    f.Input(KEY_Y, KEY_Y);
+    assert(f.app.mode == AppMode::Book);
+  }
+  viewer_gpu_queue_ok = viewer_decode_ok = true;
+  {
+    Fixture f(0);
+    const unsigned resets = viewer_gpu_resets;
+    f.reader.SuspendImageViewer();
+    assert(viewer_gpu_resets == resets && "APT hook defers GPU destruction");
+    f.reader.DrawImageViewer();
+    assert(viewer_gpu_resets == resets + 1);
+  }
+  viewer_gpu_available = false;
+}
 int main(int argc, char **argv) {
+  TestGpuOnlyViewer();
   {
     Fixture f(0);
     f.reader.image_viewer_->loading=true;

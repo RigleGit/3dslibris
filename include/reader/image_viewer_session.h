@@ -19,7 +19,11 @@ struct ReaderImageViewerSession {
   raster_image::Bitmap image, preview;
   fixed_layout_gpu::TextureCache gpu;
   uint64_t image_generation = 0, preview_expected_generation = 0;
-  bool gpu_reset_pending = false;
+  bool gpu_reset_pending = false, gpu_draw_failed = false;
+  bool HasImage() const {
+    return image.width > 0 && image.height > 0 &&
+           (image.pixels || gpu.Matches(image_generation));
+  }
   bool preview_viewport_valid = false;
   fixed_layout_preview_panel::Rect preview_viewport{};
   image_memory::Bytes source;
