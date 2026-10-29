@@ -963,6 +963,7 @@ void Book::ResetCbzFailureState() {
   cbz_state->failed_page = -1;
   cbz_state->logged_failed_page = -1;
   cbz_state->last_error.clear();
+  cbz_state->gpu_draw_failed = false;
 }
 
 bool Book::IsMobiFile() const {

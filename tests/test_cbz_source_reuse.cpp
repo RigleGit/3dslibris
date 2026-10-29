@@ -68,12 +68,15 @@ int main() {
          "synchronous view must not duplicate a sufficient decoded source");
   assert(s.current_source.zoom_index == 4 &&
          "synchronous CBZ pages need a readable source at low zoom");
+  s.gpu_draw_failed=true;
   assert(EnsureCbzInteractiveCache(&s, 0) && reads == 1);
+  assert(s.gpu_draw_failed && "resident fallback must not retry GPU every pan");
   s.viewport.zoom_index = 2;
   assert(EnsureCbzInteractiveCache(&s, 0) && reads == 1);
   s.viewport.zoom_index = 4;
   assert(EnsureCbzInteractiveCache(&s, 0) && reads == 1);
   assert(EnsureCbzPreviewCache(&s, 1));
+  assert(!s.gpu_draw_failed && "a new source must get a fresh GPU attempt");
   assert(EnsureCbzInteractiveCache(&s, 1) && reads == 2);
   s.viewport.zoom_index = 6;
   assert(EnsureCbzInteractiveCache(&s, 1) && reads == 2 && "full-resolution source must survive a zoom increase");
@@ -86,6 +89,7 @@ int main() {
   assert(EnsureCbzInteractiveCache(&bucket, 0) && reads == bucket_reads && "decoded dimensions already cover this zoom");
   // A wide source is insufficient if its height does not cover the new zoom.
   bucket.current_source.zoom_index = 2;
+  bucket.current_source.requested_zoom_index = 2;
   bucket.current_source.bitmap.height = 100;
   bucket.current_interactive.page = -1;
   assert(EnsureCbzInteractiveCache(&bucket, 0) && reads == bucket_reads + 1);
@@ -97,8 +101,15 @@ int main() {
   // A failed high-resolution decode must retain the low-resolution fallback.
   debug_runtime::sync = true; max_decode_zoom = 0;
   FixtureState fallback;
+  fallback.viewport.zoom_index = 6;
   assert(EnsureCbzPreviewCache(&fallback, 0));
   assert(fallback.current_source.zoom_index == 0);
+  const int fallback_reads = reads, fallback_decodes = decodes;
+  assert(EnsureCbzInteractiveCache(&fallback, 0));
+  assert(reads == fallback_reads && decodes == fallback_decodes &&
+         "a completed lower-resolution fallback must not decode again on pan");
+  assert(fallback.current_interactive.pixels.empty() &&
+         "memory fallback must draw its source without allocating a duplicate");
   // A failure on another page must not discard the usable page/source.
   max_decode_zoom=99;
   FixtureState errors;

@@ -28,9 +28,13 @@ inline bool CbzSourceValid(const Book::CbzState::PageBitmap &page_bitmap,
                            int page_index, int zoom_index,
                            int target_width, int target_height) {
   if (page_bitmap.page != page_index || page_bitmap.bitmap.width <= 0 ||
-      page_bitmap.bitmap.height <= 0 || page_bitmap.bitmap.pixels.empty())
+      page_bitmap.bitmap.height <= 0 || (page_bitmap.bitmap.pixels.empty() &&
+          !page_bitmap.gpu.Matches(page_bitmap.generation)))
     return false;
-  if (page_bitmap.zoom_index >= zoom_index)
+  // A successful memory fallback is the best available source for the request.
+  // Keep it resident rather than retrying the same decode or duplicating it.
+  if (page_bitmap.zoom_index >= zoom_index ||
+      page_bitmap.requested_zoom_index >= zoom_index)
     return true;
   if (page_bitmap.original_width <= 0 || page_bitmap.original_height <= 0 ||
       target_width <= 0 || target_height <= 0)
@@ -113,8 +117,11 @@ CbzWorkerQueueState GetCbzWorkerQueueState(
 void ResetCbzPageBitmap(Book::CbzState::PageBitmap *page_bitmap) {
   if (!page_bitmap)
     return;
+  page_bitmap->gpu.Reset();
+  ++page_bitmap->generation;
   page_bitmap->page = -1;
   page_bitmap->zoom_index = -1;
+  page_bitmap->requested_zoom_index = -1;
   page_bitmap->original_width = 0;
   page_bitmap->original_height = 0;
   page_bitmap->bitmap.width = 0;
@@ -272,6 +279,7 @@ bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
   ResetCbzPageBitmap(&cbz_state->current_source);
   cbz_state->current_source.page = page_index;
   cbz_state->current_source.zoom_index = used_zoom_index;
+  cbz_state->current_source.requested_zoom_index = decode_zoom_index;
   cbz_state->current_source.original_width = decoded.original_width;
   cbz_state->current_source.original_height = decoded.original_height;
   cbz_state->current_source.bitmap.width = decoded.source_bitmap.width;
@@ -279,6 +287,7 @@ bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
   cbz_state->current_source.bitmap.pixels.swap(decoded.source_bitmap.pixels);
   cbz_state->page_width = (float)std::max(1, decoded.original_width);
   cbz_state->page_height = (float)std::max(1, decoded.original_height);
+  cbz_state->gpu_draw_failed = false;
   return true;
 }
 
@@ -332,8 +341,8 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
   if (!EnsureCbzSourceLoaded(cbz_state, page_index, cbz_state->viewport.zoom_index))
     return false;
 
-  // In the synchronous reader the decoded source already covers this zoom.
-  // Blit directly from it instead of allocating and scaling a second bitmap.
+  // Draw the decoded source directly, including an accepted lower-resolution
+  // memory fallback, instead of allocating and scaling a second bitmap.
   if (debug_runtime::ForceSynchronousCbzDecode() &&
       CbzSourceValid(cbz_state->current_source, page_index,
                      cbz_state->viewport.zoom_index,
@@ -504,6 +513,12 @@ void Book::DrawCurrentCbzView(Text *ts) {
   if (cbz_state->page_count == 0)
     return;
 
+  const bool wide = ts->IsWideTopScreenActive();
+  if (cbz_state->wide_top_screen != wide) {
+    cbz_state->gpu_draw_failed = false;
+    cbz_state->wide_top_screen = wide;
+  }
+
   const fixed_layout_screen::TargetDimensions top_dims =
       fixed_layout_screen::TargetDims((unsigned char)GetOrientation(), true);
   const fixed_layout_screen::TargetDimensions bottom_dims =
@@ -520,6 +535,7 @@ void Book::DrawCurrentCbzView(Text *ts) {
     ResetCbzBitmapCache(&cbz_state->current_interactive);
     ResetCbzAdjacentSlot(&cbz_state->prev_slot);
     ResetCbzAdjacentSlot(&cbz_state->next_slot);
+    cbz_state->gpu_draw_failed = false;
     cbz_state->target_top_width = top_dims.width;
     cbz_state->target_top_height = top_dims.height;
     cbz_state->target_bottom_width = bottom_dims.width;
@@ -560,8 +576,8 @@ void Book::DrawCurrentCbzView(Text *ts) {
     return;
   }
 
-  // Keep a scaled fallback only when the decoded source cannot cover the
-  // requested zoom (for example after a lower-resolution decode fallback).
+  // The synchronous source includes an accepted lower-resolution memory
+  // fallback. Let the GPU scale it without a second full bitmap allocation.
   bool use_source = debug_runtime::ForceSynchronousCbzDecode() &&
       CbzSourceValid(cbz_state->current_source, page_index,
                      cbz_state->viewport.zoom_index,
@@ -597,30 +613,55 @@ void Book::DrawCurrentCbzView(Text *ts) {
   ts->SetStyle(TEXT_STYLE_BROWSER);
   ts->margin.bottom = 0;
 
-  ts->SetScreen(ts->screenleft);
-  ts->ClearScreen();
-  if (use_source) {
-    const CbzBitmap &source = cbz_state->current_source.bitmap;
-    BlitCbzViewport(ts, ts->screenleft,
-                    cbz_state->target_top_height,
-                    cbz_state->target_top_width,
-                    cbz_state->target_top_height,
-                    source.pixels, source.width, source.height,
-                    viewport, high_quality_viewport);
-  } else if (has_interactive) {
-    BlitCbzCacheViewport(ts, ts->screenleft,
-                         cbz_state->target_top_height,
-                         cbz_state->target_top_width,
-                         cbz_state->target_top_height,
-                         cbz_state->current_interactive, viewport,
-                         high_quality_viewport);
-  } else {
-    BlitCbzCacheViewport(ts, ts->screenleft,
-                         cbz_state->target_top_height,
-                         cbz_state->target_top_width,
-                         cbz_state->target_top_height,
-                         cbz_state->current_preview, viewport,
-                         high_quality_viewport);
+  bool gpu_drawn = false;
+  if (use_source && !cbz_state->gpu_draw_failed) {
+    Book::CbzState::PageBitmap &source = cbz_state->current_source;
+    if (source.gpu.Upload(ts, source.bitmap.pixels.data(),
+                          source.bitmap.pixels.size(), source.bitmap.width,
+                          source.bitmap.height, source.bitmap.width,
+                          source.generation)) {
+      const auto layout = pdf_view_utils::ComputePreviewLayout(
+          std::max(1, (int)(viewport.width * source.bitmap.width + 0.5f)),
+          std::max(1, (int)(viewport.height * source.bitmap.height + 0.5f)),
+          cbz_state->target_top_width, cbz_state->target_top_height);
+      gpu_drawn = fixed_layout_gpu::Queue(
+          ts, source.gpu, {0, 0, 1, 1},
+          {viewport.left, viewport.top, viewport.width, viewport.height},
+          {(float)layout.x, (float)layout.y, (float)layout.width,
+           (float)layout.height});
+      if (gpu_drawn)
+        std::vector<u16>().swap(source.bitmap.pixels);
+      else {
+        source.gpu.Reset();
+        if (source.bitmap.pixels.empty())
+          use_source = EnsureCbzSourceLoaded(cbz_state, page_index,
+                                             cbz_state->viewport.zoom_index);
+        // Reconstruction above starts a new source; keep this failed request
+        // on CPU until navigation or a real source/configuration change.
+        cbz_state->gpu_draw_failed = true;
+      }
+    }
+  }
+  if (!gpu_drawn) {
+    ts->SetScreen(ts->screenleft);
+    ts->ClearScreen();
+    if (use_source) {
+      const CbzBitmap &source = cbz_state->current_source.bitmap;
+      BlitCbzViewport(ts, ts->screenleft, cbz_state->target_top_height,
+                      cbz_state->target_top_width, cbz_state->target_top_height,
+                      source.pixels, source.width, source.height, viewport,
+                      high_quality_viewport);
+    } else if (has_interactive) {
+      BlitCbzCacheViewport(
+          ts, ts->screenleft, cbz_state->target_top_height,
+          cbz_state->target_top_width, cbz_state->target_top_height,
+          cbz_state->current_interactive, viewport, high_quality_viewport);
+    } else {
+      BlitCbzCacheViewport(
+          ts, ts->screenleft, cbz_state->target_top_height,
+          cbz_state->target_top_width, cbz_state->target_top_height,
+          cbz_state->current_preview, viewport, high_quality_viewport);
+    }
   }
   DrawCbzPreviewPanel(this, ts, cbz_state, page_index, preview_layout,
                       viewport);
