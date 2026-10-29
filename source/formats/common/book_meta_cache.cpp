@@ -141,7 +141,7 @@ std::string BuildPath(const std::string &book_path, long long file_size,
   return std::string(out);
 }
 
-bool Save(const std::string &cache_path, const MetaEntry &entry) {
+bool Save(const std::string &cache_path, const MetaEntry &entry, bool prepared) {
   if (cache_path.empty())
     return false;
 
@@ -149,9 +149,9 @@ bool Save(const std::string &cache_path, const MetaEntry &entry) {
   if (!fp)
     return false;
 
-  Header hdr;
+  Header hdr{};
   hdr.magic   = kMagic;
-  hdr.version = kVersion;
+  hdr.version = prepared ? 4 : kVersion;
 
   bool ok = binary_io_utils::WriteRaw(fp, &hdr, sizeof(hdr));
   ok = ok && binary_io_utils::WriteString32(fp, entry.title, UINT32_MAX);
@@ -174,7 +174,8 @@ bool Save(const std::string &cache_path, const MetaEntry &entry) {
   return ok && closed;
 }
 
-bool Load(const std::string &cache_path, MetaEntry *out) {
+bool Load(const std::string &cache_path, MetaEntry *out, bool *prepared) {
+  if (prepared) *prepared = false;
   if (!out || cache_path.empty())
     return false;
 
@@ -184,7 +185,7 @@ bool Load(const std::string &cache_path, MetaEntry *out) {
 
   Header hdr;
   if (!binary_io_utils::ReadRaw(fp, &hdr, sizeof(hdr)) ||
-      hdr.magic != kMagic || hdr.version != kVersion) {
+      hdr.magic != kMagic || (hdr.version != kVersion && hdr.version != 4)) {
     fclose(fp);
     return false;
   }
@@ -214,6 +215,7 @@ bool Load(const std::string &cache_path, MetaEntry *out) {
     out->description.clear();
     out->cover_image_path.clear();
   }
+  if (ok && prepared) *prepared = hdr.version == 4;
   return ok;
 }
 

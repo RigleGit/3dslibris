@@ -1,5 +1,6 @@
 #include "app/library_controller.h"
 #include "library/library_search_session.h"
+#include "formats/common/library_metadata.h"
 #include "app/app.h"
 #include "book/book.h"
 #include "formats/common/fixed_layout_gpu_renderer.h"
@@ -43,9 +44,19 @@ bool LibraryController::SearchRoot(void *ctx,size_t index,library_search::Entry 
   out->name=out->directory ? book->GetBrowserFolderDisplayName() : book->GetFileName();
   return true;
 }
-library_search::MetadataStatus LibraryController::SearchMetadata(void *,const std::string&,library_search::MetadataValue*) {
-  return library_search::MetadataStatus::Unsupported;
+library_search::MetadataStatus LibraryController::SearchMetadata(void *context,const std::string &path,library_search::MetadataValue *out) {
+  LibraryController &self=*static_cast<LibraryController *>(context);
+  if(self.app_.ShouldAbortWork()) return library_search::MetadataStatus::Cancelled;
+  library_metadata::Value value;
+  const auto status=library_metadata::Prepare(path,&value);
+  out->extracted=value.extracted;out->cache_saved=value.cache_saved;
+  out->title=std::move(value.entry.title);out->author=std::move(value.entry.author);
+  if(status==library_metadata::Status::Ready) return library_search::MetadataStatus::Ready;
+  if(status==library_metadata::Status::Unsupported) return library_search::MetadataStatus::Unsupported;
+  if(status==library_metadata::Status::Cancelled) return library_search::MetadataStatus::Cancelled;
+  return library_search::MetadataStatus::Error;
 }
+
 void LibraryController::OpenLibrarySearch() {
   if(app_.ShouldAbortWork()) return;
   PauseBrowserJobs();
