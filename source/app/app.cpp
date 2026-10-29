@@ -13,6 +13,7 @@
 */
 
 #include "app/app.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
 
 #include <algorithm>
 #include <errno.h>
@@ -267,7 +268,7 @@ bool App::PresentIfDirty()
   const bool measure_present = fixed_perf::NeedsPresentationTiming();
   uint64_t perf_phase = measure_present ? fixed_perf::Now() : 0;
   const bool had_dirty = ts->HasDirtyScreens();
-  const bool wrote = ts->BlitToFramebuffer();
+  const bool wrote = ts->BlitToFramebuffer() || fixed_layout_gpu::NeedsPresent(ts.get());
   if (measure_present)
     fixed_perf::ViewStage("present.framebuffer_copy",
                           fixed_perf::Now() - perf_phase, wrote ? 1 : 0);
@@ -278,7 +279,14 @@ bool App::PresentIfDirty()
   {
     if (measure_present)
       perf_phase = fixed_perf::Now();
-    gfxFlushBuffers();
+    // A GPU draw ends with the SDK's full Linear flush, including CPU bottom
+    // writes. Retained-target transfers and software-only frames still need it.
+    const bool gpu_will_draw = fixed_layout_gpu::WillDraw(ts.get());
+    if (!gpu_will_draw)
+      gfxFlushBuffers();
+    const bool gpu_wrote = fixed_layout_gpu::Present(ts.get());
+    if (gpu_will_draw && !gpu_wrote)
+      gfxFlushBuffers(); // FrameBegin failure must still present coherent CPU UI.
     if (measure_present) {
       fixed_perf::ViewStage("present.flush", fixed_perf::Now() - perf_phase);
       perf_phase = fixed_perf::Now();

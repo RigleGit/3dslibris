@@ -1,4 +1,5 @@
 #include "ui/text.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
 
 #include <new>
 
@@ -35,9 +36,13 @@ bool Text::SetTopScreenWideMode(bool wide) {
       DBG_LOGF(reporter_, "WIDE: enable failed conversion_bytes=%u", 240u * 800u * 3u);
       return false;
     }
+    // Commit only once both allocations succeed. A rejected mode change must
+    // leave the retained GPU image intact and need no CPU recovery.
+    fixed_layout_gpu::Software(this, true);
     wide_top_pixels_ = pixels;
     wide_top_fb_cache_ = conversion;
   } else {
+    fixed_layout_gpu::Software(this, true);
     delete[] wide_top_pixels_;
     wide_top_pixels_ = nullptr;
     delete[] wide_top_fb_cache_;
@@ -98,5 +103,36 @@ void Text::SyncWideTopUiRect() {
           wide_top_pixels_[(y * dy + yy) * stride + x * dx + xx] = pixel;
     }
   }
+  wide_top_ui_dirty_.valid = false;
+}
+
+void Text::RestoreGpuTop(const u8 *fb, int physical_height, u8 orientation) {
+  const auto geometry =
+      framebuffer_blit_utils::MakeFramebufferGeometry(240, physical_height);
+  const bool landscape = orientation_utils::IsLandscape(orientation);
+  const int density = physical_height == 800 ? 2 : 1;
+  const int width = landscape ? 400 : 240, height = landscape ? 240 : 400;
+  for (int y = 0; y < height; ++y)
+    for (int x = 0; x < width; ++x) {
+      u16 samples[2] = {0, 0};
+      for (int i = 0; i < density; ++i) {
+        const int sx = landscape ? x * density + i : x,
+                  sy = landscape ? y : y * density + i;
+        const size_t off = framebuffer_blit_utils::PhysicalOffsetBytes(
+            geometry, sx, sy, orientation);
+        const u16 pixel = (u16)(((fb[off + 2] >> 3) << 11) |
+                                ((fb[off + 1] >> 2) << 5) | (fb[off] >> 3));
+        samples[i] = pixel;
+        if (density == 2 && wide_top_pixels_) {
+          const int stride = landscape ? 800 : 240;
+          wide_top_pixels_[(size_t)sy * stride + sx] = pixel;
+        }
+      }
+      screenleft[(size_t)y * BufferStride() + x] =
+          density == 1 ? samples[0]
+                       : (u16)((samples[0] & samples[1]) +
+                               (((samples[0] ^ samples[1]) & 0xF7DEu) >> 1));
+    }
+  wide_top_valid_ = density == 2 && wide_top_pixels_;
   wide_top_ui_dirty_.valid = false;
 }

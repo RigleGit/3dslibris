@@ -15,6 +15,7 @@
 
 #include "book/book.h"
 #include "book/book_renderer.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
 #include "library/library_sort_mode.h"
 #include "menus/bookmark_menu.h"
 #include "menus/chapter_menu.h"
@@ -50,6 +51,7 @@ void App::ShowFontView(AppMode app_font_mode)
 
 void App::ShowLibraryView()
 {
+  fixed_layout_gpu::Software(ts.get(), true);
   ts->SetTopScreenWideMode(false);
   InvalidateImageViewer();
   InvalidateSearch(false);

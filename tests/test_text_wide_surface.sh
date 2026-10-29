@@ -18,7 +18,7 @@ if [ "$(uname -s)" = Darwin ]; then
 else
   DEAD_STRIP=-Wl,--gc-sections
 fi
-build_test test_text_wide_surface -- -ffunction-sections -fdata-sections "$DEAD_STRIP" \
+build_test test_text_wide_surface -- -D__3DS__ -ffunction-sections -fdata-sections "$DEAD_STRIP" \
   $(pkg-config --cflags freetype2) -I"$TASK_TMP" \
   -I"$ROOT/tests/stubs/wide_surface" -I"$ROOT/include" \
   "$ROOT/tests/test_text_wide_surface.cpp" \

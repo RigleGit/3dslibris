@@ -1,4 +1,5 @@
 #include "ui/text.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
 
 #include <string.h>
 #include <vector>
@@ -74,6 +75,7 @@ Text::Text() : reporter_(nullptr), wide_top_pixels_(nullptr), wide_top_fb_cache_
 }
 
 Text::~Text() {
+  fixed_layout_gpu::Shutdown(this);
   delete[] wide_top_pixels_;
   delete[] wide_top_fb_cache_;
   delete tr;
@@ -175,6 +177,7 @@ float Text::GetScriptScale() const { return tr ? tr->GetScriptScale() : 1.0f; }
 
 void Text::SetOrientation(u8 orientation) {
   if (tr->GetOrientation() != orientation) {
+    fixed_layout_gpu::Software(this, true);
     wide_top_valid_ = false;
     wide_top_ui_dirty_.valid = false;
   }

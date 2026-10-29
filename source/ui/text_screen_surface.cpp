@@ -2,6 +2,7 @@
 // rect tracking, and framebuffer blit. Glyph rendering is in text_renderer.cpp.
 
 #include "ui/text_renderer.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -275,6 +276,7 @@ void TextRenderer::ClearScreen(u16 *screen, u8 r, u8 g, u8 b) {
 
 void TextRenderer::MarkScreenDirty(u16 *target) {
   if (target == parent->screenleft) {
+    fixed_layout_gpu::Software(parent,true);
     if (parent->wide_top_valid_)
       parent->wide_top_ui_dirty_ = framebuffer_blit_utils::MakeDirtyRect(
           0, 0, parent->LogicalWidthFor(true), parent->LogicalHeightFor(true));
@@ -290,6 +292,9 @@ void TextRenderer::MarkScreenDirty(u16 *target) {
 
 void TextRenderer::MarkScreenDirtyRect(u16 *target, int x0, int y0, int x1,
                                        int y1) {
+  if (target == parent->screenleft)
+    fixed_layout_gpu::Software(parent, x0<=0 && y0<=0 &&
+        x1>=parent->LogicalWidthFor(true) && y1>=parent->LogicalHeightFor(true));
   // Page drawing marks whole screens up front. Glyphs already covered by that
   // damage need no geometry resolution or repeated dirty-rectangle expansion.
   const framebuffer_blit_utils::DirtyRect *existing = nullptr;
@@ -457,12 +462,13 @@ bool TextRenderer::BlitToFramebuffer() {
            parent->screenright_cache_generation, parent->screenright_hw_sync,
            "bottom/right");
 
-  u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
-  blitPage(fbTop, parent->screenleft_fb_cache, parent->screenleft,
-           (u16)parent->LogicalHeightFor(true),
-           parent->screenleft_dirty, parent->screenleft_dirty_rect,
-           parent->screenleft_cache_generation, parent->screenleft_hw_sync,
-           "top/left");
+  if (!fixed_layout_gpu::Active(parent)) {
+    u8 *fbTop = gfxGetFramebuffer(GFX_TOP, GFX_LEFT, &fbW, &fbH);
+    blitPage(fbTop, parent->screenleft_fb_cache, parent->screenleft,
+             (u16)parent->LogicalHeightFor(true), parent->screenleft_dirty,
+             parent->screenleft_dirty_rect, parent->screenleft_cache_generation,
+             parent->screenleft_hw_sync, "top/left");
+  }
 
   parent->screenright_dirty = false;
   parent->screenleft_dirty = false;

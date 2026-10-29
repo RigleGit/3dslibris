@@ -165,6 +165,10 @@ CFLAGS_BASE	:=	-Wall -mword-relocations \
 
 CFLAGS	:=	$(CFLAGS_BASE) -O2
 
+ifeq ($(DISABLE_FIXED_LAYOUT_GPU),1)
+CFLAGS += -DDSLIBRIS_DISABLE_FIXED_LAYOUT_GPU
+endif
+
 CFLAGS	+=	$(INCLUDE) -I$(PORTLIBS)/include/freetype2 -I$(PORTLIBS)/include \
 			-I$(CURDIR)/third_party/expat \
 			-D__3DS__ -DXML_STATIC -DHAVE_MEMMOVE -DXML_POOR_ENTROPY \
@@ -212,7 +216,7 @@ LDFLAGS	=	-specs=3dsx.specs $(ARCH) -Wl,-Map,$(notdir $*.map) -Wl,--gc-sections
 # Also cover the SD descriptors owned internally by libctru/newlib and fonts.
 LDFLAGS += -Wl,--wrap=FSFILE_Close,--wrap=FSDIR_Close
 
-LIBS	:= -lmupdf -lmupdf-third -lfreetype -lpng -lbz2 -lminizip -lz -lm -lctru
+LIBS	:= -lmupdf -lmupdf-third -lfreetype -lpng -lbz2 -lminizip -lz -lm -lcitro2d -lcitro3d -lctru
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing
