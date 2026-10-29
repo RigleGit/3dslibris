@@ -11,6 +11,11 @@
 #include <cstring>
 #include <memory>
 
+// libctru exposes the next writable backbuffer immediately after a swap,
+// but the display releases the previous front buffer only on VBlank.
+static bool swap_pending = false;
+static void gspWaitForVBlank() { swap_pending = false; }
+
 // Recording UI sink. Integer text measurement below is the actual Text method;
 // glyph advances are fixed, and the legacy byte-width API saturates at 255.
 class Text {
@@ -61,6 +66,7 @@ public:
     printed.push_back({s, x, y});
   }
   bool BlitToFramebuffer() {
+    assert(!swap_pending && "opening progress must wait before reusing a displayed buffer");
     return true;
   }
   int GetAdvance(u32) {
@@ -119,7 +125,7 @@ struct App {
 };
 #include "opening_orientation_under_test.inc"
 void gfxFlushBuffers() {}
-void gfxSwapBuffers() {}
+void gfxSwapBuffers() { assert(!swap_pending); swap_pending = true; }
 namespace reader_internal {
 #include "opening_splash_under_test.inc"
 }

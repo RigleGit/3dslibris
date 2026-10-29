@@ -252,6 +252,10 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
   if (app->ts->BlitToFramebuffer()) {
     gfxFlushBuffers();
     gfxSwapBuffers();
+    // Synchronous parsing may report another spine before the main loop gets
+    // its usual VBlank. Do not reuse the displayed buffer until this swap has
+    // taken effect (libctru only provides double buffering).
+    gspWaitForVBlank();
   }
 }
 
