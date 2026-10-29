@@ -24,6 +24,10 @@ public:
     int bottom = 36;
   } margin;
   bool landscape = false, wrap = true;
+  bool screenright_dirty = false;
+  uint64_t screenright_cache_generation = 0;
+  void MarkScreenDirtyRect(u16 *, int, int, int, int) {}
+  void FillRect(u16, u16, u16, u16, u16) {}
   u8 orientation = 0;
   int pixelsize = 14, style = 0, x = 0, y = 0;
   int GetPixelSize() const {

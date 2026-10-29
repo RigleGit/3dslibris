@@ -263,6 +263,7 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/common/pdf_view_utils.cpp" \
   "$TEST_ROOT/source/formats/common/fixed_layout_blit_utils.cpp" "$TEST_ROOT/source/formats/common/fixed_layout_surface.cpp" \
   "$TEST_ROOT/source/formats/common/fixed_layout_preview_panel.cpp" \
+  "$TEST_ROOT/source/formats/common/fixed_layout_preview_border.cpp" \
   "$TEST_ROOT/source/formats/odt/odt_parser.cpp" \
   "$TEST_ROOT/source/formats/odt/odt_loader.cpp" \
   "$TEST_ROOT/source/formats/txt/txt_parser.cpp" \

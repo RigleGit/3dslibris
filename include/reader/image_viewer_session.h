@@ -1,6 +1,8 @@
 #pragma once
 #include "formats/common/raster_image_decode.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
+#include "formats/common/fixed_layout_preview_panel.h"
 #include "ui/button.h"
 #include "formats/common/pdf_view_utils.h"
 #include <string>
@@ -15,6 +17,11 @@ struct ReaderImageViewerSession {
   int selection = -1;
   fixed_layout_viewport_utils::ViewportState viewport;
   raster_image::Bitmap image, preview;
+  fixed_layout_gpu::TextureCache gpu;
+  uint64_t image_generation = 0, preview_expected_generation = 0;
+  bool gpu_reset_pending = false;
+  bool preview_viewport_valid = false;
+  fixed_layout_preview_panel::Rect preview_viewport{};
   image_memory::Bytes source;
   pdf_view_utils::PreviewLayout overview{};
   std::string message;

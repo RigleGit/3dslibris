@@ -10,6 +10,8 @@ done
 build_test test_image_viewer_controls -- -I"$TASK_TMP" -I"$ROOT/tests/stubs/image_viewer" -I"$ROOT/tests/stubs" -I"$ROOT/include" -I"$ROOT/third_party/utf8proc" -I"$ROOT/third_party/libunibreak/src" \
   "$ROOT/tests/test_image_viewer_controls.cpp" "$ROOT/source/ui/button.cpp" \
   "$ROOT/source/formats/common/pdf_view_utils.cpp" \
+  "$ROOT/source/formats/common/fixed_layout_preview_border.cpp" \
+  "$ROOT/source/formats/common/fixed_layout_surface.cpp" \
   "$ROOT/source/shared/text_unicode_utils.cpp" "$ROOT/source/shared/text_layout_utils.cpp" \
   "$ROOT/source/shared/text_bidi_utils.cpp" "$ROOT/source/shared/text_arabic_shaping.cpp" \
   "$ROOT/tests/stubs/mupdf_bidi_stub.cpp"

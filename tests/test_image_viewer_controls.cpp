@@ -57,11 +57,14 @@ void FreePixels::operator()(uint16_t *p) const {
 }
 } // namespace raster_image
 static std::vector<bool> qualities;
+static size_t bottom_blit_pixels = 0;
+unsigned viewer_gpu_upload_attempts = 0;
 namespace fixed_layout_blit_utils {
-void BlitRgb565BitmapScaledCrop(Text *, u16 *, int, int, int, int, int,
+void BlitRgb565BitmapScaledCrop(Text *text, u16 *screen, int, int, int, int w, int h,
                                 const u16 *, size_t, int, int, int, int, int,
                                 int, bool quality) {
   qualities.push_back(quality);
+  if (screen == text->screenright) bottom_blit_pixels += (size_t)w*h;
 }
 } // namespace fixed_layout_blit_utils
 struct Page {
@@ -398,6 +401,26 @@ void TestPanRetainsControlsUntilStatusChanges() {
   }
 }
 int main(int argc, char **argv) {
+  {
+    Fixture f(0);
+    f.reader.image_viewer_->loading=true;
+    viewer_gpu_upload_attempts=0;
+    f.reader.DrawImageViewer();
+    assert(viewer_gpu_upload_attempts==0 && "loading must not re-upload the previous image before replacement decode");
+  }
+  {
+    Fixture f(0);
+    auto &s=*f.reader.image_viewer_;
+    s.viewport.zoom_index=4;
+    s.preview.width=s.overview.width; s.preview.height=s.overview.height;
+    s.preview.pixels.reset(new u16[(size_t)s.preview.width*s.preview.height]());
+    s.preview_ready=true;
+    f.Draw();
+    f.app.ts->screenright_cache_generation=s.preview_expected_generation;
+    bottom_blit_pixels=0;
+    f.Input(KEY_DRIGHT,KEY_DRIGHT);
+    assert(bottom_blit_pixels==0 && "resident pan must restore border strips, not blit the full preview");
+  }
   if (argc == 1 || strcmp(argv[1], "layout") == 0)
     TestLayout();
   if (argc == 1 || strcmp(argv[1], "actions") == 0)

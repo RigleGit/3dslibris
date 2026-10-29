@@ -138,6 +138,8 @@ void ReaderController::SuspendImageViewer() {
   s.preview = raster_image::Bitmap();
   s.source.clear();
   s.preview_ready = false;
+  s.preview_viewport_valid = false;
+  s.gpu_reset_pending = true; // APT hook: no texture deletion or GPU waits here.
   s.panel_dirty = true;
   s.suspended = true;
   s.loading = true;
@@ -203,6 +205,8 @@ bool ReaderController::LoadImageViewer(int zoom) {
   if (!ImageViewerValid() || app_.ShouldAbortWork())
     return false;
   ReaderImageViewerSession &s = *image_viewer_;
+  s.gpu.Reset();
+  s.gpu_reset_pending = false;
   s.loading = true;
   s.message = "Loading image...";
   DrawImageViewer();
@@ -241,6 +245,7 @@ bool ReaderController::LoadImageViewer(int zoom) {
   s.loading = false;
   s.suspended = false;
   if (decoded) {
+    ++s.image_generation;
     s.viewport.zoom_index = zoom;
     s.message.clear();
     if (!s.preview.pixels) {
@@ -290,26 +295,40 @@ void ReaderController::DrawImageViewer() {
   if (!ImageViewerValid() || app_.ShouldAbortWork())
     return;
   ReaderImageViewerSession &s = *image_viewer_;
+  if (s.gpu_reset_pending) {
+    s.gpu.Reset();
+    s.gpu_reset_pending = false;
+  }
   Text *ts = app_.ts.get();
   const uint64_t started = osGetTime();
-  const bool orientation_changed = ts->GetOrientation() != app_.reader_layout.orientation;
+  const bool orientation_changed =
+      ts->GetOrientation() != app_.reader_layout.orientation;
   if (orientation_changed)
     app_.ApplyRenderOrientation(app_.reader_layout.orientation);
   TextState saved(ts);
-  const auto top = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
-  const auto bottom = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
-  const char *status = s.loading ? "Loading image..." : s.message.empty()
-      ? "move: D-pad, Circle Pad / stylus" : s.message.c_str();
+  const auto top =
+      fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
+  const auto bottom =
+      fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
+  const char *status = s.loading           ? "Loading image..."
+                       : s.message.empty() ? "move: D-pad, Circle Pad / stylus"
+                                           : s.message.c_str();
   const bool enabled = s.image.pixels && !s.loading && !s.suspended;
-  const bool redraw_panel = s.panel_dirty || orientation_changed ||
+  const bool redraw_panel =
+      s.panel_dirty || orientation_changed ||
       s.panel_orientation != app_.reader_layout.orientation ||
       s.panel_zoom != s.viewport.zoom_index || s.panel_enabled != enabled ||
       s.panel_status != status || s.panel_fg != ts->GetFgColor() ||
-      s.panel_bg != ts->GetBgColor();
-  ts->SetScreen(ts->screenleft);
-  ts->ClearScreen();
+      s.panel_bg != ts->GetBgColor() || ts->screenright_dirty ||
+      (s.preview_viewport_valid &&
+       s.preview_expected_generation != ts->screenright_cache_generation);
+  if (!s.image.pixels) {
+    ts->SetScreen(ts->screenleft);
+    ts->ClearScreen();
+  }
   ts->SetScreen(ts->screenright);
   if (redraw_panel) {
+    s.preview_viewport_valid = false;
     ts->ClearScreen();
     LayoutControls(s, bottom.width, bottom.height);
   }
@@ -333,9 +352,24 @@ void ReaderController::DrawImageViewer() {
     const auto placement = pdf_view_utils::ComputePreviewLayout(
         s.image.original_width * rect.width,
         s.image.original_height * rect.height, top.width, top.height);
-    Blit(ts, ts->screenleft, top.height, placement.x, placement.y,
-         placement.width, placement.height, s.image, cx, cy, cw, ch,
-         !s.viewport.interaction_active);
+    const bool gpu_drawn =
+        !s.loading && !s.suspended &&
+        s.gpu.Upload(ts, s.image.pixels.get(), s.image.PixelCount(),
+                     s.image.width, s.image.height, s.image.width,
+                     s.image_generation) &&
+        fixed_layout_gpu::Queue(ts, s.gpu, {0, 0, 1, 1},
+                                {rect.left, rect.top, rect.width, rect.height},
+                                {(float)placement.x, (float)placement.y,
+                                 (float)placement.width,
+                                 (float)placement.height});
+    if (!gpu_drawn) {
+      ts->SetScreen(ts->screenleft);
+      ts->ClearScreen();
+      Blit(ts, ts->screenleft, top.height, placement.x, placement.y,
+           placement.width, placement.height, s.image, cx, cy, cw, ch,
+           !s.viewport.interaction_active);
+    }
+    ts->SetScreen(ts->screenright);
     s.overview = OverviewLayout(s, bottom.width, bottom.height);
     if (s.preview.pixels && !s.preview_ready) {
       Blit(ts, ts->screenright, bottom.height, s.overview.x, s.overview.y,
@@ -349,9 +383,25 @@ void ReaderController::DrawImageViewer() {
                   s.preview.pixels.get() + (size_t)y * s.preview.width);
       s.preview_ready = true;
     } else if (s.preview.pixels) {
-      Blit(ts, ts->screenright, bottom.height, s.overview.x, s.overview.y,
-           s.overview.width, s.overview.height, s.preview, 0, 0,
-           s.preview.width, s.preview.height, true);
+      if (s.preview_viewport_valid) {
+        fixed_layout_preview_panel::ContentKey content{};
+        content.pixels = s.preview.pixels.get();
+        content.pixel_count = s.preview.PixelCount();
+        content.screen = ts->screenright;
+        content.stride = ts->BufferStride();
+        content.bitmap_width = s.preview.width;
+        content.bitmap_height = s.preview.height;
+        content.screen_width = bottom.width;
+        content.screen_height = bottom.height;
+        content.layout = {s.overview.x, s.overview.y, s.overview.width,
+                          s.overview.height};
+        fixed_layout_preview_panel::RestoreBorder(ts, content,
+                                                  s.preview_viewport);
+      } else {
+        Blit(ts, ts->screenright, bottom.height, s.overview.x, s.overview.y,
+             s.overview.width, s.overview.height, s.preview, 0, 0,
+             s.preview.width, s.preview.height, true);
+      }
     } else {
       Blit(ts, ts->screenright, bottom.height, s.overview.x, s.overview.y,
            s.overview.width, s.overview.height, s.image, 0, 0, s.image.width,
@@ -364,6 +414,15 @@ void ReaderController::DrawImageViewer() {
         s.overview.x + (int)((rect.left + rect.width) * s.overview.width),
         s.overview.y + (int)((rect.top + rect.height) * s.overview.height),
         ts->GetFgColor());
+    const int vx = s.overview.x + (int)(rect.left * s.overview.width);
+    const int vy = s.overview.y + (int)(rect.top * s.overview.height);
+    s.preview_viewport = {
+        vx, vy,
+        s.overview.x + (int)((rect.left + rect.width) * s.overview.width) - vx,
+        s.overview.y + (int)((rect.top + rect.height) * s.overview.height) -
+            vy};
+    s.preview_viewport_valid = s.preview.pixels && s.preview_ready;
+    s.preview_expected_generation = ts->screenright_cache_generation + 1;
   }
   ts->SetScreen(ts->screenright);
   if (redraw_panel) {
