@@ -9,10 +9,15 @@ typedef uint16_t u16;
 
 #include <vector>
 #include <stddef.h>
+#include "formats/common/raster_image_source.h"
 
 class Text;
 
 namespace fixed_layout_blit_utils {
+
+// Generate the same filtered RGB565 preview directly from decoded samples.
+bool ScaleRgb8Preview(const raster_image::Rgb8View &source, int width, int height,
+                      u16 *out);
 
 // Scale into a caller-owned RGB565 surface without Text or screen state.
 void BlitRgb565SurfaceScaledCrop(

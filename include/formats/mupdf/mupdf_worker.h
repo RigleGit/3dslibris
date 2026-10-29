@@ -17,9 +17,9 @@ bool EnsureMuPdfDisplayListForPage(Book::MuPdfState *mupdf_state,
                                    int page_index,
                                    fz_display_list **out_list);
 bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state,
-                                    int page_index);
+                                    int page_index, Text *gpu_text = NULL);
 bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
-                                       int page_index);
+                                       int page_index, Text *gpu_text = NULL);
 void InitMuPdfWorker(Book::MuPdfState *mupdf_state);
 void SignalMuPdfWorkerShutdown(Book::MuPdfState *mupdf_state);
 void ShutdownMuPdfWorker(Book::MuPdfState *mupdf_state);

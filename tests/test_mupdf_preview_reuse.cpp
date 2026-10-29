@@ -1,3 +1,4 @@
+#include "formats/common/fixed_layout_gpu_upload.h"
 #include <cassert>
 #include <cstdio>
 #include <cstddef>
@@ -25,6 +26,8 @@ namespace mupdf_render_policy_utils {
 struct Cache {
   int page = -1, zoom_index = -1, bitmap_width = 0, bitmap_height = 0;
   bool gpu_only = false;
+  uint64_t generation = 0;
+  fixed_layout_gpu::TextureCache gpu;
   float left = 0, top = 0, width = 1, height = 1;
   std::vector<u16> pixels;
   const u16 *PixelData() const { return pixels.data(); }
@@ -63,7 +66,8 @@ const int kPdfPreviewPadding = fixed_layout_preview::kPadding;
 const float kPdfInteractiveScale=1.0f;
 static pdf_view_utils::NormalizedRect requested_viewport={0,0,1,1};
 pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport(const Book::MuPdfState *) { return requested_viewport; }
-bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *, int);
+bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *, int, Text * = nullptr);
+bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *, int, Text * = nullptr);
 bool HasMuPdfInteractiveRenderFailed(const Book::MuPdfState *,int) { return false; }
 float ComputeFitScale(float w,float h,int tw,int th) { return std::min(tw/w,th/h); }
 float ComputeEffectiveMuPdfZoom(app_flow_utils::MuPdfDocumentKind,int z) { return pdf_view_utils::ZoomForIndex(z); }
@@ -76,7 +80,7 @@ void fz_drop_display_list(fz_context *, fz_display_list *p) { assert(!events.emp
 bool BitmapCacheValid(const Cache &c, int p) { return c.page == p && c.bitmap_width>0 && c.bitmap_height>0 && (c.gpu_only || c.pixels.size()==(size_t)c.bitmap_width*c.bitmap_height); }
 float ComputeMuPdfPreviewScale(float, float, int, int) { return 0.2f; }
 bool EstimateMuPdfPageRenderComplexity(fz_context *, fz_document *, int, int *, size_t *) { ++complexity_checks; return true; }
-bool RenderMuPdfBitmap(fz_context *, fz_document *, int p, float, RenderedMuPdfBitmap *bitmap, float *, float *, const void *, fz_display_list *reuse, fz_display_list **out, IStatusReporter *, const char * = nullptr, float=1, float=1, bool=false, size_t=0) {
+bool RenderMuPdfBitmap(fz_context *, fz_document *, int p, float, RenderedMuPdfBitmap *bitmap, float *, float *, const void *, fz_display_list *reuse, fz_display_list **out, IStatusReporter *, const char * = nullptr, float=1, float=1, bool=false, size_t=0, const raster_image::Rgb8Sink * = nullptr) {
   ++renders; events.push_back("render");
   if (fail) return false;
   bitmap->pixels.assign(100,0x1234);

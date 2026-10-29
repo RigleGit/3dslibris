@@ -1,3 +1,4 @@
+#include "formats/common/fixed_layout_gpu_upload.h"
 #include "shared/fixed_layout_perf.h"
 #include "book/book.h"
 #include "formats/cbz/cbz_state.h"
@@ -134,12 +135,13 @@ bool DecodeCbzPageImageWithFallback(const std::vector<unsigned char> &bytes,
                                     int target_width, int target_height,
                                     CbzDecodedPage *decoded,
                                     int *used_zoom_index,
-                                    fz_context **decode_context) {
+                                    fz_context **decode_context,
+                                    const raster_image::Rgb8Sink *sink = NULL) {
   if (!decoded)
     return false;
   for (int try_zoom = preferred_zoom_index; try_zoom >= 0; --try_zoom) {
     if (DecodeCbzPageImageWithContext(bytes, try_zoom, target_width, target_height,
-                                      decoded, decode_context)) {
+                                      decoded, decode_context, sink)) {
       if (used_zoom_index)
         *used_zoom_index = try_zoom;
       return true;
@@ -223,7 +225,7 @@ bool PromoteCbzAdjacentSlotIfMatching(Book::CbzState *cbz_state,
 }
 
 bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
-                           int zoom_index) {
+                           int zoom_index, Text *gpu_text = NULL) {
   if (!cbz_state || page_index < 0 || page_index >= (int)cbz_state->entries.size())
     return false;
   if (cbz_state->failed_page == page_index)
@@ -255,6 +257,12 @@ bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
   fixed_perf::Timer perf_decode(&cbz_state->entries, page_index, zoom_index, "cbz.decode");
   CbzDecodedPage decoded;
   int used_zoom_index = -1;
+  const bool make_preview = !CbzPreviewCacheValid(cbz_state->current_preview, page_index);
+  fixed_layout_gpu::DecodedUpload upload(gpu_text, cbz_state->current_source.generation + 1,
+      make_preview ? cbz_state->target_bottom_width - 2 * fixed_layout_preview::kPadding : 0,
+      make_preview ? cbz_state->target_bottom_height - 2 * fixed_layout_preview::kPadding : 0,
+      &cbz_state->current_source.gpu);
+  const auto sink = upload.Sink();
   // At low zoom, a JPEG decoded close to the displayed size makes fine comic
   // text blurry. Keep the synchronous source at least at the 2x-fit preset;
   // the existing fallback still permits smaller decodes if one fails.
@@ -265,7 +273,9 @@ bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
           bytes, decode_zoom_index, cbz_state->target_top_width,
           cbz_state->target_top_height, &decoded,
                                       &used_zoom_index,
-                                      &cbz_state->decode_context)) {
+                                      &cbz_state->decode_context,
+                                      gpu_text && debug_runtime::ForceSynchronousCbzDecode()
+                                          ? &sink : NULL)) {
     perf_decode.End(0, bytes.size());
     cbz_state->last_error = GetLastCbzDecodeError();
     cbz_state->failed_page = page_index;
@@ -287,11 +297,21 @@ bool EnsureCbzSourceLoaded(Book::CbzState *cbz_state, int page_index,
   cbz_state->current_source.bitmap.pixels.swap(decoded.source_bitmap.pixels);
   cbz_state->page_width = (float)std::max(1, decoded.original_width);
   cbz_state->page_height = (float)std::max(1, decoded.original_height);
-  cbz_state->gpu_draw_failed = false;
+  cbz_state->current_source.gpu = std::move(upload.texture);
+  cbz_state->gpu_draw_failed = upload.attempted && !cbz_state->current_source.gpu.Valid();
+  if (!upload.preview.empty()) {
+    auto &preview = cbz_state->current_preview;
+    preview.page = page_index;
+    preview.zoom_index = -1;
+    preview.bitmap_width = upload.preview_width;
+    preview.bitmap_height = upload.preview_height;
+    preview.pixels.swap(upload.preview);
+  }
   return true;
 }
 
-bool EnsureCbzPreviewCache(Book::CbzState *cbz_state, int page_index) {
+bool EnsureCbzPreviewCache(Book::CbzState *cbz_state, int page_index,
+                           Text *gpu_text = NULL) {
   if (!cbz_state)
     return false;
   PromoteCbzAdjacentSlotIfMatching(cbz_state, page_index);
@@ -302,9 +322,11 @@ bool EnsureCbzPreviewCache(Book::CbzState *cbz_state, int page_index) {
   // the requested zoom so the preview and interactive view share the source.
   const int source_zoom = debug_runtime::ForceSynchronousCbzDecode()
                               ? cbz_state->viewport.zoom_index : 0;
-  if (!EnsureCbzSourceLoaded(cbz_state, page_index, source_zoom))
+  if (!EnsureCbzSourceLoaded(cbz_state, page_index, source_zoom, gpu_text))
     return false;
 
+  if (CbzPreviewCacheValid(cbz_state->current_preview, page_index))
+    return true;
   const pdf_view_utils::PreviewLayout preview_layout =
       pdf_view_utils::ComputePreviewLayout(
           cbz_state->page_width, cbz_state->page_height,
@@ -330,7 +352,8 @@ bool EnsureCbzPreviewCache(Book::CbzState *cbz_state, int page_index) {
   return true;
 }
 
-bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
+bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index,
+                               Text *gpu_text = NULL) {
   if (!cbz_state)
     return false;
   PromoteCbzAdjacentSlotIfMatching(cbz_state, page_index);
@@ -338,7 +361,7 @@ bool EnsureCbzInteractiveCache(Book::CbzState *cbz_state, int page_index) {
                           cbz_state->viewport.zoom_index)) {
     return true;
   }
-  if (!EnsureCbzSourceLoaded(cbz_state, page_index, cbz_state->viewport.zoom_index))
+  if (!EnsureCbzSourceLoaded(cbz_state, page_index, cbz_state->viewport.zoom_index, gpu_text))
     return false;
 
   // Draw the decoded source directly, including an accepted lower-resolution
@@ -556,7 +579,7 @@ void Book::DrawCurrentCbzView(Text *ts) {
 
   if (!CbzPreviewCacheValid(cbz_state->current_preview, page_index))
     cbz_state->preview_panel.valid = false;
-  if (!EnsureCbzPreviewCache(cbz_state, page_index)) {
+  if (!EnsureCbzPreviewCache(cbz_state, page_index, ts)) {
     cbz_state->preview_panel.valid = false;
     IStatusReporter *reporter = GetStatusReporter();
     if (reporter && cbz_state->failed_page == page_index &&
@@ -586,7 +609,7 @@ void Book::DrawCurrentCbzView(Text *ts) {
   if (debug_runtime::ForceSynchronousCbzDecode() && !use_source &&
       !CbzBitmapCacheValid(cbz_state->current_interactive, page_index,
                            cbz_state->viewport.zoom_index)) {
-    EnsureCbzInteractiveCache(cbz_state, page_index);
+    EnsureCbzInteractiveCache(cbz_state, page_index, ts);
     use_source = CbzSourceValid(cbz_state->current_source, page_index,
                                 cbz_state->viewport.zoom_index,
                                 cbz_state->target_top_width,

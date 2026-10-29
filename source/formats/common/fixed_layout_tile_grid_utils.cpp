@@ -102,14 +102,30 @@ size_t MortonOffset(unsigned x, unsigned y, unsigned tex_width) {
                        ((y & 2) << 2) | ((x & 4) << 2) | ((y & 4) << 3);
   return ((size_t)(y >> 3) * (tex_width >> 3) + (x >> 3)) * 64 + low;
 }
-bool SwizzleChunk(const Tile &t, const uint16_t *pixels, size_t pixel_count,
-                  int stride, int width, int height, size_t first, size_t count,
-                  uint16_t *out) {
+namespace {
+struct Rgb565Reader {
+  const uint16_t *pixels;
+  int stride;
+  const uint16_t *Row(int y) const { return pixels + (size_t)y * stride; }
+  static uint16_t Pixel(const uint16_t *row, int x) { return row[x]; }
+};
+template <int Components> struct Rgb8Reader {
+  const unsigned char *pixels;
+  int stride;
+  const unsigned char *Row(int y) const { return pixels + (size_t)y * stride; }
+  static uint16_t Pixel(const unsigned char *row, int x) {
+    const unsigned char *p = row + x * Components;
+    const unsigned r = p[0], g = Components < 3 ? r : p[1],
+                   b = Components < 3 ? r : p[2];
+    return (uint16_t)((r >> 3 << 11) | (g >> 2 << 5) | (b >> 3));
+  }
+};
+template <typename Reader>
+bool Swizzle(const Tile &t, const Reader &reader, int width, int height,
+             size_t first, size_t count, uint16_t *out) {
   const size_t total = (size_t)t.tex_width * t.tex_height;
-  if (!pixels || !out || width <= 0 || height <= 0 || stride < width ||
-      t.tex_width < 8 || t.tex_height < 8 || t.width <= 0 || t.height <= 0 ||
-      pixel_count < (size_t)(height - 1) * stride + width || first > total ||
-      count > total - first)
+  if (!out || t.tex_width < 8 || t.tex_height < 8 || t.width <= 0 ||
+      t.height <= 0 || first > total || count > total - first)
     return false;
   const unsigned blocks_per_row = (unsigned)t.tex_width >> 3;
   unsigned row_shift = 0;
@@ -141,19 +157,19 @@ bool SwizzleChunk(const Tile &t, const uint16_t *pixels, size_t pixel_count,
           columns[c] = std::max(0, std::min(last_x, sx + c));
       for (int r = 0; r < 8; ++r) {
         const int sy = std::max(0, std::min(last_y, t.y + y + r - 1));
-        const uint16_t *row = pixels + (size_t)sy * stride;
+        const auto *row = reader.Row(sy);
         uint16_t *d = dst + row_offsets[r];
         // Read each eight-pixel source row consecutively. Its Morton writes
         // stay in one 128-byte block, without per-texel coordinate decoding.
-        const uint16_t *p = interior ? row + sx : nullptr;
-        d[0] = p ? p[0] : row[columns[0]];
-        d[1] = p ? p[1] : row[columns[1]];
-        d[4] = p ? p[2] : row[columns[2]];
-        d[5] = p ? p[3] : row[columns[3]];
-        d[16] = p ? p[4] : row[columns[4]];
-        d[17] = p ? p[5] : row[columns[5]];
-        d[20] = p ? p[6] : row[columns[6]];
-        d[21] = p ? p[7] : row[columns[7]];
+        const int *c = columns;
+        d[0] = reader.Pixel(row, interior ? sx : c[0]);
+        d[1] = reader.Pixel(row, interior ? sx + 1 : c[1]);
+        d[4] = reader.Pixel(row, interior ? sx + 2 : c[2]);
+        d[5] = reader.Pixel(row, interior ? sx + 3 : c[3]);
+        d[16] = reader.Pixel(row, interior ? sx + 4 : c[4]);
+        d[17] = reader.Pixel(row, interior ? sx + 5 : c[5]);
+        d[20] = reader.Pixel(row, interior ? sx + 6 : c[6]);
+        d[21] = reader.Pixel(row, interior ? sx + 7 : c[7]);
       }
     }
     if (dst == partial)
@@ -161,6 +177,35 @@ bool SwizzleChunk(const Tile &t, const uint16_t *pixels, size_t pixel_count,
     index += n;
   }
   return true;
+}
+} // namespace
+bool SwizzleChunk(const Tile &t, const uint16_t *pixels, size_t pixel_count,
+                  int stride, int width, int height, size_t first, size_t count,
+                  uint16_t *out) {
+  if (!pixels || width <= 0 || height <= 0 || stride < width ||
+      pixel_count < (size_t)(height - 1) * stride + width)
+    return false;
+  return Swizzle(t, Rgb565Reader{pixels, stride}, width, height, first, count, out);
+}
+bool SwizzleRgb8Chunk(const Tile &t, const raster_image::Rgb8View &s,
+                      size_t first, size_t count, uint16_t *out) {
+  if (!s.Valid())
+    return false;
+  switch (s.components) {
+  case 1:
+    return Swizzle(t, Rgb8Reader<1>{s.samples, s.stride}, s.width, s.height,
+                   first, count, out);
+  case 2:
+    return Swizzle(t, Rgb8Reader<2>{s.samples, s.stride}, s.width, s.height,
+                   first, count, out);
+  case 3:
+    return Swizzle(t, Rgb8Reader<3>{s.samples, s.stride}, s.width, s.height,
+                   first, count, out);
+  case 4:
+    return Swizzle(t, Rgb8Reader<4>{s.samples, s.stride}, s.width, s.height,
+                   first, count, out);
+  }
+  return false;
 }
 bool VisibleQuads(const std::vector<Tile> &tiles, int width, int height,
                   const Rect &source, const Rect &vp, const Rect &dst,

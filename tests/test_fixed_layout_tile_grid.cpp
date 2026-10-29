@@ -1,4 +1,6 @@
 #include "formats/common/fixed_layout_tile_grid_utils.h"
+#include "formats/common/fixed_layout_blit_utils.h"
+#include "formats/common/raster_image_source.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -76,6 +78,43 @@ int main() {
     for (unsigned x = 0; x < 64; ++x)
       assert(padded[MortonOffset(x, y, 64)] ==
              (x >= 56 || y >= 24 ? 0 : 0x1234));
+  // Fusing the pixmap conversion must preserve the old RGB565 tile bytes and
+  // filtered preview exactly, including gray+alpha and padded source strides.
+  for (int components : {1, 2, 3, 4}) {
+    const int w = 53, h = 21, stride = w * components + 7;
+    std::vector<unsigned char> rgb((size_t)stride * h, 0xcd);
+    std::vector<uint16_t> converted(w * h);
+    for (int y = 0; y < h; ++y)
+      for (int x = 0; x < w; ++x) {
+        unsigned char *p = rgb.data() + y * stride + x * components;
+        p[0] = (x * 31 + y * 7) & 255;
+        if (components >= 3) { p[1] = (y * 19) & 255; p[2] = (x * 3) & 255; }
+        const unsigned r = p[0], g = components < 3 ? r : p[1],
+                       b = components < 3 ? r : p[2];
+        converted[y * w + x] = (r >> 3 << 11) | (g >> 2 << 5) | (b >> 3);
+      }
+    const raster_image::Rgb8View source = {
+        rgb.data(), rgb.size(), w, h, stride, components};
+    std::vector<uint16_t> tiled(64 * 32), expected(64 * 32);
+    assert(SwizzleChunk(tiles[0], converted.data(), converted.size(), w, w, h,
+                        0, expected.size(), expected.data()));
+    for (size_t first = 0; first < tiled.size(); first += 73) {
+      const size_t n = std::min((size_t)73, tiled.size() - first);
+      assert(SwizzleRgb8Chunk(tiles[0], source, first, n, tiled.data() + first));
+    }
+    assert(tiled == expected);
+    std::vector<uint16_t> preview(7 * 5), old_preview(7 * 5);
+    fixed_layout_blit_utils::BlitRgb565SurfaceScaledCrop(
+        old_preview.data(), 7, 7, 5, 0, 0, 7, 5, converted.data(), converted.size(),
+        w, h, 0, 0, w, h, true);
+    assert(fixed_layout_blit_utils::ScaleRgb8Preview(source, 7, 5, preview.data()));
+    assert(preview == old_preview);
+    auto invalid = source;
+    invalid.byte_count = 1;
+    assert(!SwizzleRgb8Chunk(tiles[0], invalid, 0, 64, tiled.data()));
+    invalid = source; invalid.stride = w * components - 1;
+    assert(!fixed_layout_blit_utils::ScaleRgb8Preview(invalid, 7, 5, preview.data()));
+  }
   assert(BuildGrid(1800, 1800, &tiles, &bytes));
   Rect source = {0, 0, 1, 1}, viewport = {0.4f, 0.4f, 0.3f, 0.3f};
   Rect dst = {7, 11, 237, 391};

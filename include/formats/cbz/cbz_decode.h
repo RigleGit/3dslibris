@@ -3,6 +3,7 @@
 #include "formats/cbz/cbz_types.h"
 
 #include <vector>
+#include "formats/common/raster_image_source.h"
 
 struct fz_context;
 
@@ -24,7 +25,8 @@ bool DecodeCbzPageImage(const std::vector<unsigned char> &bytes,
 bool DecodeCbzPageImageWithContext(const std::vector<unsigned char> &bytes,
                                   int max_zoom_index, int target_width,
                                   int target_height, CbzDecodedPage *out,
-                                  fz_context **context);
+                                  fz_context **context,
+                                  const raster_image::Rgb8Sink *sink = NULL);
 void ResetCbzDecodeContext(fz_context **context);
 bool ScaleCbzBitmap(const CbzBitmap &src, int dst_width, int dst_height,
                     bool high_quality, CbzBitmap *out);

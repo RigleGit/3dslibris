@@ -9,6 +9,6 @@ build_test test_fixed_layout_gpu -- -D__3DS__ -I"$TASK_TMP" -I"$ROOT/tests/gpu_s
   "$ROOT/tests/test_fixed_layout_gpu.cpp" \
   "$ROOT/source/formats/common/fixed_layout_gpu_renderer.cpp" \
   "$ROOT/source/formats/common/fixed_layout_tile_grid_utils.cpp"
-for scenario in flush upload low_memory fragmented frame_failure failure resize; do
+for scenario in flush upload rgb_upload low_memory fragmented frame_failure failure resize; do
   "$TEST_OUTDIR/test_fixed_layout_gpu" "$scenario"
 done

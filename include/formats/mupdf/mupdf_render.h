@@ -21,7 +21,8 @@ bool RenderMuPdfBitmap(
     IStatusReporter *reporter = NULL, const char *perf_stage = NULL,
     float density_x = 1.0f, float density_y = 1.0f,
     bool optional_output = false,
-    size_t density_pixel_limit = 1024u * 1024u);
+    size_t density_pixel_limit = 1024u * 1024u,
+    const raster_image::Rgb8Sink *sink = NULL);
 void AddMuPdfOutlineEntries(Book *book, fz_context *ctx, fz_document *doc,
                             const fz_outline *entry, u8 level);
 void PopulateMuPdfMetadata(Book *book, fz_context *ctx, fz_document *doc);

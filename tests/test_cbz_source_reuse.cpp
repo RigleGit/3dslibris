@@ -1,3 +1,4 @@
+#include "formats/common/fixed_layout_gpu_upload.h"
 #include "formats/cbz/cbz_decode.h"
 #include "formats/cbz/cbz_state.h"
 #include "formats/common/format_limits.h"
@@ -25,7 +26,7 @@ bool CbzArchiveReader::Read(const std::string &, const CbzPageEntry &, std::vect
 }
 const char *GetLastCbzArchiveError() { return "read failed"; }
 const char *GetLastCbzDecodeError() { return "decode failed"; }
-bool DecodeCbzPageImageWithContext(const std::vector<unsigned char> &, int z, int, int, CbzDecodedPage *d, fz_context **) {
+bool DecodeCbzPageImageWithContext(const std::vector<unsigned char> &, int z, int, int, CbzDecodedPage *d, fz_context **, const raster_image::Rgb8Sink *) {
   ++decodes; attempted_zooms.push_back(z);
   if (z > max_decode_zoom) return false;
   d->original_width = 600; d->original_height = 900;

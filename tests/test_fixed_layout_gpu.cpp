@@ -35,14 +35,24 @@ int main(int argc, char **argv) {
       gpu.linear_free = 1024u * 1024u + 64u * 1024u;
     if (mode == "fragmented")
       gpu.max_linear_block = 64u * 1024u;
-    const bool ok = cache.Upload(app.ts.get(), pixels.data(), pixels.size(),
-                                 width, 1000, width, 1);
+    std::vector<unsigned char> rgb;
+    if (mode == "rgb_upload") {
+      rgb.resize((size_t)width * 1000 * 3);
+      for (size_t i = 0; i < pixels.size(); ++i) {
+        rgb[3*i] = (pixels[i] >> 11) << 3;
+        rgb[3*i+1] = ((pixels[i] >> 5) & 63) << 2;
+        rgb[3*i+2] = (pixels[i] & 31) << 3;
+      }
+    }
+    const bool ok = mode == "rgb_upload"
+        ? cache.UploadRgb(app.ts.get(), {rgb.data(), rgb.size(), width, 1000, width*3, 3}, 1)
+        : cache.Upload(app.ts.get(), pixels.data(), pixels.size(), width, 1000, width, 1);
     if (mode == "failure") {
       assert(!ok && gpu.live_textures == 0 && gpu.linear_blocks.empty());
     } else {
       assert(ok);
-      if (mode == "upload" || mode == "low_memory" || mode == "fragmented") {
-        const size_t limit = mode == "upload" ? 8 : 32;
+      if (mode == "upload" || mode == "rgb_upload" || mode == "low_memory" || mode == "fragmented") {
+        const size_t limit = (mode == "upload" || mode == "rgb_upload") ? 8 : 32;
         assert(gpu.transfers.size() <= limit &&
                "bounded staging must group adjacent transfers");
         if (mode == "low_memory" || mode == "fragmented")

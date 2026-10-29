@@ -1,3 +1,4 @@
+#include "formats/common/fixed_layout_gpu_upload.h"
 #include "shared/fixed_layout_perf.h"
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
@@ -165,7 +166,8 @@ bool EnsureMuPdfDisplayListForPage(Book::MuPdfState *mupdf_state,
   return true;
 }
 
-bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_index) {
+bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_index,
+                                    Text *gpu_text) {
   if (!mupdf_state)
     return false;
   DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
@@ -218,7 +220,9 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
   // Reuse a complete bounded top raster at any zoom. A cropped high-zoom tile
   // still needs the independent overview render below.
   if (debug_runtime::ForceSynchronousMuPdfRender() &&
-      EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index)) {
+      EnsureCurrentMuPdfInteractiveTile(mupdf_state, page_index, gpu_text)) {
+    if (BitmapCacheValid(mupdf_state->current_preview, page_index))
+      return true;
     const Book::MuPdfState::BitmapCache &tile =
         mupdf_state->current_interactive_tile;
     if (tile.PixelCount() > 0 && tile.PixelData() && tile.left == 0.0f &&
@@ -280,7 +284,7 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
 }
 
 bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
-                                         int page_index) {
+                                         int page_index, Text *gpu_text) {
   if (!mupdf_state)
     return false;
   PromoteMuPdfAdjacentSlotIfMatching(mupdf_state, page_index);
@@ -365,24 +369,35 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
                region.width != viewport.width || region.height != viewport.height;
   }
   const pdf_view_utils::NormalizedRect *crop = visible_tile ? &region : NULL;
+  const bool make_preview = region.left == 0 && region.top == 0 &&
+      region.width == 1 && region.height == 1 &&
+      !BitmapCacheValid(mupdf_state->current_preview, page_index);
+  fixed_layout_gpu::DecodedUpload upload(gpu_text, cache.generation + 1,
+      make_preview ? mupdf_state->target_bottom_width - 2 * kPdfPreviewPadding : 0,
+      make_preview ? mupdf_state->target_bottom_height - 2 * kPdfPreviewPadding : 0);
+  const auto sink = upload.Sink();
+  const auto *gpu_sink = visible_tile && gpu_text && !mupdf_state->gpu_draw_failed
+      ? &sink : nullptr;
   bool render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
                        render_scale, &rendered, &page_width, &page_height, crop,
                        display_list, display_list ? NULL : &new_list,
                        mupdf_state->reporter, NULL,
-                       density_x, density_y, expanded, raster_pixel_limit);
+                       density_x, density_y, expanded, raster_pixel_limit, gpu_sink);
   if (!render_ok && expanded) {
     // The border is optional. Retry just the visible area before reducing density.
     region = viewport;
+    upload.preview_box_width = upload.preview_box_height = 0;
     render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
         render_scale, &rendered, &page_width, &page_height, &region, display_list,
         display_list ? NULL : &new_list, mupdf_state->reporter, NULL,
-        density_x, density_y);
+        density_x, density_y, false, raster_pixel_limit, gpu_sink);
   }
   if (!render_ok && mupdf_state->wide_top_screen) {
     // Allocation failure at native density must still leave the book readable.
     render_ok = RenderMuPdfBitmap(mupdf_state->ctx, mupdf_state->doc, page_index,
         render_scale, &rendered, &page_width, &page_height, crop, display_list,
-        display_list ? NULL : &new_list, mupdf_state->reporter);
+        display_list ? NULL : &new_list, mupdf_state->reporter, NULL,
+        1, 1, false, raster_pixel_limit, gpu_sink);
   }
   if (!render_ok) {
     mupdf_state->interactive_render_failed_page = page_index;
@@ -400,6 +415,18 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   StoreBitmapCache(&mupdf_state->current_interactive_tile, page_index,
                    mupdf_state->viewport.zoom_index, region.left, region.top,
                    region.width, region.height, &rendered);
+  if (upload.texture.Valid())
+    cache.gpu = std::move(upload.texture);
+  else if (upload.attempted)
+    mupdf_state->gpu_draw_failed = true;
+  if (!upload.preview.empty()) {
+    RenderedMuPdfBitmap preview;
+    preview.width = upload.preview_width;
+    preview.height = upload.preview_height;
+    preview.pixels.swap(upload.preview);
+    StoreBitmapCache(&mupdf_state->current_preview, page_index, -1,
+                     0, 0, 1, 1, &preview);
+  }
   mupdf_state->page_width = page_width;
   mupdf_state->page_height = page_height;
   if (new_list && !display_list) {

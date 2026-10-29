@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include "formats/common/raster_image_source.h"
 
 namespace fixed_layout_tiles {
 struct Rect {
@@ -24,6 +25,8 @@ size_t MortonOffset(unsigned x, unsigned y, unsigned tex_width);
 bool SwizzleChunk(const Tile &tile, const uint16_t *pixels, size_t pixel_count,
                   int stride, int width, int height, size_t first, size_t count,
                   uint16_t *out);
+bool SwizzleRgb8Chunk(const Tile &tile, const raster_image::Rgb8View &source,
+                      size_t first, size_t count, uint16_t *out);
 bool VisibleQuads(const std::vector<Tile> &tiles, int width, int height,
                   const Rect &source, const Rect &viewport, const Rect &dest,
                   std::vector<Quad> *quads);

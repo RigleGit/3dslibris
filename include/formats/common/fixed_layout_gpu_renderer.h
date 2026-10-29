@@ -17,6 +17,7 @@ public:
   TextureCache &operator=(TextureCache &&other);
   bool Upload(Text *text, const uint16_t *pixels, size_t count, int width,
               int height, int stride, uint64_t generation);
+  bool UploadRgb(Text *text, const raster_image::Rgb8View &source, uint64_t generation);
   void Reset();
 #else
   ~TextureCache() {}
@@ -25,6 +26,7 @@ public:
   bool Upload(Text *, const uint16_t *, size_t, int, int, int, uint64_t) {
     return false;
   }
+  bool UploadRgb(Text *, const raster_image::Rgb8View &, uint64_t) { return false; }
   void Reset() {
     impl_ = nullptr;
     attempted_ = false;
@@ -38,6 +40,10 @@ public:
   }
 
 private:
+#ifdef __3DS__
+  bool UploadImpl(Text *, const uint16_t *, size_t, int, int, int, uint64_t,
+                  const raster_image::Rgb8View *);
+#endif
   friend struct Renderer;
   struct Impl;
   Impl *impl_;

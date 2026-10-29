@@ -206,7 +206,8 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
                        fz_display_list **out_list,
                        IStatusReporter *reporter, const char *perf_stage,
                        float density_x, float density_y, bool optional_output,
-                       size_t density_pixel_limit) {
+                       size_t density_pixel_limit,
+                       const raster_image::Rgb8Sink *sink) {
   if (!ctx || !doc || !out || scale <= 0.0f)
     return false;
   DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
@@ -347,39 +348,48 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     out->width = pix_w;
     out->height = pix_h;
     const size_t output_pixels = (size_t)pix_w * (size_t)pix_h;
-    if (density_x > 1.0f || density_y > 1.0f || optional_output) {
-      out->native_pixels.reset(new (std::nothrow) u16[output_pixels]);
-      if (!out->native_pixels)
-        fz_throw(ctx, FZ_ERROR_SYSTEM, "optional RGB565 allocation failed");
+    const raster_image::Rgb8View source = {
+        samples, (size_t)stride * pix_h, pix_w, pix_h, stride, comps};
+    const bool uploaded = sink && sink->consume &&
+        sink->consume(sink->user, source, width, height);
+    if (uploaded) {
+      std::vector<u16>().swap(out->pixels);
+      out->native_pixels.reset();
     } else {
-      out->pixels.resize(output_pixels);
-    }
-    DBG_LOGF_CAT(
-        reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
-        "MUPDF render: convert-begin page=%d pix=%dx%d comps=%d stride=%d",
-        page_index, pix_w, pix_h, comps, stride);
-    u16 *dst = out->native_pixels ? out->native_pixels.get() : out->pixels.data();
-    if (comps == 1) {
-      // Fast path: grayscale → RGB565 via lookup table.
-      for (int y = 0; y < pix_h; y++) {
-        const unsigned char *src = samples + (size_t)y * (size_t)stride;
-        for (int x = 0; x < pix_w; x++)
-          *dst++ = g_gray_to_rgb565[*src++];
+      if (density_x > 1.0f || density_y > 1.0f || optional_output) {
+        out->native_pixels.reset(new (std::nothrow) u16[output_pixels]);
+        if (!out->native_pixels)
+          fz_throw(ctx, FZ_ERROR_SYSTEM, "optional RGB565 allocation failed");
+      } else {
+        out->pixels.resize(output_pixels);
       }
-    } else {
-      // Fallback: RGB → RGB565.
-      for (int y = 0; y < pix_h; y++) {
-        const unsigned char *src = samples + (size_t)y * (size_t)stride;
-        for (int x = 0; x < pix_w; x++) {
-          *dst++ = RGB565FromRgb8(src[0], src[1], src[2]);
-          src += comps;
+      DBG_LOGF_CAT(
+          reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
+          "MUPDF render: convert-begin page=%d pix=%dx%d comps=%d stride=%d",
+          page_index, pix_w, pix_h, comps, stride);
+      u16 *dst = out->native_pixels ? out->native_pixels.get() : out->pixels.data();
+      if (comps == 1) {
+        // Fast path: grayscale → RGB565 via lookup table.
+        for (int y = 0; y < pix_h; y++) {
+          const unsigned char *src = samples + (size_t)y * (size_t)stride;
+          for (int x = 0; x < pix_w; x++)
+            *dst++ = g_gray_to_rgb565[*src++];
+        }
+      } else {
+        // Fallback: RGB → RGB565.
+        for (int y = 0; y < pix_h; y++) {
+          const unsigned char *src = samples + (size_t)y * (size_t)stride;
+          for (int x = 0; x < pix_w; x++) {
+            *dst++ = RGB565FromRgb8(src[0], src[1], src[2]);
+            src += comps;
+          }
         }
       }
     }
     DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                  "MUPDF render: convert-done page=%d pix=%dx%d", page_index,
                  pix_w, pix_h);
-    fixed_perf::Record(doc, page_index, -1, "pdf.rgb565", fixed_perf::Now()-perf_phase, 1, out->PixelCount()*sizeof(u16), pix_w, pix_h);
+    fixed_perf::Record(doc, page_index, -1, uploaded ? "pdf.gpu_source" : "pdf.rgb565", fixed_perf::Now()-perf_phase, 1, out->PixelCount()*sizeof(u16), pix_w, pix_h);
     ok = true;
   }
   fz_always(ctx) {

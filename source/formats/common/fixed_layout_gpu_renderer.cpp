@@ -267,6 +267,16 @@ void TextureCache::Reset() {
 bool TextureCache::Upload(Text *t, const uint16_t *pixels, size_t count,
                           int width, int height, int stride,
                           uint64_t generation) {
+  return UploadImpl(t, pixels, count, width, height, stride, generation, nullptr);
+}
+bool TextureCache::UploadRgb(Text *t, const raster_image::Rgb8View &source,
+                             uint64_t generation) {
+  return UploadImpl(t, nullptr, 0, source.width, source.height, 0, generation, &source);
+}
+bool TextureCache::UploadImpl(Text *t, const uint16_t *pixels, size_t count,
+                              int width, int height, int stride,
+                              uint64_t generation,
+                              const raster_image::Rgb8View *rgb) {
   if (Matches(generation))
     return true;
   if (attempted_ && generation_ == generation)
@@ -274,7 +284,7 @@ bool TextureCache::Upload(Text *t, const uint16_t *pixels, size_t count,
   Reset();
   attempted_ = true;
   generation_ = generation;
-  if (!pixels || !renderer.Ensure(t))
+  if ((rgb ? !rgb->Valid() : !pixels) || !renderer.Ensure(t))
     return false;
   Impl *candidate = new (std::nothrow) Impl;
   if (!candidate)
@@ -325,8 +335,9 @@ bool TextureCache::Upload(Text *t, const uint16_t *pixels, size_t count,
     for (size_t first = 0; ok && first < size / 2; first += chunk_pixels) {
       const size_t n = std::min(chunk_pixels, size / 2 - first);
       u16 *dst = vram ? staging : (u16 *)tex.data + first;
-      ok = fixed_layout_tiles::SwizzleChunk(tile, pixels, count, stride, width,
-                                            height, first, n, dst);
+      ok = rgb ? fixed_layout_tiles::SwizzleRgb8Chunk(tile, *rgb, first, n, dst)
+               : fixed_layout_tiles::SwizzleChunk(tile, pixels, count, stride,
+                                                   width, height, first, n, dst);
       if (ok && vram) {
         GSPGPU_FlushDataCache(staging, n * 2);
         C3D_SyncTextureCopy((u32 *)staging, 0, (u32 *)((u16 *)tex.data + first),
