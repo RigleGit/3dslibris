@@ -1,4 +1,5 @@
 #include "formats/common/fixed_layout_gpu_renderer.h"
+#include "formats/common/fixed_layout_gpu_upload.h"
 #include "shared/fixed_layout_perf.h"
 #include "ui/text.h"
 #include <memory>
@@ -23,6 +24,29 @@ using namespace fixed_layout_gpu;
 int main(int argc, char **argv) {
   const std::string mode = argc > 1 ? argv[1] : "reset";
   App app;
+  if (mode == "decoded_retry") {
+    std::vector<unsigned char> samples(2048u * 2048u * 3u, 90);
+    DecodedUpload upload(app.ts.get(), 7, 85, 115);
+    const auto sink = upload.Sink();
+    const raster_image::Rgb8View large = {
+        samples.data(), samples.size(), 2048, 2048, 2048*3, 3};
+    assert(!sink.consume(sink.user, large, 240, 400));
+    // Preview aspect follows the document, not native/Wide pixel density.
+    assert(upload.preview_width == 69 && upload.preview_height == 115);
+    assert(upload.preview[0] == ((11 << 11) | (22 << 5) | 11));
+    // A raster retry can reduce coverage/density within the same logical
+    // generation. A failed large upload must not block that smaller attempt.
+    upload.preview_box_width = upload.preview_box_height = 0;
+    const raster_image::Rgb8View small = {
+        samples.data(), samples.size(), 8, 8, 8*3, 3};
+    assert(sink.consume(sink.user, small, 240, 400));
+    assert(upload.texture.Matches(7));
+    upload.texture.Reset();
+    Shutdown(app.ts.get());
+    assert(gpu.live_textures == 0 && gpu.linear_blocks.empty());
+    puts("GPU smaller-raster upload retry and document-aspect preview passed");
+    return 0;
+  }
   {
     TextureCache cache;
     const int width = mode == "failure" ? 1200 : 960;

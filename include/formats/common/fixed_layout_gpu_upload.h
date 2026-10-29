@@ -42,6 +42,11 @@ struct DecodedUpload {
     // decoder's live samples available for the normal CPU conversion.
     if (out.replaced)
       out.replaced->Reset();
+    // A second consume is a new decoded raster (for example the smaller
+    // visible-area retry after an expanded allocation fails). Keep the draw
+    // cache's per-frame failure latch, but allow this bounded decoder retry.
+    if (out.attempted)
+      out.texture.Reset();
     out.attempted = true;
     return out.texture.UploadRgb(out.text, source, out.generation);
   }
