@@ -163,6 +163,8 @@ int main() {
         test::ExpectTrue("library search appears on the global general page",
             HasButton(page, PREFS_BUTTON_SEARCH) ==
             (page.page == 0));
+      test::ExpectTrue("preload belongs only to global GENERAL",
+                        HasButton(page, PREFS_BUTTON_PRELOAD) == (page.page == 0));
       test::ExpectFalse("general preferences exclude bookmarks",
                         HasButton(page, PREFS_BUTTON_BOOKMARKS));
       test::ExpectFalse("general preferences exclude book information",
@@ -197,6 +199,8 @@ int main() {
         test::ExpectTrue("search only appears for reflow book actions",
             HasButton(page, PREFS_BUTTON_SEARCH) ==
             (page.from_book && !page.fixed_layout && page.page == 0));
+      test::ExpectFalse("preload excluded from book preferences",
+                        HasButton(page, PREFS_BUTTON_PRELOAD));
       test::ExpectTrue("book navigation remains available",
                        HasButton(page, PREFS_BUTTON_BOOK_INFO) &&
                        HasButton(page, PREFS_BUTTON_INDEX) &&

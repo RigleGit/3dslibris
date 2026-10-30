@@ -82,6 +82,7 @@ public:
   void RunBookmarksMenuFrame(const FrameInput &) { std::abort(); }
   void RunChaptersMenuFrame(const FrameInput &) { std::abort(); }
   void RunImageViewerFrame(const FrameInput &) { std::abort(); }
+  void RunLibraryPreloadFrame(const FrameInput &) { std::abort(); }
   void RunLibrarySearchFrame(const FrameInput &) { std::abort(); }
   void RunSearchFrame(const FrameInput &) { std::abort(); }
   void RunBookInfoFrame(const FrameInput &) { std::abort(); }

@@ -17,6 +17,8 @@ class Book;
 class Text;
 class Button;
 struct LibrarySearchSession;
+struct LibraryPreloadSession;
+namespace library_preload { struct Result; }
 namespace library_walk { struct Entry; }
 namespace library_search { struct MetadataValue; enum class MetadataStatus; }
 
@@ -53,6 +55,9 @@ public:
   size_t PauseBrowserJobs();
   bool IsInsideFolder() const;
   Book *RestoreSavedBookSelection(const char *folder, const char *filename);
+  void OpenLibraryPreload();
+  void RunLibraryPreloadFrame(const FrameInput &input);
+  void ResumeLibraryPreload();
   void OpenLibrarySearch();
   void RunLibrarySearchFrame(const FrameInput &input);
   void ResumeLibrarySearch();
@@ -71,6 +76,14 @@ private:
   bool root_cached_;
   bool browser_assets_pending_;
   std::unique_ptr<LibrarySearchSession> search_;
+  std::unique_ptr<LibraryPreloadSession> preload_;
+  void DrawLibraryPreload();
+  void CloseLibraryPreload();
+  Book *PreloadBook(const library_walk::Entry &);
+  static bool PreloadRoot(void *, size_t, library_walk::Entry *);
+  static bool PreloadCancelled(void *);
+  static library_preload::Result PreloadMetadata(void *, const library_walk::Entry &);
+  static library_preload::Result PreloadCover(void *, const library_walk::Entry &);
   void DrawLibrarySearch();
   void EditLibrarySearch();
   void StartLibrarySearch();

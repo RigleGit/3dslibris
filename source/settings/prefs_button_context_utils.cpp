@@ -28,6 +28,7 @@ static const int kGeneralPrefsButtons[] = {
     PREFS_BUTTON_LIBRARY_VIEW,
     PREFS_BUTTON_LIBRARY_SORT,
     PREFS_BUTTON_SEARCH,
+    PREFS_BUTTON_PRELOAD,
 };
 
 static const int kGeneralExtraButtons[] = {

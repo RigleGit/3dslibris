@@ -203,6 +203,8 @@ public:
   void OpenSearch();
   void RunSearchFrame(const FrameInput &input);
   void InvalidateSearch(bool forget_query);
+  void OpenLibraryPreload();
+  void RunLibraryPreloadFrame(const FrameInput &input);
   void OpenLibrarySearch();
   void RunLibrarySearchFrame(const FrameInput &input);
   bool IsOpeningPending() const;

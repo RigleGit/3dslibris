@@ -18,6 +18,7 @@ static Result Cover(void *ctx,const library_walk::Entry &) {
   auto &s=*(Source*)ctx;const int i=s.covers++;++s.heavy;
   return {i==s.write_error ? Outcome::WriteError : Outcome::Saved,true};
 }
+static Result Cached(void *,const library_walk::Entry &) {return {Outcome::Cached,false};}
 static uint64_t ticks=0;
 static uint64_t Clock() {return ticks++;}
 int main() {
@@ -36,5 +37,9 @@ int main() {
   assert(engine.Start(Root,&s,Metadata,Cover));engine.Cancel();
   const auto before=s.heavy;engine.Pump();assert(s.heavy==before && engine.GetStatus()==Status::Cancelled);
   s=Source();assert(engine.Start(Root,&s,Metadata,Cover));ticks=0;engine.Pump(16,Clock,0);assert(s.heavy==0);
+  assert(engine.Start(Root,&s,Cached,Cached));engine.Pump(16);
+  assert(engine.Examined()==16 && engine.MetadataCounts().cached==16 && engine.CoverCounts().cached==16);
+  assert(engine.Start(Root,&s,Cached,Cached));ticks=0;engine.Pump(16,Clock,4);
+  assert(engine.Examined()==1 && engine.MetadataCounts().cached==1 && engine.CoverCounts().cached==1);
   puts("PASS:600book preload, oneheavyoperation/update, independent stages, cancellation and stoponwritefailure");
 }

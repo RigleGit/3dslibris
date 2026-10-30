@@ -358,7 +358,7 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks",
       "reset settings",
       "clear cache",        "publisher indent", "publisher spacing",
-      "publisher sides", "search", "disable ebook images"};
+      "publisher sides", "search", "disable ebook images", "preload book data"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -888,6 +888,9 @@ void SettingsController::PrefsRefreshButton(int index) {
   Button &button = app_.prefsButtons[button_index];
   char msg[64];
   switch (index) {
+  case PREFS_BUTTON_PRELOAD:
+    button.SetLabel2("covers and metadata >");
+    break;
   case PREFS_BUTTON_SEARCH:
     button.SetLabel2(is_book_ctx ? "word or phrase >" : "name, title or author >");
     break;
@@ -1201,6 +1204,11 @@ void SettingsController::PrefsHandlePress() {
   const bool is_book_ctx = app_.IsBookSettingsContext();
   Book *book = app_.GetCurrentBook();
   const int selected_button = EffectiveButtonForSlot(app_.GetPrefsSelectedIndex());
+
+  if (selected_button == PREFS_BUTTON_PRELOAD && !is_book_ctx) {
+    app_.OpenLibraryPreload();
+    return;
+  }
 
   if (selected_button == PREFS_BUTTON_SEARCH) {
     if (is_book_ctx)

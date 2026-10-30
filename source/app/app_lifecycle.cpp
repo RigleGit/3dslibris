@@ -149,6 +149,7 @@ void App::HandleAppletResume()
   RequestStatusRedraw();
   OnReaderAppletResumed();
   library_controller_->ResumeLibrarySearch();
+  library_controller_->ResumeLibraryPreload();
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(this, "APPLET resumed mode=%d current_session=%u opening_session=%u",
            (int)nav_.mode, reader_state_.current_book_session_id,

@@ -32,7 +32,8 @@ struct Book {
 };
 struct Prefs { LibrarySortMode library_sort_mode = LIBRARY_SORT_DATE_MODIFIED; };
 struct App { Prefs settings; Prefs *prefs = &settings; std::vector<Book *> books; };
-struct LibrarySearchSession {}; // Unused session owner at this collaborator boundary.
+struct LibrarySearchSession {};
+struct LibraryPreloadSession {}; // Unused session owner at this collaborator boundary.
 LibraryController::LibraryController(App &app) : app_(app), inside_folder_(false) {}
 LibraryController::~LibraryController() = default;
 namespace app_flow_utils {
