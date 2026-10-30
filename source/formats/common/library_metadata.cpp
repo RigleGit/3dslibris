@@ -40,7 +40,7 @@ struct Xml {
   XML_Parser parser=nullptr;
   XmlKind kind;
   book_meta_cache::MetaEntry &entry;
-  std::string rootfile,cover_id,first_image,author,nickname,part;
+  std::string rootfile,cover_id,first_image,likely_image,author,nickname,part;
   std::string *field=nullptr;
   unsigned depth=0,field_depth=0,metadata_depth=0,title_info_depth=0,author_depth=0;
   bool failed=false,done=false,seen=false;
@@ -92,10 +92,15 @@ struct Xml {
       if(name=="item") {
         const std::string href=Attribute(attrs,"href"),type=Attribute(attrs,"media-type");
         if(href.size()>kFieldLimit) {x.Stop(true);return;}
-        if(type.compare(0,6,"image/")==0 && x.first_image.empty()) x.first_image=href;
-        const std::string properties=" "+std::string(Attribute(attrs,"properties"))+" ";
-        if(properties.find(" cover-image ")!=std::string::npos ||
-           (!x.cover_id.empty() && x.cover_id==Attribute(attrs,"id"))) x.entry.cover_image_path=href;
+        if(type.compare(0,6,"image/")==0) {
+          const std::string id=Attribute(attrs,"id"),properties=Attribute(attrs,"properties");
+          if(x.first_image.empty()) x.first_image=href;
+          if(x.likely_image.empty() && (ContainsNoCase(id,"cover") ||
+             ContainsNoCase(href,"cover") || ContainsNoCase(href,"portada") ||
+             ContainsNoCase(properties,"cover"))) x.likely_image=href;
+          if(ContainsToken(properties,"cover-image") ||
+             (!x.cover_id.empty() && x.cover_id==id)) x.entry.cover_image_path=href;
+        }
       }
     } else if(x.kind==XmlKind::Fb2) {
       // Stop at the start tag; no body text or binary payload is parsed.
@@ -180,7 +185,7 @@ Status ZipMetadata(const std::string &path,bool epub,book_meta_cache::MetaEntry 
       Xml opf(XmlKind::Opf,*entry);
       ok=ZipXml(zip,container.rootfile,opf,&budget);
       if(ok) {
-        if(entry->cover_image_path.empty()) entry->cover_image_path=opf.first_image;
+        if(entry->cover_image_path.empty()) entry->cover_image_path=opf.likely_image.empty() ? opf.first_image : opf.likely_image;
         if(!entry->cover_image_path.empty()) {
           entry->cover_image_path=ResolveRelativePath(container.rootfile,entry->cover_image_path);
           if(entry->cover_image_path.size()>kFieldLimit) ok=false;

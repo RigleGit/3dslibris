@@ -38,5 +38,9 @@ int main() {
   assert(mkdir(blocked.c_str(),0777)==0);
   assert(Prepare(missing,&v)==Status::Ready && v.extracted && !v.cache_saved);
   assert(v.entry.title=="El océano");
+  for(const char *name:{"fallback-cover.epub","nonimage-cover.epub"}) {
+    assert(Prepare(base+"/"+name,&v)==Status::Ready);
+    assert(v.entry.cover_image_path=="OEBPS/images/my cover.jpg");
+  }
   puts("PASS: real metadata-only EPUB/FB2/MOBI/CBZ, cache migration, limits, cancel and write failure");
 }

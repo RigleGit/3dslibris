@@ -18,6 +18,8 @@ def opf(title='',author=''):
  return '<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>'+title+'</dc:title><dc:creator>'+author+'</dc:creator></metadata><manifest><item id="cover" properties="cover-image" href="images/cover.jpg" media-type="image/jpeg"/></manifest></package>'
 epub('sample.epub',opf('El océano','José Pérez'))
 epub('empty.epub',opf())
+for name,meta in (('fallback-cover.epub',''),('nonimage-cover.epub','<meta name="cover" content="cover-page"/>')):
+ epub(name,'<package xmlns:dc="dc"><metadata>'+meta+'</metadata><manifest><item id="logo" href="images/logo.png" media-type="image/png"/><item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="illustration" href="images/my%20cover.jpg" media-type="image/jpeg"/></manifest></package>')
 epub('large-title.epub',opf('x'*4097))
 epub('large-xml.epub',opf()+' '*(4*1024*1024))
 fb2='<FictionBook><description><title-info><book-title>El océano</book-title><author><first-name>José</first-name><last-name>Pérez</last-name></author></title-info></description><body><intentionally invalid'
