@@ -67,6 +67,13 @@ static bool CoverCacheEntryOlderFirst(const CoverCacheEntry &a,
 
 static std::list<CoverCacheEntry> g_cache_entries;
 static size_t g_cache_bytes = 0;
+static bool g_dirs_initialized = false, g_full_retention = false;
+static bool FullRetentionStored() {
+  FILE *fp=fopen(paths::GetCoverRetentionPath().c_str(),"rb");
+  if(!fp) return false;
+  char marker[16]={};const bool ok=fgets(marker,sizeof(marker),fp)!=nullptr && !strcmp(marker,"keep-all-v1\n");
+  fclose(fp);return ok;
+}
 
 static void LoadCoverCacheIndex() {
   DIR *dp = opendir(kCoverCacheDir.c_str());
@@ -171,8 +178,7 @@ static void PruneCoverCache() {
 }
 
 static void EnsureCoverCacheDirs() {
-  static bool initialized = false;
-  if (initialized)
+  if (g_dirs_initialized)
     return;
   mkdir(kCoverCacheBaseDir.c_str(), 0777);
   mkdir(kCoverCacheDir.c_str(), 0777);
@@ -200,9 +206,12 @@ static void EnsureCoverCacheDirs() {
     closedir(legacy_dp);
   }
 
-  LoadCoverCacheIndex();
-  PruneCoverCache();
-  initialized = true;
+  g_full_retention=FullRetentionStored();
+  if(!g_full_retention) {
+    LoadCoverCacheIndex();
+    PruneCoverCache();
+  }
+  g_dirs_initialized = true;
 }
 
 struct CoverSourcePaths {
@@ -297,6 +306,23 @@ static const CoverSourcePaths &GetCoverSourcePaths(
 namespace cover_cache {
 
 void ClearPathCache() { g_source_paths.clear(); }
+void ResetMaintenance() {
+  g_dirs_initialized=false;g_full_retention=false;
+  g_cache_entries.clear();g_cache_bytes=0;ClearPathCache();
+}
+bool EnableFullRetention() {
+  mkdir(kCoverCacheBaseDir.c_str(),0777);mkdir(kCoverCacheDir.c_str(),0777);
+  if(!FullRetentionStored()) {
+    const std::string temporary=paths::GetCoverRetentionPath()+".tmp";
+    FILE *fp=fopen(temporary.c_str(),"wb");if(!fp) return false;
+    const bool written=fputs("keep-all-v1\n",fp)>=0;
+    const bool closed=fclose(fp)==0;
+    if(!written || !closed || rename(temporary.c_str(),paths::GetCoverRetentionPath().c_str())) {
+      remove(temporary.c_str());return false;
+    }
+  }
+  ResetMaintenance();return true;
+}
 
 bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
   if (!book || book_path.empty())
@@ -355,7 +381,9 @@ bool Save(Book *book, const std::string &book_path) {
   if (ok) {
     ok = fwrite(book->coverPixels, sizeof(u16), count, fp) == count;
   }
-  fclose(fp);
+  const bool closed=fclose(fp)==0;
+  ok=ok && closed;
+  if (!ok) remove(cache_path.c_str());
   if (ok) {
     FILE *mf = fopen(paths::GetCoverCacheManifest().c_str(), "a");
     if (mf) {
@@ -366,8 +394,10 @@ bool Save(Book *book, const std::string &book_path) {
       fprintf(mf, "%s\t%s\t%s\n", cache_base.c_str(), display, book_path.c_str());
       fclose(mf);
     }
-    RecordCoverCacheSave(cache_path, sizeof(header) + count * sizeof(u16));
-    PruneCoverCache();
+    if(!g_full_retention) {
+      RecordCoverCacheSave(cache_path, sizeof(header) + count * sizeof(u16));
+      PruneCoverCache();
+    }
   }
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
   if (book->GetStatusReporter()) {
@@ -381,7 +411,7 @@ bool Save(Book *book, const std::string &book_path) {
   return ok;
 }
 
-bool TryLoad(Book *book, const std::string &book_path) {
+static bool Load(Book *book, const std::string &book_path, bool allow_fallback) {
   if (!book)
     return false;
   EnsureCoverCacheDirs();
@@ -399,7 +429,7 @@ bool TryLoad(Book *book, const std::string &book_path) {
 #endif
     if (book->IsBrowserFolder())
       return false;
-    if (debug_runtime::BackgroundWorkersDisabled() &&
+    if (allow_fallback && debug_runtime::BackgroundWorkersDisabled() &&
         debug_runtime::BrowserWarmupDisabled() && !book_path.empty() &&
         !book->coverPixels && book->coverAttempts < kMaxAttempts) {
       if (TryLoadAdjacentOverride(book, book_path)) {
@@ -509,5 +539,8 @@ bool TryLoad(Book *book, const std::string &book_path) {
 #endif
   return true;
 }
+
+bool TryLoad(Book *book,const std::string &path) {return Load(book,path,true);}
+bool TryLoadCachedOnly(Book *book,const std::string &path) {return Load(book,path,false);}
 
 } // namespace cover_cache

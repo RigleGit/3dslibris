@@ -19,6 +19,10 @@ namespace cover_cache {
 static const uint8_t kMaxAttempts = 3;
 
 void ClearPathCache();
+// Manual preload retains all disk thumbnails; decoded images remain caller-owned.
+bool EnableFullRetention();
+void ResetMaintenance();
+bool TryLoadCachedOnly(Book *book, const std::string &book_path);
 
 bool TryLoad(Book *book, const std::string &book_path);
 bool Save(Book *book, const std::string &book_path);

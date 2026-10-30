@@ -26,6 +26,7 @@
 #include "book/book.h"
 #include "book/book_renderer.h"
 #include "library/browser_view_utils.h"
+#include "library/cover_cache.h"
 #include "ui/button.h"
 #include "ui/ui_button_skin.h"
 #include "shared/color_utils.h"
@@ -1135,6 +1136,8 @@ void SettingsController::ClearAllCaches() {
     settings::DeleteCacheDirectoryContents(cache_dirs[i].c_str());
 #endif
   }
+
+  cover_cache::ResetMaintenance();
 
   for (int i = 0; i < app_.BookCount(); i++) {
     Book *b = app_.books[i];

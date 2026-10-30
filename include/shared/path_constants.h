@@ -132,6 +132,11 @@ inline const std::string &GetCoverCacheDir() {
   return path;
 }
 
+inline const std::string &GetCoverRetentionPath() {
+  static const std::string path = GetCoverCacheDir() + "/retain-all";
+  return path;
+}
+
 inline const std::string &GetCoverCacheManifest() {
   static const std::string path = GetCoverCacheDir() + "/manifest.txt";
   return path;

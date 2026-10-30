@@ -130,6 +130,7 @@ inline bool SupportsMetadataIndexing(format_t type) { return type==FORMAT_EPUB; 
 namespace paths {
 inline const std::string &GetCacheBaseDir() { static const std::string path=std::string(std::getenv("FOLDER_COVER_TEST_ROOT"))+"/cache"; return path; }
 inline const std::string &GetCoverCacheDir() { static const std::string path=GetCacheBaseDir()+"/cover"; return path; }
+inline const std::string &GetCoverRetentionPath() { static const std::string path=GetCoverCacheDir()+"/retain-all";return path; }
 inline const std::string &GetCoverCacheManifest() { static const std::string path=GetCacheBaseDir()+"/manifest.txt"; return path; }
 }
 inline std::string BasenamePath(const std::string &path) { const size_t slash=path.find_last_of('/'); return slash==std::string::npos ? path : path.substr(slash+1); }
