@@ -92,7 +92,7 @@ Library:
 - `L` / `R`: previous or next library page
 - `Touch`: select and open books
 - `Y`: search the library by filename, title or author
-- `SELECT`: open `GENERAL` settings (also includes library search)
+- `SELECT`: open `GENERAL` settings (includes library search and [preload book data](docs/LIBRARY_PRELOAD.md))
 
 Standard reading:
 
