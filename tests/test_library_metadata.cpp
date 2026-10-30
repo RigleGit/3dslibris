@@ -11,9 +11,10 @@ int main() {
   const std::string base=".";
   for(const char *name:{"sample.epub","sample.fb2","sample.mobi","sample.cbz","sample.xps","sample.oxps"}) {
     const std::string path=base+"/"+name;
+    Value probe;assert(Prepare(path,&probe,nullptr,nullptr,true)==Status::NeedsPreparation && !probe.extracted);
     Value a;assert(Prepare(path,&a)==Status::Ready && a.extracted && a.cache_saved);
     assert(a.entry.title=="El océano" && a.entry.author=="José Pérez");
-    Value b;assert(Prepare(path,&b)==Status::Ready && !b.extracted);
+    Value b;assert(Prepare(path,&b,nullptr,nullptr,true)==Status::Ready && !b.extracted);
     assert(b.entry.title==a.entry.title && b.entry.author==a.entry.author);
   }
   const std::string empty=base+"/empty.epub";
@@ -21,7 +22,8 @@ int main() {
   book_meta_cache::MetaEntry legacy;legacy.title="empty.epub";
   const auto cache=book_meta_cache::BuildPath(empty,st.st_size,st.st_mtime);
   assert(book_meta_cache::Save(cache,legacy));
-  Value v;assert(Prepare(empty,&v)==Status::Ready && v.extracted);
+  Value v;assert(Prepare(empty,&v,nullptr,nullptr,true)==Status::NeedsPreparation && !v.extracted);
+  assert(Prepare(empty,&v)==Status::Ready && v.extracted);
   assert(v.entry.title.empty() && v.entry.author.empty());
   bool prepared=false;assert(book_meta_cache::Load(cache,&legacy,&prepared) && prepared);
   assert(Prepare(empty,&v)==Status::Ready && !v.extracted);

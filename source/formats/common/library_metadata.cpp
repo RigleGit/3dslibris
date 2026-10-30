@@ -295,7 +295,7 @@ Status MobiMetadata(const std::string &path,book_meta_cache::MetaEntry *entry) {
   return Status::Ready;
 }
 }
-Status Prepare(const std::string &path,Value *out,Cancelled cancelled,void *context) {
+Status Prepare(const std::string &path,Value *out,Cancelled cancelled,void *context,bool cache_only) {
   if(!out) return Status::Error;
   *out=Value();
   if(cancelled && cancelled(context)) return Status::Cancelled;
@@ -308,7 +308,9 @@ Status Prepare(const std::string &path,Value *out,Cancelled cancelled,void *cont
   const auto cache=book_meta_cache::BuildPath(path,st.st_size,st.st_mtime);
   bool prepared=false;
   if(book_meta_cache::Load(cache,&out->entry,&prepared) && prepared) return Status::Ready;
-  out->entry=book_meta_cache::MetaEntry();out->extracted=true;
+  out->entry=book_meta_cache::MetaEntry();
+  if(cache_only) return Status::NeedsPreparation;
+  out->extracted=true;
   const Status status=epub || cbz ? ZipMetadata(path,epub,&out->entry) :
       fb2 ? Fb2Metadata(path,&out->entry) : mobi ? MobiMetadata(path,&out->entry) : xps ? XpsMetadata(path,&out->entry) : ReadMuPdf(path,&out->entry);
   if(cancelled && cancelled(context)) return Status::Cancelled;

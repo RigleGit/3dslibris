@@ -96,7 +96,8 @@ static const uint8_t kCoverMaxAttempts = cover_cache::kMaxAttempts;
 static void DrawBottomGradientFromApp(void *) {}
 static void DrawTopGradientFromApp(void *) {}
 static void DrawOpeningSplashWithProgress(unsigned, unsigned, void *) {}
-struct LibrarySearchSession {}; // Unused session owner at this collaborator boundary.
+struct LibrarySearchSession {};
+struct LibraryPreloadSession {}; // Unused session owner at this collaborator boundary.
 LibraryController::LibraryController(App &app) : app_(app), inside_folder_(false) {}
 LibraryController::~LibraryController() = default;
 void LibraryController::ResetBrowserMarquee() {}
@@ -181,6 +182,9 @@ static void TestEmbeddedCoverResults(const std::string &root) {
         extraction_calls = cover_saves = 0;
         expected_extraction_book = book;
         expected_extraction_path = root + "/" + names[backend];
+        const auto preflight=library_cover::Prepare(book,expected_extraction_path,new_device,true,true);
+        Expect(preflight.status==library_cover::Status::NeedsPreparation && extraction_calls==0 && cover_saves==0,
+               "cover preflight performs no decode or write");
         LibraryController controller(app);
         controller.EnqueueJob(APP_JOB_EXTRACT_COVER, book);
         controller.ProcessJobs(3);
@@ -206,6 +210,21 @@ static void TestEmbeddedCoverResults(const std::string &root) {
   puts("PASS: embedded cover outcomes, cancellation, PDF permanent failures and cache-save failure");
 }
 
+static void TestCoverlessAdmission() {
+  Book book{BookContext()};
+  book.format=FORMAT_XHTML; book.filename="notes.txt";
+  free_bytes=0; extraction_calls=0;
+  auto result=library_cover::Prepare(&book,"/library/notes.txt",false,false);
+  Expect(result.status==library_cover::Status::Unsupported && !result.heavy,
+         "unsupported source without sidecar needs no extraction memory");
+  book.format=FORMAT_EPUB; book.metadataIndexTried=true;
+  result=library_cover::Prepare(&book,"/library/no-cover.epub",false,false);
+  Expect(result.status==library_cover::Status::Absent && !result.heavy && book.coverAttempts==3,
+         "known absent EPUB cover completes without memory admission or retries");
+  Expect(extraction_calls==0,"coverless sources never invoke extractors");
+}
+
 int main() {
   TestEmbeddedCoverResults("/test/library");
+  TestCoverlessAdmission();
 }

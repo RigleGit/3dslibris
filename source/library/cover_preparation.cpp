@@ -12,12 +12,28 @@
 #include "shared/string_utils.h"
 #include <3ds.h>
 namespace library_cover {
-Result Prepare(Book *book,const std::string &path,bool is_new,bool selected) {
+Result Prepare(Book *book,const std::string &path,bool is_new,bool selected,bool cache_only) {
   if(!book || path.empty()) return {Status::Absent,0,false};
   if(cover_cache::TryLoadCachedOnly(book,path)) return {Status::Cached,0,false};
+  const bool adjacent=cover_cache::HasAdjacentOverride(book,path);
+  if(!adjacent) {
+    if(book->IsBrowserFolder()) return {Status::Absent,0,false};
+    if(book->format==FORMAT_EPUB) {
+      if(!book->metadataIndexTried) return {Status::NeedsMetadata,0,false};
+      if(book->coverImagePath.empty()) {
+        book->coverAttempts=cover_cache::kMaxAttempts;
+        return {Status::Absent,0,false};
+      }
+    } else if(book->format!=FORMAT_PDF && book->format!=FORMAT_CBZ &&
+              !(book->format==FORMAT_XHTML &&
+                (HasExtCI(book->GetFileName(),".fb2") || HasExtCI(book->GetFileName(),".mobi")))) {
+      book->coverAttempts=cover_cache::kMaxAttempts;
+      return {Status::Unsupported,0,false};
+    }
+  }
   if(!browser_warmup_utils::HasCoverExtractionHeadroom(is_new,selected,osGetMemRegionFree(MEMREGION_ALL)))
     return {Status::LowMemory,4,false};
-  const bool adjacent=cover_cache::HasAdjacentOverride(book,path);
+  if(cache_only) return {Status::NeedsPreparation,0,false};
   bool loaded=false;int rc=0;bool supported=true;
   if(adjacent) loaded=cover_cache::TryLoadAdjacentOverride(book,path);
   if(!loaded) {
