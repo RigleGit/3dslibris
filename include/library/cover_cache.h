@@ -26,6 +26,7 @@ bool TryLoadCachedOnly(Book *book, const std::string &book_path);
 
 bool TryLoad(Book *book, const std::string &book_path);
 bool Save(Book *book, const std::string &book_path);
+bool HasAdjacentOverride(Book *book, const std::string &book_path);
 bool TryLoadAdjacentOverride(Book *book, const std::string &book_path);
 
 } // namespace cover_cache

@@ -34,6 +34,7 @@
 #include "library/browser_view_utils.h"
 #include "library/browser_warmup_utils.h"
 #include "library/cover_cache.h"
+#include "library/cover_preparation.h"
 #include "menus/chapter_menu.h"
 #include "settings/prefs.h"
 #include "shared/app_flow_utils.h"
@@ -108,22 +109,6 @@ static std::string BuildBookPath(Book *book) {
   return path;
 }
 
-static void ApplyEmbeddedCoverResult(Book *book, const std::string &path,
-                                     int rc, bool permanent_failure = false) {
-  if (rc == 0 && book->coverPixels) {
-    cover_cache::Save(book, path);
-    book->coverAttempts = kCoverMaxAttempts;
-    book->coverRetryAfterMs = 0;
-  } else if (rc == BOOK_ERR_CANCELLED) {
-  } else if (rc != 0) {
-    if (permanent_failure)
-      book->coverAttempts = kCoverMaxAttempts;
-    else
-      book->coverAttempts++;
-  } else {
-    book->coverAttempts = kCoverMaxAttempts;
-  }
-}
 
 } // namespace
 
@@ -454,76 +439,19 @@ void LibraryController::ProcessJobs(u32 budget_ms) {
         // Visible books can change on reader return (recent sorting) without
         // another preload pass. Recheck disk before admitting an expensive
         // extraction; a cached thumbnail needs only a small bounded allocation.
-        const bool cached_cover = cover_cache::TryLoad(book, path);
-        const bool is_selected_book = (book == app_.GetSelectedBook());
-        const u64 free_bytes = (u64)osGetMemRegionFree(MEMREGION_ALL);
-        if (!cached_cover && !browser_warmup_utils::HasCoverExtractionHeadroom(
-                app_.IsNew3dsDevice(), is_selected_book, free_bytes)) {
-          book->coverAttempts++;
-          const u64 retry_delay_ms = browser_warmup_utils::CoverRetryDelayMs(
-              app_.IsNew3dsDevice(), is_selected_book, 4, false);
-          if (retry_delay_ms != 0 && book->coverAttempts < kCoverMaxAttempts)
-            book->coverRetryAfterMs = osGetTime() + retry_delay_ms;
-#if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
-          DBG_LOGF(&app_,
-                   "COVER: skip mem-pressure book=%s selected=%u free=%llu attempts=%u",
-                   book->GetFileName() ? book->GetFileName() : "(null)",
-                   is_selected_book ? 1u : 0u,
-                   (unsigned long long)free_bytes,
-                   (unsigned)book->coverAttempts);
-#endif
+        const bool is_selected_book=book==app_.GetSelectedBook();
+        const auto prepared=library_cover::Prepare(book,path,app_.IsNew3dsDevice(),is_selected_book);
+        rc=prepared.code;
+        if(prepared.status==library_cover::Status::LowMemory) {
+          ++book->coverAttempts;
+          const auto delay=browser_warmup_utils::CoverRetryDelayMs(app_.IsNew3dsDevice(),is_selected_book,4,false);
+          if(delay && book->coverAttempts<kCoverMaxAttempts) book->coverRetryAfterMs=osGetTime()+delay;
           continue;
         }
-
-        if (cached_cover) {
-          book->coverAttempts = kCoverMaxAttempts;
-          book->coverRetryAfterMs = 0;
-        } else if (cover_cache::TryLoadAdjacentOverride(book, path)) {
-          cover_cache::Save(book, path);
-          book->coverAttempts = kCoverMaxAttempts;
-          book->coverRetryAfterMs = 0;
-          rc = 0;
-        } else if (book->IsBrowserFolder()) {
-          rc = 1;
-          book->coverAttempts = kCoverMaxAttempts;
-        } else
-        if (book->format == FORMAT_EPUB) {
-          if (!book->metadataIndexTried) {
-            // Metadata not yet attempted; queue it first and retry cover after.
-            EnqueueJob(APP_JOB_INDEX_METADATA, book);
-            EnqueueJob(APP_JOB_EXTRACT_COVER, book);
-          } else {
-            if (!book->coverImagePath.empty()) {
-              HomeButtonGuard home_guard;
-              rc = epub_parser::ExtractCover(book, path);
-              ApplyEmbeddedCoverResult(book, path, rc);
-            } else {
-              book->coverAttempts = kCoverMaxAttempts;
-            }
-          }
-        } else if (book->format == FORMAT_XHTML &&
-                   HasExtCI(book->GetFileName(), ".fb2")) {
-          HomeButtonGuard home_guard;
-          rc = fb2_parser::ExtractCover(book, path);
-          ApplyEmbeddedCoverResult(book, path, rc);
-        } else if (book->format == FORMAT_XHTML &&
-                   HasExtCI(book->GetFileName(), ".mobi")) {
-          HomeButtonGuard home_guard;
-          rc = mobi_parser::ExtractCover(book, path);
-          ApplyEmbeddedCoverResult(book, path, rc);
-        } else if (book->format == FORMAT_PDF) {
-          HomeButtonGuard home_guard;
-          rc = pdf_parser::ExtractCover(book, path);
-          ApplyEmbeddedCoverResult(
-              book, path, rc, browser_warmup_utils::IsPermanentCoverFailure(rc));
-        } else if (book->format == FORMAT_CBZ) {
-          HomeButtonGuard home_guard;
-          rc = cbz_parser::ExtractCover(book, path);
-          ApplyEmbeddedCoverResult(book, path, rc);
-        } else {
-          // Formats like TXT/MD/RTF/ODT have no embedded-cover extractor.
-          // If no adjacent override was found, stop retrying.
-          book->coverAttempts = kCoverMaxAttempts;
+        if(prepared.status==library_cover::Status::Cached) {
+          book->coverAttempts=kCoverMaxAttempts;book->coverRetryAfterMs=0;
+        } else if(prepared.status==library_cover::Status::NeedsMetadata) {
+          EnqueueJob(APP_JOB_INDEX_METADATA,book);EnqueueJob(APP_JOB_EXTRACT_COVER,book);
         }
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
         const bool has_cover_pixels = (book->coverPixels != nullptr);

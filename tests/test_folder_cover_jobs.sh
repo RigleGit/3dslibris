@@ -13,7 +13,7 @@ root,tmp=map(Path,sys.argv[1:])
 (tmp/'3ds.h').write_text('#pragma once\n#include <stdint.h>\ntypedef uint8_t u8; typedef uint16_t u16; typedef uint32_t u32; typedef uint64_t u64;\n')
 # Compile production owners with platform/model substitutes, preserving real
 # directory I/O, cache serialization, idle scheduling and raster decoder.
-for name in ('app_browser_covers','app_browser_jobs','cover_cache'):
+for name in ('app_browser_covers','app_browser_jobs','cover_cache','cover_preparation'):
     source=(root/'source/library'/f'{name}.cpp').read_text()
     source='\n'.join(line for line in source.splitlines() if not line.startswith('#include'))
     prefix='#include "test_folder_cover_support.h"\n'
@@ -59,7 +59,7 @@ EOFLAGS
 build_test test_folder_cover_jobs -- -I"$TASK_TMP" -I"$ROOT/tests" -I"$ROOT/third_party/stb" \
   "$ROOT/tests/test_folder_cover_jobs.cpp" "$TASK_TMP/folders.cpp" \
   "$TASK_TMP/app_browser_covers.cpp" "$TASK_TMP/app_browser_jobs.cpp" \
-  "$TASK_TMP/cover_cache.cpp" "$TASK_TMP/decode.cpp" \
+  "$TASK_TMP/cover_cache.cpp" "$TASK_TMP/cover_preparation.cpp" "$TASK_TMP/decode.cpp" \
   "$TASK_TMP/stb_image.o" "$ROOT/source/shared/image_scale_utils.cpp" \
   "$ROOT/source/formats/common/file_read_utils.cpp" "$ROOT/source/library/cover_override_utils.cpp" \
   "$ROOT/source/library/browser_view_utils.cpp"

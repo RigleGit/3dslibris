@@ -36,6 +36,7 @@
 #include "library/browser_warmup_utils.h"
 #include "library/cover_override_utils.h"
 #include "library/cover_cache.h"
+#include "library/cover_preparation.h"
 #include "library/library_job.h"
 #include "library/library_sort_mode.h"
 #include "book/cover_layout_constants.h"

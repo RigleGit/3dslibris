@@ -16,6 +16,7 @@
 #include "library/browser_view_utils.h"
 #include "library/browser_warmup_utils.h"
 #include "library/cover_cache.h"
+#include "library/cover_preparation.h"
 #include "library/cover_override_utils.h"
 #include "shared/app_flow_utils.h"
 #include "shared/aspect_fit_utils.h"
@@ -129,6 +130,8 @@ OUTCOME_BACKEND(cbz_parser, 4)
 namespace epub_parser { int ResolveToc(Book *, const std::string &) { std::abort(); } }
 namespace cover_cache {
 bool TryLoad(Book *, const std::string &) { return false; }
+bool TryLoadCachedOnly(Book *, const std::string &) { return false; }
+bool HasAdjacentOverride(Book *, const std::string &) { return false; }
 bool Save(Book *book, const std::string &path) {
   assert(book == expected_extraction_book && !book->IsBrowserFolder());
   assert(path == expected_extraction_path && book->coverPixels);
@@ -137,6 +140,7 @@ bool Save(Book *book, const std::string &path) {
 }
 bool TryLoadAdjacentOverride(Book *, const std::string &) { return false; }
 }
+#include "cover_prepare.inc"
 #include "cover_jobs.inc"
 
 static void Expect(bool condition, const char *message) {

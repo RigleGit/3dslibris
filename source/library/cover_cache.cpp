@@ -324,6 +324,9 @@ bool EnableFullRetention() {
   ResetMaintenance();return true;
 }
 
+bool HasAdjacentOverride(Book *book,const std::string &path) {
+  return book && !path.empty() && !GetCoverSourcePaths(book,path).adjacent_path.empty();
+}
 bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
   if (!book || book_path.empty())
     return false;
