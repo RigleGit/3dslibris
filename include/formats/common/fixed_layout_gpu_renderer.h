@@ -56,7 +56,7 @@ private:
 // Present; Reset withdraws that borrow before freeing any texture.
 bool Queue(Text *, TextureCache &, const fixed_layout_tiles::Rect &source,
            const fixed_layout_tiles::Rect &viewport,
-           const fixed_layout_tiles::Rect &destination);
+           const fixed_layout_tiles::Rect &destination, int quarter_turns = 0);
 bool Active(const Text *);
 bool WillDraw(const Text *);
 bool NeedsPresent(Text *);
@@ -66,7 +66,7 @@ void Shutdown(Text *);
 #else
 inline bool Queue(Text *, TextureCache &, const fixed_layout_tiles::Rect &,
                   const fixed_layout_tiles::Rect &,
-                  const fixed_layout_tiles::Rect &) {
+                  const fixed_layout_tiles::Rect &, int = 0) {
   return false;
 }
 inline bool Active(const Text *) {

@@ -4,6 +4,7 @@
 #include "ui/framebuffer_blit_utils.h"
 class Text {
 public:
+  int orientation=0;
   u16 left[400 * 400]{}, right[400 * 400]{};
   u16 *screenleft = left, *screenright = right, *screen = left;
   bool screenleft_dirty = false, dirty_bottom = false;
@@ -14,16 +15,16 @@ public:
     return 400;
   }
   int LogicalWidthFor(bool) const {
-    return 240;
+    return orientation==2 ? 400 : 240;
   }
   int LogicalHeightFor(bool) const {
-    return 400;
+    return orientation==2 ? 240 : 400;
   }
   int GetColorMode() const {
     return 0;
   }
   int GetOrientation() const {
-    return 0;
+    return orientation;
   }
   bool IsWideTopScreenActive() const {
     return gpu.wide;

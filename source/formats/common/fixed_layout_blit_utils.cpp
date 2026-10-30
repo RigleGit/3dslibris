@@ -12,7 +12,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 const u16 *pixels, size_t pixel_count,
                                 int src_width, int src_height,
                                 int crop_x, int crop_y, int crop_width, int crop_height,
-                                bool high_quality_filter) {
+                                bool high_quality_filter, int quarter_turns) {
   if (!ts || !screen || !pixels || src_width <= 0 || src_height <= 0 ||
       draw_width <= 0 || draw_height <= 0 || crop_width <= 0 || crop_height <= 0 ||
       pixel_count < (size_t)src_width * (size_t)src_height)
@@ -28,7 +28,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                   logical_height * dy, x * dx, y * dy,
                   draw_width * dx, draw_height * dy, pixels, pixel_count,
                   src_width, src_height, crop_x, crop_y, crop_width, crop_height,
-                  high_quality_filter);
+                  high_quality_filter,0,0,0x7fffffff,0x7fffffff,quarter_turns);
       // Keep the logical mirror for alpha-blended UI and screen snapshots.
       // Average each native pair instead of running a second source scaler.
       const int x0 = std::max(0, x);
@@ -53,7 +53,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
   BlitRgb565SurfaceScaledCrop(screen, ts->BufferStride(), logical_width, logical_height,
               x, y, draw_width, draw_height, pixels, pixel_count,
               src_width, src_height, crop_x, crop_y, crop_width, crop_height,
-              high_quality_filter);
+              high_quality_filter,0,0,0x7fffffff,0x7fffffff,quarter_turns);
 }
 
 void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,

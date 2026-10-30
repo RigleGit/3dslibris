@@ -10,7 +10,10 @@
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
+struct Matrix2D {double a=1,b=0,c=0,d=1,x=0,y=0;};
 struct GpuBoundary {
+  Matrix2D view;
+  std::vector<Matrix2D> draw_views;
   int full_flushes = 0, framebuffer_flushes = 0, copies = 0, frames = 0,
       restores = 0, swaps = 0;
   int live_textures = 0, allocation_attempts = 0, fail_after = -1;
@@ -113,11 +116,21 @@ inline u32 C2D_Color32(int, int, int, int) {
   return 0;
 }
 inline void C2D_SceneSize(int, int, bool) {}
-inline void C2D_ViewReset() {}
-inline void C2D_ViewTranslate(int, int) {}
-inline void C2D_ViewRotateDegrees(int) {}
+inline void C2D_ViewReset() {gpu.view=Matrix2D();}
+inline void C2D_ViewTranslate(int x,int y) {
+  gpu.view.x+=gpu.view.a*x+gpu.view.c*y;
+  gpu.view.y+=gpu.view.b*x+gpu.view.d*y;
+}
+inline void C2D_ViewRotateDegrees(int degrees) {
+  const int turn=(degrees/90+4)%4;
+  const int cs[]={1,0,-1,0},sn[]={0,1,0,-1};
+  const auto m=gpu.view;
+  gpu.view.a=m.a*cs[turn]+m.c*sn[turn];gpu.view.b=m.b*cs[turn]+m.d*sn[turn];
+  gpu.view.c=-m.a*sn[turn]+m.c*cs[turn];gpu.view.d=-m.b*sn[turn]+m.d*cs[turn];
+}
 inline bool C2D_DrawImage(C2D_Image img, const C2D_DrawParams *, const void *) {
   assert(gpu.textures.count(img.tex->data));
+  gpu.draw_views.push_back(gpu.view);
   return true;
 }
 inline bool C2D_DrawImageAt(C2D_Image img, int, int, int) {

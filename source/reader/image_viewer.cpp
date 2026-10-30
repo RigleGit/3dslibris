@@ -40,10 +40,10 @@ struct TextState {
 };
 void Blit(Text *ts, u16 *screen, int height, int x, int y, int w, int h,
           const raster_image::Bitmap &bitmap, int cx, int cy, int cw, int ch,
-          bool quality) {
+          bool quality, int quarter_turns = 0) {
   fixed_layout_blit_utils::BlitRgb565BitmapScaledCrop(
       ts, screen, height, x, y, w, h, bitmap.pixels.get(), bitmap.PixelCount(),
-      bitmap.width, bitmap.height, cx, cy, cw, ch, quality);
+      bitmap.width, bitmap.height, cx, cy, cw, ch, quality, quarter_turns);
 }
 
 // Browser labels use a fixed 12px font with a 14px line height. Leave room
@@ -58,19 +58,20 @@ const size_t kSourceCacheMaxBytes = 1024u * 1024u;
 // Two rows of buttons fit both the 240px portrait and 320px landscape panel.
 pdf_view_utils::PreviewLayout OverviewLayout(const ReaderImageViewerSession &s,
                                              int width, int height) {
+  const auto size=image_view::VirtualSize(s.image.original_width,s.image.original_height,s.quarter_turns);
   return pdf_view_utils::ComputePreviewLayoutInBounds(
-      s.image.original_width, s.image.original_height, 6, 6, width - 12,
+      size.width, size.height, 6, 6, width - 12,
       height - kControlFooter - 36);
 }
 
 void LayoutControls(ReaderImageViewerSession &s, int width, int height) {
-  const int button_width = (width - 20) / 3;
+  const int button_width = (width - 24) / 4;
   for (int i = 0; i < ReaderImageViewerSession::ControlCount; ++i) {
     Button &button = s.controls[i];
-    button.Move(6 + (i % 3) * (button_width + kControlGap),
-                height - kControlFooter + (i / 3) * (kControlHeight + kControlGap));
+    button.Move(6 + (i % 4) * (button_width + kControlGap),
+                height - kControlFooter + (i / 4) * (kControlHeight + kControlGap));
     button.Resize(button_width, kControlHeight);
-    button.SetEnabled(i >= ReaderImageViewerSession::Back ||
+    button.SetEnabled((i >= ReaderImageViewerSession::Back && i <= ReaderImageViewerSession::Settings) ||
                       (s.HasImage() && !s.loading && !s.suspended));
   }
   s.controls[ReaderImageViewerSession::ZoomIn].SetEnabled(
@@ -184,10 +185,10 @@ void ReaderController::OpenImageViewer() {
   s.token = target.token_offset;
   s.image_id = target.image_id;
   s.viewport.max_zoom_index = 6;
-  static const char *labels[] = {"zoom +", "zoom -",  "fit",
-                                 "back",   "library", "settings"};
-  static const char *keys[] = {"(A)", "(B)",     "(X)",
-                               "(Y)", "(START)", "(SELECT)"};
+  static const char *labels[] = {"zoom+", "zoom-", "fit", "back",
+                                "lib", "prefs", "rot <", "rot >"};
+  static const char *keys[] = {"(A)", "(B)", "(X)", "(Y)",
+                              "(ST)", "(SEL)", "(L)", "(R)"};
   for (int i = 0; i < ReaderImageViewerSession::ControlCount; ++i) {
     s.controls[i].Init(app_.ts.get());
     s.controls[i].SetStyle(BUTTON_STYLE_SETTING);
@@ -216,7 +217,8 @@ bool ReaderController::LoadImageViewer(int zoom) {
       s.book->ReadInlineImageSource(s.image_id, &s.source);
   if (!read) s.source.clear();
   const uint64_t read_ms = osGetTime() - started;
-  const auto target = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
+  const auto physical = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
+  const auto target = image_view::VirtualSize(physical.width,physical.height,s.quarter_turns);
   int width = s.image.original_width, height = s.image.original_height;
   InlineImageMetadata metadata{};
   if ((width <= 0 || height <= 0) &&
@@ -250,9 +252,8 @@ bool ReaderController::LoadImageViewer(int zoom) {
     s.viewport.zoom_index = zoom;
     s.message.clear();
     if (!s.preview.pixels) {
-      const auto bottom =
-          fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
-      const auto preview = OverviewLayout(s, bottom.width, bottom.height);
+      const auto preview = image_view::RequiredSize(s.image.original_width,
+          s.image.original_height,320,320,2);
       if (s.preview.Allocate(std::max(1, preview.width),
                              std::max(1, preview.height))) {
         // The first filtered overview draw populates this compact buffer.
@@ -333,11 +334,9 @@ void ReaderController::DrawImageViewer() {
   TextState saved(ts);
   const auto top =
       fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
+  const auto virtual_top=image_view::VirtualSize(top.width,top.height,s.quarter_turns);
   const auto bottom =
       fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
-  const auto overview = OverviewLayout(s, bottom.width, bottom.height);
-  const bool preview_geometry_changed = s.preview.pixels &&
-      (s.preview.width != overview.width || s.preview.height != overview.height);
   const bool background_changed = s.panel_orientation >= 0 &&
       s.panel_bg != ts->GetBgColor();
   if (s.HasImage() && !s.loading && !s.suspended) {
@@ -347,16 +346,9 @@ void ReaderController::DrawImageViewer() {
       s.gpu_draw_failed = false;
       s.preview_ready = false;
       s.preview_viewport_valid = false;
-    } else if (preview_geometry_changed && !s.image.pixels) {
-      RestoreImageViewerBitmap();
-    }
-    if (preview_geometry_changed && s.image.pixels &&
-        s.preview.Allocate(std::max(1, overview.width), std::max(1, overview.height))) {
-      s.preview_ready = false;
-      s.preview_viewport_valid = false;
-      s.panel_dirty = true;
     }
   }
+
   const char *status = s.loading           ? "Loading image..."
                        : s.message.empty() ? "move: D-pad, Circle Pad / stylus"
                                            : s.message.c_str();
@@ -381,7 +373,7 @@ void ReaderController::DrawImageViewer() {
   }
   if (s.HasImage()) {
     auto rect = image_view::Viewport(
-        s.image.original_width, s.image.original_height, top.width, top.height,
+        s.image.original_width, s.image.original_height, virtual_top.width, virtual_top.height,
         s.viewport.zoom_index, s.viewport.center_x, s.viewport.center_y);
     s.viewport.center_x = rect.left + rect.width / 2;
     s.viewport.center_y = rect.top + rect.height / 2;
@@ -398,7 +390,7 @@ void ReaderController::DrawImageViewer() {
     // Fit the visible source rectangle without stretching its aspect ratio.
     const auto placement = pdf_view_utils::ComputePreviewLayout(
         s.image.original_width * rect.width,
-        s.image.original_height * rect.height, top.width, top.height);
+        s.image.original_height * rect.height, virtual_top.width, virtual_top.height);
     const bool try_gpu = !s.loading && !s.suspended && !s.gpu_draw_failed;
     const bool gpu_drawn = try_gpu &&
         s.gpu.Upload(ts, s.image.pixels.get(), s.image.PixelCount(),
@@ -408,7 +400,7 @@ void ReaderController::DrawImageViewer() {
                                 {rect.left, rect.top, rect.width, rect.height},
                                 {(float)placement.x, (float)placement.y,
                                  (float)placement.width,
-                                 (float)placement.height});
+                                 (float)placement.height},s.quarter_turns);
     if (!gpu_drawn && try_gpu) {
       s.gpu.Reset();
       s.gpu_draw_failed = true;
@@ -422,66 +414,56 @@ void ReaderController::DrawImageViewer() {
     if (!gpu_drawn && s.image.pixels) {
       ts->SetScreen(ts->screenleft);
       ts->ClearScreen();
-      Blit(ts, ts->screenleft, top.height, placement.x, placement.y,
-           placement.width, placement.height, s.image, cx, cy, cw, ch,
-           !s.viewport.interaction_active);
+      const auto rotated=image_view::RotateLayout(placement,virtual_top.width,virtual_top.height,s.quarter_turns);
+      Blit(ts, ts->screenleft, top.height, rotated.x, rotated.y,
+           rotated.width, rotated.height, s.image, cx, cy, cw, ch,
+           !s.viewport.interaction_active,s.quarter_turns);
     }
     ts->SetScreen(ts->screenright);
     s.overview = OverviewLayout(s, bottom.width, bottom.height);
-    if (s.preview.pixels && !s.preview_ready) {
-      Blit(ts, ts->screenright, bottom.height, s.overview.x, s.overview.y,
-           s.overview.width, s.overview.height, s.image, 0, 0, s.image.width,
-           s.image.height, true);
-      const int stride = ts->BufferStride();
-      for (int y = 0; y < s.preview.height; ++y)
-        std::copy(ts->screenright + (y + s.overview.y) * stride + s.overview.x,
-                  ts->screenright + (y + s.overview.y) * stride + s.overview.x +
-                      s.preview.width,
-                  s.preview.pixels.get() + (size_t)y * s.preview.width);
-      s.preview_ready = true;
-    } else if (s.preview.pixels) {
-      if (s.preview_viewport_valid) {
-        fixed_layout_preview_panel::ContentKey content{};
-        content.pixels = s.preview.pixels.get();
-        content.pixel_count = s.preview.PixelCount();
-        content.screen = ts->screenright;
-        content.stride = ts->BufferStride();
-        content.bitmap_width = s.preview.width;
-        content.bitmap_height = s.preview.height;
-        content.screen_width = bottom.width;
-        content.screen_height = bottom.height;
-        content.layout = {s.overview.x, s.overview.y, s.overview.width,
-                          s.overview.height};
-        fixed_layout_preview_panel::RestoreBorder(ts, content,
-                                                  s.preview_viewport);
-      } else {
-        Blit(ts, ts->screenright, bottom.height, s.overview.x, s.overview.y,
-             s.overview.width, s.overview.height, s.preview, 0, 0,
-             s.preview.width, s.preview.height, true);
-      }
-    } else {
-      Blit(ts, ts->screenright, bottom.height, s.overview.x, s.overview.y,
-           s.overview.width, s.overview.height, s.image, 0, 0, s.image.width,
-           s.image.height, true);
+    if(!s.preview.pixels && s.image.pixels) {
+      const auto size=image_view::RequiredSize(s.image.original_width,s.image.original_height,320,320,2);
+      s.preview.Allocate(size.width,size.height);
     }
+    if(s.preview.pixels && !s.preview_ready && s.image.pixels) {
+      fixed_layout_blit_utils::BlitRgb565SurfaceScaledCrop(s.preview.pixels.get(),
+          s.preview.width,s.preview.width,s.preview.height,0,0,s.preview.width,s.preview.height,
+          s.image.pixels.get(),s.image.PixelCount(),s.image.width,s.image.height,
+          0,0,s.image.width,s.image.height,true);
+      s.preview_ready=true;
+    }
+    if(s.preview.pixels && s.preview_ready) {
+      if(s.preview_viewport_valid) {
+        fixed_layout_preview_panel::ContentKey content{};
+        content.pixels=s.preview.pixels.get();content.pixel_count=s.preview.PixelCount();
+        content.screen=ts->screenright;content.stride=ts->BufferStride();
+        content.bitmap_width=s.preview.width;content.bitmap_height=s.preview.height;
+        content.screen_width=bottom.width;content.screen_height=bottom.height;
+        content.quarter_turns=s.quarter_turns;
+        content.layout={s.overview.x,s.overview.y,s.overview.width,s.overview.height};
+        fixed_layout_preview_panel::RestoreBorder(ts,content,s.preview_viewport);
+      } else Blit(ts,ts->screenright,bottom.height,s.overview.x,s.overview.y,
+          s.overview.width,s.overview.height,s.preview,0,0,s.preview.width,s.preview.height,true,s.quarter_turns);
+    } else if(s.image.pixels) Blit(ts,ts->screenright,bottom.height,s.overview.x,s.overview.y,
+        s.overview.width,s.overview.height,s.image,0,0,s.image.width,s.image.height,true,s.quarter_turns);
+    const auto preview_rect=image_view::RotateRect(rect,s.quarter_turns);
     ts->SetScreen(ts->screenright);
     ts->DrawRect(
-        s.overview.x + (int)(rect.left * s.overview.width),
-        s.overview.y + (int)(rect.top * s.overview.height),
-        s.overview.x + (int)((rect.left + rect.width) * s.overview.width),
-        s.overview.y + (int)((rect.top + rect.height) * s.overview.height),
+        s.overview.x + (int)(preview_rect.left * s.overview.width),
+        s.overview.y + (int)(preview_rect.top * s.overview.height),
+        s.overview.x + (int)((preview_rect.left + preview_rect.width) * s.overview.width),
+        s.overview.y + (int)((preview_rect.top + preview_rect.height) * s.overview.height),
         ts->GetFgColor());
-    const int vx = s.overview.x + (int)(rect.left * s.overview.width);
-    const int vy = s.overview.y + (int)(rect.top * s.overview.height);
+    const int vx = s.overview.x + (int)(preview_rect.left * s.overview.width);
+    const int vy = s.overview.y + (int)(preview_rect.top * s.overview.height);
     s.preview_viewport = {
         vx, vy,
-        s.overview.x + (int)((rect.left + rect.width) * s.overview.width) - vx,
-        s.overview.y + (int)((rect.top + rect.height) * s.overview.height) -
+        s.overview.x + (int)((preview_rect.left + preview_rect.width) * s.overview.width) - vx,
+        s.overview.y + (int)((preview_rect.top + preview_rect.height) * s.overview.height) -
             vy};
     s.preview_viewport_valid = s.preview.pixels && s.preview_ready;
     s.preview_expected_generation = ts->screenright_cache_generation + 1;
-    if (gpu_drawn && s.preview_ready && s.preview.pixels &&
-        s.preview.width == s.overview.width && s.preview.height == s.overview.height)
+    if (gpu_drawn && s.preview_ready && s.preview.pixels)
       s.image.pixels.reset();
   }
   ts->SetScreen(ts->screenright);
@@ -566,6 +548,14 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
       DrawImageViewer();
     return;
   }
+  const int old_turns=s.quarter_turns;
+  if((keys&KEY_L) || control==ReaderImageViewerSession::RotateLeft)
+    s.quarter_turns=(s.quarter_turns+3)&3;
+  if((keys&KEY_R) || control==ReaderImageViewerSession::RotateRight)
+    s.quarter_turns=(s.quarter_turns+1)&3;
+  if(old_turns!=s.quarter_turns) {
+    s.preview_viewport_valid=false;s.panel_dirty=s.dirty=true;
+  }
   int zoom = s.viewport.zoom_index;
   if ((keys & app_.key.a) || control == ReaderImageViewerSession::ZoomIn)
     zoom = std::min(s.viewport.max_zoom_index, zoom + 1);
@@ -576,11 +566,12 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     s.viewport.center_x = s.viewport.center_y = 0.5f;
     s.dirty = true;
   }
-  if (zoom != s.viewport.zoom_index) {
+  if (zoom != s.viewport.zoom_index || old_turns!=s.quarter_turns) {
     const auto top = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
+    const auto target=image_view::VirtualSize(top.width,top.height,s.quarter_turns);
     const auto required = image_view::RequiredSize(s.image.original_width,
                                                    s.image.original_height,
-                                                   top.width, top.height, zoom);
+                                                   target.width, target.height, zoom);
     if (s.image.width >= required.width && s.image.height >= required.height) {
       s.viewport.zoom_index = zoom;
       s.message.clear();
@@ -604,20 +595,18 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
     y += 0.025f;
   bool moving = x != 0 || y != 0;
   if ((held & KEY_TOUCH) && s.touch_panning) {
-    const auto top = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
-    const auto rect = image_view::Viewport(
-        s.image.original_width, s.image.original_height, top.width, top.height,
-        s.viewport.zoom_index, s.viewport.center_x, s.viewport.center_y);
-    const auto center = pdf_view_utils::RecenterViewportFromPreview(
-        s.overview, rect, touch.x, touch.y);
-    s.viewport.center_x = center.x;
-    s.viewport.center_y = center.y;
+    const auto center=image_view::RotatePoint(
+        std::max(0.0f,std::min(1.0f,(float)(touch.x-s.overview.x)/s.overview.width)),
+        std::max(0.0f,std::min(1.0f,(float)(touch.y-s.overview.y)/s.overview.height)),
+        (4-s.quarter_turns)&3);
+    s.viewport.center_x=center.x;s.viewport.center_y=center.y;
     s.dirty = true;
     moving = true;
   } else if (moving) {
     float dx, dy;
     image_view::MapPan(app_.reader_layout.orientation, x, y, &dx, &dy);
-    if (fixed_layout_viewport_utils::PanViewport(&s.viewport, dx, dy))
+    const auto delta=image_view::RotatePoint(.5f+dx,.5f+dy,(4-s.quarter_turns)&3);
+    if (fixed_layout_viewport_utils::PanViewport(&s.viewport, delta.x-.5f, delta.y-.5f))
       s.dirty = true;
   }
   if (moving != s.viewport.interaction_active)

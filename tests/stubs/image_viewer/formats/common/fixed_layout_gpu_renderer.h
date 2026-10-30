@@ -23,7 +23,7 @@ struct TextureCache {
 };
 inline bool Queue(Text *, TextureCache &cache, const fixed_layout_tiles::Rect &,
                   const fixed_layout_tiles::Rect &,
-                  const fixed_layout_tiles::Rect &) {
+                  const fixed_layout_tiles::Rect &, int = 0) {
   return cache.resident && viewer_gpu_queue_ok;
 }
 } // namespace fixed_layout_gpu

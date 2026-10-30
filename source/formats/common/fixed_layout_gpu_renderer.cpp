@@ -24,7 +24,7 @@ struct Renderer {
   Text *text;
   bool initialized, init_failed, active, pending;
   C3D_RenderTarget *target;
-  int physical_height, orientation, bg_color, bg_orientation;
+  int physical_height, orientation, quarter_turns, bg_color, bg_orientation;
   bool bg_wide;
   TextureCache background;
   TextureCache *owner;
@@ -34,7 +34,7 @@ struct Renderer {
   u8 *last_fb;
   Renderer()
       : text(nullptr), initialized(false), init_failed(false), active(false),
-        pending(false), target(nullptr), physical_height(0), orientation(0),
+        pending(false), target(nullptr), physical_height(0), orientation(0), quarter_turns(0),
         bg_color(-1), bg_orientation(-1), bg_wide(false), owner(nullptr),
         generation(0), last_fb(nullptr) {}
 
@@ -76,7 +76,7 @@ struct Renderer {
   bool Enqueue(Text *t, TextureCache &cache,
                const fixed_layout_tiles::Rect &src,
                const fixed_layout_tiles::Rect &vp,
-               const fixed_layout_tiles::Rect &dst) {
+               const fixed_layout_tiles::Rect &dst, int turns) {
     if (!cache.Valid() || !Ensure(t))
       return false;
     if (!fixed_layout_tiles::VisibleQuads(cache.impl_->plan, cache.impl_->width,
@@ -104,6 +104,7 @@ struct Renderer {
     }
     owner = &cache;
     orientation = orient;
+    quarter_turns = turns&3;
     active = true;
     pending = true;
     t->screenleft_dirty = false;
@@ -145,6 +146,12 @@ struct Renderer {
                              1.0f - (float)(b.height + 1) / b.tex_height};
     C2D_Image image = {&background.impl_->textures[0], &sub};
     ok = C2D_DrawImageAt(image, 0, 0, 0);
+    // Background stays in screen coordinates. Rotate only the source quads.
+    const bool landscape=orientation_utils::IsLandscape(orientation);
+    const int width=landscape ? 400 : 240, height=landscape ? 240 : 400;
+    if(quarter_turns==1) {C2D_ViewTranslate(width,0);C2D_ViewRotateDegrees(90);}
+    if(quarter_turns==2) {C2D_ViewTranslate(width,height);C2D_ViewRotateDegrees(180);}
+    if(quarter_turns==3) {C2D_ViewTranslate(0,height);C2D_ViewRotateDegrees(-90);}
     for (size_t i = 0; i < quads.size(); ++i) {
       const fixed_layout_tiles::Quad &q = quads[i];
       const fixed_layout_tiles::Tile &tile = owner->impl_->plan[q.tile];
@@ -363,8 +370,8 @@ bool TextureCache::UploadImpl(Text *t, const uint16_t *pixels, size_t count,
 }
 bool Queue(Text *t, TextureCache &c, const fixed_layout_tiles::Rect &s,
            const fixed_layout_tiles::Rect &v,
-           const fixed_layout_tiles::Rect &d) {
-  return renderer.Enqueue(t, c, s, v, d);
+           const fixed_layout_tiles::Rect &d, int quarter_turns) {
+  return renderer.Enqueue(t, c, s, v, d, quarter_turns);
 }
 bool Active(const Text *t) {
   return renderer.text == t && renderer.active;

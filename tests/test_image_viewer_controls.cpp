@@ -22,7 +22,7 @@ enum {
   KEY_DRIGHT = 128,
   KEY_DUP = 256,
   KEY_DDOWN = 512,
-  KEY_TOUCH = 1024
+  KEY_TOUCH = 1024, KEY_L = 2048, KEY_R = 4096
 };
 struct circlePosition {
   int dx = 0, dy = 0;
@@ -75,7 +75,7 @@ bool viewer_gpu_available = false, viewer_gpu_queue_ok = true;
 namespace fixed_layout_blit_utils {
 void BlitRgb565BitmapScaledCrop(Text *text, u16 *screen, int, int, int, int w, int h,
                                 const u16 *, size_t, int, int, int, int, int,
-                                int, bool quality) {
+                                int, bool quality, int) {
   qualities.push_back(quality);
   if (screen == text->screenright) bottom_blit_pixels += (size_t)w*h;
 }
@@ -222,6 +222,8 @@ struct Fixture {
       rx = y;
       ry = 239 - x;
     }
+    if(reader.image_viewer_ && reader.image_viewer_->preview_viewport_valid)
+      app.ts->screenright_cache_generation=reader.image_viewer_->preview_expected_generation;
     reader.RunImageViewerFrame(
         FrameInput(down, held, (held & KEY_TOUCH) != 0, rx, ry, 0));
   }
@@ -253,12 +255,12 @@ void TestLayout() {
       f.Draw();
       const int width = orientation == 2 ? 320 : 240,
                 height = orientation == 2 ? 240 : 320;
-      assert(skins.size() == 6);
+      assert(skins.size() == 8);
       for (const char *label :
-           {"zoom +", "zoom -", "fit", "back", "library", "settings"})
+           {"zoom+", "zoom-", "fit", "back", "lib", "prefs", "rot <", "rot >"})
         f.Control(label);
       for (const char *key :
-           {"(A)", "(B)", "(X)", "(Y)", "(START)", "(SELECT)"}) {
+           {"(A)", "(B)", "(X)", "(Y)", "(ST)", "(SEL)", "(L)", "(R)"}) {
         bool found = false;
         for (const auto &p : f.app.ts->printed)
           found |= p.text == key;
@@ -301,25 +303,25 @@ void TestActions() {
           f.Input(key, key);
         f.Input(0);
       };
-      action("zoom +", KEY_A);
+      action("zoom+", KEY_A);
       assert(s.viewport.zoom_index == 3);
       assert(s.viewport.center_x == 0.5f && s.viewport.center_y == 0.5f);
-      action("zoom -", KEY_B);
+      action("zoom-", KEY_B);
       assert(s.viewport.zoom_index == 2);
       s.viewport.zoom_index = 4;
       s.viewport.center_x = 0.8f;
       action("fit", KEY_X);
       assert(s.viewport.zoom_index == 2 && s.viewport.center_x == 0.5f);
       for (int i = 0; i < 8; ++i)
-        action("zoom +", KEY_A);
+        action("zoom+", KEY_A);
       assert(s.viewport.zoom_index == 6);
       for (int i = 0; i < 8; ++i)
-        action("zoom -", KEY_B);
+        action("zoom-", KEY_B);
       assert(s.viewport.zoom_index == 2);
       action("back", KEY_Y);
       assert(f.app.mode == AppMode::Book && !f.reader.image_viewer_);
       for (const auto &target : std::vector<std::pair<const char *, u32>>{
-               {"library", KEY_START}, {"settings", KEY_SELECT}}) {
+               {"lib", KEY_START}, {"prefs", KEY_SELECT}}) {
         Fixture other(orientation);
         if (touch)
           other.Tap(other.Control(target.first));
@@ -334,13 +336,13 @@ void TestActions() {
 }
 void TestUnavailableControls() {
   for (unsigned char orientation : {0, 1, 2}) {
-    for (const char *destination : {"back", "library", "settings"}) {
+    for (const char *destination : {"back", "lib", "prefs"}) {
       Fixture f(orientation);
       auto &s = *f.reader.image_viewer_;
       s.image = raster_image::Bitmap();
       s.message = "Image unavailable";
       f.Draw();
-      for (const char *label : {"zoom +", "zoom -", "fit"}) {
+      for (const char *label : {"zoom+", "zoom-", "fit"}) {
         const Skin b = f.Control(label);
         assert(b.state == UI_BUTTON_STATE_DISABLED);
         f.Tap(b);
@@ -350,7 +352,7 @@ void TestUnavailableControls() {
       f.Tap(f.Control(destination));
       assert(!f.reader.image_viewer_);
       assert(f.app.mode == (strcmp(destination, "back") == 0 ? AppMode::Book
-                            : strcmp(destination, "library") == 0
+                            : strcmp(destination, "lib") == 0
                                 ? AppMode::Browser
                                 : AppMode::Prefs));
     }
@@ -410,7 +412,7 @@ void TestPanRetainsControlsUntilStatusChanges() {
     assert(skins.empty() && f.app.ts->printed.empty());
     s.message = "Image load failed";
     f.Input(KEY_DLEFT, KEY_DLEFT);
-    assert(skins.size() == 6);
+    assert(skins.size() == 8);
     bool showed_error = false;
     for (const auto &p : f.app.ts->printed)
       showed_error |= p.text == "Image load failed";
@@ -475,7 +477,26 @@ static void TestGpuOnlyViewer() {
   }
   viewer_gpu_available = false;
 }
+void TestRotation() {
+  for(unsigned char orientation:{0,1,2}) for(bool touch:{false,true}) {
+    Fixture f(orientation);auto &s=*f.reader.image_viewer_;
+    s.viewport.zoom_index=6;s.viewport.center_x=.4f;s.viewport.center_y=.6f;
+    viewer_decodes=0;
+    for(int turn=1;turn<=4;++turn) {
+      if(touch) f.Tap(f.Control("rot >"));else f.Input(KEY_R,KEY_R);
+      f.Input(0);f.Draw();
+      assert(s.quarter_turns==(turn%4) && s.viewport.zoom_index==6);
+      assert(std::abs(s.viewport.center_x-.4f)<1e-6f && std::abs(s.viewport.center_y-.6f)<1e-6f);
+    }
+    assert(viewer_decodes==0);
+    if(touch) f.Tap(f.Control("rot <"));else f.Input(KEY_L,KEY_L);
+    f.Input(0);assert(s.quarter_turns==3);
+    f.Input(KEY_X,KEY_X);assert(s.quarter_turns==3 && s.viewport.zoom_index==2);
+    const auto angle=s.quarter_turns;f.reader.SuspendImageViewer();assert(s.quarter_turns==angle);
+  }
+}
 int main(int argc, char **argv) {
+  TestRotation();
   TestGpuOnlyViewer();
   {
     Fixture f(0);

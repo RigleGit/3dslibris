@@ -27,6 +27,7 @@ struct ContentKey {
   int screen_width, screen_height, stride;
   bool wide_top;
   Rect layout;
+  int quarter_turns; // Zero when omitted from aggregate initialization.
 
   bool operator==(const ContentKey &other) const;
 };

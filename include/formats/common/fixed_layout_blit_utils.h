@@ -27,7 +27,8 @@ void BlitRgb565SurfaceScaledCrop(
     int crop_x, int crop_y, int crop_width, int crop_height,
     bool high_quality_filter,
     int clip_x0 = 0, int clip_y0 = 0,
-    int clip_x1 = 0x7fffffff, int clip_y1 = 0x7fffffff);
+    int clip_x1 = 0x7fffffff, int clip_y1 = 0x7fffffff,
+    int quarter_turns = 0);
 
 void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int x, int y, int draw_width,
@@ -36,7 +37,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int src_width, int src_height,
                                 int crop_x, int crop_y,
                                 int crop_width, int crop_height,
-                                bool high_quality_filter);
+                                bool high_quality_filter, int quarter_turns = 0);
 
 void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int x, int y, int draw_width,

@@ -161,7 +161,26 @@ void TestInteriorPanDamagesOnlyTheViewport() {
          "interior pan must not invalidate the whole preview frame");
 }
 
+void TestRotatedBorderRestoration() {
+  for(int turn=0;turn<4;++turn) {
+    Fixture f(40,50);
+    panel::ContentKey content{};
+    content.pixels=f.pixels.data();content.pixel_count=f.pixels.size();
+    content.bitmap_width=7;content.bitmap_height=11;
+    content.screen=f.text.screenright;content.stride=f.text.stride;
+    content.screen_width=40;content.screen_height=50;
+    content.layout={4,6,23,31};content.quarter_turns=turn;
+    fixed_layout_blit_utils::BlitRgb565SurfaceScaledCrop(f.text.screenright,f.text.stride,
+        40,50,4,6,23,31,f.pixels.data(),f.pixels.size(),7,11,0,0,7,11,true,0,0,40,50,turn);
+    const auto expected=f.text.bottom;
+    const panel::Rect old={8,12,13,17};
+    f.text.DrawRect(old.x,old.y,old.x+old.width,old.y+old.height,0xffff);
+    panel::RestoreBorder(&f.text,content,old);
+    assert(f.text.bottom==expected && "rotated preview must erase every previous border pixel");
+  }
+}
 int main() {
+  TestRotatedBorderRestoration();
   TestPanningMatchesFullRedrawWithoutBackgroundWork();
   TestNativeSizePreviewRestoresClippedStrips();
   TestExternalInvalidationAndContentChanges();

@@ -19,7 +19,8 @@ void RestoreRect(Text *text, const ContentKey &content, int x0, int y0, int x1,
         content.screen_height, content.layout.x, content.layout.y,
         content.layout.width, content.layout.height, content.pixels,
         content.pixel_count, content.bitmap_width, content.bitmap_height, 0, 0,
-        content.bitmap_width, content.bitmap_height, true, x0, y0, x1, y1);
+        content.bitmap_width, content.bitmap_height, true, x0, y0, x1, y1,
+        content.quarter_turns);
   } else {
     text->FillRect((u16)x0, (u16)y0, (u16)x1, (u16)y1,
                    fixed_layout_preview::kPaper);

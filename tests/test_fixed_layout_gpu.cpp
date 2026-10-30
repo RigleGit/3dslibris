@@ -93,7 +93,26 @@ int main(int argc, char **argv) {
       } else {
         assert(Queue(app.ts.get(), cache, {0, 0, 1, 1}, {0, 0, 1, 1},
                      {0, 0, 240, 400}));
-        if (mode == "resize") {
+        if (mode == "rotation") {
+          for(int orientation=0;orientation<3;++orientation) for(bool wide:{false,true}) for(int turn=0;turn<4;++turn) {
+            app.ts->orientation=orientation;gpu.wide=wide;
+            const int w=orientation==2 ? 400 : 240,h=orientation==2 ? 240 : 400;
+            assert(Queue(app.ts.get(),cache,{0,0,1,1},{0,0,1,1},
+                         {0,0,(float)(turn%2 ? h : w),(float)(turn%2 ? w : h)},turn));
+            const size_t transfers=gpu.transfers.size();gpu.draw_views.clear();
+            assert(Present(app.ts.get()));assert(gpu.draw_views.size()>1);
+            const auto bg=gpu.draw_views.front(),m=gpu.draw_views.back();
+            // Source origin moves to the appropriate screen corner; background
+            // origin stays fixed. Both then share the global reader transform.
+            const int x[]={0,w,w,0},y[]={0,0,h,h};
+            assert(m.x==bg.a*x[turn]+bg.c*y[turn]+bg.x);
+            assert(m.y==bg.b*x[turn]+bg.d*y[turn]+bg.y);
+            const int a[]={1,0,-1,0},b[]={0,1,0,-1};
+            assert(m.a==bg.a*a[turn]+bg.c*b[turn]);
+            assert(m.b==bg.b*a[turn]+bg.d*b[turn]);
+            assert(gpu.transfers.size()==transfers);
+          }
+        } else if (mode == "resize") {
           assert(Present(app.ts.get()));
           // The source stays resident; the stale background must make room
           // before the larger target is allocated.

@@ -15,7 +15,8 @@ bool ContentKey::operator==(const ContentKey &other) const {
          zoom == other.zoom && color_mode == other.color_mode &&
          orientation == other.orientation && screen_width == other.screen_width &&
          screen_height == other.screen_height && stride == other.stride &&
-         wide_top == other.wide_top && layout == other.layout;
+         wide_top == other.wide_top && layout == other.layout &&
+         quarter_turns == other.quarter_turns;
 }
 
 static bool Contains(const Rect &outer, const Rect &inner) {
@@ -43,7 +44,7 @@ void Draw(Book *book, Text *text, State *state,
       bitmap_width, bitmap_height, page, zoom, text->GetColorMode(),
       text->GetOrientation(), text->LogicalWidthFor(false),
       text->LogicalHeightFor(false), text->BufferStride(), wide_top,
-      {layout.x, layout.y, layout.width, layout.height}};
+      {layout.x, layout.y, layout.width, layout.height}, 0};
 
   // Dirty is pending conversion, not a record of who last changed the buffer.
   // The generation also detects a menu that was already drawn and presented.

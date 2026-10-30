@@ -15,6 +15,7 @@ struct ReaderImageViewerSession {
   unsigned page = 0, token = 0;
   uint16_t image_id = 0;
   int selection = -1;
+  int quarter_turns = 0;
   fixed_layout_viewport_utils::ViewportState viewport;
   raster_image::Bitmap image, preview;
   fixed_layout_gpu::TextureCache gpu;
@@ -35,7 +36,7 @@ struct ReaderImageViewerSession {
   int panel_orientation = -1, panel_zoom = -1;
   uint16_t panel_fg = 0, panel_bg = 0;
   std::string panel_status;
-  enum Control { ZoomIn, ZoomOut, Fit, Back, Library, Settings, ControlCount };
+  enum Control { ZoomIn, ZoomOut, Fit, Back, Library, Settings, RotateLeft, RotateRight, ControlCount };
   Button controls[ControlCount];
   bool touch_panning = false;
 };
