@@ -119,7 +119,11 @@ void LibraryController::ActivateLibrarySearchResult(size_t index) {
     for(Book *book:app_.books) if(EntryPath(book)==result.path) {
       app_.SetSelectedBook(book);
       if(result.directory) {EnterFolder(book);app_.ShowLibraryView();opened=true;}
-      else opened=app_.OpenBook()==0 && app_.GetMode()==AppMode::Book;
+      else {
+        // The normal opening flow enters the reader from the browser mode.
+        app_.SetMode(AppMode::Browser);
+        opened=app_.OpenBook()==0 && app_.GetMode()==AppMode::Book;
+      }
       break;
     }
   }

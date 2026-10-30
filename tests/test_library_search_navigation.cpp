@@ -2,6 +2,10 @@
 #include "app/app_mode.h"
 #include "shared/path_utils.h"
 #include "shared/path_constants.h"
+#include "shared/orientation_utils.h"
+#define DBG_LOG(...) ((void)0)
+struct App;
+namespace reader_internal {void EnsureBookMode(App *,const char *);}
 #include <cassert>
 #include <cstdio>
 #include <fstream>
@@ -18,7 +22,8 @@ static bool Exists(const std::string &p,bool dir) {struct stat st;return !stat(p
 struct App {
   std::string bookdir;
   std::vector<Book*> books;
-  Book *selected=nullptr;
+  Book *selected=nullptr,*current=nullptr;
+  struct {u8 orientation=0;} reader_layout;
   int page=10;
   bool open_ok=false;
   u8 portrait_orientation=0;
@@ -31,8 +36,19 @@ struct App {
   void SetMode(AppMode value) {mode=value;}
   AppMode GetMode() const {return mode;}
   void ShowLibraryView() {mode=AppMode::Browser;}
-  int OpenBook() {if(open_ok) mode=AppMode::Book;return open_ok ? 0 : 1;}
+  void ShowCurrentBookView() {if(current) mode=AppMode::Book;}
+  int OpenBook() {
+    if(open_ok) {
+      current=selected;
+      // Use the actual reader transition gate, rather than supplying its result.
+      reader_internal::EnsureBookMode(this,nullptr);
+    }
+    return open_ok ? 0 : 1;
+  }
 };
+namespace reader_internal {
+#include "ensure_book_mode.inc"
+}
 struct LibraryController {
   App &app_;bool inside_folder_=false;
   std::string current_folder_path_;
@@ -61,6 +77,14 @@ int main() {
   assert(!owner.inside_folder_ && app.selected==&root && app.page==10 && app.mode==AppMode::LibrarySearch);
   app.open_ok=true;owner.ActivateLibrarySearchResult(0);
   assert(!owner.search_ && owner.inside_folder_ && app.selected==&child && app.mode==AppMode::Book);
+  assert(app.current==&child);
+  // Root results must use the same reader transition while retaining virtual root.
+  owner.search_.reset(new LibrarySearchSession);app.mode=AppMode::LibrarySearch;
+  candidates.entries={{root.path,"root.epub",false}};
+  assert(owner.search_->engine.Start(library_search::Field::Name,"root",Root,&candidates,false));
+  owner.search_->engine.Pump();owner.ActivateLibrarySearchResult(0);
+  assert(!owner.search_ && !owner.inside_folder_ && app.current==&root && app.mode==AppMode::Book);
+  owner.LoadFolderPath(folder,"");
   owner.search_.reset(new LibrarySearchSession);auto &back=*owner.search_;
   back.origin_folder=folder;back.origin_selection=child.path;
   unlink(child.path.c_str());rmdir(folder.c_str());
