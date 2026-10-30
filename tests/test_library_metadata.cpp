@@ -2,6 +2,7 @@
 #include "shared/path_constants.h"
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <sys/stat.h>
 #include <unistd.h>
 using namespace library_metadata;
@@ -38,9 +39,18 @@ int main() {
   assert(mkdir(blocked.c_str(),0777)==0);
   assert(Prepare(missing,&v)==Status::Ready && v.extracted && !v.cache_saved);
   assert(v.entry.title=="El océano");
-  for(const char *name:{"fallback-cover.epub","nonimage-cover.epub"}) {
-    assert(Prepare(base+"/"+name,&v)==Status::Ready);
-    assert(v.entry.cover_image_path=="OEBPS/images/my cover.jpg");
+  const char *review=getenv("METADATA_REVIEW_CASE");
+  if(!review || std::string(review)=="cover") {
+    for(const char *name:{"fallback-cover.epub","nonimage-cover.epub"}) {
+      assert(Prepare(base+"/"+name,&v)==Status::Ready);
+      assert(v.entry.cover_image_path=="OEBPS/images/my cover.jpg");
+    }
+  }
+  if(!review || std::string(review)=="ancillary") {
+    assert(Prepare(base+"/long-description.epub",&v)==Status::Ready);
+    assert(v.entry.title=="El océano" && v.entry.author=="José Pérez");
+    assert(v.entry.description.size()<=4096 && v.entry.description.substr(v.entry.description.size()-3)=="...");
+    assert(Prepare(base+"/long-description.epub",&v)==Status::Ready && !v.extracted);
   }
   puts("PASS: real metadata-only EPUB/FB2/MOBI/CBZ, cache migration, limits, cancel and write failure");
 }

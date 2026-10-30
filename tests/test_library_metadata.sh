@@ -20,6 +20,7 @@ epub('sample.epub',opf('El océano','José Pérez'))
 epub('empty.epub',opf())
 for name,meta in (('fallback-cover.epub',''),('nonimage-cover.epub','<meta name="cover" content="cover-page"/>')):
  epub(name,'<package xmlns:dc="dc"><metadata>'+meta+'</metadata><manifest><item id="logo" href="images/logo.png" media-type="image/png"/><item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml"/><item id="illustration" href="images/my%20cover.jpg" media-type="image/jpeg"/></manifest></package>')
+epub('long-description.epub',opf('El océano','José Pérez').replace('</metadata>','<dc:description>'+'long '*1500+'</dc:description></metadata>'))
 epub('large-title.epub',opf('x'*4097))
 epub('large-xml.epub',opf()+' '*(4*1024*1024))
 fb2='<FictionBook><description><title-info><book-title>El océano</book-title><author><first-name>José</first-name><last-name>Pérez</last-name></author></title-info></description><body><intentionally invalid'

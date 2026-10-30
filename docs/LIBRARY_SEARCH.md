@@ -60,4 +60,6 @@ warning explains that preparation may repeat later.
 Errors, excluded formats and oversized/corrupt metadata produce an incomplete
 search warning. Each searchable field is limited to 4096 UTF-8 bytes; XML/MOBI
 metadata reads and MuPDF metadata allocations are bounded to 4 MiB. An exceeded
-limit is an error, rather than a silently truncated searchable value.
+limit is an error, rather than a silently truncated searchable value. Ancillary
+bibliographic display text, such as a long description, is bounded separately
+and marked with `...`; it does not exclude an otherwise searchable book.

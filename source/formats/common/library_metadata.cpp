@@ -35,6 +35,18 @@ bool Join(std::string *out,const std::string &value) {
   if(value.empty()) return true;
   return (out->empty() || Append(out,"; ",2)) && Append(out,value.data(),value.size());
 }
+// Bibliographic display text is not a searchable field. Keep it bounded and
+// explicitly mark omitted text, without rejecting genuine title/author data.
+void AppendDisplay(std::string *out,const char *data,size_t size,bool *overflow) {
+  if(*overflow) return;
+  const size_t count=std::min(size,kFieldLimit-out->size());
+  out->append(data,count);
+  if(count!=size) {
+    *overflow=true;out->resize(std::min(out->size(),kFieldLimit-3));
+    while(!out->empty() && !utf8_utils::IsValidUtf8(*out)) out->pop_back();
+    *out+="...";
+  }
+}
 enum class XmlKind {Container,Opf,Fb2,Comic,Relations,Core};
 struct Xml {
   XML_Parser parser=nullptr;
@@ -44,10 +56,11 @@ struct Xml {
   std::string *field=nullptr;
   unsigned depth=0,field_depth=0,metadata_depth=0,title_info_depth=0,author_depth=0;
   bool failed=false,done=false,seen=false;
+  bool searchable=true,field_overflow=false,subjects_overflow=false;
   Xml(XmlKind k,book_meta_cache::MetaEntry &e):kind(k),entry(e) {}
   ~Xml() {if(parser) XML_ParserFree(parser);}
   void Stop(bool error) {failed=error;done=!error;XML_StopParser(parser,XML_FALSE);}
-  void Capture(std::string *out) {field=out;field_depth=depth;}
+  void Capture(std::string *out,bool strict=true) {field=out;field_depth=depth;searchable=strict;field_overflow=false;}
   static void Start(void *ctx,const XML_Char *tag,const XML_Char **attrs) {
     Xml &x=*(Xml*)ctx;
     if(++x.depth>64) {x.Stop(true);return;}
@@ -65,7 +78,7 @@ struct Xml {
     } else if(x.kind==XmlKind::Core) {
       if(name=="title") x.Capture(&x.entry.title);
       else if(name=="creator") x.Capture(&x.entry.author);
-      else if(name=="language") x.Capture(&x.entry.language);
+      else if(name=="language") x.Capture(&x.entry.language,false);
     } else if(x.kind==XmlKind::Container && name=="rootfile" && x.rootfile.empty()) {
       const char *value=Attribute(attrs,"full-path");
       if(strlen(value)>kFieldLimit) x.Stop(true);else x.rootfile=value;
@@ -74,24 +87,24 @@ struct Xml {
       if(x.metadata_depth && !x.field) {
         if(name=="title" && x.entry.title.empty()) x.Capture(&x.entry.title);
         else if(name=="creator") {x.part.clear();x.Capture(&x.part);}
-        else if(name=="language") x.Capture(&x.entry.language);
-        else if(name=="publisher") x.Capture(&x.entry.publisher);
-        else if(name=="date") x.Capture(&x.entry.published);
-        else if(name=="subject") {x.part.clear();x.Capture(&x.part);}
-        else if(name=="description") x.Capture(&x.entry.description);
+        else if(name=="language") x.Capture(&x.entry.language,false);
+        else if(name=="publisher") x.Capture(&x.entry.publisher,false);
+        else if(name=="date") x.Capture(&x.entry.published,false);
+        else if(name=="subject") {x.part.clear();x.Capture(&x.part,false);}
+        else if(name=="description") x.Capture(&x.entry.description,false);
         else if(name=="meta" && std::string(Attribute(attrs,"name"))=="cover") {
           const char *value=Attribute(attrs,"content");
-          if(strlen(value)>kFieldLimit) {x.Stop(true);return;} x.cover_id=value;
+          if(strlen(value)<=kFieldLimit) x.cover_id=value;
         }
       }
       if(name=="meta" && (std::string(Attribute(attrs,"name"))=="calibre:series" ||
                             std::string(Attribute(attrs,"property"))=="calibre:series")) {
         const char *series=Attribute(attrs,"content");
-        if(strlen(series)>kFieldLimit) {x.Stop(true);return;} x.entry.series=series;
+        bool overflow=false;AppendDisplay(&x.entry.series,series,strlen(series),&overflow);
       }
       if(name=="item") {
         const std::string href=Attribute(attrs,"href"),type=Attribute(attrs,"media-type");
-        if(href.size()>kFieldLimit) {x.Stop(true);return;}
+        if(href.size()>kFieldLimit) return;
         if(type.compare(0,6,"image/")==0) {
           const std::string id=Attribute(attrs,"id"),properties=Attribute(attrs,"properties");
           if(x.first_image.empty()) x.first_image=href;
@@ -108,7 +121,7 @@ struct Xml {
       if(name=="title-info" && !x.title_info_depth) x.title_info_depth=x.depth;
       if(x.title_info_depth && !x.field) {
         if(name=="book-title") x.Capture(&x.entry.title);
-        else if(name=="lang") x.Capture(&x.entry.language);
+        else if(name=="lang") x.Capture(&x.entry.language,false);
         else if(name=="author") {x.author_depth=x.depth;x.author.clear();x.nickname.clear();}
         else if(x.author_depth && (name=="first-name" || name=="middle-name" || name=="last-name")) {x.part.clear();x.Capture(&x.part);}
         else if(x.author_depth && name=="nickname") x.Capture(&x.nickname);
@@ -116,8 +129,8 @@ struct Xml {
     } else if(x.kind==XmlKind::Comic && x.depth==2) {
       if(name=="Title") x.Capture(&x.entry.title);
       else if(name=="Writer") x.Capture(&x.entry.author);
-      else if(name=="Series") x.Capture(&x.entry.series);
-      else if(name=="Publisher") x.Capture(&x.entry.publisher);
+      else if(name=="Series") x.Capture(&x.entry.series,false);
+      else if(name=="Publisher") x.Capture(&x.entry.publisher,false);
     }
   }
   static void End(void *ctx,const XML_Char *tag) {
@@ -126,7 +139,13 @@ struct Xml {
       Trim(x.field);
       if(x.field==&x.part) {
         bool ok=true;
-        if(x.kind==XmlKind::Opf) ok=Join(name=="creator" ? &x.entry.author : &x.entry.subjects,x.part);
+        if(x.kind==XmlKind::Opf) {
+          if(name=="creator") ok=Join(&x.entry.author,x.part);
+          else {
+            if(!x.entry.subjects.empty()) AppendDisplay(&x.entry.subjects,"; ",2,&x.subjects_overflow);
+            AppendDisplay(&x.entry.subjects,x.part.data(),x.part.size(),&x.subjects_overflow);
+          }
+        }
         else {
           if(!x.author.empty() && !x.part.empty()) ok=Append(&x.author," ",1);
           if(ok) ok=Append(&x.author,x.part.data(),x.part.size());
@@ -146,7 +165,10 @@ struct Xml {
   }
   static void Text(void *ctx,const XML_Char *text,int length) {
     Xml &x=*(Xml*)ctx;
-    if(x.field && !Append(x.field,text,(size_t)length)) x.Stop(true);
+    if(x.field) {
+      if(!x.searchable) AppendDisplay(x.field,text,(size_t)length,&x.field_overflow);
+      else if(!Append(x.field,text,(size_t)length)) x.Stop(true);
+    }
   }
   static void Doctype(void *ctx,const XML_Char *,const XML_Char *,const XML_Char *,int) {((Xml*)ctx)->Stop(true);}
   bool Init() {

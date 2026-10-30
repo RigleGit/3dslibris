@@ -4,6 +4,8 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstddef>
+#include <algorithm>
+#include "shared/utf8_utils.h"
 namespace library_metadata {
 namespace {
 const size_t kMetadataMemoryLimit=4u*1024u*1024u;
@@ -45,12 +47,17 @@ Status ReadMuPdf(const std::string &path,book_meta_cache::MetaEntry *out) {
     std::string *values[]={&out->title,&out->author,&out->subjects,&out->published};
     for(unsigned i=0;ok && i<4;++i) {
       const int needed=fz_lookup_metadata(ctx,doc,keys[i],nullptr,0);
-      if(needed>4097) {ok=false;break;}
+      if(i<2 && needed>4097) {ok=false;break;}
       if(needed>0) {
         memset(buffer,0,sizeof(buffer));
         const int count=fz_lookup_metadata(ctx,doc,keys[i],buffer,sizeof(buffer));
-        if(count>4097 || count<0) {ok=false;break;}
+        if(count<0 || (i<2 && count>4097)) {ok=false;break;}
         *values[i]=buffer;
+        if(count>4097) {
+          values[i]->resize(std::min(values[i]->size(),(size_t)4093));
+          while(!values[i]->empty() && !utf8_utils::IsValidUtf8(*values[i])) values[i]->pop_back();
+          *values[i]+="...";
+        }
       }
     }
   }
