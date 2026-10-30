@@ -1,3 +1,4 @@
+#undef lstat
 #include "library/library_walk.h"
 #include <cassert>
 #include <vector>
@@ -5,6 +6,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
+#include <cstring>
+extern "C" int WalkTestLstat(const char *path,struct stat *st) {
+  if(strstr(path,"/book300.epub")) unlink(path); // A file disappears after directory enumeration.
+  return lstat(path,st);
+}
 struct Source {std::vector<library_walk::Entry> roots;};
 static bool Root(void *p,size_t i,library_walk::Entry *out) {
   auto &s=*static_cast<Source *>(p);if(i>=s.roots.size()) return false;*out=s.roots[i];return true;
@@ -21,7 +27,7 @@ int main() {
     const auto step=cursor.Next(&entry);if(step==library_walk::Step::End) break;
     if(step==library_walk::Step::Item) {if(entry.directory) ++folders;else ++books;assert(entry.path.find("deep")==std::string::npos);}
   }
-  assert(books==600 && folders==1 && cursor.Errors()==0);
+  assert(books==599 && folders==1 && cursor.Errors()==1);
   assert(cursor.Start(Root,&source,false));assert(cursor.Next(&entry)==library_walk::Step::Item);
   assert(cursor.Next(&entry)==library_walk::Step::End);
   source.roots={{root+"/gone","gone",true}};assert(cursor.Start(Root,&source,true));

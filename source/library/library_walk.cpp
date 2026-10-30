@@ -2,6 +2,7 @@
 #include "shared/app_flow_utils.h"
 #include "shared/utf8_utils.h"
 #include <dirent.h>
+#include <cerrno>
 #include <new>
 #include <sys/stat.h>
 #ifdef __3DS__
@@ -64,12 +65,13 @@ struct Directory {
       return 1;
     }
 #endif
+    errno=0;
     dirent *value=readdir(posix);
-    if(!value) return 0;
+    if(!value) return errno ? -1 : 0;
     entry->name=value->d_name; entry->path=path+"/"+entry->name;
     struct stat st;
     // lstat deliberately excludes links in the POSIX fallback/host backend.
-    if(lstat(entry->path.c_str(),&st)) return -1;
+    if(lstat(entry->path.c_str(),&st)) return 2; // Entry failed; directory remains usable.
     entry->directory=S_ISDIR(st.st_mode);
     if(!entry->directory && !S_ISREG(st.st_mode)) entry->name.clear();
     return 1;
@@ -95,6 +97,7 @@ Step Cursor::Next(Entry *entry) {
   auto &s=*state_;
   if(s.directory.Active()) {
     const int rc=s.directory.Next(entry);
+    if(rc==2) {++s.errors;return Step::Skip;}
     if(rc<=0) {if(rc<0) ++s.errors;s.directory.Close();return Step::Skip;}
     if(entry->directory) return Step::Skip;
   } else {
