@@ -84,17 +84,18 @@ void LibraryController::StartLibrarySearch() {
   s.editor=false;s.result_selection=0;s.message.clear();s.dirty=true;
 }
 void LibraryController::ResumeLibrarySearch() {
-  if(!search_ || app_.GetMode()!=AppMode::LibrarySearch) return;
+  if(!search_ || app_.GetMode()!=AppMode::LibrarySearch || app_.ShouldAbortWork()) return;
+  RestoreSearchOrigin();
+  app_.ApplyRenderOrientation(app_.portrait_orientation);
   if(!search_->editor) StartLibrarySearch();
   search_->dirty=search_->wait_release=true;
 }
 void LibraryController::RestoreSearchOrigin() {
   const auto &s=*search_;
   if(s.origin_folder.empty()) {if(inside_folder_) RebuildRoot();}
-  else if(!inside_folder_ || current_folder_path_!=s.origin_folder) {
-    if(Exists(s.origin_folder,true)) LoadFolderPath(s.origin_folder,BasenamePath(s.origin_folder));
-    else RebuildRoot();
-  }
+  else if(!Exists(s.origin_folder,true)) RebuildRoot();
+  else if(!inside_folder_ || current_folder_path_!=s.origin_folder)
+    LoadFolderPath(s.origin_folder,BasenamePath(s.origin_folder));
   for(Book *book:app_.books) if(EntryPath(book)==s.origin_selection) {
     app_.SetSelectedBook(book);app_.SetBrowserPageStart(s.origin_page);break;
   }
@@ -123,7 +124,10 @@ void LibraryController::ActivateLibrarySearchResult(size_t index) {
     }
   }
   if(opened) {search_.reset();return;}
-  RestoreSearchOrigin();app_.SetMode(AppMode::LibrarySearch);
+  if(!app_.ShouldAbortWork()) {
+    RestoreSearchOrigin();app_.ApplyRenderOrientation(app_.portrait_orientation);
+  }
+  app_.SetMode(AppMode::LibrarySearch);
   search_->message="Unable to open result";search_->wait_release=search_->dirty=true;
 }
 void LibraryController::EditLibrarySearch() {
@@ -169,6 +173,10 @@ void LibraryController::DrawLibrarySearch() {
     ts->SetPen(6,164);ts->PrintString(Fit(ts,progress).c_str());
   }
   if(s.engine.Uncached()) {ts->SetPen(6,188);ts->PrintString("Some metadata was not saved");}
+  if(s.field!=library_search::Field::Name) {
+    ts->SetPen(6,216);ts->PrintString("Metadata: EPUB PDF XPS MOBI");
+    ts->SetPen(6,236);ts->PrintString("FB2 CBZ; other formats excluded");
+  }
   ts->SetScreen(ts->screenright);ts->ClearScreen();
   ts->SetPen(6,24);ts->PrintString(s.editor ? "search library" : "search results");
   if(s.editor) {
