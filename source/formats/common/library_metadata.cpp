@@ -8,7 +8,8 @@
 #include <cstdio>
 #include <cstring>
 #include <sys/stat.h>
-#include <vector>
+#include <memory>
+#include <new>
 
 namespace library_metadata {
 namespace {
@@ -231,19 +232,23 @@ Status MobiMetadata(const std::string &path,book_meta_cache::MetaEntry *entry) {
   struct stat st;
   ok=ok && count>1 && start>=78+count*8 && end>start &&
       end-start<=kReadLimit && fstat(fileno(fp),&st)==0 && (uint64_t)end<=(uint64_t)st.st_size;
-  std::vector<unsigned char> record;
-  if(ok) {record.resize(end-start);ok=fseek(fp,start,SEEK_SET)==0 && fread(record.data(),1,record.size(),fp)==record.size();}
-  fclose(fp);if(!ok || record.size()<16+0x4c) return Status::Error;
-  const unsigned char *mobi=record.data()+16;
+  const size_t record_size=ok ? end-start : 0;
+  std::unique_ptr<unsigned char[]> record;
+  if(ok) {
+    record.reset(new(std::nothrow) unsigned char[record_size]);
+    ok=record && fseek(fp,start,SEEK_SET)==0 && fread(record.get(),1,record_size,fp)==record_size;
+  }
+  fclose(fp);if(!ok || record_size<16+0x4c) return Status::Error;
+  const unsigned char *mobi=record.get()+16;
   const uint32_t length=Be32(mobi+4),encoding=Be32(mobi+12);
-  if(memcmp(mobi,"MOBI",4) || length<0x4c || length>record.size()-16) return Status::Error;
+  if(memcmp(mobi,"MOBI",4) || length<0x4c || length>record_size-16) return Status::Error;
   const size_t title_offset=Be32(mobi+0x44),title_length=Be32(mobi+0x48);
-  if(title_length && (title_offset>record.size() || title_length>record.size()-title_offset ||
-     !MobiField(record.data()+title_offset,title_length,encoding,&entry->title))) return Status::Error;
-  const size_t offset=16+length,remain=record.size()-offset;
+  if(title_length && (title_offset>record_size || title_length>record_size-title_offset ||
+     !MobiField(record.get()+title_offset,title_length,encoding,&entry->title))) return Status::Error;
+  const size_t offset=16+length,remain=record_size-offset;
   const bool flagged=length>=0x84 && (Be32(mobi+0x80)&0x40);
-  if(flagged || (remain>=12 && !memcmp(record.data()+offset,"EXTH",4))) {
-    const auto exth=record.data()+offset;
+  if(flagged || (remain>=12 && !memcmp(record.get()+offset,"EXTH",4))) {
+    const auto exth=record.get()+offset;
     if(remain<12 || memcmp(exth,"EXTH",4)) return Status::Error;
     const size_t size=Be32(exth+4),records=Be32(exth+8);
     if(size<12 || size>remain || records>(size-12)/8) return Status::Error;
@@ -269,7 +274,8 @@ Status Prepare(const std::string &path,Value *out,Cancelled cancelled,void *cont
   if(cancelled && cancelled(context)) return Status::Cancelled;
   const bool epub=HasExtCI(path.c_str(),".epub"),fb2=HasExtCI(path.c_str(),".fb2"),
       mobi=HasExtCI(path.c_str(),".mobi") || HasExtCI(path.c_str(),".azw") || HasExtCI(path.c_str(),".azw3"),
-      cbz=HasExtCI(path.c_str(),".cbz"),pdf=HasExtCI(path.c_str(),".pdf") || HasExtCI(path.c_str(),".xps");
+      cbz=HasExtCI(path.c_str(),".cbz"),xps=HasExtCI(path.c_str(),".xps") || HasExtCI(path.c_str(),".oxps"),
+      pdf=HasExtCI(path.c_str(),".pdf") || xps;
   if(!epub && !fb2 && !mobi && !cbz && !pdf) return Status::Unsupported;
   struct stat st;if(stat(path.c_str(),&st) || !S_ISREG(st.st_mode)) return Status::Error;
   const auto cache=book_meta_cache::BuildPath(path,st.st_size,st.st_mtime);
@@ -277,7 +283,7 @@ Status Prepare(const std::string &path,Value *out,Cancelled cancelled,void *cont
   if(book_meta_cache::Load(cache,&out->entry,&prepared) && prepared) return Status::Ready;
   out->entry=book_meta_cache::MetaEntry();out->extracted=true;
   const Status status=epub || cbz ? ZipMetadata(path,epub,&out->entry) :
-      fb2 ? Fb2Metadata(path,&out->entry) : mobi ? MobiMetadata(path,&out->entry) : HasExtCI(path.c_str(),".xps") ? XpsMetadata(path,&out->entry) : ReadMuPdf(path,&out->entry);
+      fb2 ? Fb2Metadata(path,&out->entry) : mobi ? MobiMetadata(path,&out->entry) : xps ? XpsMetadata(path,&out->entry) : ReadMuPdf(path,&out->entry);
   if(cancelled && cancelled(context)) return Status::Cancelled;
   if(status!=Status::Ready) {out->entry=book_meta_cache::MetaEntry();return status;}
   if(out->entry.title.size()>kFieldLimit || out->entry.author.size()>kFieldLimit ||

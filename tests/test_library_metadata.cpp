@@ -8,7 +8,7 @@ using namespace library_metadata;
 static bool Cancel(void *) {return true;}
 int main() {
   const std::string base=".";
-  for(const char *name:{"sample.epub","sample.fb2","sample.mobi","sample.cbz","sample.xps"}) {
+  for(const char *name:{"sample.epub","sample.fb2","sample.mobi","sample.cbz","sample.xps","sample.oxps"}) {
     const std::string path=base+"/"+name;
     Value a;assert(Prepare(path,&a)==Status::Ready && a.extracted && a.cache_saved);
     assert(a.entry.title=="El océano" && a.entry.author=="José Pérez");

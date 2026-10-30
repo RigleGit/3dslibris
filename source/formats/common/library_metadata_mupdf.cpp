@@ -2,9 +2,37 @@
 #if defined(__3DS__) || defined(LIBRARY_METADATA_NATIVE_MUPDF)
 #include "mupdf/fitz.h"
 #include <cstring>
+#include <cstdlib>
+#include <cstddef>
 namespace library_metadata {
+namespace {
+const size_t kMetadataMemoryLimit=4u*1024u*1024u;
+struct Memory {size_t bytes=0;};
+union Header {size_t bytes;std::max_align_t alignment;};
+void Free(void *context,void *ptr) {
+  if(!ptr) return;
+  auto &memory=*static_cast<Memory *>(context);
+  Header *head=static_cast<Header *>(ptr)-1;
+  memory.bytes-=head->bytes;free(head);
+}
+void *Resize(void *context,void *ptr,size_t bytes) {
+  if(!bytes) {Free(context,ptr);return nullptr;}
+  auto &memory=*static_cast<Memory *>(context);
+  Header *head=ptr ? static_cast<Header *>(ptr)-1 : nullptr;
+  const size_t old=head ? head->bytes : 0;
+  if(bytes>kMetadataMemoryLimit-sizeof(Header) ||
+     bytes+sizeof(Header)>kMetadataMemoryLimit-(memory.bytes-old)) return nullptr;
+  const size_t total=bytes+sizeof(Header);
+  Header *next=static_cast<Header *>(realloc(head,total));
+  if(!next) return nullptr;
+  next->bytes=total;memory.bytes=memory.bytes-old+total;return next+1;
+}
+void *Allocate(void *context,size_t bytes) {return Resize(context,nullptr,bytes);}
+}
 Status ReadMuPdf(const std::string &path,book_meta_cache::MetaEntry *out) {
-  fz_context *ctx=fz_new_context(nullptr,nullptr,4u*1024u*1024u);
+  Memory memory;
+  fz_alloc_context allocator={&memory,Allocate,Resize,Free};
+  fz_context *ctx=fz_new_context(&allocator,nullptr,kMetadataMemoryLimit);
   if(!ctx) return Status::Error;
   fz_document *doc=nullptr;bool ok=true;
   // Keep C++ objects outside MuPDF's longjmp region.

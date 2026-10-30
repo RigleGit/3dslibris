@@ -30,6 +30,7 @@ with zipfile.ZipFile(p/'sample.cbz','w') as z:
 with zipfile.ZipFile(p/'sample.xps','w') as z:
  z.writestr('_rels/.rels','<Relationships><Relationship Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="/Metadata/Core.xml"/></Relationships>')
  z.writestr('Metadata/Core.xml','<cp:coreProperties xmlns:cp="core" xmlns:dc="dc"><dc:title>El océano</dc:title><dc:creator>José Pérez</dc:creator></cp:coreProperties>')
+(p/'sample.oxps').write_bytes((p/'sample.xps').read_bytes())
 (p/'bad.cbz').write_bytes(b'not zip')
 # Only record 0 is metadata; the following text record is deliberately invalid.
 b32=lambda n:struct.pack('>I',n)
