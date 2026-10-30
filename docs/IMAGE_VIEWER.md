@@ -30,10 +30,10 @@ returns to the library; `prefs` / `(SEL)` opens settings. The overview sits abov
 gestures started inside it move the viewport. Button skins and icons clip to the
 actual screen width, including landscape.
 
-The image starts fitted, centered and unrotated. Rotation preserves zoom and
+The image starts fitted, centered and unrotated. Rotation preserves the absolute image scale and
 the source center, clamping only to the new viewport bounds. Panning and stylus
 coordinates follow the rotated image, including its overview. Closing or changing
-the image resets rotation; HOME/sleep preserves it. A loaded texture is reused
+the image resets rotation; HOME/sleep preserves it. `X` establishes a new fit scale for the current angle. A loaded texture is reused
 when its resolution is sufficient; larger views can require a new decode.
 
 The image starts fitted and centered. When movement stops, including pad

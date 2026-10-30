@@ -45,14 +45,6 @@ inline Size RequiredSize(int width, int height, int screen_width,
   return {std::max(1, (int)std::ceil(width * scale)),
           std::max(1, (int)std::ceil(height * scale))};
 }
-inline pdf_view_utils::NormalizedRect Viewport(int width, int height,
-                                               int screen_width,
-                                               int screen_height, int zoom,
-                                               float x, float y) {
-  return pdf_view_utils::ComputeViewportRect(
-      width, height, pdf_view_utils::ZoomForIndex(zoom),
-      screen_width, screen_height, x, y);
-}
 inline void MapPan(unsigned char orientation, float x, float y, float *dx,
                    float *dy) {
   if (orientation_utils::IsLandscape(orientation)) {

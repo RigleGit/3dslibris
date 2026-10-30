@@ -82,6 +82,26 @@ void LayoutControls(ReaderImageViewerSession &s, int width, int height) {
       s.viewport.zoom_index > 2);
 }
 
+float FitScale(int width,int height,int screen_width,int screen_height) {
+  return width>0 && height>0 ? std::min((float)screen_width/width,(float)screen_height/height) : 0;
+}
+image_view::Size RequiredSourceSize(const ReaderImageViewerSession &s,int width,
+                                    int height,int screen_width,int screen_height,int zoom) {
+  const float fit=s.zoom_fit_scale>0 ? s.zoom_fit_scale : FitScale(width,height,screen_width,screen_height);
+  const float scale=std::min(1.0f,fit*pdf_view_utils::ZoomForIndex(zoom));
+  return {std::max(1,(int)std::ceil(width*scale)),std::max(1,(int)std::ceil(height*scale))};
+}
+pdf_view_utils::NormalizedRect SourceViewport(const ReaderImageViewerSession &s,
+                                                int width,int height) {
+  const float scale=s.zoom_fit_scale*pdf_view_utils::ZoomForIndex(s.viewport.zoom_index);
+  if(scale<=0 || s.image.original_width<=0 || s.image.original_height<=0) return {0,0,1,1};
+  const float w=std::min(1.f,width/(s.image.original_width*scale));
+  const float h=std::min(1.f,height/(s.image.original_height*scale));
+  const float cx=std::max(w/2,std::min(1-w/2,s.viewport.center_x));
+  const float cy=std::max(h/2,std::min(1-h/2,s.viewport.center_y));
+  return {cx-w/2,cy-h/2,w,h};
+}
+
 void DrawViewerStatus(Text *ts, const char *message, int width, int height) {
   // Status/error messages get two bounded lines above the controls. Button
   // labels use Button's own UTF-8 clipping, like the other menus.
@@ -230,8 +250,7 @@ bool ReaderController::LoadImageViewer(int zoom) {
   // decoder still validates its own original dimensions and allocation bounds.
   const auto required =
       width > 0 && height > 0
-          ? image_view::RequiredSize(width, height, target.width, target.height,
-                                     zoom)
+          ? RequiredSourceSize(s,width,height,physical.width,physical.height,zoom)
           : image_view::Size{target.width * 4, target.height * 4};
   const char *error = "Image unavailable (resource/memory limit)";
   const bool decoded =
@@ -245,6 +264,7 @@ bool ReaderController::LoadImageViewer(int zoom) {
   s.loading = false;
   s.suspended = false;
   if (decoded) {
+    if(s.zoom_fit_scale<=0) s.zoom_fit_scale=FitScale(s.image.original_width,s.image.original_height,physical.width,physical.height);
     s.gpu.Reset();
     s.gpu_reset_pending = false;
     s.gpu_draw_failed = false;
@@ -335,6 +355,8 @@ void ReaderController::DrawImageViewer() {
   const auto top =
       fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
   const auto virtual_top=image_view::VirtualSize(top.width,top.height,s.quarter_turns);
+  if(s.HasImage() && s.zoom_fit_scale<=0)
+    s.zoom_fit_scale=FitScale(s.image.original_width,s.image.original_height,top.width,top.height);
   const auto bottom =
       fixed_layout_screen::TargetDims(app_.reader_layout.orientation, false);
   const bool background_changed = s.panel_orientation >= 0 &&
@@ -372,9 +394,7 @@ void ReaderController::DrawImageViewer() {
     LayoutControls(s, bottom.width, bottom.height);
   }
   if (s.HasImage()) {
-    auto rect = image_view::Viewport(
-        s.image.original_width, s.image.original_height, virtual_top.width, virtual_top.height,
-        s.viewport.zoom_index, s.viewport.center_x, s.viewport.center_y);
+    const auto rect=SourceViewport(s,virtual_top.width,virtual_top.height);
     s.viewport.center_x = rect.left + rect.width / 2;
     s.viewport.center_y = rect.top + rect.height / 2;
     const int cx =
@@ -387,10 +407,13 @@ void ReaderController::DrawImageViewer() {
     const int ch =
         std::max(1, std::min(s.image.height - cy,
                              (int)(rect.height * s.image.height + 0.5f)));
-    // Fit the visible source rectangle without stretching its aspect ratio.
-    const auto placement = pdf_view_utils::ComputePreviewLayout(
-        s.image.original_width * rect.width,
-        s.image.original_height * rect.height, virtual_top.width, virtual_top.height);
+    // Preserve absolute image scale across turns, including letterboxing. X
+    // alone chooses a new fit scale for the current angle.
+    const float scale=s.zoom_fit_scale*pdf_view_utils::ZoomForIndex(s.viewport.zoom_index);
+    const int draw_width=std::min(virtual_top.width,std::max(1,(int)(s.image.original_width*rect.width*scale+.5f)));
+    const int draw_height=std::min(virtual_top.height,std::max(1,(int)(s.image.original_height*rect.height*scale+.5f)));
+    const pdf_view_utils::PreviewLayout placement={(virtual_top.width-draw_width)/2,
+        (virtual_top.height-draw_height)/2,draw_width,draw_height};
     const bool try_gpu = !s.loading && !s.suspended && !s.gpu_draw_failed;
     const bool gpu_drawn = try_gpu &&
         s.gpu.Upload(ts, s.image.pixels.get(), s.image.PixelCount(),
@@ -556,27 +579,30 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
   if(old_turns!=s.quarter_turns) {
     s.preview_viewport_valid=false;s.panel_dirty=s.dirty=true;
   }
+  const float previous_fit=s.zoom_fit_scale;
+  const bool fit_requested=(keys&app_.key.x) || control==ReaderImageViewerSession::Fit;
   int zoom = s.viewport.zoom_index;
   if ((keys & app_.key.a) || control == ReaderImageViewerSession::ZoomIn)
     zoom = std::min(s.viewport.max_zoom_index, zoom + 1);
   if ((keys & app_.key.b) || control == ReaderImageViewerSession::ZoomOut)
     zoom = std::max(2, zoom - 1);
-  if ((keys & app_.key.x) || control == ReaderImageViewerSession::Fit) {
+  if (fit_requested) {
+    const auto top=fixed_layout_screen::TargetDims(app_.reader_layout.orientation,true);
+    const auto target=image_view::VirtualSize(top.width,top.height,s.quarter_turns);
+    s.zoom_fit_scale=FitScale(s.image.original_width,s.image.original_height,target.width,target.height);
     zoom = 2;
     s.viewport.center_x = s.viewport.center_y = 0.5f;
     s.dirty = true;
   }
-  if (zoom != s.viewport.zoom_index || old_turns!=s.quarter_turns) {
+  if (zoom != s.viewport.zoom_index || old_turns!=s.quarter_turns || fit_requested) {
     const auto top = fixed_layout_screen::TargetDims(app_.reader_layout.orientation, true);
-    const auto target=image_view::VirtualSize(top.width,top.height,s.quarter_turns);
-    const auto required = image_view::RequiredSize(s.image.original_width,
-                                                   s.image.original_height,
-                                                   target.width, target.height, zoom);
+    const auto required=RequiredSourceSize(s,s.image.original_width,s.image.original_height,
+                                            top.width,top.height,zoom);
     if (s.image.width >= required.width && s.image.height >= required.height) {
       s.viewport.zoom_index = zoom;
       s.message.clear();
-    } else
-      LoadImageViewer(zoom);
+    } else if(!LoadImageViewer(zoom) && fit_requested)
+      s.zoom_fit_scale=previous_fit;
     s.dirty = true;
     if (app_.ShouldAbortWork())
       return;

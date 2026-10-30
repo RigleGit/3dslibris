@@ -5,6 +5,7 @@
 class Text;
 extern unsigned viewer_gpu_upload_attempts, viewer_gpu_resets;
 extern bool viewer_gpu_available, viewer_gpu_queue_ok;
+extern fixed_layout_tiles::Rect viewer_gpu_viewport;
 namespace fixed_layout_gpu {
 // Controllable hardware boundary; the real controller owns source validity,
 // CPU pixel release, fallback reconstruction and input behavior.
@@ -22,8 +23,9 @@ struct TextureCache {
   void Reset() { ++viewer_gpu_resets; resident = false; }
 };
 inline bool Queue(Text *, TextureCache &cache, const fixed_layout_tiles::Rect &,
-                  const fixed_layout_tiles::Rect &,
+                  const fixed_layout_tiles::Rect &viewport,
                   const fixed_layout_tiles::Rect &, int = 0) {
+  viewer_gpu_viewport=viewport;
   return cache.resident && viewer_gpu_queue_ok;
 }
 } // namespace fixed_layout_gpu

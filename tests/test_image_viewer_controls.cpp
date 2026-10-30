@@ -72,6 +72,7 @@ static std::vector<bool> qualities;
 static size_t bottom_blit_pixels = 0;
 unsigned viewer_gpu_upload_attempts = 0, viewer_gpu_resets = 0;
 bool viewer_gpu_available = false, viewer_gpu_queue_ok = true;
+fixed_layout_tiles::Rect viewer_gpu_viewport;
 namespace fixed_layout_blit_utils {
 void BlitRgb565BitmapScaledCrop(Text *text, u16 *screen, int, int, int, int w, int h,
                                 const u16 *, size_t, int, int, int, int, int,
@@ -193,14 +194,14 @@ struct ReaderController {
 struct Fixture {
   App app;
   ReaderController reader{app};
-  explicit Fixture(unsigned char orientation) {
+  explicit Fixture(unsigned char orientation,int width=1000,int height=1000) {
     app.reader_layout.orientation = orientation;
     reader.OpenImageViewer();
     auto &s = *reader.image_viewer_;
     s.loading = s.wait_release = false;
-    s.image.width = s.image.height = s.image.original_width =
-        s.image.original_height = 1000;
-    s.image.pixels.reset(new u16[1000 * 1000]());
+    s.image.width=s.image.original_width=width;
+    s.image.height=s.image.original_height=height;
+    s.image.pixels.reset(new u16[(size_t)width*height]());
     Draw();
   }
   void Draw() {
@@ -495,7 +496,25 @@ void TestRotation() {
     const auto angle=s.quarter_turns;f.reader.SuspendImageViewer();assert(s.quarter_turns==angle);
   }
 }
+void TestRectangularRotationScale() {
+  viewer_gpu_available=true;
+  Fixture f(2,1000,1500);auto &s=*f.reader.image_viewer_;
+  s.viewport.zoom_index=4;f.Draw();
+  assert(std::abs(viewer_gpu_viewport.height-.5f)<1e-5f);
+  const unsigned uploads=viewer_gpu_upload_attempts;
+  viewer_decodes=0;f.Input(KEY_R,KEY_R);
+  assert(std::abs(viewer_gpu_viewport.width-.75f)<1e-5f);
+  assert(std::abs(viewer_gpu_viewport.height-5.f/6.f)<1e-5f);
+  assert(viewer_decodes==0 && viewer_gpu_upload_attempts==uploads);
+  f.Input(KEY_X,KEY_X);
+  assert(s.quarter_turns==1 && viewer_gpu_viewport.width==1 && viewer_gpu_viewport.height==1);
+  f.Input(KEY_R,KEY_R);
+  assert(std::abs(viewer_gpu_viewport.width-1.f)<1e-5f);
+  assert(std::abs(viewer_gpu_viewport.height-2.f/3.f)<1e-5f);
+  viewer_gpu_available=false;
+}
 int main(int argc, char **argv) {
+  TestRectangularRotationScale();
   TestRotation();
   TestGpuOnlyViewer();
   {

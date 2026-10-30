@@ -16,6 +16,7 @@ struct ReaderImageViewerSession {
   uint16_t image_id = 0;
   int selection = -1;
   int quarter_turns = 0;
+  float zoom_fit_scale = 0; // Retained until X explicitly fits the current angle.
   fixed_layout_viewport_utils::ViewportState viewport;
   raster_image::Bitmap image, preview;
   fixed_layout_gpu::TextureCache gpu;
