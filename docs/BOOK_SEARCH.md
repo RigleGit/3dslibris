@@ -1,5 +1,7 @@
 # Book text search
 
+For filenames, folders, titles and authors, see [library search](LIBRARY_SEARCH.md).
+
 Search is available in `BOOK` settings for EPUB, MOBI, TXT, Markdown, FB2,
 RTF and ODT after opening and pagination have finished. Select `search`, enter
 a word or phrase with the system keyboard, choose `whole words` if wanted,

@@ -91,7 +91,8 @@ Library:
 - `A`: open selected book
 - `L` / `R`: previous or next library page
 - `Touch`: select and open books
-- `Y` / `Select`: open `GENERAL` settings
+- `Y`: search the library by filename, title or author
+- `SELECT`: open `GENERAL` settings (also includes library search)
 
 Standard reading:
 
@@ -106,7 +107,8 @@ Standard reading:
 Book images (`EPUB` / `MOBI` / `FB2`):
 
 - Select an image with hold `Y`, then `A` to enlarge it.
-- `A` / `B`: zoom in / out; `X`: fit and center
+- `A` / `B`: zoom in / out; `X`: fit and center, keeping rotation
+- Physical `L` / `R`: rotate the illustration 90° left / right
 - `D-Pad` / `Circle Pad` / stylus on the overview: move the viewport
 - `Y` or touch `back`: return to the same page and selection
 - `SELECT`: book settings; `START`: library
@@ -214,7 +216,8 @@ Expected outputs:
 
 - [sdmc/3ds/3dslibris/book/QuickStart.txt](sdmc/3ds/3dslibris/book/QuickStart.txt) - Quickstart guide explaining menus, options, and controls
 - [docs/IMAGE_VIEWER.md](docs/IMAGE_VIEWER.md) - image selection, zoom and touch controls
-- [docs/BOOK_SEARCH.md](docs/BOOK_SEARCH.md) - search controls and supported formats
+- [docs/BOOK_SEARCH.md](docs/BOOK_SEARCH.md) - search within book text
+- [docs/LIBRARY_SEARCH.md](docs/LIBRARY_SEARCH.md) - filename, title and author search
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 - [docs/PDF_SOURCE_RELEASE.md](docs/PDF_SOURCE_RELEASE.md) - source release and rebuild notes for distributed binaries

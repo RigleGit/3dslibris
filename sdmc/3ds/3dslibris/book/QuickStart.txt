@@ -38,7 +38,11 @@ Notes:
 - D-Pad / Circle Pad: move selection
 - A: open selected book
 - B: back
-- X / Y: quick actions in library (depends on current view)
+- Y: search books/folders by name, or books by title or author
+- Select: GENERAL settings (also includes search)
+- Search: choose field and query, then search; D-Pad selects, L/R pages, A opens.
+- Name needs no metadata. Title/author prepares and caches genuine metadata.
+- Searches cover the root plus one folder level, or only the current folder.
 - Touch: select/open books and use UI buttons
 
 Tip:
@@ -76,7 +80,8 @@ Links and images:
 - Touch selects an image while selection is active; press A to open it.
 - In the image viewer, A / B zooms, D-Pad / Circle Pad pans, and the stylus
   moves the visible region using the touch-screen overview.
-- X fits and centers; Y or touch back returns to the same page and selection.
+- Physical L / R rotates the illustration 90 degrees left / right.
+- X fits and centers, keeping rotation; Y or touch back returns to the same page.
 - Start returns to the library; Select opens BOOK settings.
 
 Other:
