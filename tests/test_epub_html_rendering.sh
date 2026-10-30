@@ -18,6 +18,11 @@ if [ -f "$TEST_ROOT/third_party/expat/xmlparse.c" ]; then
   done
 fi
 
+MINIZIP_DIR="$TEST_ROOT/third_party/mupdf/thirdparty/zlib/contrib/minizip"
+for unit in unzip ioapi; do
+  "$CC_BIN" ${CFLAGS:-} -c "$MINIZIP_DIR/$unit.c" -o "$TEST_OUTDIR/html_minizip_$unit.o"
+done
+
 "$CXX_BIN" -std=c++11 \
   ${CXXFLAGS:-} \
   "-I$TEST_ROOT/tests/stubs" \
@@ -33,7 +38,7 @@ fi
   "$TEST_ROOT/tests/stubs/book_fixed_layout_stubs.cpp" \
   "$TEST_ROOT/tests/stubs/book_inline_image_stub.cpp" \
   "$TEST_ROOT/tests/stubs/epub_parser_stub.cpp" \
-  "$TEST_ROOT/tests/stubs/minizip_unzip_stubs.cpp" \
+  "$TEST_OUTDIR/html_minizip_unzip.o" "$TEST_OUTDIR/html_minizip_ioapi.o" \
   "$TEST_ROOT/tests/stubs/fixed_format_parser_stubs.cpp" \
   "$TEST_ROOT/tests/stubs/mupdf_bidi_stub.cpp" \
   "$TEST_ROOT/source/book/book.cpp" \
@@ -90,6 +95,8 @@ fi
   "$TEST_ROOT/source/formats/common/file_read_utils.cpp" \
   "$TEST_ROOT/source/formats/common/binary_io_utils.cpp" \
   "$TEST_ROOT/source/formats/common/book_meta_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/library_metadata.cpp" \
+  "$TEST_ROOT/source/formats/common/library_metadata_mupdf.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_utils.cpp" \
   "$TEST_ROOT/source/formats/common/html_entity_utils.cpp" \
   "$TEST_ROOT/source/formats/common/href_normalization.cpp" \

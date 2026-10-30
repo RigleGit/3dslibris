@@ -282,6 +282,8 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/common/file_read_utils.cpp" \
   "$TEST_ROOT/source/formats/common/binary_io_utils.cpp" \
   "$TEST_ROOT/source/formats/common/book_meta_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/library_metadata.cpp" \
+  "$TEST_ROOT/source/formats/common/library_metadata_mupdf.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_utils.cpp" \
   "$TEST_ROOT/source/formats/common/html_entity_utils.cpp" \
   "$TEST_ROOT/source/formats/common/href_normalization.cpp" \

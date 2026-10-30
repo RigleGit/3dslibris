@@ -95,6 +95,7 @@ static const uint8_t kCoverMaxAttempts = cover_cache::kMaxAttempts;
 static void DrawBottomGradientFromApp(void *) {}
 static void DrawTopGradientFromApp(void *) {}
 static void DrawOpeningSplashWithProgress(unsigned, unsigned, void *) {}
+struct LibrarySearchSession {}; // Unused session owner at this collaborator boundary.
 LibraryController::LibraryController(App &app) : app_(app), inside_folder_(false) {}
 LibraryController::~LibraryController() = default;
 void LibraryController::ResetBrowserMarquee() {}
