@@ -4,18 +4,19 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "library/library_walk.h"
 
 namespace library_search {
 enum class Field { Name, Title, Author };
 enum class Status { Idle, Searching, Complete, Limited, Cancelled };
 enum class MetadataStatus { Ready, Unsupported, Error, Cancelled };
-struct Entry { std::string path, name; bool directory; };
+using Entry=library_walk::Entry;
 struct Result : Entry { std::string label, author; };
 struct MetadataValue {
   std::string title, author;
   bool extracted=false, cache_saved=true;
 };
-typedef bool (*RootSource)(void *,size_t,Entry *);
+using RootSource=library_walk::RootSource;
 typedef MetadataStatus (*MetadataSource)(void *,const std::string&,MetadataValue *);
 typedef uint64_t (*Clock)();
 

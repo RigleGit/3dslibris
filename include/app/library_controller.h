@@ -17,7 +17,8 @@ class Book;
 class Text;
 class Button;
 struct LibrarySearchSession;
-namespace library_search { struct Entry; struct MetadataValue; enum class MetadataStatus; }
+namespace library_walk { struct Entry; }
+namespace library_search { struct MetadataValue; enum class MetadataStatus; }
 
 struct LibraryGradientContext {
   Text *ts;
@@ -76,7 +77,7 @@ private:
   void CloseLibrarySearch();
   void RestoreSearchOrigin();
   void ActivateLibrarySearchResult(size_t index);
-  static bool SearchRoot(void *, size_t, library_search::Entry *);
+  static bool SearchRoot(void *, size_t, library_walk::Entry *);
   static library_search::MetadataStatus SearchMetadata(void *, const std::string &, library_search::MetadataValue *);
 
   void RebuildRoot();

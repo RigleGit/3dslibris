@@ -8,5 +8,5 @@ for signature in 'bool LibraryController::SearchRoot(' 'void LibraryController::
 done
 build_test test_library_search_ui -- -I"$TEST_ROOT/tests/stubs/image_viewer" \
   -I"$TASK_TMP" -I"$TEST_ROOT/tests/stubs" -I"$TEST_ROOT/include" \
-  "$TEST_ROOT/tests/test_library_search_ui.cpp" "$TEST_ROOT/source/library/library_search.cpp" \
+  "$TEST_ROOT/tests/test_library_search_ui.cpp" "$TEST_ROOT/source/library/library_search.cpp" "$TEST_ROOT/source/library/library_walk.cpp" \
   "$TEST_ROOT/source/shared/app_flow_utils.cpp" "$TEST_ROOT/source/shared/utf8_utils.cpp"

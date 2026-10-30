@@ -1,14 +1,8 @@
 #include "library/library_search.h"
 #include "shared/app_flow_utils.h"
-#include "shared/utf8_utils.h"
 #include "utf8proc.h"
 #include <algorithm>
-#include <dirent.h>
 #include <new>
-#include <sys/stat.h>
-#ifdef __3DS__
-#include <3ds.h>
-#endif
 
 namespace library_search {
 namespace {
@@ -40,85 +34,17 @@ bool Normalize(const std::string &in,std::string *out) {
   return true;
 }
 
-struct Directory {
-  DIR *posix=nullptr;
-  std::string path;
-#ifdef __3DS__
-  FS_Archive archive{};
-  Handle handle=0;
-  bool archive_open=false;
-  FS_DirectoryEntry batch[16];
-  u32 index=0,count=0;
-#endif
-  ~Directory() { Close(); }
-  void Close() {
-    if(posix) {closedir(posix);posix=nullptr;}
-#ifdef __3DS__
-    if(handle) {FSDIR_Close(handle);handle=0;}
-    if(archive_open) {FSUSER_CloseArchive(archive);archive_open=false;}
-    index=count=0;
-#endif
-    path.clear();
-  }
-  bool Open(const std::string &name) {
-    Close(); path=name;
-#ifdef __3DS__
-    if(name.compare(0,6,"sdmc:/")==0 &&
-       R_SUCCEEDED(FSUSER_OpenArchive(&archive,ARCHIVE_SDMC,fsMakePath(PATH_EMPTY,"")))) {
-      archive_open=true;
-      const std::string relative=name.substr(5);
-      if(R_SUCCEEDED(FSUSER_OpenDirectory(&handle,archive,fsMakePath(PATH_ASCII,relative.c_str())))) return true;
-      FSUSER_CloseArchive(archive); archive_open=false;
-    }
-#endif
-    posix=opendir(name.c_str());
-    return posix!=nullptr;
-  }
-  bool Active() const {
-#ifdef __3DS__
-    if(handle) return true;
-#endif
-    return posix!=nullptr;
-  }
-  int Next(Entry *entry) {
-#ifdef __3DS__
-    if(handle) {
-      if(index==count) {
-        index=count=0;
-        if(R_FAILED(FSDIR_Read(handle,&count,16,batch))) return -1;
-        if(!count) return 0;
-      }
-      const FS_DirectoryEntry &value=batch[index++];
-      if(!utf8_utils::Utf16NameToUtf8(value.name,&entry->name)) {entry->name.clear();return 1;}
-      entry->directory=(value.attributes&FS_ATTRIBUTE_DIRECTORY)!=0;
-      entry->path=path+"/"+entry->name;
-      return 1;
-    }
-#endif
-    dirent *value=readdir(posix);
-    if(!value) return 0;
-    entry->name=value->d_name; entry->path=path+"/"+entry->name;
-    struct stat st;
-    // lstat deliberately excludes links in the POSIX fallback/host backend.
-    if(lstat(entry->path.c_str(),&st)) return -1;
-    entry->directory=S_ISDIR(st.st_mode);
-    if(!entry->directory && !S_ISREG(st.st_mode)) entry->name.clear();
-    return 1;
-  }
-};
 } // namespace
 
 struct Engine::State {
   Field field=Field::Name;
   Status status=Status::Idle;
-  RootSource roots=nullptr;
   MetadataSource metadata=nullptr;
   void *context=nullptr;
-  bool child_files=false;
-  size_t next_root=0,examined=0,errors=0,unsupported=0,uncached=0,bytes=0;
+  size_t examined=0,errors=0,unsupported=0,uncached=0,bytes=0;
   std::vector<std::string> terms;
   std::vector<Result> results;
-  Directory directory;
+  library_walk::Cursor cursor;
   bool Match(const std::string &value) {
     std::string normalized;
     if(!Normalize(value,&normalized)) {++errors;return false;}
@@ -160,7 +86,7 @@ bool Engine::Start(Field field,const std::string &query,RootSource roots,void *c
   if(!state_) return false;
   Cancel(); State &s=*state_;
   s.results.clear(); s.terms.clear();s.bytes=0;
-  s.next_root=s.examined=s.errors=s.unsupported=s.uncached=0;
+  s.examined=s.errors=s.unsupported=s.uncached=0;
   std::string normalized;
   if(!roots || query.size()>512 || !Normalize(query,&normalized) || normalized.empty()) {s.status=Status::Idle;return false;}
   size_t start=0;
@@ -170,7 +96,8 @@ bool Engine::Start(Field field,const std::string &query,RootSource roots,void *c
     if(end==std::string::npos) break;
     start=end+1;
   }
-  s.field=field;s.roots=roots;s.context=context;s.child_files=child_files;s.metadata=metadata;
+  if(!s.cursor.Start(roots,context,child_files)) return false;
+  s.field=field;s.context=context;s.metadata=metadata;
   s.status=Status::Searching;return true;
 }
 void Engine::Pump(unsigned entries,Clock clock,unsigned milliseconds) {
@@ -179,23 +106,18 @@ void Engine::Pump(unsigned entries,Clock clock,unsigned milliseconds) {
   for(unsigned i=0;i<entries && s.status==Status::Searching;++i) {
     if(i && clock && clock()-start>=milliseconds) break;
     Entry entry;
-    if(s.directory.Active()) {
-      const int rc=s.directory.Next(&entry);
-      if(rc<=0) {if(rc<0) ++s.errors;s.directory.Close();continue;}
-      if(entry.directory) continue;
-    } else {
-      if(!s.roots(s.context,s.next_root++,&entry)) {s.status=Status::Complete;break;}
-      if(entry.directory && s.child_files && !s.directory.Open(entry.path)) ++s.errors;
-    }
+    const auto step=s.cursor.Next(&entry);
+    if(step==library_walk::Step::End) {s.status=Status::Complete;break;}
+    if(step==library_walk::Step::Skip) continue;
     if(s.Process(entry)) break; // At most one extraction per main-loop tick.
   }
-  if(s.status!=Status::Searching) s.directory.Close();
+  if(s.status!=Status::Searching) s.cursor.Close();
 }
-void Engine::Cancel() {if(state_) {state_->directory.Close();state_->status=Status::Cancelled;}}
+void Engine::Cancel() {if(state_) {state_->cursor.Close();state_->status=Status::Cancelled;}}
 Status Engine::GetStatus() const {return state_ ? state_->status : Status::Idle;}
 const std::vector<Result> &Engine::Results() const {static const std::vector<Result> empty;return state_ ? state_->results : empty;}
 size_t Engine::Examined() const {return state_ ? state_->examined : 0;}
-size_t Engine::Errors() const {return state_ ? state_->errors : 0;}
+size_t Engine::Errors() const {return state_ ? state_->errors+state_->cursor.Errors() : 0;}
 size_t Engine::Unsupported() const {return state_ ? state_->unsupported : 0;}
 size_t Engine::Uncached() const {return state_ ? state_->uncached : 0;}
 size_t Engine::AuxiliaryBytes() const {return state_ ? state_->bytes+32768 : 0;}
