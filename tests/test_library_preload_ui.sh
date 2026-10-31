@@ -3,7 +3,7 @@ set -euo pipefail
 source "$(dirname "$0")/test_build.sh"
 TASK_TMP="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMP"' EXIT
-for signature in 'bool LibraryController::PreloadRoot(' 'bool LibraryController::PreloadCancelled(' 'Book *LibraryController::PreloadBook(' 'LibraryController::PreloadMetadata(' 'LibraryController::PreloadCover(' 'void LibraryController::ResumeLibraryPreload(' 'void LibraryController::RunLibraryPreloadFrame(' 'void LibraryController::CloseLibraryPreload('; do
+for signature in 'void DrawCounts(' 'void LibraryController::DrawLibraryPreload(' 'bool LibraryController::PreloadRoot(' 'bool LibraryController::PreloadCancelled(' 'Book *LibraryController::PreloadBook(' 'LibraryController::PreloadMetadata(' 'LibraryController::PreloadCover(' 'void LibraryController::ResumeLibraryPreload(' 'void LibraryController::RunLibraryPreloadFrame(' 'void LibraryController::CloseLibraryPreload('; do
   case "$signature" in LibraryController::PreloadMetadata*|LibraryController::PreloadCover*) printf "library_preload::Result\n" >> "$TASK_TMP/preload_ui.inc";; esac
   python3 "$TEST_ROOT/tests/extract_test_function.py" "$TEST_ROOT/source/library/library_preload_view.cpp" "$signature" >> "$TASK_TMP/preload_ui.inc"
 done

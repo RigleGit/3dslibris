@@ -37,7 +37,10 @@ struct Book {
   const char *GetFileName() const {return name.c_str();}
 };
 #include "library/library_preload_session.h"
-Button::Button() {}
+static Text button_text;
+Button::Button():ts(&button_text) {}
+void Button::Label(const char *label) {text1=label;}
+void Button::Draw(u16 *,bool) {}
 bool Button::EnclosesPoint(u16,u16) {return false;}
 static uint64_t PreloadClock() {return 0;}
 static std::string PreloadPath(Book *b) {return b->directory ? b->path : b->path+"/"+b->name;}
@@ -83,7 +86,14 @@ struct App {
  bool IsNew3dsDevice() {return true;}
  void ShowSettingsView(bool) {++settings_shown;mode=AppMode::Prefs;}
  void ApplyRenderOrientation(u8) {}
- void PresentIfDirty() {++presentations;}
+ void PresentIfDirty() {
+   ++presentations;
+   for(auto i=ts->printed.rbegin();i!=ts->printed.rend();++i) {
+     if(i->screen!=ts->screenleft) continue;
+     if(i->text=="metadata") {visible_phase=library_preload::Phase::Metadata;break;}
+     if(i->text=="cover") {visible_phase=library_preload::Phase::Cover;break;}
+   }
+ }
 };
 enum {KEY_TOUCH=4};
 struct LibraryController {
@@ -99,13 +109,14 @@ struct LibraryController {
  Book *PreloadBook(const library_walk::Entry&);
  static library_preload::Result PreloadMetadata(void*,const library_walk::Entry&);
  static library_preload::Result PreloadCover(void*,const library_walk::Entry&);
- void DrawLibraryPreload(){++draws;visible_phase=preload_->engine.GetPhase();}
+ void DrawLibraryPreload();
  void ResumeLibraryPreload();void RunLibraryPreloadFrame(const FrameInput&);
  void CloseLibraryPreload();
  void SortBooks(){std::reverse(app_.books.begin(),app_.books.end());}
  void ResetBrowserMarquee() {}
  void RebuildRoot() {inside_folder_=false;app_.books=root_books_;app_.selected=app_.books[0];}
 };
+static std::string FitPreload(Text *,const std::string &text) {return text;}
 #include "preload_ui.inc"
 int main() {
  App app;LibraryController owner(app);FrameInput input;
@@ -140,6 +151,15 @@ int main() {
  cover_cached=true;owner.ResumeLibraryPreload();owner.RunLibraryPreloadFrame(FrameInput());owner.RunLibraryPreloadFrame(FrameInput());
  const auto shown=presentations;owner.RunLibraryPreloadFrame(FrameInput());
  assert(owner.preload_->finished && presentations==shown && owner.preload_->engine.MetadataCounts().cached==1 && owner.preload_->engine.CoverCounts().cached==1);
+ app.ts->printed.clear();owner.DrawLibraryPreload();
+ bool complete=false,stale=false,instructions=false;
+ for(const auto &line:app.ts->printed) {
+   complete|=line.screen==app.ts->screenleft && line.text=="PRELOAD COMPLETE";
+   stale|=line.screen==app.ts->screenleft && line.text=="scanning library";
+   instructions|=line.text=="A / B: return to settings";
+ }
+ assert(complete && instructions && !stale && "completed preload must visibly replace the active progress view");
+ assert(std::string(owner.preload_->action.GetLabel())=="back to settings");
  cover_cached=false;
  owner.preload_.reset(new LibraryPreloadSession);app.mode=AppMode::LibraryPreload;
  visible_phase=library_preload::Phase::Cover;

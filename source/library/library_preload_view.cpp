@@ -301,13 +301,34 @@ void LibraryController::DrawLibraryPreload() {
     else
       message = "Preparing... B: cancel";
   }
-  ts->SetPen(6, 56);
-  ts->PrintString(FitPreload(ts, message).c_str());
-  ts->SetPen(6, 88);
-  ts->PrintString(FitPreload(ts, s.engine.Current().name).c_str());
-  const char *phases[] = {"scanning library", "metadata", "cover"};
-  ts->SetPen(6, 116);
-  ts->PrintString(phases[(int)s.engine.GetPhase()]);
+  if (s.finished) {
+    const bool errors = s.engine.MetadataCounts().errors ||
+                        s.engine.CoverCounts().errors ||
+                        s.engine.DirectoryErrors();
+    const char *heading =
+        status == library_preload::Status::Complete
+            ? (errors ? "PRELOAD FINISHED" : "PRELOAD COMPLETE")
+        : status == library_preload::Status::Cancelled ? "PRELOAD CANCELLED"
+                                                       : "PRELOAD STOPPED";
+    ts->DrawRect(5, 43, 235, 126, ts->GetFgColor());
+    ts->SetPixelSize(18);
+    ts->SetPen(12, 74);
+    ts->PrintString(heading);
+    ts->SetPixelSize(10);
+    if (status == library_preload::Status::Complete)
+      message = errors ? "Some data could not be prepared"
+                       : "Saved data is ready to use";
+    ts->SetPen(12, 108);
+    ts->PrintString(FitPreload(ts, message).c_str());
+  } else {
+    ts->SetPen(6, 56);
+    ts->PrintString(FitPreload(ts, message).c_str());
+    ts->SetPen(6, 88);
+    ts->PrintString(FitPreload(ts, s.engine.Current().name).c_str());
+    const char *phases[] = {"scanning library", "metadata", "cover"};
+    ts->SetPen(6, 116);
+    ts->PrintString(phases[(int)s.engine.GetPhase()]);
+  }
   char count[80];
   snprintf(count, sizeof(count), "%u books examined",
            (unsigned)s.engine.Examined());
@@ -320,7 +341,8 @@ void LibraryController::DrawLibraryPreload() {
   ts->SetPen(6, 224);
   ts->PrintString("Covers stay on SD until cache clear");
   ts->SetPen(6, 248);
-  ts->PrintString("Cancel between books / operations");
+  ts->PrintString(s.finished ? "A / B: return to settings"
+                             : "Cancel between books / operations");
   ts->SetScreen(ts->screenright);
   ts->ClearScreen();
   DrawCounts(ts, "metadata", s.engine.MetadataCounts(), 24);
@@ -329,7 +351,7 @@ void LibraryController::DrawLibraryPreload() {
   ts->PrintString("EPUB PDF XPS MOBI FB2 CBZ");
   ts->SetPen(6, 252);
   ts->PrintString("Other formats: external covers");
-  s.action.Label(s.finished ? "back" : "cancel");
+  s.action.Label(s.finished ? "back to settings" : "cancel");
   s.action.Draw(false);
   ts->margin.bottom = bottom;
   ts->SetAutoWrapEnabled(wrap);
