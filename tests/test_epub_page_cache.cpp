@@ -22,6 +22,18 @@ extern "C" int ObserveCacheFlush(FILE *fp) {
   return fflush(fp);
 }
 
+#undef fwrite
+extern "C" size_t fwrite(const void *, size_t, size_t, FILE *);
+static bool observe_cache_writes=false;
+static size_t cache_step_bytes=0,cache_largest_write=0;
+extern "C" size_t ObserveCacheWrite(const void *data,size_t size,size_t count,FILE *fp) {
+  if(observe_cache_writes) {
+    cache_step_bytes+=size*count;
+    if(size*count>cache_largest_write) cache_largest_write=size*count;
+  }
+  return fwrite(data,size,count,fp);
+}
+
 #ifdef DSLIBRIS_TEST_CLOCK
 long long dslibris_test_clock = 0;
 long long dslibris_test_clock_step = 1;
@@ -339,6 +351,38 @@ void TestSaveStepsBudgetMetadataAndPreserveContent() {
   }
 }
 
+void TestLargeRecordsYieldWithinWriteBudget() {
+  Fixture fixture;
+  fixture.AddPages(1,4096);
+  page_search::Events events;
+  for(unsigned i=0;i<=4096;++i) page_search::Annotate(events,i,page_search::Space);
+  fixture.source.GetPage(0)->SetSearchEvents(events);
+  epub_page_cache::StreamWriter writer;
+  Require(fixture.Begin(&writer),"begin large page/search records");
+  unsigned steps=0;
+  epub_page_cache::StreamWriter::StepResult result;
+  cache_largest_write=0;
+  cache_step_bytes=0;observe_cache_writes=true;
+  result=writer.Step(&fixture.source,4,0);observe_cache_writes=false;
+  Check(result==epub_page_cache::StreamWriter::Pending && cache_step_bytes<=4,
+        "a record prefix cannot force its entire payload into the same slice");
+  do {
+    cache_step_bytes=0;observe_cache_writes=true;
+    result=writer.Step(&fixture.source,4096,0);
+    observe_cache_writes=false;
+    Check(cache_step_bytes<=4096,"large page/search data yields within the slice byte budget");
+    Require(++steps<40,"partial records finish without stalling");
+  } while(result==epub_page_cache::StreamWriter::Pending);
+  Check(result==epub_page_cache::StreamWriter::Complete && steps>=8,
+        "large page and search arrays span multiple resumable slices");
+  Check(cache_largest_write<=4096,"individual writes remain bounded");
+  Book loaded(fixture.ctx);
+  const bool ok=fixture.Load(&loaded);
+  Check(ok && loaded.GetPageCount()==1 && loaded.GetPage(0)->GetLength()==4096 &&
+        loaded.GetPage(0)->GetSearchEvents()==events,
+        "partial records round-trip without changing the cache format");
+}
+
 void TestBookOwnsPendingWriter() {
   Fixture fixture;
   fixture.AddPages(20, 1024);
@@ -369,9 +413,11 @@ void TestBookOwnsPendingWriter() {
 #if defined(DSLIBRIS_DEBUG) && defined(DSLIBRIS_TEST_CLOCK)
 struct MetricsReporter : IStatusReporter {
   std::string load, save;
+  unsigned slow=0;
   void PrintStatus(const char *message) override {
     if (strstr(message, "EPUB cache load: hdr=")) load = message;
     if (strstr(message, "EPUB cache save: done")) save = message;
+    if (strstr(message, "EPUB cache save: slow slice")) ++slow;
   }
   void PrintStatus(std::string message) override { PrintStatus(message.c_str()); }
 };
@@ -418,7 +464,7 @@ void TestCacheSaveMetricsSeparateIdleAndClosing() {
   epub_page_cache::StreamWriter writer;
   Require(writer.Begin(&book, kBookPath, 14, 2, 0, 0, 0,
                        12, 12, 10, 36, NULL), "begin metrics save");
-  Require(writer.Step(&book, 1, 0) == epub_page_cache::StreamWriter::Pending,
+  Require(writer.Step(&book, 10, 0) == epub_page_cache::StreamWriter::Pending,
           "save starts with a bounded idle step");
   // Closing is deliberately slower; it must not contaminate the idle maximum.
   dslibris_test_clock_step = 100;
@@ -436,6 +482,15 @@ void TestCacheSaveMetricsSeparateIdleAndClosing() {
   Book loaded(fixture.ctx);
   Check(fixture.Load(&loaded) && loaded.GetPageCount() == 2,
         "metrics do not alter the saved cache");
+  // A cache interrupted before completion must still expose slow I/O without
+  // producing a log on every idle frame.
+  epub_page_cache::StreamWriter slow_writer;
+  Require(slow_writer.Begin(&book,kBookPath,14,2,0,0,0,12,12,10,36,NULL),"begin slow diagnostics");
+  reporter.slow=0;dslibris_test_clock_step=100;
+  Require(slow_writer.Step(&book,1,0)==epub_page_cache::StreamWriter::Pending,"first slow slice");
+  Require(slow_writer.Step(&book,1,0)==epub_page_cache::StreamWriter::Pending,"second slow slice");
+  Check(reporter.slow==1,"unfinished slow slices are logged with bounded frequency");
+  dslibris_test_clock_step=1;slow_writer.Abort();
 }
 #endif
 
@@ -461,6 +516,8 @@ int main(int argc, char **argv) {
     TestInterruptedReplacementPreservesCache();
   if (selected == "all" || selected == "steps")
     TestSaveStepsBudgetMetadataAndPreserveContent();
+  if (selected == "all" || selected == "steps")
+    TestLargeRecordsYieldWithinWriteBudget();
   if (selected == "all" || selected == "owner")
     TestBookOwnsPendingWriter();
   if (selected == "all" || selected == "maps" || selected == "maps-load")

@@ -541,21 +541,26 @@ struct StreamWriter::State {
   u32 pages_written;
   size_t index, step_bytes;
   References::const_iterator reference;
-  bool reference_ready, frozen;
+  bool reference_ready, frozen, record_started;
+  size_t record_offset;
   unsigned session, revision;
   size_t documents, anchors;
 #ifdef DSLIBRIS_DEBUG
   u64 started_ms, active_ms, max_slice_ms;
   u64 idle_max_slice_ms, closing_max_slice_ms;
   unsigned slices;
+  u64 last_slow_log_ms;
+  unsigned slow_slices;
 #endif
 
   State() : fp(NULL), owner(NULL), stage(Pages), pages_written(0), index(0),
-            step_bytes(0), reference_ready(false), frozen(false), session(0),
+            step_bytes(0), reference_ready(false), frozen(false), record_started(false),
+            record_offset(0), session(0),
             revision(0), documents(0), anchors(0)
 #ifdef DSLIBRIS_DEBUG
             , started_ms(osGetTime()), active_ms(0), max_slice_ms(0),
-            idle_max_slice_ms(0), closing_max_slice_ms(0), slices(0)
+            idle_max_slice_ms(0), closing_max_slice_ms(0), slices(0),
+            last_slow_log_ms(0), slow_slices(0)
 #endif
   { memset(&header, 0, sizeof(header)); }
 
@@ -572,17 +577,45 @@ struct StreamWriter::State {
            Write(value.data(), size);
   }
 
-  bool PageRecord(Book *book) {
+  // Leave the record prefix in place while its words span multiple idle
+  // slices. Pages/search arrays stay borrowed from the immutable layout.
+  bool Words(const u32 *data, size_t count, size_t max_bytes) {
+    if (record_offset == count)
+      return true;
+    if (!data)
+      return false;
+    if (max_bytes && step_bytes >= max_bytes)
+      return true;
+    const size_t available = max_bytes ? max_bytes - step_bytes : 4096;
+    if (available < sizeof(u32) && step_bytes)
+      return true;
+    size_t words = std::min(count - record_offset, (size_t)1024);
+    // A budget below one word still makes progress, as with primitive fields.
+    words = std::min(words, std::max((size_t)1, available / sizeof(u32)));
+    if (!Write(data + record_offset, words * sizeof(u32)))
+      return false;
+    record_offset += words;
+    return true;
+  }
+
+  bool PageRecord(Book *book, size_t max_bytes = 0) {
     Page *page = book->GetPage((int)pages_written);
     const int length = page ? page->GetLength() : 0;
     if (length < 0 || length > page_cache_limits::kPageMaxBytes)
       return false;
-    const u16 size = (u16)length;
-    if (!Write(&size, sizeof(size)) ||
-        (size && (!page->GetBuffer() ||
-                  !Write(page->GetBuffer(), size * sizeof(u32)))))
+    if (!record_started) {
+      const u16 size = (u16)length;
+      if (!Write(&size, sizeof(size)))
+        return false;
+      record_started = true;
+    }
+    if (!Words(page ? page->GetBuffer() : NULL, length, max_bytes))
       return false;
-    ++pages_written;
+    if (record_offset == (size_t)length) {
+      ++pages_written;
+      record_offset = 0;
+      record_started = false;
+    }
     return true;
   }
 
@@ -637,41 +670,71 @@ struct StreamWriter::State {
     return true;
   }
 
-  bool Next(Book *book) {
+  bool Next(Book *book, size_t max_bytes) {
     switch (stage) {
     case Pages:
       if (pages_written < header.page_count)
-        return PageRecord(book);
+        return PageRecord(book, max_bytes);
       Advance();
       return true;
     case Search: {
-      if (index >= header.page_count) { Advance(); return true; }
-      Page *page = book->GetPage((int)index++);
+      if (index >= header.page_count) {
+        Advance();
+        return true;
+      }
+      Page *page = book->GetPage((int)index);
       const page_search::Events &events = page->GetSearchEvents();
-      if (events.size() > 65535 || !page_search::Valid(events, page->GetLength()))
+      if (!record_started) {
+        if (events.size() > 65535 ||
+            !page_search::Valid(events, page->GetLength()))
+          return false;
+        const u16 count = (u16)events.size();
+        if (!Write(&count, sizeof(count)))
+          return false;
+        record_started = true;
+      }
+      if (!Words(events.data(), events.size(), max_bytes))
         return false;
-      const u16 count = (u16)events.size();
-      return Write(&count, sizeof(count)) && Write(events.data(), count * sizeof(u32));
+      if (record_offset == events.size()) {
+        ++index;
+        record_offset = 0;
+        record_started = false;
+      }
+      return true;
     }
     case Chapters: {
-      if (index >= header.chapter_count) { Advance(); return true; }
+      if (index >= header.chapter_count) {
+        Advance();
+        return true;
+      }
       const ChapterEntry &chapter = book->GetChapters()[index++];
       return Write(&chapter.page, sizeof(chapter.page)) &&
              Write(&chapter.level, sizeof(chapter.level)) &&
-             String(chapter.title, page_cache_limits::kChapterTitleMaxBytes, true);
+             String(chapter.title, page_cache_limits::kChapterTitleMaxBytes,
+                    true);
     }
     case Documents:
     case Anchors: {
-      const References &map = stage == Documents ? book->GetChapterDocStartPages()
-                                                : book->GetChapterAnchorPages();
-      if (!reference_ready) { reference = map.begin(); reference_ready = true; }
-      if (reference == map.end()) { Advance(); return true; }
+      const References &map = stage == Documents
+                                  ? book->GetChapterDocStartPages()
+                                  : book->GetChapterAnchorPages();
+      if (!reference_ready) {
+        reference = map.begin();
+        reference_ready = true;
+      }
+      if (reference == map.end()) {
+        Advance();
+        return true;
+      }
       const References::value_type &entry = *reference++;
       if (entry.second >= header.page_count)
         return true;
-      const bool ok = Write(&entry.second, sizeof(entry.second)) &&
-          String(entry.first, stage == Documents ? page_cache_limits::kPathMaxBytes
-                                                : kPageCacheHrefMaxBytes, true);
+      const bool ok =
+          Write(&entry.second, sizeof(entry.second)) &&
+          String(entry.first,
+                 stage == Documents ? page_cache_limits::kPathMaxBytes
+                                    : kPageCacheHrefMaxBytes,
+                 true);
       if (ok) {
         if (stage == Documents)
           ++header.doc_start_count;
@@ -684,12 +747,18 @@ struct StreamWriter::State {
     case Links: {
       const bool image = stage == Images;
       const u32 count = image ? header.image_count : header.link_href_count;
-      if (index >= count) { Advance(); return true; }
-      const std::string *value = image ? book->GetInlineImagePath((u16)index)
-                                      : book->GetInlineLinkHref((u16)(index + 1));
+      if (index >= count) {
+        Advance();
+        return true;
+      }
+      const std::string *value =
+          image ? book->GetInlineImagePath((u16)index)
+                : book->GetInlineLinkHref((u16)(index + 1));
       ++index;
-      return value && String(*value, image ? page_cache_limits::kPathMaxBytes
-                                           : kPageCacheHrefMaxBytes, false);
+      return value && String(*value,
+                             image ? page_cache_limits::kPathMaxBytes
+                                   : kPageCacheHrefMaxBytes,
+                             false);
     }
     case Commit: {
       bool ok = fseek(fp, 0, SEEK_SET) == 0 && Write(&header, sizeof(header));
@@ -720,17 +789,35 @@ struct StreamWriter::State {
     else
       idle_max_slice_ms = std::max(idle_max_slice_ms, elapsed);
     ++slices;
+    if (!closing && elapsed >= 100) {
+      ++slow_slices;
+      if (slow_slices == 1 || now - last_slow_log_ms >= 5000) {
+        last_slow_log_ms = now;
+        DBG_LOGF(book->GetStatusReporter(),
+                 "EPUB cache save: slow slice ms=%llu next=%d page=%u/%u "
+                 "bytes=%u part=%u",
+                 (unsigned long long)elapsed, (int)stage,
+                 (unsigned)pages_written, (unsigned)header.page_count,
+                 (unsigned)step_bytes, (unsigned)record_offset);
+      }
+    }
     if (result != Pending) {
       DBG_LOGF(book->GetStatusReporter(),
-               "EPUB cache save: done ok=%d ms=%llu pages=%u active_ms=%llu max_slice_ms=%llu slices=%u closing=%d idle_max_slice_ms=%llu closing_max_slice_ms=%llu",
-               result == Complete ? 1 : 0, (unsigned long long)(now - started_ms),
+               "EPUB cache save: done ok=%d ms=%llu pages=%u active_ms=%llu "
+               "max_slice_ms=%llu slices=%u closing=%d idle_max_slice_ms=%llu "
+               "closing_max_slice_ms=%llu",
+               result == Complete ? 1 : 0,
+               (unsigned long long)(now - started_ms),
                (unsigned)header.page_count, (unsigned long long)active_ms,
                (unsigned long long)max_slice_ms, slices, closing ? 1 : 0,
                (unsigned long long)idle_max_slice_ms,
                (unsigned long long)closing_max_slice_ms);
     }
 #else
-    (void)book; (void)begin; (void)closing; (void)result;
+    (void)book;
+    (void)begin;
+    (void)closing;
+    (void)result;
 #endif
   }
 };
@@ -747,6 +834,9 @@ bool StreamWriter::Begin(Book *book, const char *book_path, int pixel_size,
   Abort();
   if (!book || !book_path)
     return false;
+#ifdef DSLIBRIS_DEBUG
+  const u64 setup_begin = osGetTime();
+#endif
   EnsureCacheDirs();
   state_ = new (std::nothrow) State;
   if (!state_)
@@ -777,8 +867,8 @@ bool StreamWriter::Begin(Book *book, const char *book_path, int pixel_size,
     Abort();
     return false;
   }
-  DBG_LOGF(book->GetStatusReporter(), "EPUB cache save: begin pages=%u buffer_bytes=16384",
-           (unsigned)book->GetPageCount());
+  DBG_LOGF(book->GetStatusReporter(), "EPUB cache save: begin pages=%u buffer_bytes=16384 setup_ms=%llu",
+           (unsigned)book->GetPageCount(), (unsigned long long)(osGetTime() - setup_begin));
   return true;
 }
 
@@ -797,7 +887,7 @@ bool StreamWriter::FlushPages(Book *book, u16 from_page, bool closing) {
 }
 
 StreamWriter::StepResult StreamWriter::Step(Book *book, size_t max_bytes,
-                                           u32 max_ms, bool closing) {
+                                            u32 max_ms, bool closing) {
   if (!state_ || !book || state_->owner != book) {
     Abort();
     return Failed;
@@ -824,8 +914,15 @@ StreamWriter::StepResult StreamWriter::Step(Book *book, size_t max_bytes,
     if (records && ((max_bytes && state_->step_bytes >= max_bytes) ||
                     (max_ms && osGetTime() - begin >= max_ms)))
       break;
+    // Metadata records are at most 2053 bytes; do not begin one near the
+    // end of a bounded slice. Primitive test budgets still advance one record.
+    if (records && max_bytes &&
+        max_bytes - state_->step_bytes <
+            (state_->stage > State::Search ? (size_t)2053 : sizeof(u32)))
+      break;
     if (open_cancel_poll::Poll(closing ? NULL : book, book->GetStatusReporter(),
-                               "epub-cache-step") || !state_->Next(book)) {
+                               "epub-cache-step") ||
+        !state_->Next(book, max_bytes)) {
       ok = false;
       break;
     }
@@ -833,7 +930,9 @@ StreamWriter::StepResult StreamWriter::Step(Book *book, size_t max_bytes,
   }
   // stdio already has a bounded 16 KiB buffer. Let full buffers drain during
   // Write; Commit flushes/checks the final tail before publishing the cache.
-  const StepResult result = !ok ? Failed : state_->stage == State::Done ? Complete : Pending;
+  const StepResult result = !ok                            ? Failed
+                            : state_->stage == State::Done ? Complete
+                                                           : Pending;
   state_->Record(book, begin, closing, result);
   if (!ok)
     Abort();
