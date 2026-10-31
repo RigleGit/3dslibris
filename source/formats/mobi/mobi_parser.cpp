@@ -635,6 +635,11 @@ static void FinalizeImmediateMobiParse(Book *book, const char *path,
   book->MarkMobiRenderSettingsApplied(deferred->line_wrap_fix_applied);
 }
 
+static void LogMobiParseTimings(IStatusReporter *reporter,
+                                const MobiDeferredState *deferred,
+                                const Book *book,
+                                const MobiTocFinalizeResult &toc_result);
+
 // --- Sync pagination (deferred path) ---
 
 template <typename LogFn>
@@ -689,6 +694,7 @@ static u8 RunSyncMobiPagination(Book *book, const char *path,
   MobiTocFinalizeResult toc_result;
   FinalizeImmediateMobiParse(book, path, deps, raw, header, decoded_utf8,
                              deferred, &toc_result, hooks);
+  LogMobiParseTimings(reporter, deferred, book, toc_result);
 #ifdef DSLIBRIS_DEBUG
   if (reporter) {
     DBG_LOGF(reporter, "MOBI: stage=finalized");
