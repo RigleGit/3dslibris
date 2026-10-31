@@ -78,9 +78,9 @@ Manual install (`.cia`):
 Notes:
 
 - The `.cia` includes default `font/` and `resources/` assets in `RomFS`.
-- Books are read from `sdmc:/3ds/3dslibris/book/` and optionally `romfs:/3ds/3dslibris/book/`.
+- Books are read from the configured SD library (normally `sdmc:/3ds/3dslibris/book/`). Bundled books in `romfs:/3ds/3dslibris/book/` are used only if that directory is missing.
 - Runtime data can also be installed under `sdmc:/config/3dslibris/` (for example `book/`, `font/`, `resources/`, cache, prefs, and log files).
-- If the same filename exists in both places, the SD version wins.
+- An existing SD books directory, even when empty, is authoritative. Delete `README.md` and `QuickStart.txt` from that directory and restart the app to remove them from the library; their internal copies will not reappear. An empty library shows the existing `No books found` notice.
 - Releases also provide `3dslibris-debug.3dsx` and `3dslibris-debug.cia`, which enable verbose logging to `sdmc:/3ds/3dslibris/3dslibris.log`.
 
 ## Controls

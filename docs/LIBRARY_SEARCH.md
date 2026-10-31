@@ -14,7 +14,8 @@ The query limit is 128 keyboard characters (up to 512 UTF-8 bytes).
 The scope follows the existing one-level library:
 
 - At the virtual root, search visible root entries and the books directly inside
-  its visible folders. Existing SD/ROMFS priority is preserved.
+  its visible folders. It uses the active SD library; bundled books are only
+  used when the configured books directory is missing.
 - Within a folder, search only that folder's direct books.
 - Folders appear only in Name mode. No second folder level is visited.
 

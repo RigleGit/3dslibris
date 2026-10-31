@@ -6,7 +6,9 @@ cover thumbnails across the whole library, even when opened from a folder.
 It starts after showing the progress screen, without a confirmation dialog.
 
 The scope is the virtual root and the books directly inside its visible folders.
-The existing SD/ROMFS priority applies; a second folder level is never visited.
+The configured SD library is used when its directory exists, even when empty;
+bundled books are only a fallback for a missing directory. A second folder
+level is never visited.
 Unlike search results, the operation has no 256-book limit.
 
 ## Progress and cancellation
