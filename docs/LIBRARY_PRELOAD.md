@@ -27,6 +27,11 @@ touch **back** to return to preferences. A write failure stops the operation and
 keeps everything already saved. Resolve the SD problem and run the action again.
 Other individual book errors do not stop the remaining books.
 
+When work finishes, a large **PRELOAD COMPLETE** banner replaces the active
+file/stage view. Errors and cancellation have their own completion messages.
+The **back to settings** button and `A / B: return to settings` instruction
+confirm that preparation has stopped.
+
 After HOME or sleep, the operation restarts its traversal and counters while
 reusing saved data. Returning to the library preserves its location and selected
 book, even when new titles change the sort order. If the folder disappeared,
