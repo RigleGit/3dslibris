@@ -121,6 +121,11 @@ static bool PathIsDirectory(const std::string &path) {
   return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+// An existing user library is authoritative, even when it is empty.
+static std::string LibraryBookSource(const std::string &configured) {
+  return PathIsDirectory(configured) ? configured : paths::kRomfsBookDir;
+}
+
 static bool PathIsRegularFile(const std::string &path) {
   struct stat st;
   return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
@@ -647,9 +652,7 @@ int LibraryController::FindBooks() {
 
   bool found_any_source = false;
   std::vector<std::string> scan_dirs;
-  scan_dirs.push_back(app_.bookdir);
-  if (app_.bookdir != paths::kRomfsBookDir)
-    scan_dirs.push_back(paths::kRomfsBookDir);
+  scan_dirs.push_back(LibraryBookSource(app_.bookdir));
 
   for (size_t i = 0; i < scan_dirs.size(); i++) {
     const std::string &dir = scan_dirs[i];
@@ -881,9 +884,7 @@ Book *LibraryController::RestoreSavedBookSelection(const char *folder,
   std::string folder_path = folder ? std::string(folder) : std::string();
   if (folder_path.empty()) {
     std::vector<std::string> scan_dirs;
-    scan_dirs.push_back(app_.bookdir);
-    if (app_.bookdir != paths::kRomfsBookDir)
-      scan_dirs.push_back(paths::kRomfsBookDir);
+    scan_dirs.push_back(LibraryBookSource(app_.bookdir));
     for (size_t i = 0; i < scan_dirs.size() && folder_path.empty(); i++) {
       DIR *dp = opendir(scan_dirs[i].c_str());
       if (!dp)
@@ -904,6 +905,12 @@ Book *LibraryController::RestoreSavedBookSelection(const char *folder,
     }
   }
 
+  // Old preferences must not reopen bundled copies excluded from this library.
+  const std::string bundled = paths::kRomfsBookDir;
+  if (LibraryBookSource(app_.bookdir) != bundled &&
+      (folder_path == bundled ||
+       folder_path.compare(0, bundled.size() + 1, bundled + "/") == 0))
+    return NULL;
   if (folder_path.empty() || !PathIsDirectory(folder_path))
     return NULL;
 
