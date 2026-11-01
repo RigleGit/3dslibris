@@ -165,21 +165,22 @@ u8 ReaderController::OpenBook()
     preparation_.reset(new (std::nothrow) ReflowPreparation);
     const std::string source = std::string(selected_book->GetFolderName()) +
                                "/" + selected_book->GetFileName();
+    cache_label_.clear();
     if (!preparation_ ||
         !preparation_->Begin(selected_book, source,
-                             debug_runtime::DisableEpubPageResidency() ? 0
+                             debug_runtime::DisableReflowPageResidency() ? 0
                              : app_.IsNew3dsDevice() ? 2u * 1024u * 1024u
                                                      : 512u * 1024u)) {
+      cache_label_ = preparation_ ? preparation_->Label() : "not enough memory to prepare book";
+      cache_label_ += "; B: back";
+      if (preparation_) preparation_->Cancel();
       preparation_.reset();
       selected_book->Close();
       app_.SetCurrentBook(nullptr);
-      app_.SetMode(AppMode::Browser);
-      app_.SetBrowserDirty(true);
-      return 1;
+      DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
     }
     cache_preparing_ = selected_book;
     cache_draw_ms_ = 0;
-    cache_label_.clear();
     app_.SetOpeningPending(true);
     app_.SetOpeningBook(selected_book);
     app_.SetOpeningSessionId(session_id);

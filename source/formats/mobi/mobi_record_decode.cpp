@@ -1,4 +1,5 @@
 #include "formats/mobi/mobi_record_decode.h"
+#include "formats/common/cache_memory_utils.h"
 
 #include <algorithm>
 #include <new>
@@ -393,6 +394,7 @@ int MergeSession::Step() {
     if (!DecodeTextRecord((const uint8_t *)s.raw->data()+start, end-start,
                           s.header, s.header.compression==17480 ? &s.huff : NULL, &text)) return -1;
     if (text.size() > 64u*1024u*1024u - s.merged->size()) return -1;
+    if (!cache_memory::CanAppend(*s.merged,text.size())) return -2;
     *s.merged += text;
   }
   return 1;

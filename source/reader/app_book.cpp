@@ -246,7 +246,9 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
     return true;
   }
   const std::string label = preparation_->Label();
-  if (label != cache_label_ || input.timestamp_ms - cache_draw_ms_ >= 100) {
+  if (!cache_draw_ms_ || input.timestamp_ms - cache_draw_ms_ >= 100) {
+    if (label != cache_label_)
+      DBG_LOGF(&app_, "Reflow preparation stage=%s", label.c_str());
     DrawOpeningSplashImpl(&app_, preparation_->Progress(),
                           preparation_->Total(), label.c_str());
     cache_draw_ms_ = input.timestamp_ms;

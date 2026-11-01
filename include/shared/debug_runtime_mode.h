@@ -11,8 +11,8 @@ inline bool DisableFixedLayoutGpuRenderer() {
 #endif
 }
 
-inline bool DisableEpubPageResidency() {
-#ifdef DSLIBRIS_EPUB_FULL_CACHE
+inline bool DisableReflowPageResidency() {
+#if defined(DSLIBRIS_REFLOW_FULL_CACHE) || defined(DSLIBRIS_EPUB_FULL_CACHE)
   return true;
 #else
   return false;

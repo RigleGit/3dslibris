@@ -60,7 +60,12 @@ void InitMuPdfWorker(Book::MuPdfState *s) {
   assert(events.back() == "pdf-release");
   events.push_back("pdf-init"); s->worker=(void*)1;
 }
+struct PreparationSignals {
+  bool paused=false;
+  void SignalPause(){paused=true;}
+};
 struct ReaderController {
+  std::unique_ptr<PreparationSignals> preparation_;
   App &app_;
   std::unique_ptr<ReaderImageViewerSession> image_viewer_;
   explicit ReaderController(App &app) : app_(app) {}
@@ -75,10 +80,12 @@ void App::OnReaderAppletSuspendRequested() {
 int main() {
   App app; Book b; app.current=&b;
   ReaderController reader(app); app.reader=&reader;
+  reader.preparation_.reset(new PreparationSignals);
   app.lifecycle_state_.resume=true;
   // The complete synchronous hook path must prepare the current book before
   // aptMainLoop yields; only the main-loop resume path may join or free.
   app.HandleAppletHook(APTHOOK_ONSUSPEND);
+  assert(reader.preparation_->paused);
   assert((events == std::vector<std::string>{"pdf-signal"}));
   assert(app.lifecycle_state_.suspended && app.lifecycle_state_.handled);
   assert(!app.touch && app.last_x == -1 && app.last_y == -1 && app.deferred == 0);

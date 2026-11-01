@@ -23,6 +23,7 @@ public:
   bool Begin(const std::string *source, u32 encoding, std::string *output);
   bool Step(size_t bytes = 32768);
   size_t Progress() const;
+  bool NoMemory() const;
   size_t Total() const;
   bool UsedUtf8Guess() const;
   bool UsedLegacyGuess() const;

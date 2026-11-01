@@ -368,12 +368,20 @@ bool Preparation::Begin(Book *book, const std::string &source,
   s.hooks = hooks ? *hooks : mobi_book_hooks::Make();
   s.fd = open(source.c_str(), O_RDONLY);
   struct stat info;
-  if (s.fd < 0 || fstat(s.fd, &info) != 0 || info.st_size <= 0 ||
-      (uint64_t)info.st_size > kMobiMaxBytes)
+  if (s.fd < 0 || fstat(s.fd, &info) != 0) {
+    s.result = ReflowPreparation::IoError;
     return false;
+  }
+  if (info.st_size <= 0 || (uint64_t)info.st_size > kMobiMaxBytes) {
+    s.result = ReflowPreparation::Failed;
+    return false;
+  }
   s.file_size = info.st_size;
   s.deferred.line_wrap_fix_applied = book->GetMobiLineWrapFix();
   return true;
+}
+ReflowPreparation::Result Preparation::GetResult() const {
+  return state_ ? state_->result : ReflowPreparation::NoMemory;
 }
 ReflowPreparation::Result Preparation::Step() {
   if (!state_)
@@ -414,7 +422,8 @@ ReflowPreparation::Result Preparation::Step() {
   } else if (s.phase == State::Merge) {
     const int r = s.merger.Step();
     if (r < 0)
-      return s.result = ReflowPreparation::Failed;
+      return s.result = r == -2 ? ReflowPreparation::NoMemory
+                                : ReflowPreparation::Failed;
     if (!r) {
       if (!s.decoder.Begin(&s.merged, s.header.encoding, &s.utf8))
         return s.result = ReflowPreparation::NoMemory;
@@ -440,9 +449,13 @@ ReflowPreparation::Result Preparation::Step() {
         return s.result = ReflowPreparation::NoMemory;
       s.phase = State::Markup;
     }
+    if (s.decoder.NoMemory())
+      return s.result = ReflowPreparation::NoMemory;
   } else if (s.phase == State::Markup) {
     if (s.extractor.Step())
       s.phase = State::Cleanup;
+    if (s.extractor.NoMemory())
+      return s.result = ReflowPreparation::NoMemory;
   } else if (s.phase == State::Cleanup) {
     CleanupDecodedMobiText(s.deps.reporter, &s.deferred.text_utf8,
                            s.deferred.html_to_text_map.empty()
@@ -468,14 +481,14 @@ ReflowPreparation::Result Preparation::Step() {
     s.book->MarkMobiRenderSettingsApplied(s.deferred.line_wrap_fix_applied);
     s.phase = State::Pages;
   } else if (s.phase == State::Pages) {
-    const size_t before = s.deferred.stream.cursor;
+    const size_t before = s.deferred.stream.text_bytes_fed;
     const bool done = plain_text_stream::ContinueState(
         &s.deferred.stream, s.deferred.text_utf8, 20, 8, 0,
         &s.deferred.text_cursor_per_page, NULL,
         s.hooks.make_plain_continue_callbacks());
     if (done)
       s.phase = State::Toc;
-    else if (before == s.deferred.stream.cursor)
+    else if (before == s.deferred.stream.text_bytes_fed)
       return s.result = ReflowPreparation::Failed;
   } else if (s.phase == State::Toc) {
     const auto callbacks = s.hooks.make_finalize_callbacks();

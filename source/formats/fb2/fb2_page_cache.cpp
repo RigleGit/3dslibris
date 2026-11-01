@@ -6,18 +6,23 @@ namespace {
 #ifdef DSLIBRIS_HOST_TEST
 std::string directory;
 #endif
-}
-std::string CachePath(Book *book,const char *source,const page_cache_utils::PageCacheLayoutParams &params) {
-  auto p=params;
-  if(book && !book->GetEbookImagesEnabled()) p.variant_token="no-images";
+} // namespace
+std::string CachePath(Book *book, const char *source,
+                      const page_cache_utils::PageCacheLayoutParams &params) {
+  auto p = params;
+  if (book && !book->GetEbookImagesEnabled())
+    p.variant_token = "no-images";
 #ifdef DSLIBRIS_HOST_TEST
-  const std::string &dir=directory.empty() ? paths::GetFb2CacheDir() : directory;
+  const std::string &dir =
+      directory.empty() ? paths::GetFb2CacheDir() : directory;
 #else
-  const std::string &dir=paths::GetFb2CacheDir();
+  const std::string &dir = paths::GetFb2CacheDir();
 #endif
-  return page_cache_utils::BuildPageCachePath(dir,".fpc",source,p);
+  return page_cache_utils::BuildPageCachePath(dir, ".fpc", source, p);
 }
 #ifdef DSLIBRIS_HOST_TEST
-void SetCacheDirForTest(const char *path){directory=path ? path : "";}
-#endif
+void SetCacheDirForTest(const char *path) {
+  directory = path ? path : "";
 }
+#endif
+} // namespace fb2_page_cache

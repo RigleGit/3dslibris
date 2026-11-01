@@ -40,7 +40,7 @@ public:
   ~MergeSession();
   bool Begin(const std::string *raw, const std::vector<uint32_t> *offsets,
              const MobiRecord0Header &header, std::string *merged);
-  int Step(); // 1 pending, 0 complete, -1 invalid
+  int Step(); // 1 pending, 0 complete, -1 invalid, -2 out of memory
   unsigned Progress() const;
 private:
   struct State;

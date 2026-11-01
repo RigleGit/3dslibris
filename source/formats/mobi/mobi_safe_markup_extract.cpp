@@ -1,4 +1,5 @@
 #include "formats/mobi/mobi_safe_markup_extract.h"
+#include "formats/common/cache_memory_utils.h"
 
 #include <cctype>
 #include <new>
@@ -11,7 +12,8 @@
 #include "formats/mobi/mobi_position_map.h"
 #include "shared/text_token_constants.h"
 
-bool mobi_extract_image_recindex(const std::string &tag, uint16_t *recindex_out);
+bool mobi_extract_image_recindex(const std::string &tag,
+                                 uint16_t *recindex_out);
 std::string mobi_inline_image_path(uint16_t recindex);
 
 namespace mobi_safe_markup_extract {
@@ -25,8 +27,8 @@ static bool IsAsciiSpace(char c) {
 static void TrimTrailingInlineWhitespace(std::string *out) {
   if (!out)
     return;
-  while (!out->empty() && (out->back() == ' ' || out->back() == '\t' ||
-                           out->back() == '\r'))
+  while (!out->empty() &&
+         (out->back() == ' ' || out->back() == '\t' || out->back() == '\r'))
     out->pop_back();
 }
 
@@ -105,38 +107,63 @@ struct Session::State {
   std::string *output;
   InlineImageCallbacks callbacks;
   std::vector<std::pair<uint32_t, uint32_t>> *map;
-  size_t cursor=0, interval=0, next_sample=0;
-  bool in_script=false, in_style=false, pending_space=false, at_paragraph_start=true, done=false;
+  size_t cursor = 0, interval = 0, next_sample = 0;
+  bool in_script = false, in_style = false, pending_space = false,
+       at_paragraph_start = true, done = false, no_memory = false;
 };
 Session::Session() : state_(nullptr) {}
-Session::~Session() { delete state_; }
+Session::~Session() {
+  delete state_;
+}
 bool Session::Begin(const std::string *source, std::string *output,
                     const InlineImageCallbacks &callbacks,
                     std::vector<std::pair<uint32_t, uint32_t>> *map) {
-  delete state_; state_ = new (std::nothrow) State;
-  if (!state_ || !source || !output) return false;
-  State &s=*state_; s.source=source; s.output=output; s.callbacks=callbacks; s.map=map;
+  delete state_;
+  state_ = new (std::nothrow) State;
+  if (!state_ || !source || !output)
+    return false;
+  State &s = *state_;
+  s.source = source;
+  s.output = output;
+  s.callbacks = callbacks;
+  s.map = map;
   output->clear();
   if (map) {
-    s.interval=mobi_position_map::HtmlSampleIntervalForTextBytes(source->size());
-    s.next_sample=s.interval;
-    map->clear(); map->push_back({0u,0u});
+    s.interval =
+        mobi_position_map::HtmlSampleIntervalForTextBytes(source->size());
+    s.next_sample = s.interval;
+    map->clear();
+    map->push_back({0u, 0u});
   }
   return true;
 }
-size_t Session::Progress() const { return state_ ? state_->cursor : 0; }
+size_t Session::Progress() const {
+  return state_ ? state_->cursor : 0;
+}
+bool Session::NoMemory() const {
+  return state_ && state_->no_memory;
+}
 bool Session::Step(size_t bytes) {
-  if (!state_ || state_->done) return true;
-  State &s=*state_;
-  const std::string &markup_utf8=*s.source;
-  std::string &out=*s.output;
-  const InlineImageCallbacks &image_callbacks=s.callbacks;
-  auto *html_to_text_map=s.map;
-  const size_t kSampleInterval=s.interval;
-  size_t &next_sample=s.next_sample, &i=s.cursor;
-  bool &in_script=s.in_script, &in_style=s.in_style, &pending_space=s.pending_space,
-       &at_paragraph_start=s.at_paragraph_start;
-  const size_t begin=i;
+  if (!state_ || state_->done)
+    return true;
+  State &s = *state_;
+  const std::string &markup_utf8 = *s.source;
+  std::string &out = *s.output;
+  const InlineImageCallbacks &image_callbacks = s.callbacks;
+  auto *html_to_text_map = s.map;
+  const size_t kSampleInterval = s.interval;
+  size_t &next_sample = s.next_sample, &i = s.cursor;
+  bool &in_script = s.in_script, &in_style = s.in_style,
+       &pending_space = s.pending_space,
+       &at_paragraph_start = s.at_paragraph_start;
+  const size_t begin = i;
+  if (s.no_memory)
+    return false;
+  if (!cache_memory::CanAppend(out,
+                               std::min(markup_utf8.size() - i, bytes + 16))) {
+    s.no_memory = true;
+    return false;
+  }
   for (; i < markup_utf8.size() && i - begin < bytes;) {
     if (html_to_text_map && kSampleInterval > 0 && i >= next_sample) {
       html_to_text_map->push_back({(uint32_t)i, (uint32_t)out.size()});
@@ -238,18 +265,25 @@ bool Session::Step(size_t bytes) {
     i++;
   }
 
-  if (i < markup_utf8.size()) return false;
+  if (i < markup_utf8.size())
+    return false;
   TrimTrailingInlineWhitespace(&out);
-  while (!out.empty() && out.back() == '\n') out.pop_back();
-  s.done=true;
+  while (!out.empty() && out.back() == '\n')
+    out.pop_back();
+  s.done = true;
   return true;
 }
-std::string ExtractToText(const std::string &source, const InlineImageCallbacks &callbacks,
-                        std::vector<std::pair<uint32_t, uint32_t>> *map) {
+std::string ExtractToText(const std::string &source,
+                          const InlineImageCallbacks &callbacks,
+                          std::vector<std::pair<uint32_t, uint32_t>> *map) {
   std::string output;
   Session session;
-  if (!session.Begin(&source, &output, callbacks, map)) return output;
-  while (!session.Step()) {}
+  if (!session.Begin(&source, &output, callbacks, map))
+    return output;
+  while (!session.Step()) {
+    if (session.NoMemory())
+      return std::string();
+  }
   return output;
 }
 

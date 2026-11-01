@@ -24,6 +24,7 @@ public:
              std::vector<std::pair<uint32_t, uint32_t>> *map = nullptr);
   bool Step(size_t bytes = 32768);
   size_t Progress() const;
+  bool NoMemory() const;
 private:
   struct State;
   State *state_;

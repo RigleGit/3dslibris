@@ -9,6 +9,7 @@ public:
   ~Preparation();
   bool Begin(Book *book, const std::string &source, const Hooks *hooks = NULL);
   ReflowPreparation::Result Step();
+  ReflowPreparation::Result GetResult() const;
   const char *Label() const;
   unsigned Progress() const;
   unsigned Total() const;
