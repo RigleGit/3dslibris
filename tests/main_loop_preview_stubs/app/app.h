@@ -66,6 +66,7 @@ public:
     if (ts->bottom[55 * ts->stride + 55] == kHudPixel) ++visible_huds;
     ts->Present();
   }
+  bool PumpReaderPageCache(const FrameInput &) { return false; }
   bool ShouldAbortWork() const { return false; }
   Book *GetCurrentBook() { return &book_; }
   // Every non-book branch must stay inactive in this focused reader scenario.

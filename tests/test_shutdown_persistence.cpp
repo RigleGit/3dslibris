@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+#include <memory>
 typedef uint64_t u64;
 static u64 osGetTime() { return 1000; }
 static const u64 kProgressAutosaveIntervalMs = 30000;
@@ -72,6 +73,10 @@ int Prefs::Write() {
 class ReaderController {
 public:
   App &app_;
+  struct Preparation { void Cancel() {} };
+  std::unique_ptr<Preparation> preparation_;
+  Book *cache_preparing_ = nullptr;
+  bool cache_page_error_ = false, cache_page_loading_ = false;
   Book *progress_autosave_book_ = nullptr;
   bool progress_autosave_dirty_ = false;
   u64 last_progress_persist_ms_ = 0;

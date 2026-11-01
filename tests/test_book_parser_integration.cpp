@@ -603,6 +603,8 @@ void TestRepeatedImageWidthsRemainPerOccurrence() {
         ++occurrence;
       }
       test::ExpectEq("all repeated image occurrences render", occurrence, 3);
+      while (book.HasPendingEpubPageCacheSave())
+        book.PumpPendingEpubPageCacheSave();
       book.Close();
     }
   }
@@ -679,6 +681,8 @@ void TestImageResourcesAcrossBookFormats() {
     test::ExpectTrue("1024px detail never replaced by page thumbnail", found_detail);
     test::ExpectEq("resource reading preserves page count",book.GetPageCount(),pages);
     test::ExpectEq("resource reading preserves position",book.GetPosition(),position);
+    while (book.HasPendingEpubPageCacheSave())
+      book.PumpPendingEpubPageCacheSave();
     book.Close();
     test::ExpectEq("book close releases image resources",book.GetInlineImageCount(),0);
     // Exercise warm EPUB/MOBI cache reconstruction as well as a cold parse.
@@ -772,6 +776,8 @@ void TestImagePagesDoNotCoverText() {
           if (std::string(name).find(".fb2") != std::string::npos)
             test::ExpectGt("overlap check renders full-page FB2 images", images, 0);
           test::ExpectGt("overlap check renders prose", glyphs, 100);
+          while (book.HasPendingEpubPageCacheSave())
+            book.PumpPendingEpubPageCacheSave();
           book.Close();
         }
       }
@@ -834,6 +840,8 @@ void TestDisableEbookImages() {
         test::ExpectFalse("both image modes reuse their own warm cache",
             book.HasPendingEpubPageCacheSave()||book.HasPendingMobiPageCacheSave());
       disabled=!disabled;
+      while (book.HasPendingEpubPageCacheSave())
+        book.PumpPendingEpubPageCacheSave();
       book.Close();
     }
   }
@@ -1462,9 +1470,11 @@ void TestRepeatedInlineImageWidthsAndCachedDraw() {
       test::ExpectStrEq("TOC labels preserved", shared.GetChapters()[i].title.c_str(), chapters[i].title.c_str());
     }
     const PageData cold_pages = CapturePageData(&shared);
+    while (shared.HasPendingEpubPageCacheSave())
+      shared.PumpPendingEpubPageCacheSave();
     shared.Close();
     const std::vector<std::string> caches = CacheFiles(cache_dir);
-    test::ExpectEq("close saves one real image page cache", (int)caches.size(), 1);
+    test::ExpectEq("explicit preparation saves one real image page cache", (int)caches.size(), 1);
     const std::string path = std::string(folder) + "/shared.epub";
     Book warm(ctx); warm.SetFolderName(folder); warm.SetFileName("shared.epub"); warm.format = FORMAT_EPUB;
     test::ExpectTrue("load actual image page cache without parsing", LoadImagePageCache(&warm, path));
@@ -1759,6 +1769,8 @@ void TestEpubInterruptedSpineAndRecovery() {
     test::ExpectEq("same EPUB opens completely after cancellation", book_parser::Open(&book), 0);
     ExpectCompleteRecoveryEpub(&book);
     test::ExpectTrue("complete recovery can schedule a cache", book.HasPendingEpubPageCacheSave());
+    while (book.HasPendingEpubPageCacheSave())
+      book.PumpPendingEpubPageCacheSave();
     book.Close();
     ExpectClosedReadingState(&book);
     const std::vector<std::string> caches = CacheFiles(cache_dir);
@@ -1804,6 +1816,8 @@ void TestEpubXmlRecoveryAndZipFailure() {
     const text_search::Match before = ExpectSearch(&book, "FIRST-START link label");
     ExpectSearch(&book, "FINAL-SPINE");
     ExpectSearch(&book, "FIRST-END MIDDLE-SPINE", false); // Separate XHTML documents are barriers.
+    while (book.HasPendingEpubPageCacheSave())
+      book.PumpPendingEpubPageCacheSave();
     book.Close();
     test::ExpectEq("reopen EPUB through actual page cache", book_parser::Open(&book), 0);
     test::ExpectFalse("cached EPUB does not schedule another save", book.HasPendingEpubPageCacheSave());
@@ -1832,7 +1846,8 @@ void TestWarmEpubTocRepairIsDeferred() {
   test::ExpectEq("open real TOC fixture", book_parser::Open(&book), 0);
   test::ExpectGt("source fixture has chapters", (int)book.GetChapters().size(), 0);
   book.ClearChapters();
-  book.FlushPendingCacheSaves();
+  while (book.HasPendingEpubPageCacheSave())
+    book.PumpPendingEpubPageCacheSave();
   book.Close();
   const std::vector<std::string> caches = CacheFiles(cache_dir);
   test::ExpectEq("one chapterless cache prepared", (int)caches.size(), 1);
@@ -1845,7 +1860,8 @@ void TestWarmEpubTocRepairIsDeferred() {
   uint32_t chapter_count = 99;
   memcpy(&chapter_count, bytes.data() + 12, sizeof(chapter_count));
   test::ExpectEqU("opening did not synchronously rewrite the chapter table", chapter_count, 0);
-  book.FlushPendingCacheSaves();
+  while (book.HasPendingEpubPageCacheSave())
+    book.PumpPendingEpubPageCacheSave();
   book.Close();
   test::ExpectEq("reopen completed TOC cache", book_parser::Open(&book), 0);
   test::ExpectFalse("completed TOC no longer requires a rewrite", book.HasPendingEpubPageCacheSave());

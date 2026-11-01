@@ -18,6 +18,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <vector>
+#include <zlib.h>
 
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
@@ -676,7 +677,85 @@ void TestCooperativePreparation() {
   rmdir(dir);
 }
 
+static uLong PreparationHash(Book &book) {
+  uLong hash = 0;
+  for (unsigned i = 0; i < book.GetPageCount(); ++i) {
+    Page *page = book.GetPage(i);
+    const u32 count = page->GetLength();
+    hash = crc32(hash, (const Bytef *)&count, 4);
+    hash = crc32(hash, (const Bytef *)page->GetBuffer(), count * 4);
+    const auto &events = page->GetSearchEvents();
+    const u32 n = events.size();
+    hash = crc32(hash, (const Bytef *)&n, 4);
+    hash = crc32(hash, (const Bytef *)events.data(), n * 4);
+  }
+  return hash;
+}
+void TestRealPreparationFromEnv() {
+  const char *source = getenv("REAL_EPUB_PREPARATION_PATH");
+  if (!source)
+    return;
+  char dir[] = "/tmp/3dslibris-real-preparation-XXXXXX";
+  ExpectTrue("real preparation directory", mkdtemp(dir) != nullptr);
+  epub_page_cache::SetCacheDirForTest(dir);
+  const std::string path = source;
+  const size_t slash = path.find_last_of('/');
+  TestCtx context;
+  Book book(context.ctx);
+  book.format = FORMAT_EPUB;
+  book.SetFolderName(
+      slash == std::string::npos ? "." : path.substr(0, slash).c_str());
+  book.SetFileName(slash == std::string::npos ? source
+                                              : path.substr(slash + 1).c_str());
+  epub_parser::Preparation prep;
+  ExpectTrue("real cold begin", prep.Begin(&book, path));
+  unsigned steps = 0;
+  while (prep.Step() == epub_parser::Preparation::Pending &&
+         ++steps < 1000000) {
+  }
+  ExpectTrue("real cold cache published",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 !prep.PersistenceFailed());
+  const unsigned pages = book.GetPageCount();
+  const uLong hash = PreparationHash(book);
+  const unsigned target = pages / 2;
+  Page *page = book.GetPage(target);
+  const uLong target_hash =
+      crc32(0, (const Bytef *)page->GetBuffer(), page->GetLength() * 4);
+  const unsigned target_length = page->GetLength();
+  book.Close();
+  prep.Begin(&book, path);
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("real complete warm content matches",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 book.GetPageCount() == pages && PreparationHash(book) == hash);
+  book.Close();
+  book.SetPosition(target);
+  prep.Begin(&book, path, 512 * 1024);
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("real partial warm complete",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 book.HasEpubPageCache() && book.GetPosition() == (int)target);
+  page = book.GetPage(target);
+  ExpectTrue("real partial page bytes match",
+             page->GetLength() == (int)target_length &&
+                 crc32(0, (const Bytef *)page->GetBuffer(),
+                       target_length * 4) == target_hash);
+  fprintf(stderr,
+          "REAL EPUB preparation pages=%u cold_steps=%u token_crc=%lu "
+          "saved_page=%u\n",
+          pages, steps, hash, target + 1);
+  book.Close();
+  const std::string file = CacheFilePath(dir);
+  remove(file.c_str());
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  rmdir(dir);
+}
+
 int main() {
+  TestRealPreparationFromEnv();
   TestCooperativePreparation();
   TestOptionalCacheAllocationFailureKeepsReading();
   TestEpubContentAllocationFailureAndRecovery();
