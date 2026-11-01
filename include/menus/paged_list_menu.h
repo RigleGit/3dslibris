@@ -39,6 +39,7 @@ public:
   }
 
 protected:
+  void ActivateSelected();
   inline void SetHeaderTitle(const std::string &title) { header_title = title; }
   virtual void BuildEntries(Book *book, class Text *text,
                             std::vector<std::string> &labels,
@@ -54,7 +55,6 @@ protected:
   std::vector<u16> page_sizes;
 
 private:
-  void ActivateSelected();
   void Back();
   void NextPage();
   void PreviousPage();
