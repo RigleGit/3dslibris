@@ -62,17 +62,20 @@ struct IndexWriter {
     for (size_t i = 0; i < sizeof(T); ++i)
       data.push_back((uint8_t)((uint64_t)value >> (i * 8)));
   }
-  void String(const std::string &s, size_t max = 2048) {
-    if (s.size() > max) {
+  void String(const std::string &s, size_t max = 65535, bool display = false) {
+    if (!display && s.size() > max) {
       ok = false;
       return;
     }
-    Put<uint16_t>(s.size());
-    if (data.size() + s.size() > kIndexLimit) {
+    size_t n = std::min(s.size(), max);
+    // Display labels may shorten; resource identities must remain exact.
+    while (display && n < s.size() && n && ((unsigned char)s[n] & 0xc0) == 0x80) --n;
+    Put<uint16_t>(n);
+    if (data.size() + n > kIndexLimit) {
       ok = false;
       return;
     }
-    data.insert(data.end(), s.begin(), s.end());
+    data.insert(data.end(), s.begin(), s.begin() + n);
   }
 };
 struct IndexReader {
@@ -90,7 +93,7 @@ struct IndexReader {
       value |= (uint64_t)*p++ << (8 * i);
     return (T)value;
   }
-  std::string String(size_t max = 2048) {
+  std::string String(size_t max = 65535) {
     const unsigned n = Get<uint16_t>();
     if (n > max || (size_t)(end - p) < n) {
       ok = false;
@@ -259,7 +262,7 @@ struct Writer::State {
       w.Put<uint8_t>(b.compressed);
       w.Put<uint8_t>(b.kind);
     }
-    w.String(book->GetTitle() ? book->GetTitle() : "", 1000);
+    w.String(book->GetTitle() ? book->GetTitle() : "", 1000, true);
     w.Put<uint8_t>(book->GetTocQuality());
     w.Put<uint16_t>(book->GetTocDirectCount());
     w.Put<uint16_t>(book->GetTocHeuristicCount());
@@ -268,7 +271,7 @@ struct Writer::State {
     for (const auto &c : book->GetChapters()) {
       w.Put<uint16_t>(c.page);
       w.Put<uint8_t>(c.level);
-      w.String(c.title);
+      w.String(c.title, 2048, true);
     }
     PutReferences(w, book->GetChapterDocStartPages(), refs.size());
     PutReferences(w, book->GetChapterAnchorPages(), refs.size());
@@ -587,7 +590,7 @@ struct Reader::State {
     for (unsigned i = 0; i < count; ++i) {
       const u16 page = r.Get<uint16_t>();
       const u8 level = r.Get<uint8_t>();
-      const std::string text = r.String();
+      const std::string text = r.String(2048);
       if (!r.ok || page >= header.pages)
         return false;
       book->AddChapter(page, text, level);

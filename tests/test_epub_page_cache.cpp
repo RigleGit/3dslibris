@@ -599,6 +599,37 @@ void TestBlockCacheRoundtrip() {
   remove(path.c_str());
 }
 
+void TestLongBlockIndexStrings() {
+  Fixture fixture;
+  fixture.AddPages(1);
+  const std::string title = std::string(999, 'a') + "\xc3\xa9" + std::string(200, 'b');
+  const std::string href(4096, 'h');
+  fixture.source.SetTitle(title.c_str());
+  fixture.source.AddChapter(0, std::string(3000, 'c'));
+  fixture.source.RegisterInlineLinkHref(href);
+  fixture.source.SetChapterDocStartPage(href, 0);
+  const std::string path=fixture.directory+"/long.epc";
+  epub_block_cache::Writer writer;
+  Require(writer.Begin(&fixture.source,path) && writer.AppendDocument(0,1), "begin long metadata cache");
+  while(writer.Step()==epub_block_cache::Pending) {}
+  Check(writer.Finish(), "long metadata can finish cache");
+  while(writer.Step()==epub_block_cache::Pending) {}
+  Check(writer.GetResult()==epub_block_cache::Complete,"display labels cannot disable caching");
+  Book loaded(fixture.ctx); epub_block_cache::Reader reader;
+  reader.Begin(&loaded,path,0);
+  while(reader.Step()==epub_block_cache::Pending) {}
+  Check(reader.GetResult()==epub_block_cache::Complete,"long metadata reopens");
+  if(reader.GetResult()==epub_block_cache::Complete) {
+    Check(std::string(loaded.GetTitle())==std::string(999,'a'),"display title truncates at a UTF8 boundary");
+    Check(loaded.GetChapters()[0].title==std::string(2048,'c'),"chapter display label is bounded");
+    const std::string *restored = loaded.GetInlineLinkHref(1);
+    u16 page = 99;
+    Check(restored && *restored==href && loaded.FindChapterDocStartPage(href, &page) && page==0,
+          "resource identities are never truncated");
+  }
+  reader.Close(); loaded.Close(); writer.Abort(); remove(path.c_str());
+}
+
 void TestCooperativeLegacyLoad() {
   Fixture fixture;
   fixture.AddPages(60, 1024);
@@ -747,6 +778,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (selected == "all") {
+    TestLongBlockIndexStrings();
     TestBlockCacheRoundtrip();
     TestCooperativeLegacyLoad();
     TestCloseNeverStartsDeferredEpubSave();
