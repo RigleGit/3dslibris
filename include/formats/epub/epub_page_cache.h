@@ -12,13 +12,23 @@
 
 class Book;
 
-namespace page_cache_utils { struct PageCacheLayoutParams; }
+namespace page_cache_utils {
+struct PageCacheLayoutParams;
+}
 namespace epub_page_cache {
 std::string CachePath(Book *book, const char *source,
-                     const page_cache_utils::PageCacheLayoutParams &params);
+                      const page_cache_utils::PageCacheLayoutParams &params);
 class LoadSession {
 public:
-  enum Result { Pending, Complete, Missing, Cancelled, Corrupt, IoError, NoMemory };
+  enum Result {
+    Pending,
+    Complete,
+    Missing,
+    Cancelled,
+    Corrupt,
+    IoError,
+    NoMemory
+  };
   LoadSession();
   ~LoadSession();
   Result Begin(Book *book, const std::string &path);
@@ -27,13 +37,13 @@ public:
   Result GetResult() const;
   unsigned Progress() const;
   unsigned Total() const;
+
 private:
   struct State;
   State *state_;
   LoadSession(const LoadSession &);
   LoadSession &operator=(const LoadSession &);
 };
-
 
 bool TryLoad(Book *book, const char *book_path, int pixel_size,
              int line_spacing, int paragraph_spacing, int paragraph_indent,

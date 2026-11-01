@@ -109,8 +109,9 @@ static bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction) {
        page_index >= 0 && page_index < page_count; page_index += direction) {
     if (InlineLinkCountForPage(book, page_index) == 0) continue;
     book->SetPosition(page_index);
-    if(book->HasPendingEpubNavigation()) {
-      book->SetFocusedInlineLinkIndex(direction>0?0:(int)book->EpubPageLinkCount(page_index)-1);
+    if (book->HasPendingEpubNavigation()) {
+      book->SetFocusedInlineLinkIndex(
+          direction > 0 ? 0 : (int)book->EpubPageLinkCount(page_index) - 1);
       return true;
     }
     book->ClearFocusedInlineLink();

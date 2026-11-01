@@ -5,7 +5,9 @@
 #include <string>
 struct ReaderSearchSession;
 struct ReaderImageViewerSession;
-namespace epub_parser { class Preparation; }
+namespace epub_parser {
+class Preparation;
+}
 
 class App;
 struct FrameInput;
@@ -38,8 +40,8 @@ private:
   std::unique_ptr<epub_parser::Preparation> preparation_;
   Book *cache_preparing_;
   std::string cache_label_;
-  bool cache_page_error_=false;
-  bool cache_page_loading_=false;
+  bool cache_page_error_ = false;
+  bool cache_page_loading_ = false;
   uint64_t cache_draw_ms_;
   bool AdvanceCachePreparation(const FrameInput &input);
   void DrawImageViewer();

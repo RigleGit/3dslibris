@@ -413,92 +413,146 @@ void TestBookOwnsPendingWriter() {
 }
 
 void TestBlockCacheRoundtrip() {
-  Fixture fixture; fixture.AddPages(80,1024);
-  fixture.source.SetTitle("Block cache"); fixture.source.AddChapter(31,"Middle",1);
-  fixture.source.SetChapterDocStartPage("one.xhtml",0);
-  fixture.source.SetChapterDocStartPage("two.xhtml",40);
-  fixture.source.SetChapterAnchorPage("two.xhtml#anchor",47);
+  Fixture fixture;
+  fixture.AddPages(80, 1024);
+  fixture.source.SetTitle("Block cache");
+  fixture.source.AddChapter(31, "Middle", 1);
+  fixture.source.SetChapterDocStartPage("one.xhtml", 0);
+  fixture.source.SetChapterDocStartPage("two.xhtml", 40);
+  fixture.source.SetChapterAnchorPage("two.xhtml#anchor", 47);
   fixture.source.RegisterInlineLinkHref("two.xhtml#anchor");
-  page_search::Events events; page_search::Annotate(events,2,page_search::Space);
+  page_search::Events events;
+  page_search::Annotate(events, 2, page_search::Space);
   fixture.source.GetPage(47)->SetSearchEvents(events);
-  const std::string path=fixture.directory+"/blocks.epc";
+  const std::string path = fixture.directory + "/blocks.epc";
   epub_block_cache::Writer writer;
-  Require(writer.Begin(&fixture.source,path),"begin block writer");
-  Require(writer.AppendDocument(0,40),"first document");
-  while(writer.Step()==epub_block_cache::Pending) {}
-  Require(writer.AppendDocument(40,80),"second document");
-  while(writer.Step()==epub_block_cache::Pending) {}
-  Require(writer.Finish(),"start publishing index");
-  while(writer.Step()==epub_block_cache::Pending) {}
-  Check(writer.GetResult()==epub_block_cache::Complete,"publish complete v23 cache");
-  struct stat info; stat(path.c_str(),&info);
-  Book loaded(fixture.ctx); epub_block_cache::Reader reader;
-  Require(reader.Begin(&loaded,path,0)==epub_block_cache::Pending,"open complete block reader");
-  unsigned steps=0;
-  while(reader.Step()==epub_block_cache::Pending) ++steps;
-  Check(reader.GetResult()==epub_block_cache::Complete && steps>1,"v23 loading is cooperative");
-  Check(loaded.GetPageCount()==80 && loaded.GetPage(79)->GetLength()==1024,"all pages restored");
-  Check(loaded.GetPage(47)->GetSearchEvents()==events,"search events restored");
-  Check(loaded.GetChapters().size()==1 && loaded.GetChapters()[0].page==31,"chapters restored");
-  u16 target=0; Check(loaded.FindChapterAnchorPage("two.xhtml#anchor",&target)&&target==47,"anchors restored");
-  stat(path.c_str(),&info);
-  Check(info.st_size<80*1024,"block format reduces repetitive content");
-  reader.Close(); loaded.Close();
-  loaded.SetPosition(47);
-  reader.Begin(&loaded,path,128*1024);
-  unsigned initial_steps=0;
-  while(reader.Step()==epub_block_cache::Pending && ++initial_steps<200) {}
-  Check(reader.GetResult()==epub_block_cache::Complete && reader.IsReady(47) && !reader.IsReady(0),
-        "partial reader starts at saved position");
-  Check(reader.BytesRead()<(size_t)info.st_size,"partial reopen avoids unrelated blocks");
-  reader.Pin(47);
-  const u32 *pinned=loaded.GetPage(47)->GetBuffer();
-  for(unsigned page=0;page<80;++page) {
-    reader.Request(page);unsigned turns=0;
-    while(reader.Step()==epub_block_cache::Pending && ++turns<40) {}
-    Check(reader.GetResult()==epub_block_cache::Complete && reader.IsReady(page),
-          "residency makes progress when eviction is needed");
-    Check(reader.ResidentBytes()<=128*1024,"payload stays within budget");
-    Check(loaded.GetPage(47)->GetBuffer()==pinned,"visible page remains pinned");
+  Require(writer.Begin(&fixture.source, path), "begin block writer");
+  Require(writer.AppendDocument(0, 40), "first document");
+  while (writer.Step() == epub_block_cache::Pending) {
   }
-  reader.Close(); loaded.Close();
-  loaded.SetPosition(47);
-  Require(loaded.StartEpubPageCache(path,128*1024),"attach private page backend");
-  while(loaded.AdvanceEpubPageCache()>0) {}
-  Check(loaded.IsEpubPageReady(47),"Book restores saved page");
-  loaded.SetPosition(79);
-  Check(loaded.GetPosition()==47,"navigation waits before committing position");
-  while(loaded.AdvanceEpubPageCache()>0) {}
-  Check(loaded.GetPosition()==79 && loaded.IsEpubPageReady(79),"loaded navigation commits target");
+  Require(writer.AppendDocument(40, 80), "second document");
+  while (writer.Step() == epub_block_cache::Pending) {
+  }
+  Require(writer.Finish(), "start publishing index");
+  while (writer.Step() == epub_block_cache::Pending) {
+  }
+  Check(writer.GetResult() == epub_block_cache::Complete,
+        "publish complete v23 cache");
+  struct stat info;
+  stat(path.c_str(), &info);
+  Book loaded(fixture.ctx);
+  epub_block_cache::Reader reader;
+  Require(reader.Begin(&loaded, path, 0) == epub_block_cache::Pending,
+          "open complete block reader");
+  unsigned steps = 0;
+  while (reader.Step() == epub_block_cache::Pending)
+    ++steps;
+  Check(reader.GetResult() == epub_block_cache::Complete && steps > 1,
+        "v23 loading is cooperative");
+  Check(loaded.GetPageCount() == 80 && loaded.GetPage(79)->GetLength() == 1024,
+        "all pages restored");
+  Check(loaded.GetPage(47)->GetSearchEvents() == events,
+        "search events restored");
+  Check(loaded.GetChapters().size() == 1 && loaded.GetChapters()[0].page == 31,
+        "chapters restored");
+  u16 target = 0;
+  Check(loaded.FindChapterAnchorPage("two.xhtml#anchor", &target) &&
+            target == 47,
+        "anchors restored");
+  stat(path.c_str(), &info);
+  Check(info.st_size < 80 * 1024, "block format reduces repetitive content");
+  reader.Close();
   loaded.Close();
-  epub_page_cache::LoadSession facade; facade.Begin(&loaded,path);
-  while(facade.Step()==epub_page_cache::LoadSession::Pending) {}
-  Check(facade.GetResult()==epub_page_cache::LoadSession::Complete && loaded.GetPageCount()==80,
+  loaded.SetPosition(47);
+  reader.Begin(&loaded, path, 128 * 1024);
+  unsigned initial_steps = 0;
+  while (reader.Step() == epub_block_cache::Pending && ++initial_steps < 200) {
+  }
+  Check(reader.GetResult() == epub_block_cache::Complete &&
+            reader.IsReady(47) && !reader.IsReady(0),
+        "partial reader starts at saved position");
+  Check(reader.BytesRead() < (size_t)info.st_size,
+        "partial reopen avoids unrelated blocks");
+  reader.Pin(47);
+  const u32 *pinned = loaded.GetPage(47)->GetBuffer();
+  for (unsigned page = 0; page < 80; ++page) {
+    reader.Request(page);
+    unsigned turns = 0;
+    while (reader.Step() == epub_block_cache::Pending && ++turns < 40) {
+    }
+    Check(reader.GetResult() == epub_block_cache::Complete &&
+              reader.IsReady(page),
+          "residency makes progress when eviction is needed");
+    Check(reader.ResidentBytes() <= 128 * 1024, "payload stays within budget");
+    Check(loaded.GetPage(47)->GetBuffer() == pinned,
+          "visible page remains pinned");
+  }
+  reader.Close();
+  loaded.Close();
+  loaded.SetPosition(47);
+  Require(loaded.StartEpubPageCache(path, 128 * 1024),
+          "attach private page backend");
+  while (loaded.AdvanceEpubPageCache() > 0) {
+  }
+  Check(loaded.IsEpubPageReady(47), "Book restores saved page");
+  loaded.SetPosition(79);
+  Check(loaded.GetPosition() == 47,
+        "navigation waits before committing position");
+  while (loaded.AdvanceEpubPageCache() > 0) {
+  }
+  Check(loaded.GetPosition() == 79 && loaded.IsEpubPageReady(79),
+        "loaded navigation commits target");
+  loaded.Close();
+  epub_page_cache::LoadSession facade;
+  facade.Begin(&loaded, path);
+  while (facade.Step() == epub_page_cache::LoadSession::Pending) {
+  }
+  Check(facade.GetResult() == epub_page_cache::LoadSession::Complete &&
+            loaded.GetPageCount() == 80,
         "v23 reopens through the shared complete reader");
   loaded.Close();
-  FILE *fp=fopen(path.c_str(),"r+b"); fseek(fp,35,SEEK_SET); int byte=fgetc(fp); fseek(fp,35,SEEK_SET); fputc(byte^64,fp); fclose(fp);
-  reader.Begin(&loaded,path,0);
-  while(reader.Step()==epub_block_cache::Pending) {}
-  Check(reader.GetResult()==epub_block_cache::Corrupt,"block CRC detects changed data");
-  reader.Close(); loaded.Close(); remove(path.c_str());
+  FILE *fp = fopen(path.c_str(), "r+b");
+  fseek(fp, 35, SEEK_SET);
+  int byte = fgetc(fp);
+  fseek(fp, 35, SEEK_SET);
+  fputc(byte ^ 64, fp);
+  fclose(fp);
+  reader.Begin(&loaded, path, 0);
+  while (reader.Step() == epub_block_cache::Pending) {
+  }
+  Check(reader.GetResult() == epub_block_cache::Corrupt,
+        "block CRC detects changed data");
+  reader.Close();
+  loaded.Close();
+  remove(path.c_str());
 }
 
 void TestCooperativeLegacyLoad() {
-  Fixture fixture; fixture.AddPages(60,1024); fixture.Save();
+  Fixture fixture;
+  fixture.AddPages(60, 1024);
+  fixture.Save();
   Book loaded(fixture.ctx);
   epub_page_cache::LoadSession reader;
-  Check(reader.Begin(&loaded,fixture.CacheFile())==epub_page_cache::LoadSession::Pending,
+  Check(reader.Begin(&loaded, fixture.CacheFile()) ==
+            epub_page_cache::LoadSession::Pending,
         "legacy load opens without decoding all pages");
-  Check(loaded.GetPageCount()==0,"begin never exposes partial page collection");
-  unsigned steps=0;
-  while(reader.Step()==epub_page_cache::LoadSession::Pending) ++steps;
-  Check(reader.GetResult()==epub_page_cache::LoadSession::Complete && steps>1 &&
-        loaded.GetPageCount()==60,"bounded buffered load restores complete book");
+  Check(loaded.GetPageCount() == 0,
+        "begin never exposes partial page collection");
+  unsigned steps = 0;
+  while (reader.Step() == epub_page_cache::LoadSession::Pending)
+    ++steps;
+  Check(reader.GetResult() == epub_page_cache::LoadSession::Complete &&
+            steps > 1 && loaded.GetPageCount() == 60,
+        "bounded buffered load restores complete book");
   loaded.Close();
-  reader.Begin(&loaded,fixture.CacheFile()); reader.Step(); reader.Cancel();
-  Check(reader.GetResult()==epub_page_cache::LoadSession::Cancelled && loaded.GetPageCount()==0,
+  reader.Begin(&loaded, fixture.CacheFile());
+  reader.Step();
+  reader.Cancel();
+  Check(reader.GetResult() == epub_page_cache::LoadSession::Cancelled &&
+            loaded.GetPageCount() == 0,
         "cancelling clears partial pages");
-  Check(access(fixture.CacheFile().c_str(),R_OK)==0,"cancellation preserves valid input file");
+  Check(access(fixture.CacheFile().c_str(), R_OK) == 0,
+        "cancellation preserves valid input file");
 }
 
 void TestCloseNeverStartsDeferredEpubSave() {
@@ -506,12 +560,15 @@ void TestCloseNeverStartsDeferredEpubSave() {
   fixture.AddPages(2);
   fixture.source.SetFolderName("/tmp");
   fixture.source.SetFileName("3dslibris-epub-cache-owner.epub");
-  fixture.source.SetPendingEpubPageCacheSaveWithParams(14,2,0,0,0,12,12,10,36,NULL);
-  observe_cache_writes=true; cache_step_bytes=0;
+  fixture.source.SetPendingEpubPageCacheSaveWithParams(14, 2, 0, 0, 0, 12, 12,
+                                                       10, 36, NULL);
+  observe_cache_writes = true;
+  cache_step_bytes = 0;
   fixture.source.Close();
-  observe_cache_writes=false;
-  Check(cache_step_bytes==0,"closing never writes a deferred EPUB cache");
-  Check(fixture.CacheFile().empty(),"closing does not publish an optional cache");
+  observe_cache_writes = false;
+  Check(cache_step_bytes == 0, "closing never writes a deferred EPUB cache");
+  Check(fixture.CacheFile().empty(),
+        "closing does not publish an optional cache");
 }
 
 #if defined(DSLIBRIS_DEBUG) && defined(DSLIBRIS_TEST_CLOCK)
@@ -546,9 +603,10 @@ void TestCacheLoadMetricsStayWithinTotal() {
     BookContext ctx = fixture.ctx;
     ctx.status_reporter = &reporter;
     Book loaded(ctx);
-    if (large) dslibris_test_clock_step=100;
+    if (large)
+      dslibris_test_clock_step = 100;
     Require(fixture.Load(&loaded), "load real cache for metrics");
-    dslibris_test_clock_step=1;
+    dslibris_test_clock_step = 1;
     const unsigned long long total = Metric(reporter.load, " total=");
     Check(total > 0, "load metrics use elapsed platform time");
     for (const char *key : {" hdr=", " pages=", " chapters=", " doc_starts=",
@@ -570,7 +628,8 @@ void TestCacheSaveMetricsSeparateIdleAndClosing() {
   epub_page_cache::StreamWriter writer;
   Require(writer.Begin(&book, kBookPath, 14, 2, 0, 0, 0,
                        12, 12, 10, 36, NULL), "begin metrics save");
-  dslibris_test_clock += 10000; // Time outside Step must not count as active I/O.
+  dslibris_test_clock +=
+      10000; // Time outside Step must not count as active I/O.
   Require(writer.Step(&book, 10, 0) == epub_page_cache::StreamWriter::Pending,
           "save starts with a bounded idle step");
   // Closing is deliberately slower; it must not contaminate the idle maximum.

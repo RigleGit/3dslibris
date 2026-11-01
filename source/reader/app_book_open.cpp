@@ -155,25 +155,38 @@ u8 ReaderController::OpenBook()
     return BOOK_ERR_CANCELLED;
   }
 
-  if (selected_book->format==FORMAT_EPUB) {
+  if (selected_book->format == FORMAT_EPUB) {
     app_.PauseBrowserJobs();
-    DetachCurrentBookForSwitch(&app_,selected_book,session_id,"epub-preparation");
+    DetachCurrentBookForSwitch(&app_, selected_book, session_id,
+                               "epub-preparation");
     selected_book->SetOpenSessionId(session_id);
-    preparation_.reset(new(std::nothrow) epub_parser::Preparation);
-    const std::string source=std::string(selected_book->GetFolderName())+"/"+selected_book->GetFileName();
-    if(!preparation_ || !preparation_->Begin(selected_book,source,debug_runtime::DisableEpubPageResidency()?0:
-        app_.IsNew3dsDevice()?2u*1024u*1024u:512u*1024u)) {
-      preparation_.reset();selected_book->Close();app_.SetCurrentBook(nullptr);
-      app_.SetMode(AppMode::Browser);app_.SetBrowserDirty(true);return 1;
+    preparation_.reset(new (std::nothrow) epub_parser::Preparation);
+    const std::string source = std::string(selected_book->GetFolderName()) +
+                               "/" + selected_book->GetFileName();
+    if (!preparation_ ||
+        !preparation_->Begin(selected_book, source,
+                             debug_runtime::DisableEpubPageResidency() ? 0
+                             : app_.IsNew3dsDevice() ? 2u * 1024u * 1024u
+                                                     : 512u * 1024u)) {
+      preparation_.reset();
+      selected_book->Close();
+      app_.SetCurrentBook(nullptr);
+      app_.SetMode(AppMode::Browser);
+      app_.SetBrowserDirty(true);
+      return 1;
     }
-    cache_preparing_=selected_book;cache_draw_ms_=0;cache_label_.clear();
-    app_.SetOpeningPending(true);app_.SetOpeningBook(selected_book);
+    cache_preparing_ = selected_book;
+    cache_draw_ms_ = 0;
+    cache_label_.clear();
+    app_.SetOpeningPending(true);
+    app_.SetOpeningBook(selected_book);
     app_.SetOpeningSessionId(session_id);
     app_.SetOpeningNeedsRelayout(relayout_state.needs_relayout);
     app_.SetOpeningOldPageCount(relayout_state.old_page_count);
     app_.SetOpeningOldPosition(relayout_state.old_position);
-    app_.MutableOpeningOldBookmarks()=relayout_state.old_bookmarks;
-    app_.SetMode(AppMode::Opening);return 0;
+    app_.MutableOpeningOldBookmarks() = relayout_state.old_bookmarks;
+    app_.SetMode(AppMode::Opening);
+    return 0;
   }
 
   if (use_async_reflow)

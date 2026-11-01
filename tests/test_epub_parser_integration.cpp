@@ -590,7 +590,8 @@ void TestEpubContentAllocationFailureAndRecovery() {
   ExpectTrue("recovery parses both chapter targets", book.GetChapters().size() == 2);
   ExpectTrue("recovery preserves chapter titles",
              book.GetChapters()[0].title == "Chapter One");
-  while (book.HasPendingEpubPageCacheSave()) book.PumpPendingEpubPageCacheSave();
+  while (book.HasPendingEpubPageCacheSave())
+    book.PumpPendingEpubPageCacheSave();
   book.Close();
   const std::string cache_file = CacheFilePath(cache_dir);
   ExpectTrue("remove recovery cache", remove(cache_file.c_str()) == 0);
@@ -624,33 +625,55 @@ void TestOptionalCacheAllocationFailureKeepsReading() {
 } // namespace
 
 void TestCooperativePreparation() {
-  char dir[]="/tmp/3dslibris-preparation-XXXXXX";
-  ExpectTrue("preparation directory",mkdtemp(dir)!=nullptr);
+  char dir[] = "/tmp/3dslibris-preparation-XXXXXX";
+  ExpectTrue("preparation directory", mkdtemp(dir) != nullptr);
   epub_page_cache::SetCacheDirForTest(dir);
-  TestCtx ctx; Book book(ctx.ctx); book.format=FORMAT_EPUB;
-  book.SetFolderName(TEST_FIXTURES_DIR "/books"); book.SetFileName("basic.epub");
+  TestCtx ctx;
+  Book book(ctx.ctx);
+  book.format = FORMAT_EPUB;
+  book.SetFolderName(TEST_FIXTURES_DIR "/books");
+  book.SetFileName("basic.epub");
   epub_parser::Preparation prep;
-  ExpectTrue("begin preparation",prep.Begin(&book,TEST_FIXTURES_DIR "/books/basic.epub"));
-  unsigned steps=0;
-  while(prep.Step()==epub_parser::Preparation::Pending) ++steps;
-  ExpectTrue("preparation completes",prep.GetResult()==epub_parser::Preparation::Complete);
-  ExpectTrue("preparation yields",steps>=5);
-  ExpectTrue("preparation preserves chapter targets",book.GetChapters().size()==2);
-  const unsigned pages=book.GetPageCount();
-  const std::string file=CacheFilePath(dir);
+  ExpectTrue("begin preparation",
+             prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub"));
+  unsigned steps = 0;
+  while (prep.Step() == epub_parser::Preparation::Pending)
+    ++steps;
+  ExpectTrue("preparation completes",
+             prep.GetResult() == epub_parser::Preparation::Complete);
+  ExpectTrue("preparation yields", steps >= 5);
+  ExpectTrue("preparation preserves chapter targets",
+             book.GetChapters().size() == 2);
+  const unsigned pages = book.GetPageCount();
+  const std::string file = CacheFilePath(dir);
   book.Close();
-  ExpectTrue("start warm preparation",prep.Begin(&book,TEST_FIXTURES_DIR "/books/basic.epub",128*1024));
-  while(prep.Step()==epub_parser::Preparation::Pending) {}
-  ExpectTrue("warm preparation matches",prep.GetResult()==epub_parser::Preparation::Complete && book.GetPageCount()==pages);
-  ExpectTrue("warm preparation attaches residency",book.HasEpubPageCache() && book.IsEpubPageReady(book.GetPosition()));
-  book.Close(); remove(file.c_str());
-  prep.Begin(&book,TEST_FIXTURES_DIR "/books/basic.epub");
-  for(unsigned i=0;i<4;++i)prep.Step();
+  ExpectTrue(
+      "start warm preparation",
+      prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 128 * 1024));
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("warm preparation matches",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 book.GetPageCount() == pages);
+  ExpectTrue("warm preparation attaches residency",
+             book.HasEpubPageCache() &&
+                 book.IsEpubPageReady(book.GetPosition()));
+  book.Close();
+  remove(file.c_str());
+  prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub");
+  for (unsigned i = 0; i < 4; ++i)
+    prep.Step();
   prep.Cancel();
-  ExpectTrue("cancel discards partial pages",book.GetPageCount()==0);
-  DIR *d=opendir(dir);unsigned files=0;while(dirent *e=readdir(d))if(e->d_name[0]!='.')++files;closedir(d);
-  ExpectTrue("cancel removes temporary",files==0);
-  epub_page_cache::SetCacheDirForTest(nullptr);rmdir(dir);
+  ExpectTrue("cancel discards partial pages", book.GetPageCount() == 0);
+  DIR *d = opendir(dir);
+  unsigned files = 0;
+  while (dirent *e = readdir(d))
+    if (e->d_name[0] != '.')
+      ++files;
+  closedir(d);
+  ExpectTrue("cancel removes temporary", files == 0);
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  rmdir(dir);
 }
 
 int main() {

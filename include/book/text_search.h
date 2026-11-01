@@ -26,10 +26,11 @@ struct Source {
   void *context;
   uint32_t pages;
   bool (*page)(void *, uint32_t, PageView *);
-  PageAvailability (*prepare)(void *,uint32_t);
-  Source(void *ctx=nullptr,uint32_t count=0,bool (*read)(void *,uint32_t,PageView *)=nullptr,
-         PageAvailability (*ensure)(void *,uint32_t)=nullptr)
-      : context(ctx),pages(count),page(read),prepare(ensure) {}
+  PageAvailability (*prepare)(void *, uint32_t);
+  Source(void *ctx = nullptr, uint32_t count = 0,
+         bool (*read)(void *, uint32_t, PageView *) = nullptr,
+         PageAvailability (*ensure)(void *, uint32_t) = nullptr)
+      : context(ctx), pages(count), page(read), prepare(ensure) {}
 };
 enum Status { Idle, Searching, Found, NotFound, Failed };
 // No platform calls or retained Page pointers. The owner invalidates the session

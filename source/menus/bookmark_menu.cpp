@@ -237,7 +237,8 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
   if (!book)
     return;
 
-  preview_pages_.clear();preview_ready_.clear();
+  preview_pages_.clear();
+  preview_ready_.clear();
   std::list<u16> &bookmarks = book->GetBookmarks();
   labels.reserve(bookmarks.size());
   pages.reserve(bookmarks.size());
@@ -251,11 +252,14 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
     snprintf(label, sizeof(label), "Page %d", pg + 1);
     std::string full_label = label;
 
-    preview_pages_.push_back(pg);preview_ready_.push_back(false);
-    if(book->HasEpubPageCache()) {
-      labels.push_back(full_label+"\nloading preview...\n ");pages.push_back(pg);continue;
+    preview_pages_.push_back(pg);
+    preview_ready_.push_back(false);
+    if (book->HasEpubPageCache()) {
+      labels.push_back(full_label + "\nloading preview...\n ");
+      pages.push_back(pg);
+      continue;
     }
-    Page *page = pg<book->GetPageCount()?book->GetPage(pg):nullptr;
+    Page *page = pg < book->GetPageCount() ? book->GetPage(pg) : nullptr;
     if (page) {
       std::string preview = ExtractPagePreview(page, kPreviewChars);
       if (!preview.empty()) {
@@ -273,19 +277,28 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
 }
 
 void BookmarkMenu::Draw() {
-  Book *book=current_book_;
-  if(book && book->HasEpubPageCache()) {
-    const unsigned start=GetPageStart(page);
-    const unsigned end=std::min((unsigned)preview_pages_.size(),start+GetPageSize(page));
-    for(unsigned i=start;i<end;++i) {
-      if(preview_ready_[i])continue;
-      const unsigned target=preview_pages_[i];
-      if(target>=book->GetPageCount()) {preview_ready_[i]=true;continue;}
-      if(!book->IsEpubPageReady(target)) {book->RequestEpubPage(target);break;}
-      const std::string text=ExtractPagePreview(book->GetPage(target),120);
-      const auto lines=WrapTextToLines(ts,text,220,2);
-      buttons[i]->SetLabel2(lines.empty()?"":lines[0]);
-      buttons[i]->SetLabel3(lines.size()<2?"":lines[1]);preview_ready_[i]=true;
+  Book *book = current_book_;
+  if (book && book->HasEpubPageCache()) {
+    const unsigned start = GetPageStart(page);
+    const unsigned end =
+        std::min((unsigned)preview_pages_.size(), start + GetPageSize(page));
+    for (unsigned i = start; i < end; ++i) {
+      if (preview_ready_[i])
+        continue;
+      const unsigned target = preview_pages_[i];
+      if (target >= book->GetPageCount()) {
+        preview_ready_[i] = true;
+        continue;
+      }
+      if (!book->IsEpubPageReady(target)) {
+        book->RequestEpubPage(target);
+        break;
+      }
+      const std::string text = ExtractPagePreview(book->GetPage(target), 120);
+      const auto lines = WrapTextToLines(ts, text, 220, 2);
+      buttons[i]->SetLabel2(lines.empty() ? "" : lines[0]);
+      buttons[i]->SetLabel3(lines.size() < 2 ? "" : lines[1]);
+      preview_ready_[i] = true;
     }
   }
   PagedListMenu::Draw();

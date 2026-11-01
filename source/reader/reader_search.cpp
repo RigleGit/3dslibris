@@ -38,7 +38,8 @@ void ReaderController::InvalidateSearch(bool forget_query) {
   if (search_->engine.GetStatus() == text_search::Searching)
     LogSearch(app_, *search_, "cancel");
   search_->engine.Cancel();
-  if(search_->book)search_->book->CancelEpubPageRequest();
+  if (search_->book)
+    search_->book->CancelEpubPageRequest();
   search_->active = search_->has_match = false;
   search_->book = nullptr;
   if (forget_query) search_.reset();
@@ -249,10 +250,11 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
     if (s.engine.GetStatus() == text_search::Searching) {
       const uint64_t kSearchSliceMs = 12;
       const uint64_t started = osGetTime();
-      do { s.engine.Pump(32); }
-      while (s.engine.GetStatus() == text_search::Searching &&
-             !s.engine.IsWaitingForPage() &&
-             osGetTime() - started < kSearchSliceMs && !app_.ShouldAbortWork());
+      do { s.engine.Pump(32);
+      } while (s.engine.GetStatus() == text_search::Searching &&
+               !s.engine.IsWaitingForPage() &&
+               osGetTime() - started < kSearchSliceMs &&
+               !app_.ShouldAbortWork());
       const uint64_t elapsed = osGetTime() - started;
       s.scan_ms += elapsed; s.max_slice_ms = std::max(s.max_slice_ms, elapsed);
       if (s.engine.GetStatus() != text_search::Searching) {

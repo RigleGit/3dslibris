@@ -31,7 +31,8 @@ bool CanDrawReflow(Book *book) {
 }
 
 void DrawReflow(Book *book, Text *text) {
-  if(book->IsEpubPageReady(book->GetPosition()))book->GetPage()->Draw(text);
+  if (book->IsEpubPageReady(book->GetPosition()))
+    book->GetPage()->Draw(text);
 }
 
 static const BookRendererEntry kBookRenderers[] = {

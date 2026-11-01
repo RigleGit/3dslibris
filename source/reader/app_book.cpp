@@ -216,44 +216,72 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
 }
 
 bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
-  if(!preparation_ || !cache_preparing_)return false;
-  Book *book=cache_preparing_;
-  if(input.keys_down&(app_.key.b|app_.key.start)) {
-    preparation_->Cancel();preparation_.reset();cache_preparing_=nullptr;
-    app_.SetCurrentBook(nullptr);app_.SetCurrentBookSessionId(0);
-    ResetOpeningState(&app_);app_.SetMode(AppMode::Browser);app_.SetBrowserDirty(true);return true;
+  if (!preparation_ || !cache_preparing_)
+    return false;
+  Book *book = cache_preparing_;
+  if (input.keys_down & (app_.key.b | app_.key.start)) {
+    preparation_->Cancel();
+    preparation_.reset();
+    cache_preparing_ = nullptr;
+    app_.SetCurrentBook(nullptr);
+    app_.SetCurrentBookSessionId(0);
+    ResetOpeningState(&app_);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
+    return true;
   }
-  if(app_.ShouldAbortWork())return true;
-  const std::string label=preparation_->Label();
-  if(label!=cache_label_ || input.timestamp_ms-cache_draw_ms_>=100) {
-    DrawOpeningSplashImpl(&app_,preparation_->Progress(),preparation_->Total(),label.c_str());
-    cache_draw_ms_=input.timestamp_ms;cache_label_=label;
+  if (app_.ShouldAbortWork())
+    return true;
+  const std::string label = preparation_->Label();
+  if (label != cache_label_ || input.timestamp_ms - cache_draw_ms_ >= 100) {
+    DrawOpeningSplashImpl(&app_, preparation_->Progress(),
+                          preparation_->Total(), label.c_str());
+    cache_draw_ms_ = input.timestamp_ms;
+    cache_label_ = label;
   }
-  const auto result=preparation_->Step();
-  if(app_.ShouldAbortWork())return true;
-  if(result==epub_parser::Preparation::Pending)return true;
-  if(result!=epub_parser::Preparation::Complete) {
-    DBG_LOG(&app_,"EPUB preparation failed or cancelled");
-    preparation_->Cancel();preparation_.reset();cache_preparing_=nullptr;
-    app_.SetCurrentBook(nullptr);app_.SetCurrentBookSessionId(0);
-    ResetOpeningState(&app_);app_.SetMode(AppMode::Browser);app_.SetBrowserDirty(true);return true;
+  const auto result = preparation_->Step();
+  if (app_.ShouldAbortWork())
+    return true;
+  if (result == epub_parser::Preparation::Pending)
+    return true;
+  if (result != epub_parser::Preparation::Complete) {
+    DBG_LOG(&app_, "EPUB preparation failed or cancelled");
+    preparation_->Cancel();
+    preparation_.reset();
+    cache_preparing_ = nullptr;
+    app_.SetCurrentBook(nullptr);
+    app_.SetCurrentBookSessionId(0);
+    ResetOpeningState(&app_);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
+    return true;
   }
-  if(preparation_->PersistenceFailed() && !(input.keys_down&app_.key.a)) {
-    if(cache_label_!=preparation_->Label()) {
-      cache_label_=preparation_->Label();DrawOpeningSplashImpl(&app_,0,0,cache_label_.c_str());
+  if (preparation_->PersistenceFailed() && !(input.keys_down & app_.key.a)) {
+    if (cache_label_ != preparation_->Label()) {
+      cache_label_ = preparation_->Label();
+      DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
     }
     return true;
   }
   book->SetLayoutRevision(app_.GetLayoutRevision());
-  if(app_.IsOpeningNeedsRelayout()) {
-    const auto plan=deferred_relayout_utils::BuildOpenRelayoutPlan(true,false,
-      app_.GetOpeningOldPageCount(),app_.GetOpeningOldPosition(),book->GetPageCount(),
-      app_.MutableOpeningOldBookmarks());
-    if(plan.has_remap) {book->SetPosition(plan.mapped_position);ApplyRemappedBookmarks(book,plan.mapped_bookmarks);}
+  if (app_.IsOpeningNeedsRelayout()) {
+    const auto plan = deferred_relayout_utils::BuildOpenRelayoutPlan(
+        true, false, app_.GetOpeningOldPageCount(),
+        app_.GetOpeningOldPosition(), book->GetPageCount(),
+        app_.MutableOpeningOldBookmarks());
+    if (plan.has_remap) {
+      book->SetPosition(plan.mapped_position);
+      ApplyRemappedBookmarks(book, plan.mapped_bookmarks);
+    }
   }
-  app_.SetCurrentBook(book);app_.SetCurrentBookSessionId(app_.GetOpeningSessionId());
-  preparation_.reset();cache_preparing_=nullptr;
-  ResetOpeningState(&app_);app_.SetMode(AppMode::Browser);OpenBook();return true;
+  app_.SetCurrentBook(book);
+  app_.SetCurrentBookSessionId(app_.GetOpeningSessionId());
+  preparation_.reset();
+  cache_preparing_ = nullptr;
+  ResetOpeningState(&app_);
+  app_.SetMode(AppMode::Browser);
+  OpenBook();
+  return true;
 }
 
 void ReaderController::HandleEventInOpening(const FrameInput &input)
@@ -262,7 +290,8 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
   Text *ts = app_.ts.get();
   if (app_.ShouldAbortWork())
     return;
-  if (AdvanceCachePreparation(input)) return;
+  if (AdvanceCachePreparation(input))
+    return;
   MaybeDrawOpeningSplashProgress(&app_);
   const u32 keys = input.keys_down;
 
@@ -453,52 +482,86 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
 }
 
 bool ReaderController::PumpPageCache(const FrameInput &input) {
-  Book *book=app_.GetCurrentBook();const AppMode mode=app_.GetMode();
-  if(!book || !book->HasEpubPageCache() ||
-      (mode!=AppMode::Book && mode!=AppMode::Search && mode!=AppMode::Bookmarks && mode!=AppMode::Chapters))return false;
-  if(app_.ShouldAbortWork())return true;
-  if(cache_page_error_) {
-    if(input.keys_down&(app_.key.b|app_.key.start)) {
-      cache_page_error_=false;book->CancelEpubPageRequest();app_.ShowLibraryView();return true;
+  Book *book = app_.GetCurrentBook();
+  const AppMode mode = app_.GetMode();
+  if (!book || !book->HasEpubPageCache() ||
+      (mode != AppMode::Book && mode != AppMode::Search &&
+       mode != AppMode::Bookmarks && mode != AppMode::Chapters))
+    return false;
+  if (app_.ShouldAbortWork())
+    return true;
+  if (cache_page_error_) {
+    if (input.keys_down & (app_.key.b | app_.key.start)) {
+      cache_page_error_ = false;
+      book->CancelEpubPageRequest();
+      app_.ShowLibraryView();
+      return true;
     }
-    if(input.keys_down&app_.key.a) {
-      cache_page_error_=false;book->InvalidateEpubPageCacheFile();
-      const int position=book->GetPosition();CloseBook(false);book->SetPosition(position);
-      app_.SetMode(AppMode::Browser);OpenBook();return true;
+    if (input.keys_down & app_.key.a) {
+      cache_page_error_ = false;
+      book->InvalidateEpubPageCacheFile();
+      const int position = book->GetPosition();
+      CloseBook(false);
+      book->SetPosition(position);
+      app_.SetMode(AppMode::Browser);
+      OpenBook();
+      return true;
     }
     return true;
   }
-  if(!book->HasPendingEpubPageRead())return false;
-  if(mode==AppMode::Book && (input.keys_down&(app_.key.b|app_.key.start))) {
-    book->CancelEpubPageRequest();cache_page_loading_=false;
-    if(input.keys_down&app_.key.start)app_.ShowLibraryView();
-    else {book_nav::DrawPage(book,app_.ts.get());app_.RequestStatusRedraw();}
+  if (!book->HasPendingEpubPageRead())
+    return false;
+  if (mode == AppMode::Book &&
+      (input.keys_down & (app_.key.b | app_.key.start))) {
+    book->CancelEpubPageRequest();
+    cache_page_loading_ = false;
+    if (input.keys_down & app_.key.start)
+      app_.ShowLibraryView();
+    else {
+      book_nav::DrawPage(book, app_.ts.get());
+      app_.RequestStatusRedraw();
+    }
     return true;
   }
-  const int before=book->GetPosition();const int result=book->AdvanceEpubPageCache();
-  if(app_.ShouldAbortWork())return true;
-  if(result<0) {
-    if(search_)search_->engine.Cancel();
-    cache_page_error_=true;
-    DrawOpeningSplashImpl(&app_,0,0,"cache read failed; A: rebuild B: back");return true;
+  const int before = book->GetPosition();
+  const int result = book->AdvanceEpubPageCache();
+  if (app_.ShouldAbortWork())
+    return true;
+  if (result < 0) {
+    if (search_)
+      search_->engine.Cancel();
+    cache_page_error_ = true;
+    DrawOpeningSplashImpl(&app_, 0, 0, "cache read failed; A: rebuild B: back");
+    return true;
   }
-  if(result>0) {
-    if(mode==AppMode::Book && !cache_page_loading_) {
+  if (result > 0) {
+    if (mode == AppMode::Book && !cache_page_loading_) {
       app_.ts->SetScreen(app_.ts->screenright);
-      const int style=app_.ts->GetStyle();app_.ts->SetStyle(TEXT_STYLE_BROWSER);
-      app_.ts->SetPen(5,app_.ts->LogicalHeight()-6);app_.ts->PrintString("loading page...");
-      app_.ts->SetStyle(style);app_.ts->MarkScreenDirty(app_.ts->screenright);cache_page_loading_=true;
+      const int style = app_.ts->GetStyle();
+      app_.ts->SetStyle(TEXT_STYLE_BROWSER);
+      app_.ts->SetPen(5, app_.ts->LogicalHeight() - 6);
+      app_.ts->PrintString("loading page...");
+      app_.ts->SetStyle(style);
+      app_.ts->MarkScreenDirty(app_.ts->screenright);
+      cache_page_loading_ = true;
     }
-    return mode==AppMode::Book;
+    return mode == AppMode::Book;
   }
-  if(mode==AppMode::Bookmarks)app_.bookmarkmenu->dirty=true;
-  if(mode==AppMode::Chapters)app_.chaptermenu->dirty=true;
-  if(mode==AppMode::Search && search_)search_->dirty=true;
-  if(mode==AppMode::Book && (before!=book->GetPosition() || cache_page_loading_)) {
-    book_nav::DrawPage(book,app_.ts.get());app_.RequestStatusRedraw();
-    if(before!=book->GetPosition())MarkProgressDirty(book);
+  if (mode == AppMode::Bookmarks)
+    app_.bookmarkmenu->dirty = true;
+  if (mode == AppMode::Chapters)
+    app_.chaptermenu->dirty = true;
+  if (mode == AppMode::Search && search_)
+    search_->dirty = true;
+  if (mode == AppMode::Book &&
+      (before != book->GetPosition() || cache_page_loading_)) {
+    book_nav::DrawPage(book, app_.ts.get());
+    app_.RequestStatusRedraw();
+    if (before != book->GetPosition())
+      MarkProgressDirty(book);
   }
-  cache_page_loading_=false;return false;
+  cache_page_loading_ = false;
+  return false;
 }
 
 void ReaderController::HandleEventInBook(const FrameInput &input)
@@ -597,8 +660,11 @@ void ReaderController::ToggleBookmark()
 
 void ReaderController::CloseBook(bool persist_progress)
 {
-  cache_page_error_=cache_page_loading_=false;
-  if(preparation_) {preparation_->Cancel();preparation_.reset();}
+  cache_page_error_ = cache_page_loading_ = false;
+  if (preparation_) {
+    preparation_->Cancel();
+    preparation_.reset();
+  }
   cache_preparing_ = nullptr;
   InvalidateImageViewer();
   InvalidateSearch(true);
