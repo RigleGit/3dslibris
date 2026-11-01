@@ -468,6 +468,9 @@ public:
   bool RequestEpubPage(unsigned page);
   void CancelEpubPageRequest();
   bool HasPendingEpubNavigation() const;
+  bool HasPendingEpubPageRead() const;
+  bool IsEpubPageCacheCorrupt() const;
+  void InvalidateEpubPageCacheFile();
   unsigned EpubPageLinkCount(unsigned page);
   void PumpPendingEpubPageCacheSave();
   void CancelPendingEpubPageCacheSave();

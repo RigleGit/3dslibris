@@ -7,7 +7,7 @@ class Preparation {
 public:
   enum Result { Pending, Complete, Cancelled, Failed };
   Preparation(); ~Preparation();
-  bool Begin(Book *book,const std::string &source);
+  bool Begin(Book *book,const std::string &source,size_t residency_budget=0);
   Result Step();
   void Cancel();
   Result GetResult() const;

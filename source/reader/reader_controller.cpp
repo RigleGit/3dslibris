@@ -42,3 +42,5 @@ void App::OnReaderAppletSuspendRequested() {
 void App::OnReaderAppletSuspended() { reader_controller_->OnAppletSuspended(); }
 
 void App::OnReaderAppletResumed() { reader_controller_->OnAppletResumed(); }
+
+bool App::PumpReaderPageCache(const FrameInput &input) {return reader_controller_->PumpPageCache(input);}

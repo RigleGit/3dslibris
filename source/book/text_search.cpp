@@ -70,6 +70,7 @@ struct Engine::State {
   size_t matched = 0, ring_next = 0, ring_count = 0;
   unsigned unit = 0, tail = 0;
   uint64_t scanned = 0;
+  bool waiting = false;
   bool whole = false, backwards = false, include = false, wrapped = false;
   bool excluded = false, annotated = false, raw_end = false, in_rtl = false;
   bool have_pending = false, have_candidate = false, previous_word = false, previous_space = false;
@@ -119,6 +120,11 @@ struct Engine::State {
   // One call handles at most one token or annotation. Payloads have fixed size.
   int Raw(Character *out) {
     if (cursor.page >= source.pages) return -1;
+    if(source.prepare) {
+      const PageAvailability available=source.prepare(source.context,cursor.page);
+      if(available==PagePending) {waiting=true;return 0;}
+      if(available==PageError) {Fail("Cannot load page data");return -1;}
+    }
     PageView page{};
     if (!source.page(source.context, cursor.page, &page) ||
         (page.length && !page.text) || !page.events || cursor.token > page.length) {
@@ -315,11 +321,13 @@ void Engine::Start(const Source &source, Position anchor, bool backwards, bool i
   s.scanned = 0; s.status = Searching; s.error.clear(); s.ResetUnit();
 }
 Status Engine::Pump(unsigned steps) {
-  while (steps-- && state_->status == Searching) state_->Step();
+  state_->waiting=false;
+  while (steps-- && state_->status == Searching && !state_->waiting) state_->Step();
   return state_->status;
 }
 void Engine::Cancel() { state_->status = Idle; state_->source = Source{}; }
 Status Engine::GetStatus() const { return state_->status; }
+bool Engine::IsWaitingForPage() const {return state_->waiting;}
 const Match &Engine::GetMatch() const { return state_->match; }
 const std::string &Engine::GetError() const { return state_->error; }
 bool Engine::Wrapped() const { return state_->wrapped; }

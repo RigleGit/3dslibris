@@ -30,6 +30,7 @@ public:
   bool IsReady(unsigned page) const;
   unsigned Links(unsigned page) const;
   void Pin(unsigned page);
+  void InvalidateFile();
   size_t ResidentBytes() const;
   size_t BytesRead() const;
   bool HasIndex() const;

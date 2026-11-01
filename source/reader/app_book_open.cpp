@@ -161,7 +161,8 @@ u8 ReaderController::OpenBook()
     selected_book->SetOpenSessionId(session_id);
     preparation_.reset(new(std::nothrow) epub_parser::Preparation);
     const std::string source=std::string(selected_book->GetFolderName())+"/"+selected_book->GetFileName();
-    if(!preparation_ || !preparation_->Begin(selected_book,source)) {
+    if(!preparation_ || !preparation_->Begin(selected_book,source,debug_runtime::DisableEpubPageResidency()?0:
+        app_.IsNew3dsDevice()?2u*1024u*1024u:512u*1024u)) {
       preparation_.reset();selected_book->Close();app_.SetCurrentBook(nullptr);
       app_.SetMode(AppMode::Browser);app_.SetBrowserDirty(true);return 1;
     }

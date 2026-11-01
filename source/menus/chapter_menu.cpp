@@ -567,6 +567,8 @@ bool ChapterMenu::ResolveTargetPage(u16 index, u16 *page_out) {
     return true;
   }
 
+  // EPUB v23 persists targets resolved during complete pagination.
+  if(book->HasEpubPageCache())return true;
   TocQuality q = book->GetTocQuality();
   if (q == TOC_QUALITY_UNKNOWN) {
     DBG_LOGF(status_reporter, "INDEX resolve toc unknown idx=%u page=%u",

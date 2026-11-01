@@ -192,6 +192,7 @@ public:
   void CloseBook();
   int GetBookIndex(Book *);
   void HandleEventInBook(const FrameInput &input);
+  bool PumpReaderPageCache(const FrameInput &input);
   void HandleEventInOpening(const FrameInput &input);
   u8 OpenBook();
   void ToggleBookmark();

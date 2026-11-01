@@ -23,6 +23,7 @@ public:
   void RunSearchFrame(const FrameInput &input);
   void InvalidateSearch(bool forget_query);
 
+  bool PumpPageCache(const FrameInput &input);
   void CloseBook(bool persist_progress = true);
   int GetBookIndex(Book *book);
   void HandleEventInBook(const FrameInput &input);
@@ -37,6 +38,8 @@ private:
   std::unique_ptr<epub_parser::Preparation> preparation_;
   Book *cache_preparing_;
   std::string cache_label_;
+  bool cache_page_error_=false;
+  bool cache_page_loading_=false;
   uint64_t cache_draw_ms_;
   bool AdvanceCachePreparation(const FrameInput &input);
   void DrawImageViewer();

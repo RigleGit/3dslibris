@@ -45,6 +45,9 @@
 #include "shared/debug_log.h"
 #include "book/layout_reflow.h"
 #include "formats/epub/epub_preparation.h"
+#include "reader/search_session.h"
+#include "menus/bookmark_menu.h"
+#include "menus/chapter_menu.h"
 #include "parse.h"
 #include "settings/prefs.h"
 #include "shared/boot_trace.h"
@@ -449,6 +452,55 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
   boot_trace::Boot("async open done");
 }
 
+bool ReaderController::PumpPageCache(const FrameInput &input) {
+  Book *book=app_.GetCurrentBook();const AppMode mode=app_.GetMode();
+  if(!book || !book->HasEpubPageCache() ||
+      (mode!=AppMode::Book && mode!=AppMode::Search && mode!=AppMode::Bookmarks && mode!=AppMode::Chapters))return false;
+  if(app_.ShouldAbortWork())return true;
+  if(cache_page_error_) {
+    if(input.keys_down&(app_.key.b|app_.key.start)) {
+      cache_page_error_=false;book->CancelEpubPageRequest();app_.ShowLibraryView();return true;
+    }
+    if(input.keys_down&app_.key.a) {
+      cache_page_error_=false;book->InvalidateEpubPageCacheFile();
+      const int position=book->GetPosition();CloseBook(false);book->SetPosition(position);
+      app_.SetMode(AppMode::Browser);OpenBook();return true;
+    }
+    return true;
+  }
+  if(!book->HasPendingEpubPageRead())return false;
+  if(mode==AppMode::Book && (input.keys_down&(app_.key.b|app_.key.start))) {
+    book->CancelEpubPageRequest();cache_page_loading_=false;
+    if(input.keys_down&app_.key.start)app_.ShowLibraryView();
+    else {book_nav::DrawPage(book,app_.ts.get());app_.RequestStatusRedraw();}
+    return true;
+  }
+  const int before=book->GetPosition();const int result=book->AdvanceEpubPageCache();
+  if(app_.ShouldAbortWork())return true;
+  if(result<0) {
+    if(search_)search_->engine.Cancel();
+    cache_page_error_=true;
+    DrawOpeningSplashImpl(&app_,0,0,"cache read failed; A: rebuild B: back");return true;
+  }
+  if(result>0) {
+    if(mode==AppMode::Book && !cache_page_loading_) {
+      app_.ts->SetScreen(app_.ts->screenright);
+      const int style=app_.ts->GetStyle();app_.ts->SetStyle(TEXT_STYLE_BROWSER);
+      app_.ts->SetPen(5,app_.ts->LogicalHeight()-6);app_.ts->PrintString("loading page...");
+      app_.ts->SetStyle(style);app_.ts->MarkScreenDirty(app_.ts->screenright);cache_page_loading_=true;
+    }
+    return mode==AppMode::Book;
+  }
+  if(mode==AppMode::Bookmarks)app_.bookmarkmenu->dirty=true;
+  if(mode==AppMode::Chapters)app_.chaptermenu->dirty=true;
+  if(mode==AppMode::Search && search_)search_->dirty=true;
+  if(mode==AppMode::Book && (before!=book->GetPosition() || cache_page_loading_)) {
+    book_nav::DrawPage(book,app_.ts.get());app_.RequestStatusRedraw();
+    if(before!=book->GetPosition())MarkProgressDirty(book);
+  }
+  cache_page_loading_=false;return false;
+}
+
 void ReaderController::HandleEventInBook(const FrameInput &input)
 {
   Book *bookcurrent_ = app_.GetCurrentBook();
@@ -545,6 +597,7 @@ void ReaderController::ToggleBookmark()
 
 void ReaderController::CloseBook(bool persist_progress)
 {
+  cache_page_error_=cache_page_loading_=false;
   if(preparation_) {preparation_->Cancel();preparation_.reset();}
   cache_preparing_ = nullptr;
   InvalidateImageViewer();

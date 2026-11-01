@@ -155,6 +155,10 @@ int MainLoopController::RunMainLoop()
     uint64_t browser_input_ms = 0;
     uint64_t browser_warmup_ms = 0;
 #endif
+    if(app_.PumpReaderPageCache(input)) {
+      app_.PresentIfDirty();
+      continue;
+    }
     switch (app_.GetMode())
     {
     case AppMode::Book:

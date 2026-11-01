@@ -11,6 +11,14 @@ inline bool DisableFixedLayoutGpuRenderer() {
 #endif
 }
 
+inline bool DisableEpubPageResidency() {
+#ifdef DSLIBRIS_EPUB_FULL_CACHE
+  return true;
+#else
+  return false;
+#endif
+}
+
 // Stability-first runtime: keep all background/deferred work disabled in both
 // normal and debug builds until the fixed-layout and MOBI paths are proven on
 // hardware again.

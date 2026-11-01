@@ -874,6 +874,11 @@ void Book::CancelEpubPageRequest() {
   if(epub_cache_reader_ && epub_cache_reader_->IsReady(position))epub_cache_reader_->Request(position);
 }
 bool Book::HasPendingEpubNavigation()const {return epub_pending_position_>=0;}
+bool Book::HasPendingEpubPageRead()const {
+  return epub_cache_reader_&&epub_cache_reader_->GetResult()==epub_block_cache::Pending;
+}
+bool Book::IsEpubPageCacheCorrupt()const {return epub_cache_reader_&&epub_cache_reader_->GetResult()==epub_block_cache::Corrupt;}
+void Book::InvalidateEpubPageCacheFile(){if(epub_cache_reader_)epub_cache_reader_->InvalidateFile();}
 unsigned Book::EpubPageLinkCount(unsigned page) {
   return epub_cache_reader_ ? epub_cache_reader_->Links(page) :
       page<GetPageCount() ? GetPage(page)->GetSelectableCount() : 0;

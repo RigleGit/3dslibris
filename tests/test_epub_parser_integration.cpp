@@ -639,9 +639,10 @@ void TestCooperativePreparation() {
   const unsigned pages=book.GetPageCount();
   const std::string file=CacheFilePath(dir);
   book.Close();
-  ExpectTrue("start warm preparation",prep.Begin(&book,TEST_FIXTURES_DIR "/books/basic.epub"));
+  ExpectTrue("start warm preparation",prep.Begin(&book,TEST_FIXTURES_DIR "/books/basic.epub",128*1024));
   while(prep.Step()==epub_parser::Preparation::Pending) {}
   ExpectTrue("warm preparation matches",prep.GetResult()==epub_parser::Preparation::Complete && book.GetPageCount()==pages);
+  ExpectTrue("warm preparation attaches residency",book.HasEpubPageCache() && book.IsEpubPageReady(book.GetPosition()));
   book.Close(); remove(file.c_str());
   prep.Begin(&book,TEST_FIXTURES_DIR "/books/basic.epub");
   for(unsigned i=0;i<4;++i)prep.Step();

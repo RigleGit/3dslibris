@@ -343,6 +343,7 @@ size_t Reader::BytesRead()const{return state_?state_->read_bytes:0;}
 unsigned Reader::Links(unsigned page)const{return HasIndex()&&page<state_->refs.size()?state_->refs[page].links:0;}
 bool Reader::IsReady(unsigned page)const{return HasIndex()&&page<state_->ready.size()&&state_->ready[page];}
 void Reader::Pin(unsigned page){if(state_)state_->pinned=page;}
+void Reader::InvalidateFile(){if(state_)remove(state_->path.c_str());}
 bool Reader::Request(unsigned page) {
   if(!HasIndex() || page>=state_->header.pages)return false;
   state_->target=page;state_->result=IsReady(page)?Complete:Pending;
@@ -368,7 +369,7 @@ Result Reader::Step() {
       s.index_read+=n;return Pending;
     }
     if(Crc(s.index.data(),s.index.size())!=s.header.index_crc || !s.ParseIndex())return s.result=Corrupt;
-    s.phase=2;s.target=std::min((unsigned)std::max(0,s.book->GetPosition()),s.header.pages-1);
+    s.phase=2;s.target=std::min<unsigned>((unsigned)std::max(0,s.book->GetPosition()),s.header.pages-1);
     s.pinned=s.target;return Pending;
   }
   const unsigned target=s.budget?s.target:s.full_next;

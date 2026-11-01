@@ -676,10 +676,10 @@ struct Preparation::State {
   epub_page_cache::LoadSession loader;epub_block_cache::Writer writer;
   enum Phase { Cache, Package, Spine, WriteDocument, Toc, Commit, Finished } phase;
   Result result;bool cached,metadata,legacy,persistence_failed,writer_open,migration;
-  unsigned before;std::vector<unsigned> ranges;size_t range;
+  unsigned before;std::vector<unsigned> ranges;size_t range,residency_budget;bool resident;
   u64 started,parse_ms,cache_ms;
   State():book(NULL),data(),zip(NULL),phase(Cache),result(Pending),cached(false),metadata(false),legacy(false),
-    persistence_failed(false),writer_open(false),migration(false),before(0),range(0),started(osGetTime()),parse_ms(0),cache_ms(0) {}
+    persistence_failed(false),writer_open(false),migration(false),before(0),range(0),residency_budget(0),resident(false),started(osGetTime()),parse_ms(0),cache_ms(0) {}
   ~State(){if(book)book->SetInlineImageProbeZip(NULL);if(zip)unzClose(zip);epub_data_delete(&data);}
   bool StartWriter() {
     writer_open=writer.Begin(book,path);
@@ -697,10 +697,10 @@ struct Preparation::State {
 };
 Preparation::Preparation():state_(NULL){}
 Preparation::~Preparation(){if(state_&&state_->result==Pending)Cancel();delete state_;}
-bool Preparation::Begin(Book *book,const std::string &source) {
+bool Preparation::Begin(Book *book,const std::string &source,size_t residency_budget) {
   if(state_&&state_->result==Pending)Cancel();delete state_;state_=new(std::nothrow) State;
   if(!state_)return false;
-  State &s=*state_;s.book=book;s.source=source;
+  State &s=*state_;s.book=book;s.source=source;s.residency_budget=residency_budget;
   if(!book || book->GetPageCount()) {s.result=Failed;return false;}
   book->PrepareForOpen();book->CaptureEbookImageSetting();s.deps=BuildEpubDeps(book);
   const auto &l=s.deps.layout;
@@ -711,9 +711,13 @@ bool Preparation::Begin(Book *book,const std::string &source) {
   mkdir(paths::GetCacheBaseDir().c_str(),0777);
   const size_t slash=s.path.find_last_of('/');if(slash!=std::string::npos)mkdir(s.path.substr(0,slash).c_str(),0777);
   s.metadata=book->TryLoadMetadataFromCache();
-  FILE *fp=fopen(s.path.c_str(),"rb");
-  if(fp) {u32 magic=0;u16 version=0;fread(&magic,1,4,fp);fread(&version,1,2,fp);s.legacy=version==22;fclose(fp);}
-  s.loader.Begin(book,s.path);return true;
+  FILE *fp=fopen(s.path.c_str(),"rb");bool v23=false;
+  if(fp) {u32 magic=0;u16 version=0;fread(&magic,1,4,fp);fread(&version,1,2,fp);s.legacy=version==22;v23=magic==0x45504347U&&version==23;fclose(fp);}
+  if(v23 && residency_budget) {
+    if(!book->StartEpubPageCache(s.path,residency_budget)) {s.result=Failed;return false;}
+    s.resident=true;
+  } else s.loader.Begin(book,s.path);
+  return true;
 }
 Preparation::Result Preparation::GetResult()const{return state_?state_->result:Failed;}
 bool Preparation::PersistenceFailed()const{return state_&&state_->persistence_failed;}
@@ -729,12 +733,12 @@ const char *Preparation::Label()const {
 }
 unsigned Preparation::Progress()const {
   if(!state_)return 0;
-  if(state_->phase==State::Cache)return state_->loader.Progress();
+  if(state_->phase==State::Cache)return state_->resident?0:state_->loader.Progress();
   return state_->migration?state_->writer.Progress():(unsigned)state_->spine.next;
 }
 unsigned Preparation::Total()const {
   if(!state_)return 0;
-  if(state_->phase==State::Cache)return state_->loader.Total();
+  if(state_->phase==State::Cache)return state_->resident?0:state_->loader.Total();
   return state_->migration?state_->book->GetPageCount():(unsigned)state_->hrefs.size();
 }
 void Preparation::Cancel() {
@@ -746,7 +750,14 @@ Preparation::Result Preparation::Step() {
   if(!state_||state_->result!=Pending)return GetResult();State &s=*state_;
   if(ShouldAbortEpubOpen(s.book)) {Cancel();return Cancelled;}
   if(s.phase==State::Cache) {
-    const auto r=s.loader.Step();if(r==epub_page_cache::LoadSession::Pending)return Pending;
+    auto r=epub_page_cache::LoadSession::Missing;
+    if(s.resident) {
+      const int result=s.book->AdvanceEpubPageCache();if(result>0)return Pending;
+      r=result==0?epub_page_cache::LoadSession::Complete:
+          s.book->IsEpubPageCacheCorrupt()?epub_page_cache::LoadSession::Corrupt:epub_page_cache::LoadSession::IoError;
+      if(result<0) {s.book->Close();s.resident=false;}
+    } else r=s.loader.Step();
+    if(r==epub_page_cache::LoadSession::Pending)return Pending;
     if(r==epub_page_cache::LoadSession::Cancelled) {Cancel();return Cancelled;}
     if(r==epub_page_cache::LoadSession::NoMemory||r==epub_page_cache::LoadSession::IoError)return s.result=Failed;
     if(r==epub_page_cache::LoadSession::Corrupt)remove(s.path.c_str());
@@ -809,6 +820,12 @@ Preparation::Result Preparation::Step() {
     if(r==epub_block_cache::Pending)return Pending;
     if(r!=epub_block_cache::Complete) {s.persistence_failed=true;s.writer.Abort();}
     s.phase=State::Finished;s.result=Complete;
+    if(s.residency_budget && !s.persistence_failed) {
+      const unsigned session=s.book->GetOpenSessionId();
+      s.book->Close();s.book->SetOpenSessionId(session);
+      if(!s.book->StartEpubPageCache(s.path,s.residency_budget))return s.result=Failed;
+      s.resident=true;s.metadata=true;s.legacy=false;s.phase=State::Cache;s.result=Pending;
+    }
     DBG_LOGF(s.deps.reporter,"EPUB preparation done pages=%u parse_ms=%llu cache_ms=%llu total_ms=%llu saved=%u",
       s.book->GetPageCount(),(unsigned long long)s.parse_ms,(unsigned long long)s.cache_ms,
       (unsigned long long)(osGetTime()-s.started),s.persistence_failed?0:1);

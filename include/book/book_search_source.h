@@ -12,8 +12,15 @@ inline bool ReadBookPage(void *context, uint32_t index, PageView *out) {
   *out = {page->GetBuffer(), (size_t)page->GetLength(), &page->GetSearchEvents()};
   return true;
 }
+inline PageAvailability PrepareBookPage(void *context,uint32_t index) {
+  Book *book=static_cast<Book*>(context);
+  if(!book || index>=book->GetPageCount())return PageError;
+  if(book->IsEpubPageReady(index))return PageReady;
+  return book->RequestEpubPage(index)?PagePending:PageError;
+}
 inline Source FromBook(Book *book) {
-  Source source = {book, book ? (uint32_t)book->GetPageCount() : 0, ReadBookPage};
+  Source source = {book, book ? (uint32_t)book->GetPageCount() : 0, ReadBookPage,
+      book&&book->HasEpubPageCache()?PrepareBookPage:nullptr};
   return source;
 }
 } // namespace text_search
