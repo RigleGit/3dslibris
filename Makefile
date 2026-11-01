@@ -208,6 +208,13 @@ ifeq ($(PAGE_RENDER_TRACE),1)
 CFLAGS	+=	-DPAGE_RENDER_TRACE=1
 endif
 
+ifeq ($(CACHE_IO_PROBE),1)
+CFLAGS += -DDSLIBRIS_CACHE_IO_PROBE
+endif
+ifeq ($(EPUB_FULL_CACHE),1)
+CFLAGS += -DDSLIBRIS_EPUB_FULL_CACHE
+endif
+
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -fno-unwind-tables -fno-asynchronous-unwind-tables -std=gnu++11 -fstack-usage
 
 

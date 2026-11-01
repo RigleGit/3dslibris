@@ -142,6 +142,10 @@ inline const std::string &GetCoverCacheManifest() {
   return path;
 }
 
+inline std::string GetCacheIoProbePath() {
+  return GetCacheBaseDir() + "/io-probe.tmp";
+}
+
 inline const std::string &GetEpubCacheDir() {
   static const std::string path = GetCacheBaseDir() + "/epub";
   return path;

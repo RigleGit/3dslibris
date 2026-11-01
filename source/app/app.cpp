@@ -13,6 +13,10 @@
 */
 
 #include "app/app.h"
+#include "shared/cache_io_probe.h"
+#ifdef DSLIBRIS_CACHE_IO_PROBE
+#include "reader/app_book_internal.h"
+#endif
 #include "formats/common/fixed_layout_gpu_renderer.h"
 
 #include <algorithm>
@@ -321,6 +325,21 @@ int App::Run(void)
     return 0;
   }
   boot_trace::Boot("app startup complete");
+#ifdef DSLIBRIS_CACHE_IO_PROBE
+  PrintStatus("CACHE IO diagnostic; B cancels; temporary data only");
+  reader_internal::DrawOpeningSplashImpl(this, 0, 0,
+                                         "CACHE IO diagnostic; B: cancel");
+  cache_io_probe::Run(
+      paths::GetCacheIoProbePath(), this,
+      [](void *userdata) -> bool {
+        App *owner = static_cast<App *>(userdata);
+        if (!aptMainLoop() || owner->ShouldAbortWork())
+          return false;
+        hidScanInput();
+        return !(hidKeysDown() & KEY_B);
+      },
+      this);
+#endif
   boot_trace::Boot("app main loop begin");
   return main_loop_controller_->RunMainLoop();
 }
