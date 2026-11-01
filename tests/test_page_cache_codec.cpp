@@ -34,5 +34,21 @@ int main() {
   assert(!page_cache_codec::Unpack(packed.data(), packed.size(), encoded.size(),
                                    true, &unpacked));
   assert(!page_cache_codec::Encode(large.data(), large.size() + 1, &encoded));
+  page_cache_codec::Compressor compressor;
+  for (unsigned pass = 0; pass < 4; ++pass) {
+    large.assign(pass % 2 ? 3 : 16384, pass + 120);
+    assert(page_cache_codec::Encode(large.data(), large.size(), &encoded));
+    assert(compressor.Pack(encoded, &packed, &compressed));
+    assert(page_cache_codec::Unpack(packed.data(), packed.size(), encoded.size(), compressed, &unpacked));
+    assert(unpacked == encoded);
+  }
+  encoded.assign(65535, 7);
+  const auto before = encoded;
+  assert(!page_cache_codec::Append(words + 5, 1, &encoded));
+  assert(encoded == before);
+  encoded.clear();
+  assert(page_cache_codec::Append(words, 3, &encoded));
+  assert(page_cache_codec::Append(words + 3, 3, &encoded));
+  assert(encoded == std::vector<uint8_t>(wire, wire + sizeof(wire)));
   puts("page cache codec: passed");
 }

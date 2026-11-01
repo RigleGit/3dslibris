@@ -154,6 +154,7 @@ struct Writer::State {
   std::vector<PageRef> refs;
   std::vector<Block> blocks;
   std::vector<uint8_t> encoded, packed, staging, index;
+  page_cache_codec::Compressor compressor;
   uint64_t logical;
   unsigned first, end, next, document, words, kind;
   enum Phase {
@@ -222,7 +223,7 @@ struct Writer::State {
       return true;
     }
     if (blocks.size() >= 50000 ||
-        !page_cache_codec::Pack(encoded, &packed, &compressed)) {
+        !compressor.Pack(encoded, &packed, &compressed)) {
       result = NoMemory;
       return false;
     }
@@ -383,15 +384,8 @@ Result Writer::Step() {
         s.result = Corrupt;
         break;
       }
-      size_t bytes = 0;
-      for (size_t i = 0; i < count; ++i) {
-        u32 v = data[i];
-        do {
-          ++bytes;
-          v >>= 7;
-        } while (v);
-      }
-      if (s.words + count > kBytes / 4 || s.encoded.size() + bytes > kBytes) {
+      if (s.words + count > kBytes / 4 ||
+          !page_cache_codec::Append(data, count, &s.encoded)) {
         s.FlushBlock(State::Records);
         continue;
       }
@@ -400,14 +394,6 @@ Result Writer::Step() {
       ref.offset = s.words;
       ref.count = count;
       s.refs[s.next].links = page->GetSelectableCount();
-      for (size_t i = 0; i < count; ++i) {
-        u32 v = data[i];
-        do {
-          uint8_t b = v & 127;
-          v >>= 7;
-          s.encoded.push_back(b | (v ? 128 : 0));
-        } while (v);
-      }
       s.words += count;
       ++s.next;
     } else if (s.phase == State::Index) {
@@ -686,9 +672,6 @@ struct Reader::State {
     const Block &b = blocks[id];
     Trim(b.words * 4);
     if (budget && Memory() + b.words * 4 > budget)
-      return NoMemory;
-    if (!cache_memory::HasHeadroom((size_t)b.words * 4 + (size_t)b.size * 3,
-                                   512 * 1024))
       return NoMemory;
     std::vector<uint8_t> bytes(b.size), encoded;
     if (!ReadAt(b.offset, bytes.data(), bytes.size()))
