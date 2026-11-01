@@ -1,6 +1,7 @@
 #include "formats/mobi/mobi_safe_markup_extract.h"
 
 #include <cctype>
+#include <new>
 #include <stdint.h>
 #include <string>
 #include <utility>
@@ -99,32 +100,44 @@ static void AppendInlineImageToken(std::string *out, uint16_t image_id,
 
 } // namespace
 
-std::string ExtractToText(const std::string &markup_utf8,
-                          const InlineImageCallbacks &image_callbacks,
-                          std::vector<std::pair<uint32_t, uint32_t>>
-                              *html_to_text_map) {
-  std::string out;
-
-  if (html_to_text_map) {
-    html_to_text_map->clear();
-    const size_t interval =
-        mobi_position_map::HtmlSampleIntervalForTextBytes(markup_utf8.size());
-    html_to_text_map->reserve(markup_utf8.size() / (interval > 0 ? interval : 1) + 2);
-    html_to_text_map->push_back({0u, 0u});
+struct Session::State {
+  const std::string *source;
+  std::string *output;
+  InlineImageCallbacks callbacks;
+  std::vector<std::pair<uint32_t, uint32_t>> *map;
+  size_t cursor=0, interval=0, next_sample=0;
+  bool in_script=false, in_style=false, pending_space=false, at_paragraph_start=true, done=false;
+};
+Session::Session() : state_(nullptr) {}
+Session::~Session() { delete state_; }
+bool Session::Begin(const std::string *source, std::string *output,
+                    const InlineImageCallbacks &callbacks,
+                    std::vector<std::pair<uint32_t, uint32_t>> *map) {
+  delete state_; state_ = new (std::nothrow) State;
+  if (!state_ || !source || !output) return false;
+  State &s=*state_; s.source=source; s.output=output; s.callbacks=callbacks; s.map=map;
+  output->clear();
+  if (map) {
+    s.interval=mobi_position_map::HtmlSampleIntervalForTextBytes(source->size());
+    s.next_sample=s.interval;
+    map->clear(); map->push_back({0u,0u});
   }
-
-  const size_t kSampleInterval =
-      html_to_text_map
-          ? mobi_position_map::HtmlSampleIntervalForTextBytes(markup_utf8.size())
-          : 0;
-  size_t next_sample = kSampleInterval;
-
-  bool in_script = false;
-  bool in_style = false;
-  bool pending_space = false;
-  bool at_paragraph_start = true;
-
-  for (size_t i = 0; i < markup_utf8.size();) {
+  return true;
+}
+size_t Session::Progress() const { return state_ ? state_->cursor : 0; }
+bool Session::Step(size_t bytes) {
+  if (!state_ || state_->done) return true;
+  State &s=*state_;
+  const std::string &markup_utf8=*s.source;
+  std::string &out=*s.output;
+  const InlineImageCallbacks &image_callbacks=s.callbacks;
+  auto *html_to_text_map=s.map;
+  const size_t kSampleInterval=s.interval;
+  size_t &next_sample=s.next_sample, &i=s.cursor;
+  bool &in_script=s.in_script, &in_style=s.in_style, &pending_space=s.pending_space,
+       &at_paragraph_start=s.at_paragraph_start;
+  const size_t begin=i;
+  for (; i < markup_utf8.size() && i - begin < bytes;) {
     if (html_to_text_map && kSampleInterval > 0 && i >= next_sample) {
       html_to_text_map->push_back({(uint32_t)i, (uint32_t)out.size()});
       next_sample = i + kSampleInterval;
@@ -225,10 +238,19 @@ std::string ExtractToText(const std::string &markup_utf8,
     i++;
   }
 
+  if (i < markup_utf8.size()) return false;
   TrimTrailingInlineWhitespace(&out);
-  while (!out.empty() && out.back() == '\n')
-    out.pop_back();
-  return out;
+  while (!out.empty() && out.back() == '\n') out.pop_back();
+  s.done=true;
+  return true;
+}
+std::string ExtractToText(const std::string &source, const InlineImageCallbacks &callbacks,
+                        std::vector<std::pair<uint32_t, uint32_t>> *map) {
+  std::string output;
+  Session session;
+  if (!session.Begin(&source, &output, callbacks, map)) return output;
+  while (!session.Step()) {}
+  return output;
 }
 
 } // namespace mobi_safe_markup_extract

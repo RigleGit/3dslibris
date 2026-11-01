@@ -5,6 +5,8 @@
 #include "formats/mobi/mobi_text_decode.h"
 
 #include <ctype.h>
+#include <algorithm>
+#include <new>
 #include <stdio.h>
 #include <string.h>
 
@@ -195,6 +197,95 @@ std::string DecodeBytesToUtf8(const std::string &in, u32 encoding,
     }
   }
   return legacy_candidate;
+}
+
+struct Session::State {
+  const std::string *source;
+  std::string *output;
+  u32 encoding;
+  size_t cursor=0, invalid=0, legacy_score=0, mixed_score=0;
+  std::string legacy_tail, mixed_tail;
+  bool converting=false, done=false, guessed=false, legacy_guess=false;
+  enum Mode { Copy, Mixed, Legacy, Utf16 } mode = Legacy;
+};
+namespace {
+size_t SafeEnd(const std::string &s, size_t from, size_t bytes) {
+  size_t i=from, end=std::min(s.size(),from+std::max<size_t>(1,bytes));
+  while (i<end) {
+    const unsigned char c=s[i];
+    const size_t n=(c&0xe0)==0xc0 ? 2 : (c&0xf0)==0xe0 ? 3 : (c&0xf8)==0xf0 ? 4 : 1;
+    bool valid=n>1 && i+n<=s.size();
+    for (size_t j=1;valid && j<n;++j) valid=((unsigned char)s[i+j]&0xc0)==0x80;
+    i+=valid ? n : 1;
+  }
+  return i;
+}
+size_t ScoreChunk(std::string &tail,const std::string &chunk) {
+  const std::string joined=tail+chunk;
+  const size_t score=CountMojibakeMarkers(joined)-CountMojibakeMarkers(tail);
+  tail=joined.substr(joined.size()>8 ? joined.size()-8 : 0);
+  return score;
+}
+}
+Session::Session() : state_(NULL) {}
+Session::~Session() { delete state_; }
+bool Session::Begin(const std::string *source,u32 encoding,std::string *output) {
+  delete state_; state_=new(std::nothrow) State;
+  if (!state_ || !source || !output) return false;
+  State &s=*state_;s.source=source;s.output=output;s.encoding=encoding;output->clear();
+  if (IsUtf16Encoding(encoding)) { s.mode=State::Utf16;s.converting=true; }
+  return true;
+}
+size_t Session::Progress() const { return state_ ? state_->cursor+(state_->converting ? state_->source->size() : 0) : 0; }
+size_t Session::Total() const { return state_ ? state_->source->size()*2 : 0; }
+bool Session::UsedUtf8Guess() const { return state_ && state_->guessed; }
+bool Session::UsedLegacyGuess() const { return state_ && state_->legacy_guess; }
+bool Session::Step(size_t bytes) {
+  if (!state_ || state_->done) return true;
+  State &s=*state_;const std::string &in=*s.source;
+  if (!s.converting) {
+    const size_t end=SafeEnd(in,s.cursor,bytes);
+    const std::string part=in.substr(s.cursor,end-s.cursor);
+    s.invalid+=CountUtf8InvalidLeadBytes(part);
+    s.legacy_score+=ScoreChunk(s.legacy_tail,DecodeLegacySingleByteToUtf8(part));
+    s.mixed_score+=ScoreChunk(s.mixed_tail,DecodeMostlyUtf8WithCp1252Fallback(part,NULL));
+    s.cursor=end;
+    if (end<in.size()) return false;
+    const bool valid=!s.invalid, mostly=!in.empty() && s.invalid*1000<=in.size()*2;
+    if (IsUtf8Encoding(s.encoding)) s.mode=valid ? State::Copy : State::Mixed;
+    else if (IsUnknownEncoding(s.encoding)) {
+      s.mode=valid ? State::Copy : mostly ? State::Mixed : State::Legacy;
+      s.guessed=valid || mostly;s.legacy_guess=!s.guessed;
+    } else if ((valid || mostly) && s.legacy_score>=2 && (valid || s.mixed_score+1<s.legacy_score)) {
+      s.mode=valid ? State::Copy : State::Mixed;s.guessed=true;
+    }
+    s.cursor=0;s.converting=true;
+    return false;
+  }
+  if (s.mode==State::Utf16) {
+    bool little=true;
+    if (in.size()>=2 && (unsigned char)in[0]==0xfe && (unsigned char)in[1]==0xff) little=false;
+    if (!s.cursor && in.size()>=2 && (((unsigned char)in[0]==0xff && (unsigned char)in[1]==0xfe) || !little)) s.cursor=2;
+    const size_t end=std::min(in.size(),s.cursor+std::max<size_t>(bytes,2));
+    auto word=[&](size_t i) { return little ? (u16)((u8)in[i]|((u16)(u8)in[i+1]<<8)) : (u16)(((u16)(u8)in[i]<<8)|(u8)in[i+1]); };
+    while (s.cursor<end && s.cursor+1<in.size()) {
+      u32 cp=word(s.cursor);s.cursor+=2;
+      if (cp>=0xd800 && cp<=0xdbff && s.cursor+1<in.size()) {
+        const u16 next=word(s.cursor);
+        if (next>=0xdc00 && next<=0xdfff) {cp=0x10000+((cp-0xd800)<<10)+(next-0xdc00);s.cursor+=2;}
+      }
+      AppendUtf8Codepoint(s.output,cp);
+    }
+    if (s.cursor+1>=in.size()) s.cursor=in.size();
+  } else {
+    const size_t end=SafeEnd(in,s.cursor,bytes);
+    const std::string part=in.substr(s.cursor,end-s.cursor);
+    if (s.mode==State::Copy) *s.output+=part;
+    else if (s.mode==State::Mixed) *s.output+=DecodeMostlyUtf8WithCp1252Fallback(part,NULL);
+    else *s.output+=DecodeLegacySingleByteToUtf8(part);
+    s.cursor=end;
+  }
+  return s.done=s.cursor==in.size();
 }
 
 void ApplyEmbeddedTitle(Book *book, const std::string &raw,

@@ -1,6 +1,7 @@
 #include "formats/mobi/mobi_record_decode.h"
 
 #include <algorithm>
+#include <new>
 #include <string.h>
 
 namespace mobi_record_decode {
@@ -358,41 +359,51 @@ std::string RemoveTrailingEntries(const uint8_t *data, size_t len,
   return std::string((const char *)data, keep);
 }
 
+struct MergeSession::State {
+  const std::string *raw;
+  const std::vector<uint32_t> *offsets;
+  MobiRecord0Header header;
+  std::string *merged;
+  HuffCdicDecoder huff;
+  unsigned next = 1;
+};
+MergeSession::MergeSession() : state_(NULL) {}
+MergeSession::~MergeSession() { delete state_; }
+bool MergeSession::Begin(const std::string *raw, const std::vector<uint32_t> *offsets,
+                          const MobiRecord0Header &header, std::string *merged) {
+  delete state_; state_ = new (std::nothrow) State;
+  if (!state_ || !raw || !offsets || !merged) return false;
+  state_->raw = raw; state_->offsets = offsets; state_->header = header; state_->merged = merged;
+  merged->clear();
+  return header.compression != 17480 || InitHuffCdicDecoder(*raw, *offsets, header, &state_->huff);
+}
+unsigned MergeSession::Progress() const { return state_ ? state_->next-1 : 0; }
+int MergeSession::Step() {
+  if (!state_) return -1;
+  State &s = *state_;
+  if (s.next > s.header.text_rec_count) {
+    if (s.header.text_len && s.merged->size() > s.header.text_len) s.merged->resize(s.header.text_len);
+    return 0;
+  }
+  const unsigned rec = s.next++;
+  if (rec+1 >= s.offsets->size()) return -1;
+  const uint32_t start=(*s.offsets)[rec], end=(*s.offsets)[rec+1];
+  if (end > start && end <= s.raw->size()) {
+    std::string text;
+    if (!DecodeTextRecord((const uint8_t *)s.raw->data()+start, end-start,
+                          s.header, s.header.compression==17480 ? &s.huff : NULL, &text)) return -1;
+    if (text.size() > 64u*1024u*1024u - s.merged->size()) return -1;
+    *s.merged += text;
+  }
+  return 1;
+}
 bool BuildMergedText(const std::string &raw, const std::vector<uint32_t> &offsets,
                      const MobiRecord0Header &header, std::string *merged) {
-  if (!merged)
-    return false;
-  merged->clear();
-  // Do not reserve(text_len) here — a large contiguous reservation on a
-  // fragmented 3DS heap can fail and std::terminate. The string grows
-  // incrementally instead, which is safer under heap fragmentation.
-
-  HuffCdicDecoder huff;
-  HuffCdicDecoder *decoder = NULL;
-  if (header.compression == 17480) {
-    if (!InitHuffCdicDecoder(raw, offsets, header, &huff))
-      return false;
-    decoder = &huff;
-  }
-
-  const uint8_t *data = (const uint8_t *)raw.data();
-  for (uint32_t rec = 1; rec <= header.text_rec_count; rec++) {
-    if (rec + 1 >= offsets.size())
-      return false;
-    uint32_t start = offsets[(size_t)rec];
-    uint32_t end = offsets[(size_t)rec + 1];
-    if (end <= start || end > raw.size())
-      continue;
-    std::string text;
-    if (!DecodeTextRecord(data + start, (size_t)(end - start), header, decoder,
-                          &text))
-      return false;
-    *merged += text;
-  }
-
-  if (header.text_len > 0 && merged->size() > header.text_len)
-    merged->resize((size_t)header.text_len);
-  return true;
+  MergeSession session;
+  if (!session.Begin(&raw, &offsets, header, merged)) return false;
+  int result;
+  do { result = session.Step(); } while (result > 0);
+  return result == 0;
 }
 
 } // namespace mobi_record_decode
