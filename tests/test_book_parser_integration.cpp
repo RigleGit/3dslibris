@@ -2058,6 +2058,19 @@ static void TestSharedReflowPreparation() {
         test::ExpectTrue("FB2 original image bytes identical",std::string((const char *)bytes.data(),bytes.size())==resources[i]);
       }
     }
+    if(std::string(name)=="images.fb2") {
+      std::string file;
+      for(const auto &candidate:CacheFiles(directory)) if(candidate.size()>4 && candidate.substr(candidate.size()-4)==".fpc") file=candidate;
+      const std::string saved=ReadFileBytes(file);
+      const size_t at=saved.find(resources[0]);
+      test::ExpectTrue("resource payload is stored once without conversion",at!=std::string::npos);
+      std::string damaged=saved;damaged[at]^=1;WriteFileBytes(file,damaged);
+      image_memory::Bytes bytes;
+      const auto before=book.GetReflowPageCacheResult();
+      test::ExpectFalse("resource CRC rejects damaged image",book.ReadInlineImageSource(0,&bytes));
+      test::ExpectTrue("resource failure preserves page reader state",book.GetReflowPageCacheResult()==before);
+      WriteFileBytes(file,saved);
+    }
     book.Close();WriteFileBytes(source,original);utime(source.c_str(),&times);
   }
   for(const auto &file:CacheFiles(directory)) remove(file.c_str());

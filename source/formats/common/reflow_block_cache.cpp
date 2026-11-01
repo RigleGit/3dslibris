@@ -290,7 +290,13 @@ struct Writer::State {
     w.Put<uint32_t>(book->GetInlineImageCount());
     for (unsigned i = 0; i < book->GetInlineImageCount(); ++i) {
       w.String(*book->GetInlineImagePath(i));
-      if (format != Epub) w.Put<uint8_t>(book->GetInlineImageFollowTextLines(i));
+      if (format != Epub) {
+        const auto &image = book->inline_images[i];
+        w.Put<uint8_t>(image.follow_text_lines);
+        w.Put<uint8_t>((image.metadata_probed ? 1 : 0) | (image.metadata_ok ? 2 : 0));
+        w.Put<uint32_t>(image.source_width);
+        w.Put<uint32_t>(image.source_height);
+      }
     }
     w.Put<uint32_t>(book->GetInlineLinkHrefCount());
     for (unsigned i = 1; i <= book->GetInlineLinkHrefCount(); ++i)
@@ -680,8 +686,13 @@ struct Reader::State {
         const std::string text = r.String();
         if (!r.ok || text.empty())
           return false;
-        unsigned follow = 0;
-        if (!kind && format != Epub) follow = r.Get<uint8_t>();
+        unsigned follow = 0, flags = 0, width = 0, height = 0;
+        if (!kind && format != Epub) {
+          follow = r.Get<uint8_t>(); flags = r.Get<uint8_t>();
+          width = r.Get<uint32_t>(); height = r.Get<uint32_t>();
+          if ((flags & ~3U) || ((flags & 2) && (!(flags & 1) || !width || !height)) ||
+              width > 0x7fffffffU || height > 0x7fffffffU) return false;
+        }
         if (!r.ok) return false;
         if (validate_only) continue;
         if (kind) {
@@ -690,6 +701,11 @@ struct Reader::State {
         } else {
           const u16 id = book->RegisterInlineImage(text);
           book->SetInlineImageFollowTextLines(id, follow);
+          if (format != Epub && id < book->inline_images.size()) {
+            auto &image = book->inline_images[id];
+            image.metadata_probed = flags & 1; image.metadata_ok = flags & 2;
+            image.source_width = width; image.source_height = height;
+          }
         }
       }
     }
