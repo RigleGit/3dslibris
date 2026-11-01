@@ -144,7 +144,9 @@ struct Fixture {
 
 void CheckRejected(Fixture &fixture, const char *label) {
   Book loaded(fixture.ctx);
+  loaded.SetOpenSessionId(317);
   Check(!fixture.Load(&loaded), label);
+  Check(loaded.GetOpenSessionId() == 317, "failed cache load preserves opening session");
   Check(loaded.GetPageCount() == 0, "rejection clears partially loaded pages");
   Check(loaded.GetChapterDocStartPages().empty() &&
             loaded.GetChapterAnchorPages().empty(),

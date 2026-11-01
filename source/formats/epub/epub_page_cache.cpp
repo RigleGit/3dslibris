@@ -369,8 +369,11 @@ LoadSession::Result LoadSession::Step() {
                : result == epub_block_cache::Corrupt  ? Corrupt
                : result == epub_block_cache::NoMemory ? NoMemory
                                                       : IoError;
-    if (s.result != Complete)
+    if (s.result != Complete) {
+      const unsigned session = s.book->GetOpenSessionId();
       s.book->Close();
+      s.book->SetOpenSessionId(session);
+    }
     return s.result;
   }
   const u64 start = osGetTime();
@@ -415,8 +418,11 @@ LoadSession::Result LoadSession::Step() {
   if (s.result != Pending) {
     fclose(s.fp);
     s.fp = NULL;
-    if (s.result != Complete)
+    if (s.result != Complete) {
+      const unsigned session = s.book->GetOpenSessionId();
       s.book->Close();
+      s.book->SetOpenSessionId(session);
+    }
   }
   return s.result;
 }

@@ -896,7 +896,9 @@ Preparation::Result Preparation::Step() {
               ? epub_page_cache::LoadSession::Corrupt
               : epub_page_cache::LoadSession::IoError;
       if (result < 0) {
+        const unsigned session = s.book->GetOpenSessionId();
         s.book->Close();
+        s.book->SetOpenSessionId(session);
         s.resident = false;
       }
     } else
