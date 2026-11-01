@@ -12,7 +12,9 @@ class Compressor {
 public:
   Compressor();
   ~Compressor();
-  bool Pack(const std::vector<uint8_t> &encoded, std::vector<uint8_t> *out, bool *compressed);
+  bool Pack(const std::vector<uint8_t> &encoded, std::vector<uint8_t> *out,
+            bool *compressed);
+
 private:
   struct State;
   State *state_;

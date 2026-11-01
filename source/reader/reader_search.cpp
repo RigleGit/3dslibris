@@ -259,7 +259,10 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
       do {
         s.engine.Pump(32);
         if (s.engine.IsWaitingForPage() && book->HasPendingEpubPageRead()) {
-          if (book->AdvanceEpubPageCache() < 0) { ReportPageCacheError(); return; }
+          if (book->AdvanceEpubPageCache() < 0) {
+            ReportPageCacheError();
+            return;
+          }
         }
       } while (s.engine.GetStatus() == text_search::Searching &&
                osGetTime() - started < kSearchSliceMs &&

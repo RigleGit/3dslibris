@@ -18,7 +18,8 @@ inline PageAvailability PrepareBookPage(void *context, uint32_t index) {
     return PageError;
   if (book->IsEpubPageReady(index))
     return PageReady;
-  if (!book->RequestEpubPage(index)) return PageError;
+  if (!book->RequestEpubPage(index))
+    return PageError;
   return book->IsEpubPageReady(index) ? PageReady : PagePending;
 }
 inline Source FromBook(Book *book) {

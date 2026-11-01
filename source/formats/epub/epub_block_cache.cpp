@@ -69,7 +69,8 @@ struct IndexWriter {
     }
     size_t n = std::min(s.size(), max);
     // Display labels may shorten; resource identities must remain exact.
-    while (display && n < s.size() && n && ((unsigned char)s[n] & 0xc0) == 0x80) --n;
+    while (display && n < s.size() && n && ((unsigned char)s[n] & 0xc0) == 0x80)
+      --n;
     Put<uint16_t>(n);
     if (data.size() + n > kIndexLimit) {
       ok = false;
@@ -521,15 +522,20 @@ struct Reader::State {
         window_capacity = 16384;
         read_window.reset(new (std::nothrow) uint8_t[window_capacity]);
       }
-      if (!read_window) return NoMemory;
+      if (!read_window)
+        return NoMemory;
     }
     if (b.size > window_capacity)
       return ReadAt(b.offset, out, b.size) ? Ready : IoError;
     if (b.offset < window_offset || b.offset - window_offset > window_size ||
         b.size > window_size - (size_t)(b.offset - window_offset)) {
       window_offset = b.offset;
-      window_size = std::min<uint64_t>(window_capacity, header.index_offset - b.offset);
-      if (!ReadAt(window_offset, read_window.get(), window_size)) { window_size = 0; return IoError; }
+      window_size =
+          std::min<uint64_t>(window_capacity, header.index_offset - b.offset);
+      if (!ReadAt(window_offset, read_window.get(), window_size)) {
+        window_size = 0;
+        return IoError;
+      }
     }
     memcpy(out, read_window.get() + (size_t)(b.offset - window_offset), b.size);
     return Ready;
@@ -705,7 +711,8 @@ struct Reader::State {
       return NoMemory;
     std::vector<uint8_t> bytes(b.size), encoded;
     const Result read_result = ReadBlock(b, bytes.data());
-    if (read_result != Ready) return read_result;
+    if (read_result != Ready)
+      return read_result;
     if (!page_cache_codec::Unpack(bytes.data(), bytes.size(), b.encoded,
                                   b.compressed, &encoded) ||
         Crc(encoded.data(), encoded.size()) != b.crc)
@@ -788,11 +795,13 @@ bool Reader::Request(unsigned page) {
     return false;
   state_->target = page;
   state_->result = IsReady(page) ? Complete : Pending;
-  if (IsReady(page)) state_->ages[page] = ++state_->tick;
+  if (IsReady(page))
+    state_->ages[page] = ++state_->tick;
   else {
     // Decode blocks are already owned: materialize this page without any I/O.
     for (const Ref &ref : {state_->refs[page].text, state_->refs[page].search})
-      if (ref.count && !state_->Find(ref.block)) return true;
+      if (ref.count && !state_->Find(ref.block))
+        return true;
     return Advance() == Complete;
   }
   return true;

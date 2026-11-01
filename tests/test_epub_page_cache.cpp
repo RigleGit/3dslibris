@@ -40,7 +40,8 @@ extern "C" ssize_t read(int, void *, size_t);
 static bool count_block_reads = false;
 static unsigned block_reads = 0;
 extern "C" ssize_t ObserveBlockRead(int fd, void *data, size_t size) {
-  if (count_block_reads) ++block_reads;
+  if (count_block_reads)
+    ++block_reads;
   return read(fd, data, size);
 }
 
@@ -155,7 +156,8 @@ void CheckRejected(Fixture &fixture, const char *label) {
   Book loaded(fixture.ctx);
   loaded.SetOpenSessionId(317);
   Check(!fixture.Load(&loaded), label);
-  Check(loaded.GetOpenSessionId() == 317, "failed cache load preserves opening session");
+  Check(loaded.GetOpenSessionId() == 317,
+        "failed cache load preserves opening session");
   Check(loaded.GetPageCount() == 0, "rejection clears partially loaded pages");
   Check(loaded.GetChapterDocStartPages().empty() &&
             loaded.GetChapterAnchorPages().empty(),
@@ -491,12 +493,14 @@ void TestBlockCacheRoundtrip() {
   epub_block_cache::Reader reader;
   Require(reader.Begin(&loaded, path, 0) == epub_block_cache::Pending,
           "open complete block reader");
-  block_reads = 0; count_block_reads = true;
+  block_reads = 0;
+  count_block_reads = true;
   unsigned steps = 0;
   while (reader.Step() == epub_block_cache::Pending)
     ++steps;
   count_block_reads = false;
-  Check(block_reads <= 4, "complete reader groups adjacent small blocks into bounded reads");
+  Check(block_reads <= 4,
+        "complete reader groups adjacent small blocks into bounded reads");
   Check(reader.GetResult() == epub_block_cache::Complete && steps > 1,
         "v23 loading is cooperative");
   Check(steps < 40, "complete reader batches decoded pages rather than waiting "
@@ -528,7 +532,8 @@ void TestBlockCacheRoundtrip() {
   const size_t bytes_before_neighbor = reader.BytesRead();
   Require(reader.Request(48), "request decoded neighbor");
   Check(reader.IsReady(48) && reader.BytesRead() == bytes_before_neighbor,
-        "decoded neighbors are available immediately without I/O or another frame");
+        "decoded neighbors are available immediately without I/O or another "
+        "frame");
   reader.Request(47);
   reader.Pin(47);
   const u32 *pinned = loaded.GetPage(47)->GetBuffer();
@@ -602,32 +607,46 @@ void TestBlockCacheRoundtrip() {
 void TestLongBlockIndexStrings() {
   Fixture fixture;
   fixture.AddPages(1);
-  const std::string title = std::string(999, 'a') + "\xc3\xa9" + std::string(200, 'b');
+  const std::string title =
+      std::string(999, 'a') + "\xc3\xa9" + std::string(200, 'b');
   const std::string href(4096, 'h');
   fixture.source.SetTitle(title.c_str());
   fixture.source.AddChapter(0, std::string(3000, 'c'));
   fixture.source.RegisterInlineLinkHref(href);
   fixture.source.SetChapterDocStartPage(href, 0);
-  const std::string path=fixture.directory+"/long.epc";
+  const std::string path = fixture.directory + "/long.epc";
   epub_block_cache::Writer writer;
-  Require(writer.Begin(&fixture.source,path) && writer.AppendDocument(0,1), "begin long metadata cache");
-  while(writer.Step()==epub_block_cache::Pending) {}
+  Require(writer.Begin(&fixture.source, path) && writer.AppendDocument(0, 1),
+          "begin long metadata cache");
+  while (writer.Step() == epub_block_cache::Pending) {
+  }
   Check(writer.Finish(), "long metadata can finish cache");
-  while(writer.Step()==epub_block_cache::Pending) {}
-  Check(writer.GetResult()==epub_block_cache::Complete,"display labels cannot disable caching");
-  Book loaded(fixture.ctx); epub_block_cache::Reader reader;
-  reader.Begin(&loaded,path,0);
-  while(reader.Step()==epub_block_cache::Pending) {}
-  Check(reader.GetResult()==epub_block_cache::Complete,"long metadata reopens");
-  if(reader.GetResult()==epub_block_cache::Complete) {
-    Check(std::string(loaded.GetTitle())==std::string(999,'a'),"display title truncates at a UTF8 boundary");
-    Check(loaded.GetChapters()[0].title==std::string(2048,'c'),"chapter display label is bounded");
+  while (writer.Step() == epub_block_cache::Pending) {
+  }
+  Check(writer.GetResult() == epub_block_cache::Complete,
+        "display labels cannot disable caching");
+  Book loaded(fixture.ctx);
+  epub_block_cache::Reader reader;
+  reader.Begin(&loaded, path, 0);
+  while (reader.Step() == epub_block_cache::Pending) {
+  }
+  Check(reader.GetResult() == epub_block_cache::Complete,
+        "long metadata reopens");
+  if (reader.GetResult() == epub_block_cache::Complete) {
+    Check(std::string(loaded.GetTitle()) == std::string(999, 'a'),
+          "display title truncates at a UTF8 boundary");
+    Check(loaded.GetChapters()[0].title == std::string(2048, 'c'),
+          "chapter display label is bounded");
     const std::string *restored = loaded.GetInlineLinkHref(1);
     u16 page = 99;
-    Check(restored && *restored==href && loaded.FindChapterDocStartPage(href, &page) && page==0,
+    Check(restored && *restored == href &&
+              loaded.FindChapterDocStartPage(href, &page) && page == 0,
           "resource identities are never truncated");
   }
-  reader.Close(); loaded.Close(); writer.Abort(); remove(path.c_str());
+  reader.Close();
+  loaded.Close();
+  writer.Abort();
+  remove(path.c_str());
 }
 
 void TestCooperativeLegacyLoad() {

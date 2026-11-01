@@ -39,7 +39,8 @@ int main() {
     large.assign(pass % 2 ? 3 : 16384, pass + 120);
     assert(page_cache_codec::Encode(large.data(), large.size(), &encoded));
     assert(compressor.Pack(encoded, &packed, &compressed));
-    assert(page_cache_codec::Unpack(packed.data(), packed.size(), encoded.size(), compressed, &unpacked));
+    assert(page_cache_codec::Unpack(packed.data(), packed.size(),
+                                    encoded.size(), compressed, &unpacked));
     assert(unpacked == encoded);
   }
   encoded.assign(65535, 7);

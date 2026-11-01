@@ -487,7 +487,8 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
 }
 
 void ReaderController::ReportPageCacheError() {
-  if (search_) search_->engine.Cancel();
+  if (search_)
+    search_->engine.Cancel();
   cache_page_error_ = true;
   DrawOpeningSplashImpl(&app_, 0, 0, "cache read failed; A: rebuild B: back");
 }
@@ -524,9 +525,12 @@ bool ReaderController::PumpPageCache(const FrameInput &input) {
     cache_page_started_ms_ = 0;
     return false;
   }
-  // The search owns its CPU/I/O budget and can resume after each requested block.
-  if (mode == AppMode::Search && !book->HasPendingEpubNavigation()) return false;
-  if (!cache_page_started_ms_) cache_page_started_ms_ = input.timestamp_ms;
+  // The search owns its CPU/I/O budget and can resume after each requested
+  // block.
+  if (mode == AppMode::Search && !book->HasPendingEpubNavigation())
+    return false;
+  if (!cache_page_started_ms_)
+    cache_page_started_ms_ = input.timestamp_ms;
   if (mode == AppMode::Book &&
       (input.keys_down & (app_.key.b | app_.key.start))) {
     book->CancelEpubPageRequest();
@@ -547,7 +551,8 @@ bool ReaderController::PumpPageCache(const FrameInput &input) {
   int result;
   do {
     result = book->AdvanceEpubPageCache();
-  } while (result > 0 && osGetTime() - work_begin < 30 && !app_.ShouldAbortWork());
+  } while (result > 0 && osGetTime() - work_begin < 30 &&
+           !app_.ShouldAbortWork());
   if (app_.ShouldAbortWork())
     return true;
   if (result < 0) {

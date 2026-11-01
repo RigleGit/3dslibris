@@ -7,7 +7,8 @@ bool Append(const uint32_t *words, size_t count, std::vector<uint8_t> *out) {
   if (!out || count > kBlockWords || (count && !words))
     return false;
   const size_t before = out->size();
-  if (before > kBlockBytes) return false;
+  if (before > kBlockBytes)
+    return false;
   out->reserve(kBlockBytes);
   for (size_t i = 0; i < count; ++i) {
     uint32_t value = words[i];
@@ -24,7 +25,8 @@ bool Append(const uint32_t *words, size_t count, std::vector<uint8_t> *out) {
   return true;
 }
 bool Encode(const uint32_t *words, size_t count, std::vector<uint8_t> *out) {
-  if (!out) return false;
+  if (!out)
+    return false;
   out->clear();
   return Append(words, count, out);
 }
@@ -73,31 +75,48 @@ bool Decode(const uint8_t *bytes, size_t length, size_t count,
 struct Compressor::State {
   z_stream stream;
   bool initialized;
-  State() : initialized(false) { memset(&stream, 0, sizeof(stream)); }
-  ~State() { if (initialized) deflateEnd(&stream); }
+  State() : initialized(false) {
+    memset(&stream, 0, sizeof(stream));
+  }
+  ~State() {
+    if (initialized)
+      deflateEnd(&stream);
+  }
 };
 Compressor::Compressor() : state_(new (std::nothrow) State) {}
-Compressor::~Compressor() { delete state_; }
-bool Compressor::Pack(const std::vector<uint8_t> &encoded, std::vector<uint8_t> *out,
-                      bool *compressed) {
-  if (!state_ || !out || !compressed || encoded.size() > kBlockBytes) return false;
+Compressor::~Compressor() {
+  delete state_;
+}
+bool Compressor::Pack(const std::vector<uint8_t> &encoded,
+                      std::vector<uint8_t> *out, bool *compressed) {
+  if (!state_ || !out || !compressed || encoded.size() > kBlockBytes)
+    return false;
   State &s = *state_;
   if (!s.initialized) {
-    if (deflateInit2(&s.stream, 1, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY) != Z_OK) return false;
+    if (deflateInit2(&s.stream, 1, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY) !=
+        Z_OK)
+      return false;
     s.initialized = true;
-  } else if (deflateReset(&s.stream) != Z_OK) return false;
+  } else if (deflateReset(&s.stream) != Z_OK)
+    return false;
   out->resize(compressBound(encoded.size()));
   s.stream.next_in = const_cast<Bytef *>(encoded.data());
   s.stream.avail_in = encoded.size();
   s.stream.next_out = out->data();
   s.stream.avail_out = out->size();
-  if (deflate(&s.stream, Z_FINISH) != Z_STREAM_END) { out->clear(); return false; }
+  if (deflate(&s.stream, Z_FINISH) != Z_STREAM_END) {
+    out->clear();
+    return false;
+  }
   *compressed = s.stream.total_out < encoded.size();
-  if (*compressed) out->resize(s.stream.total_out);
-  else *out = encoded;
+  if (*compressed)
+    out->resize(s.stream.total_out);
+  else
+    *out = encoded;
   return true;
 }
-bool Pack(const std::vector<uint8_t> &encoded, std::vector<uint8_t> *out, bool *compressed) {
+bool Pack(const std::vector<uint8_t> &encoded, std::vector<uint8_t> *out,
+          bool *compressed) {
   Compressor compressor;
   return compressor.Pack(encoded, out, compressed);
 }
