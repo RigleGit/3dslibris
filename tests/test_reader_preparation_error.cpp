@@ -28,11 +28,10 @@ struct Book {
   }
 };
 static unsigned steps = 0, cancellations = 0, destructions = 0;
-namespace epub_parser {
-struct Preparation {
-  enum Result { Pending, Complete, Cancelled, Failed, NoMemory, IoError };
+struct ReflowPreparation {
+  enum Result { Pending, Complete, Cancelled, Failed, NoMemory, IoError, Paused };
   Result result = Pending, outcome = NoMemory;
-  ~Preparation() {
+  ~ReflowPreparation() {
     ++destructions;
   }
   Result GetResult() const {
@@ -58,7 +57,6 @@ struct Preparation {
     std::abort();
   }
 };
-} // namespace epub_parser
 struct App {
   struct {
     unsigned b = 1, start = 2, a = 4;
@@ -124,8 +122,8 @@ static void DrawOpeningSplashImpl(App *app, unsigned, unsigned,
 }
 struct ReaderController {
   App &app_;
-  std::unique_ptr<epub_parser::Preparation> preparation_{
-      new epub_parser::Preparation};
+  std::unique_ptr<ReflowPreparation> preparation_{
+      new ReflowPreparation};
   Book *cache_preparing_;
   std::string cache_label_;
   u64 cache_draw_ms_ = 0;
@@ -139,8 +137,8 @@ struct ReaderController {
 
 int main() {
   for (auto failure :
-       {epub_parser::Preparation::NoMemory, epub_parser::Preparation::IoError,
-        epub_parser::Preparation::Failed}) {
+       {ReflowPreparation::NoMemory, ReflowPreparation::IoError,
+        ReflowPreparation::Failed}) {
     for (unsigned back : {1u, 2u}) {
       steps = cancellations = destructions = 0;
       App app;

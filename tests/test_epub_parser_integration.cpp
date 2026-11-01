@@ -3,6 +3,7 @@
 #include "book/page.h"
 #include "formats/epub/epub_parser.h"
 #include "formats/epub/epub_preparation.h"
+#include "formats/common/reflow_preparation.h"
 #include "expat.h"
 #include "formats/epub/epub_page_cache.h"
 #include "formats/common/page_text_extract_utils.h"
@@ -652,14 +653,17 @@ void TestCooperativePreparation() {
   book.format = FORMAT_EPUB;
   book.SetFolderName(TEST_FIXTURES_DIR "/books");
   book.SetFileName("basic.epub");
-  epub_parser::Preparation prep;
+  ReflowPreparation prep;
   ExpectTrue("begin preparation",
              prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub"));
+  prep.SignalPause();
+  ExpectTrue("paused preparation does not paginate", prep.Step() == ReflowPreparation::Paused && book.GetPageCount() == 0);
+  prep.SignalResume();
   unsigned steps = 0;
-  while (prep.Step() == epub_parser::Preparation::Pending)
+  while (prep.Step() == ReflowPreparation::Pending)
     ++steps;
   ExpectTrue("preparation completes",
-             prep.GetResult() == epub_parser::Preparation::Complete);
+             prep.GetResult() == ReflowPreparation::Complete);
   ExpectTrue("preparation yields", steps >= 5);
   ExpectTrue("preparation preserves chapter targets",
              book.GetChapters().size() == 2);
@@ -669,10 +673,10 @@ void TestCooperativePreparation() {
   ExpectTrue(
       "start warm preparation",
       prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 128 * 1024));
-  while (prep.Step() == epub_parser::Preparation::Pending) {
+  while (prep.Step() == ReflowPreparation::Pending) {
   }
   ExpectTrue("warm preparation matches",
-             prep.GetResult() == epub_parser::Preparation::Complete &&
+             prep.GetResult() == ReflowPreparation::Complete &&
                  book.GetPageCount() == pages);
   ExpectTrue("warm preparation attaches residency",
              book.HasReflowPageCache() &&
@@ -681,10 +685,10 @@ void TestCooperativePreparation() {
   book.SetOpenSessionId(82);
   ExpectTrue("begin memory-limited resident load",
              prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 1));
-  while (prep.Step() == epub_parser::Preparation::Pending) {
+  while (prep.Step() == ReflowPreparation::Pending) {
   }
   ExpectTrue("resident OOM is distinct from I/O error",
-             prep.GetResult() == epub_parser::Preparation::NoMemory);
+             prep.GetResult() == ReflowPreparation::NoMemory);
   ExpectTrue("OOM preserves valid cache and opening session",
              access(file.c_str(), R_OK) == 0 && book.GetOpenSessionId() == 82);
   book.Close();
@@ -696,10 +700,10 @@ void TestCooperativePreparation() {
   fclose(corrupt);
   book.SetOpenSessionId(83);
   prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 128 * 1024);
-  while (prep.Step() == epub_parser::Preparation::Pending) {
+  while (prep.Step() == ReflowPreparation::Pending) {
   }
   ExpectTrue("corrupt resident cache reparses without losing session",
-             prep.GetResult() == epub_parser::Preparation::Complete &&
+             prep.GetResult() == ReflowPreparation::Complete &&
                  book.GetOpenSessionId() == 83 && book.HasReflowPageCache());
   book.Close();
   remove(file.c_str());
@@ -708,7 +712,7 @@ void TestCooperativePreparation() {
   bool damaged_index = false;
   unsigned prepared_pages = 0;
   for (unsigned i = 0;
-       i < 10000 && prep.GetResult() == epub_parser::Preparation::Pending;
+       i < 10000 && prep.GetResult() == ReflowPreparation::Pending;
        ++i) {
     if (!damaged_index &&
         std::string(prep.Label()) == "checking cache... B: cancel") {
@@ -727,7 +731,7 @@ void TestCooperativePreparation() {
   ExpectTrue("cold open validates published index before releasing pages",
              damaged_index);
   ExpectTrue("cache validation failure retains complete readable book",
-             prep.GetResult() == epub_parser::Preparation::Complete &&
+             prep.GetResult() == ReflowPreparation::Complete &&
                  prep.PersistenceFailed() && prepared_pages == pages &&
                  book.GetPageCount() == pages && !book.HasReflowPageCache() &&
                  book.GetPage(0)->GetBuffer() != nullptr &&

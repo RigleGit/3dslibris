@@ -5,9 +5,7 @@
 #include <string>
 struct ReaderSearchSession;
 struct ReaderImageViewerSession;
-namespace epub_parser {
-class Preparation;
-}
+class ReflowPreparation;
 
 class App;
 struct FrameInput;
@@ -37,7 +35,7 @@ public:
   void OnAppletResumed();
 
 private:
-  std::unique_ptr<epub_parser::Preparation> preparation_;
+  std::unique_ptr<ReflowPreparation> preparation_;
   Book *cache_preparing_;
   std::string cache_label_;
   bool cache_page_error_ = false;

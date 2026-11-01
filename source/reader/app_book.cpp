@@ -44,7 +44,7 @@
 #include "ui/button.h"
 #include "shared/debug_log.h"
 #include "book/layout_reflow.h"
-#include "formats/epub/epub_preparation.h"
+#include "formats/common/reflow_preparation.h"
 #include "formats/common/reflow_block_cache.h"
 #include "reader/search_session.h"
 #include "menus/bookmark_menu.h"
@@ -95,6 +95,7 @@ void ReaderController::OnAppletSuspendRequested()
   // CPU-only viewer buffers have no worker/GPU references. Free them here
   // before aptMainLoop waits in HOME; the session rebuilds on a safe frame.
   SuspendImageViewer();
+  if (preparation_) preparation_->SignalPause();
   // Called synchronously from the APT hook: signal only for workers. In-progress reflow
   // and opening state remain owned by their workers across OS suspension.
   Book *bookcurrent_ = app_.GetCurrentBook();
@@ -113,6 +114,7 @@ void ReaderController::OnAppletSuspended()
 
 void ReaderController::OnAppletResumed()
 {
+  if (preparation_) preparation_->SignalResume();
   if (search_) search_->dirty = true;
   Book *bookcurrent_ = app_.GetCurrentBook();
   if (!bookcurrent_)
@@ -251,24 +253,24 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
     cache_label_ = label;
   }
   const u64 work_begin = osGetTime();
-  epub_parser::Preparation::Result result;
+  ReflowPreparation::Result result;
   do {
     result = preparation_->Step();
-  } while (result == epub_parser::Preparation::Pending &&
+  } while (result == ReflowPreparation::Pending &&
            osGetTime() - work_begin < 30 && !app_.ShouldAbortWork());
   if (app_.ShouldAbortWork())
     return true;
-  if (result == epub_parser::Preparation::Pending)
+  if (result == ReflowPreparation::Pending || result == ReflowPreparation::Paused)
     return true;
-  if (result != epub_parser::Preparation::Complete) {
-    if (result != epub_parser::Preparation::Cancelled) {
+  if (result != ReflowPreparation::Complete) {
+    if (result != ReflowPreparation::Cancelled) {
       char failure_label[128];
       snprintf(failure_label, sizeof(failure_label), "%s; B: back",
                preparation_->Label());
       preparation_->Cancel();
       preparation_.reset();
       cache_label_ = failure_label;
-      DBG_LOGF(&app_, "EPUB preparation failed result=%d detail=%s",
+      DBG_LOGF(&app_, "Reflow preparation failed result=%d detail=%s",
                (int)result, cache_label_.c_str());
       DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
       cache_draw_ms_ = input.timestamp_ms;

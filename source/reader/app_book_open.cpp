@@ -24,7 +24,7 @@
 #include <3ds.h>
 
 #include "book/book.h"
-#include "formats/epub/epub_preparation.h"
+#include "formats/common/reflow_preparation.h"
 #include "book/book_renderer.h"
 #include "formats/common/book_error.h"
 #include "reader/app_book_internal.h"
@@ -160,7 +160,7 @@ u8 ReaderController::OpenBook()
     DetachCurrentBookForSwitch(&app_, selected_book, session_id,
                                "epub-preparation");
     selected_book->SetOpenSessionId(session_id);
-    preparation_.reset(new (std::nothrow) epub_parser::Preparation);
+    preparation_.reset(new (std::nothrow) ReflowPreparation);
     const std::string source = std::string(selected_book->GetFolderName()) +
                                "/" + selected_book->GetFileName();
     if (!preparation_ ||
