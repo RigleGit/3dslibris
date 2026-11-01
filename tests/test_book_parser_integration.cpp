@@ -2017,8 +2017,23 @@ static void TestSharedReflowPreparation() {
     prep.SignalPause();
     test::ExpectTrue("paused preparation does not parse",prep.Step()==ReflowPreparation::Paused && !book.GetPageCount());
     prep.SignalResume();
-    unsigned steps=0;
-    while(prep.Step()==ReflowPreparation::Pending) test::ExpectTrue("preparation makes bounded progress",++steps<10000);
+    unsigned steps=0, last_progress=0, last_total=0;
+    std::string stage;
+    ReflowPreparation::Result outcome;
+    do {
+      const std::string next=prep.Label();
+      if(next!=stage) {
+        stage=next;last_progress=last_total=0;
+        const unsigned before=book.GetPageCount();
+        prep.SignalPause();test::ExpectTrue("each stage pauses without progress",prep.Step()==ReflowPreparation::Paused && book.GetPageCount()==before);
+        prep.SignalResume();
+      }
+      const unsigned total=prep.Total(), progress=prep.Progress();
+      if(total && total==last_total) test::ExpectTrue("stage percentage is monotonic",progress>=last_progress);
+      last_total=total;last_progress=progress;
+      outcome=prep.Step();
+      test::ExpectTrue("preparation makes bounded progress",++steps<10000);
+    } while(outcome==ReflowPreparation::Pending);
     test::ExpectTrue("cold shared preparation completes",prep.GetResult()==ReflowPreparation::Complete && !prep.PersistenceFailed());
     test::ExpectTrue("new formats adopt resident backend",book.HasReflowPageCache());
     test::ExpectEqU("cache fallback retains open session",book.GetOpenSessionId(),123);
@@ -2037,6 +2052,46 @@ static void TestSharedReflowPreparation() {
     }
     test::ExpectTrue("fixture has original resources",resources.size()>=3);
     book.Close();
+    if(std::string(name)=="images.mobi") {
+      // Produce a real v26 file through the legacy writer, then migrate it.
+      Book legacy(ctx);legacy.SetFolderName(folder);legacy.SetFileName(name);
+      test::ExpectEq("full diagnostic reader opens before v26 fixture",book_parser::Open(&legacy),0);
+      const auto deps=BuildBookParseDeps(&legacy);const auto &l=deps.layout;
+      mobi_page_cache::Save(&legacy,source.c_str(),l.pixel_size,l.linespacing,deps.paragraph_spacing,
+          deps.paragraph_indent,deps.orientation,l.margin_left,l.margin_right,l.margin_top,l.margin_bottom,
+          l.regular_font_path.c_str(),legacy.GetMobiLineWrapFix());
+      legacy.Close();
+      const std::string file=CacheFiles(directory)[0];
+      const std::string v26=ReadFileBytes(file);
+      test::ExpectEq("legacy fixture really is v26",(unsigned char)v26[4],26);
+      // An unavailable temporary must retain the old valid cache and prepared pages.
+      const std::string blocked=file+".tmp";
+      mkdir(blocked.c_str(),0700);WriteFileBytes(blocked+"/keep","owned by fixture");
+      test::ExpectTrue("start migration with unwritable temporary",prep.Begin(&book,source,512*1024));
+      while(prep.Step()==ReflowPreparation::Pending) {}
+      test::ExpectTrue("persistence failure still allows reading",prep.GetResult()==ReflowPreparation::Complete && prep.PersistenceFailed() && book.GetPageCount()==expected.size());
+      test::ExpectTrue("failed migration keeps original v26",ReadFileBytes(file)==v26);
+      prep.Cancel();
+      test::ExpectEq("cancelled preparation releases pages",book.GetPageCount(),0);
+      remove((blocked+"/keep").c_str());rmdir(blocked.c_str());
+      test::ExpectTrue("restart v26 migration",prep.Begin(&book,source,512*1024));
+      while(prep.Step()==ReflowPreparation::Pending) {}
+      test::ExpectTrue("v26 becomes resident v27",prep.GetResult()==ReflowPreparation::Complete && !prep.PersistenceFailed() && book.HasReflowPageCache());
+      test::ExpectEq("published cache is v27",(unsigned char)ReadFileBytes(file)[4],27);
+      book.Close();
+    }
+    // Cancel a fresh layout after it has produced pages; the original cache survives.
+    std::map<std::string,std::string> previous;
+    for(const auto &f:CacheFiles(directory)) previous[f]=ReadFileBytes(f);
+    const int old_size=text.pixelsize;text.SetPixelSize(old_size+1);
+    test::ExpectTrue("begin cancellable new layout",prep.Begin(&book,source,512*1024));
+    unsigned attempts=0;
+    while(!book.GetPageCount() && prep.GetResult()==ReflowPreparation::Pending && ++attempts<10000) prep.Step();
+    test::ExpectTrue("cancel after real partial pagination",book.GetPageCount()>0 && prep.GetResult()==ReflowPreparation::Pending);
+    prep.Cancel();test::ExpectEq("cancel discards incomplete pages",book.GetPageCount(),0);
+    test::ExpectEq("cancel removes its temporary",CacheFiles(directory).size(),previous.size());
+    for(const auto &f:previous) test::ExpectTrue("cancel keeps valid previous cache",ReadFileBytes(f.first)==f.second);
+    text.SetPixelSize(old_size);
     const std::string original=ReadFileBytes(source);
     struct stat info;stat(source.c_str(),&info);const utimbuf times={info.st_atime,info.st_mtime};
     WriteFileBytes(source,std::string(original.size(),'\0'));utime(source.c_str(),&times);
@@ -2073,14 +2128,39 @@ static void TestSharedReflowPreparation() {
     }
     book.Close();WriteFileBytes(source,original);utime(source.c_str(),&times);
   }
+  {
+    Text text;BookContext ctx;ctx.text=&text;Book book(ctx);
+    book.SetFolderName(folder);book.SetFileName("missing-source.mobi");
+    ReflowPreparation prep;
+    test::ExpectFalse("missing source fails initial preparation",prep.Begin(&book,std::string(folder)+"/missing-source.mobi"));
+    test::ExpectTrue("missing source reports IO explicitly",prep.GetResult()==ReflowPreparation::IoError);
+    prep.Cancel();test::ExpectTrue("cancel clears a latched source error",prep.GetResult()==ReflowPreparation::Cancelled);
+  }
   for(const auto &file:CacheFiles(directory)) remove(file.c_str());
   rmdir(directory.c_str());
   mobi_page_cache::SetCacheDirForTest(nullptr);fb2_page_cache::SetCacheDirForTest(nullptr);
 }
 
+static void TestMobiLookaheadEnd() {
+  Text text;BookContext ctx;ctx.text=&text;
+  Book book(ctx);const char *folder=getenv("TEST_MOBI_READING_DIR");
+  book.SetFolderName(folder);book.SetFileName("lookahead.mobi");
+  const std::string cache=std::string(folder)+"/cache-lookahead";
+  mkdir(cache.c_str(),0700);mobi_page_cache::SetCacheDirForTest(cache.c_str());
+  ReflowPreparation prep;test::ExpectTrue("begin EOF-lookahead MOBI",prep.Begin(&book,std::string(folder)+"/lookahead.mobi"));
+  unsigned steps=0;while(prep.Step()==ReflowPreparation::Pending) test::ExpectTrue("EOF pagination terminates",++steps<10000);
+  test::ExpectTrue("long penultimate line is real progress",prep.GetResult()==ReflowPreparation::Complete);
+  test::ExpectGt("lookahead fixture exceeds one page batch",book.GetPageCount(),8);
+  test::ExpectStrContains("final line survives yielding at EOF",BookText(&book).c_str(),"FINALLOOKAHEAD");
+  book.Close();
+  for(const auto &file:CacheFiles(cache)) remove(file.c_str());rmdir(cache.c_str());
+  mobi_page_cache::SetCacheDirForTest(nullptr);
+}
+
 int main(int argc, char **argv) {
   if(argc==2) {
-    if(std::string(argv[1])=="reflow-preparation") TestSharedReflowPreparation();
+    if(std::string(argv[1])=="mobi-lookahead") TestMobiLookaheadEnd();
+    else if(std::string(argv[1])=="reflow-preparation") TestSharedReflowPreparation();
     else if(std::string(argv[1])=="inline-zip") TestInlineZipLifetime();
     else if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
     else if(std::string(argv[1])=="image-overlap") TestImagePagesDoNotCoverText();
@@ -2100,6 +2180,7 @@ int main(int argc, char **argv) {
     else return 2;
     return 0;
   }
+  TestMobiLookaheadEnd();
   TestSharedReflowPreparation();
   TestInlineZipLifetime();
   TestPageFontFaceTransitions();
