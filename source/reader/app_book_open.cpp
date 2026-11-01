@@ -19,10 +19,12 @@
 
 #include <stdio.h>
 #include <time.h>
+#include <new>
 
 #include <3ds.h>
 
 #include "book/book.h"
+#include "formats/epub/epub_preparation.h"
 #include "book/book_renderer.h"
 #include "formats/common/book_error.h"
 #include "reader/app_book_internal.h"
@@ -153,6 +155,26 @@ u8 ReaderController::OpenBook()
     return BOOK_ERR_CANCELLED;
   }
 
+  if (selected_book->format==FORMAT_EPUB) {
+    app_.PauseBrowserJobs();
+    DetachCurrentBookForSwitch(&app_,selected_book,session_id,"epub-preparation");
+    selected_book->SetOpenSessionId(session_id);
+    preparation_.reset(new(std::nothrow) epub_parser::Preparation);
+    const std::string source=std::string(selected_book->GetFolderName())+"/"+selected_book->GetFileName();
+    if(!preparation_ || !preparation_->Begin(selected_book,source)) {
+      preparation_.reset();selected_book->Close();app_.SetCurrentBook(nullptr);
+      app_.SetMode(AppMode::Browser);app_.SetBrowserDirty(true);return 1;
+    }
+    cache_preparing_=selected_book;cache_draw_ms_=0;cache_label_.clear();
+    app_.SetOpeningPending(true);app_.SetOpeningBook(selected_book);
+    app_.SetOpeningSessionId(session_id);
+    app_.SetOpeningNeedsRelayout(relayout_state.needs_relayout);
+    app_.SetOpeningOldPageCount(relayout_state.old_page_count);
+    app_.SetOpeningOldPosition(relayout_state.old_position);
+    app_.MutableOpeningOldBookmarks()=relayout_state.old_bookmarks;
+    app_.SetMode(AppMode::Opening);return 0;
+  }
+
   if (use_async_reflow)
   {
     boot_trace::Boot("open book async path begin");
@@ -259,17 +281,6 @@ u8 ReaderController::OpenBook()
   else
   {
     ClearDeferredRelayoutState();
-  }
-
-  if (bookcurrent_->HasPendingEpubPageCacheSave()) {
-    cache_preparing_ = bookcurrent_;
-    cache_draw_ms_ = osGetTime();
-    app_.SetOpeningPending(true);
-    app_.SetOpeningBook(bookcurrent_);
-    app_.SetOpeningSessionId(session_id);
-    app_.SetMode(AppMode::Opening);
-    DrawOpeningSplashImpl(&app_, 0, 0, "saving cache... B: cancel");
-    return 0;
   }
 
   EnsureBookMode(&app_, "OpenBook: switched mode to APP_MODE_BOOK");

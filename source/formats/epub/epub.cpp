@@ -28,6 +28,11 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 */
 
 #include "formats/epub/epub.h"
+#include "formats/epub/epub_preparation.h"
+#include "formats/epub/epub_block_cache.h"
+#include "formats/common/page_cache_utils.h"
+#include "shared/path_constants.h"
+#include <new>
 
 #include "formats/epub/epub_cache.h"
 #include "formats/epub/epub_manifest.h"
@@ -217,12 +222,30 @@ static int OpenEpubArchive(const std::string &name, unzFile *uf) {
   return *uf ? 0 : 1;
 }
 
+namespace {
+const int kSpinePending=-32760;
+struct SpineCursor {
+  epub_zip_utils::ZipEntryIndex zip_index;
+  size_t next,document;
+  int chapter;
+  bool initialized,done;
+  unzFile inline_zip,css_zip;
+#ifdef DSLIBRIS_DEBUG
+  u64 started;
+  text_layout_utils::PerfStats layout_before;
+  epub_parse_perf::Snapshot parse_before;
+#endif
+  SpineCursor():next(0),document(0),chapter(1),initialized(false),done(false),inline_zip(NULL),css_zip(NULL) {}
+  ~SpineCursor() { if(inline_zip)unzClose(inline_zip);if(css_zip)unzClose(css_zip); }
+};
+}
+
 static int ParseEpubSpineDocuments(
     unzFile uf, Book *book, epub_data_t *parsedata,
     const std::string &archive_path, const std::string &folder,
     const std::vector<std::string> &hrefs, const EpubDeps &deps,
     std::map<std::string, u16> *page_start_by_href,
-    epub_page_cache::StreamWriter *stream_writer
+    epub_page_cache::StreamWriter *stream_writer, SpineCursor *resume
 #ifdef DSLIBRIS_DEBUG
     ,
     u64 *t_after_content
@@ -232,38 +255,35 @@ static int ParseEpubSpineDocuments(
     return 1;
 
   IStatusReporter *reporter = deps.reporter;
-  epub_zip_utils::ZipEntryIndex zip_index;
-  int rc = 0;
-  for (auto *ctx : parsedata->ctx)
-    delete ctx;
-  parsedata->ctx.clear();
-  parsedata->book = book;
-  parsedata->type = PARSE_CONTENT;
-  book->ClearChapters();
-  book->ClearChapterDocStartPages();
-  book->ClearInlineImages();
-  page_start_by_href->clear();
-
-  int chapter_num = 1;
-  size_t spine_doc_index = 0;
+  SpineCursor local;
+  SpineCursor &work=resume?*resume:local;
+  epub_zip_utils::ZipEntryIndex &zip_index=work.zip_index;
+  int rc=0;
+  if(!work.initialized) {
+    for(auto *ctx:parsedata->ctx)delete ctx;
+    parsedata->ctx.clear();parsedata->book=book;parsedata->type=PARSE_CONTENT;
+    book->ClearChapters();book->ClearChapterDocStartPages();book->ClearInlineImages();
+    page_start_by_href->clear();
+    work.inline_zip=book->GetEbookImagesEnabled()?unzOpen(archive_path.c_str()):NULL;
+    work.css_zip=unzOpen(archive_path.c_str());work.initialized=true;
 #ifdef DSLIBRIS_DEBUG
-  // Snapshot global layout perf counters so we can emit one aggregate
-  // breakdown at the end (shape / measure / line-break ms). One line per
-  // book open is cheap and tells us where the parse time actually goes,
-  // without the per-document spam that EPUB_LAYOUT_PROFILE produces.
-  const u64 t_spine_begin = osGetTime();
-  const text_layout_utils::PerfStats spine_layout_before =
-      text_layout_utils::GetPerfStats();
-  const epub_parse_perf::Snapshot spine_parse_before = epub_parse_perf::Get();
+    work.started=osGetTime();work.layout_before=text_layout_utils::GetPerfStats();
+    work.parse_before=epub_parse_perf::Get();
 #endif
-  unzFile inline_probe_uf = book->GetEbookImagesEnabled()
-      ? unzOpen(archive_path.c_str()) : NULL;
-  book->SetInlineImageProbeZip(inline_probe_uf);
-  // CSS resources need a separate handle while the content stream stays open.
-  // Both handles share the spine's ZIP entry offsets for this archive.
-  unzFile css_scan_uf = unzOpen(archive_path.c_str());
-
-  for (size_t i = 0; i < hrefs.size(); i++) {
+  }
+  book->SetInlineImageProbeZip(work.inline_zip);
+  unzFile css_scan_uf=work.css_zip;
+  int &chapter_num=work.chapter;
+  size_t &spine_doc_index=work.document;
+#ifdef DSLIBRIS_DEBUG
+  const u64 t_spine_begin=work.started;
+  const text_layout_utils::PerfStats &spine_layout_before=work.layout_before;
+  const epub_parse_perf::Snapshot &spine_parse_before=work.parse_before;
+#endif
+  const size_t initial=work.next;
+  for (size_t i = work.next; i < hrefs.size(); i++) {
+    if(resume && i!=initial) return kSpinePending;
+    work.next=i+1;
     if (open_cancel_poll::Poll(book, reporter, "epub-spine-loop")) {
       rc = BOOK_ERR_CANCELLED;
       break;
@@ -367,7 +387,7 @@ static int ParseEpubSpineDocuments(
                  (unsigned)osGetMemRegionFree(MEMREGION_ALL));
         }
 #endif
-      if (spine_doc_index % 20 == 0 || spine_doc_index == 1)
+      if (!resume && (spine_doc_index % 20 == 0 || spine_doc_index == 1))
         book->NotifySpineProgress((unsigned)spine_doc_index,
                                   (unsigned)hrefs.size());
 #ifdef DSLIBRIS_DEBUG
@@ -397,11 +417,10 @@ static int ParseEpubSpineDocuments(
   }
   }
 
+  work.done=true;
   book->SetInlineImageProbeZip(NULL);
-  if (inline_probe_uf)
-    unzClose(inline_probe_uf);
-  if (css_scan_uf)
-    unzClose(css_scan_uf);
+  if(work.inline_zip) {unzClose(work.inline_zip);work.inline_zip=NULL;}
+  if(work.css_zip) {unzClose(work.css_zip);work.css_zip=NULL;}
 #ifdef DSLIBRIS_DEBUG
   if (t_after_content)
     *t_after_content = osGetTime();
@@ -582,7 +601,7 @@ int epub(Book *book, std::string name, bool metadataonly) {
 
   rc = ParseEpubSpineDocuments(
       uf, book, &parsedata, name, folder, hrefs, deps, &page_start_by_href,
-      use_stream ? &stream_writer : NULL
+      use_stream ? &stream_writer : NULL, NULL
 #ifdef DSLIBRIS_DEBUG
       ,
       &t_after_content
@@ -648,3 +667,152 @@ int epub(Book *book, std::string name, bool metadataonly) {
 int epub_extract_cover(Book *book, const std::string &epubpath) {
   return epub_cover::Extract(book, epubpath);
 }
+
+namespace epub_parser {
+struct Preparation::State {
+  Book *book;std::string source,path,folder;
+  EpubDeps deps;epub_data_t data;unzFile zip;SpineCursor spine;
+  std::vector<std::string> hrefs;std::map<std::string,u16> page_starts;
+  epub_page_cache::LoadSession loader;epub_block_cache::Writer writer;
+  enum Phase { Cache, Package, Spine, WriteDocument, Toc, Commit, Finished } phase;
+  Result result;bool cached,metadata,legacy,persistence_failed,writer_open,migration;
+  unsigned before;std::vector<unsigned> ranges;size_t range;
+  u64 started,parse_ms,cache_ms;
+  State():book(NULL),data(),zip(NULL),phase(Cache),result(Pending),cached(false),metadata(false),legacy(false),
+    persistence_failed(false),writer_open(false),migration(false),before(0),range(0),started(osGetTime()),parse_ms(0),cache_ms(0) {}
+  ~State(){if(book)book->SetInlineImageProbeZip(NULL);if(zip)unzClose(zip);epub_data_delete(&data);}
+  bool StartWriter() {
+    writer_open=writer.Begin(book,path);
+    if(!writer_open) {persistence_failed=true;writer.Abort();}
+    return writer_open;
+  }
+  void Migration() {
+    migration=true;ranges.push_back(0);
+    for(const auto &v:book->GetChapterDocStartPages())if(v.second<book->GetPageCount())ranges.push_back(v.second);
+    ranges.push_back(book->GetPageCount());std::sort(ranges.begin(),ranges.end());
+    ranges.erase(std::unique(ranges.begin(),ranges.end()),ranges.end());
+    if(StartWriter() && ranges.size()>1) {writer.AppendDocument(ranges[0],ranges[1]);phase=WriteDocument;}
+    else {phase=Finished;result=Complete;}
+  }
+};
+Preparation::Preparation():state_(NULL){}
+Preparation::~Preparation(){if(state_&&state_->result==Pending)Cancel();delete state_;}
+bool Preparation::Begin(Book *book,const std::string &source) {
+  if(state_&&state_->result==Pending)Cancel();delete state_;state_=new(std::nothrow) State;
+  if(!state_)return false;
+  State &s=*state_;s.book=book;s.source=source;
+  if(!book || book->GetPageCount()) {s.result=Failed;return false;}
+  book->PrepareForOpen();book->CaptureEbookImageSetting();s.deps=BuildEpubDeps(book);
+  const auto &l=s.deps.layout;
+  const auto params=page_cache_utils::BuildLayoutParams(source.c_str(),l.pixel_size,l.linespacing,
+    s.deps.paragraph_spacing,s.deps.paragraph_indent,s.deps.orientation,
+    l.margin_left,l.margin_right,l.margin_top,l.margin_bottom,l.regular_font_path.c_str());
+  s.path=epub_page_cache::CachePath(book,source.c_str(),params);
+  mkdir(paths::GetCacheBaseDir().c_str(),0777);
+  const size_t slash=s.path.find_last_of('/');if(slash!=std::string::npos)mkdir(s.path.substr(0,slash).c_str(),0777);
+  s.metadata=book->TryLoadMetadataFromCache();
+  FILE *fp=fopen(s.path.c_str(),"rb");
+  if(fp) {u32 magic=0;u16 version=0;fread(&magic,1,4,fp);fread(&version,1,2,fp);s.legacy=version==22;fclose(fp);}
+  s.loader.Begin(book,s.path);return true;
+}
+Preparation::Result Preparation::GetResult()const{return state_?state_->result:Failed;}
+bool Preparation::PersistenceFailed()const{return state_&&state_->persistence_failed;}
+const char *Preparation::Label()const {
+  if(!state_)return "cannot prepare book";
+  if(state_->result==Complete&&state_->persistence_failed)return "cache not saved; A: read / B: back";
+  switch(state_->phase) {
+    case State::Cache:return "loading cache...";
+    case State::WriteDocument:case State::Commit:return "saving cache... B: cancel";
+    case State::Toc:return "preparing index... B: cancel";
+    default:return "opening book... B: cancel";
+  }
+}
+unsigned Preparation::Progress()const {
+  if(!state_)return 0;
+  if(state_->phase==State::Cache)return state_->loader.Progress();
+  return state_->migration?state_->writer.Progress():(unsigned)state_->spine.next;
+}
+unsigned Preparation::Total()const {
+  if(!state_)return 0;
+  if(state_->phase==State::Cache)return state_->loader.Total();
+  return state_->migration?state_->book->GetPageCount():(unsigned)state_->hrefs.size();
+}
+void Preparation::Cancel() {
+  if(!state_)return;State &s=*state_;
+  s.writer.Abort();s.loader.Cancel();s.book->SetInlineImageProbeZip(NULL);
+  s.book->CancelPendingEpubPageCacheSave();s.book->Close();s.result=Cancelled;
+}
+Preparation::Result Preparation::Step() {
+  if(!state_||state_->result!=Pending)return GetResult();State &s=*state_;
+  if(ShouldAbortEpubOpen(s.book)) {Cancel();return Cancelled;}
+  if(s.phase==State::Cache) {
+    const auto r=s.loader.Step();if(r==epub_page_cache::LoadSession::Pending)return Pending;
+    if(r==epub_page_cache::LoadSession::Cancelled) {Cancel();return Cancelled;}
+    if(r==epub_page_cache::LoadSession::NoMemory||r==epub_page_cache::LoadSession::IoError)return s.result=Failed;
+    if(r==epub_page_cache::LoadSession::Corrupt)remove(s.path.c_str());
+    s.cached=r==epub_page_cache::LoadSession::Complete;
+    if(s.cached&&s.metadata&&!s.book->GetChapters().empty()) {
+      if(s.legacy)s.Migration();else {s.phase=State::Finished;s.result=Complete;}
+    } else s.phase=State::Package;
+  } else if(s.phase==State::Package) {
+    if(OpenEpubArchive(s.source,&s.zip))return s.result=Failed;
+#ifdef DSLIBRIS_DEBUG
+    u64 container=0,root=0;
+#endif
+    const int rc=LoadEpubPackageForParse(s.zip,s.book,&s.data,&s.folder,false,s.deps
+#ifdef DSLIBRIS_DEBUG
+      ,&container,&root
+#endif
+    );
+    if(rc)return s.result=Failed;
+    ApplyEpubMetadataOnlyResult(s.book,s.data,s.folder);
+    if(s.cached) {
+      if(s.book->GetChapters().empty()) {
+        BuildPageStartMapFromPackage(s.data,s.folder,s.book,&s.page_starts);
+        ResolveEpubTocFromPackageData(s.zip,s.book,s.data,s.folder,s.page_starts,s.deps.reporter);
+      }
+      if(s.legacy)s.Migration();else {s.phase=State::Finished;s.result=Complete;}
+    } else {s.hrefs=BuildEpubSpineDocumentList(s.data);s.StartWriter();s.phase=State::Spine;}
+  } else if(s.phase==State::Spine) {
+    s.before=s.book->GetPageCount();const u64 begin=osGetTime();
+    const int rc=ParseEpubSpineDocuments(s.zip,s.book,&s.data,s.source,s.folder,s.hrefs,s.deps,
+      &s.page_starts,NULL,&s.spine
+#ifdef DSLIBRIS_DEBUG
+      ,NULL
+#endif
+    );
+    s.parse_ms+=osGetTime()-begin;
+    if(rc!=0&&rc!=kSpinePending)return s.result=Failed;
+    if(s.writer_open) {
+      if(s.writer.AppendDocument(s.before,s.book->GetPageCount()))s.phase=State::WriteDocument;
+      else {s.writer.Abort();s.writer_open=false;s.persistence_failed=true;}
+    }
+    if(!s.writer_open)s.phase=s.spine.done?State::Toc:State::Spine;
+  } else if(s.phase==State::WriteDocument) {
+    const u64 begin=osGetTime();const auto r=s.writer.Step();s.cache_ms+=osGetTime()-begin;
+    if(r==epub_block_cache::Pending)return Pending;
+    if(r!=epub_block_cache::Ready) {
+      s.writer.Abort();s.writer_open=false;s.persistence_failed=true;
+      if(s.migration) {s.phase=State::Finished;s.result=Complete;}
+      else s.phase=s.spine.done?State::Toc:State::Spine;
+    } else if(s.migration) {
+      if(++s.range+1<s.ranges.size())s.writer.AppendDocument(s.ranges[s.range],s.ranges[s.range+1]);
+      else {s.writer.Finish();s.phase=State::Commit;}
+    } else s.phase=s.spine.done?State::Toc:State::Spine;
+  } else if(s.phase==State::Toc) {
+    if(!s.book->GetPageCount())return s.result=Failed;
+    ResolveEpubTocFromPackageData(s.zip,s.book,s.data,s.folder,s.page_starts,s.deps.reporter);
+    if(s.writer_open && s.writer.Finish())s.phase=State::Commit;
+    else {s.persistence_failed=true;s.phase=State::Finished;s.result=Complete;}
+  } else if(s.phase==State::Commit) {
+    const u64 begin=osGetTime();const auto r=s.writer.Step();s.cache_ms+=osGetTime()-begin;
+    if(r==epub_block_cache::Pending)return Pending;
+    if(r!=epub_block_cache::Complete) {s.persistence_failed=true;s.writer.Abort();}
+    s.phase=State::Finished;s.result=Complete;
+    DBG_LOGF(s.deps.reporter,"EPUB preparation done pages=%u parse_ms=%llu cache_ms=%llu total_ms=%llu saved=%u",
+      s.book->GetPageCount(),(unsigned long long)s.parse_ms,(unsigned long long)s.cache_ms,
+      (unsigned long long)(osGetTime()-s.started),s.persistence_failed?0:1);
+  }
+  return s.result;
+}
+} // namespace epub_parser

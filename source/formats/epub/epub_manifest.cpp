@@ -241,9 +241,11 @@ int LoadCssClassMapForDoc(const std::string &archive_path,
 
   if (epd)
     epd->css_sources_by_doc[xhtml_path] = source_keys;
+#if EPUB_CSS_TRACE
   DBG_LOGF(reporter, "EPUB CSS: doc=%s linked=%u embedded=%u failed=%u rules=%u",
            xhtml_path.c_str(), (unsigned)(sheets.size() - embedded_count),
            embedded_count, failed_count, (unsigned)out->size());
+#endif
   if (owns_scan_uf) unzClose(scan_uf);
   return 0;
 }
@@ -585,7 +587,7 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
       if (css_rc != 0)
         return css_rc;
     }
-#ifdef DSLIBRIS_DEBUG
+#if defined(DSLIBRIS_DEBUG) && EPUB_LAYOUT_PROFILE
     unsigned align_rules = 0;
     for (const auto &rule : pd.css_class_map)
       align_rules += rule.second.has_text_align ? 1u : 0u;

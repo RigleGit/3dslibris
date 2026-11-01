@@ -1,6 +1,7 @@
 #include "app/reader_controller.h"
 #include "reader/search_session.h"
 #include "reader/image_viewer_session.h"
+#include "formats/epub/epub_preparation.h"
 
 #include "app/app.h"
 

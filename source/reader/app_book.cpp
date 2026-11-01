@@ -44,6 +44,7 @@
 #include "ui/button.h"
 #include "shared/debug_log.h"
 #include "book/layout_reflow.h"
+#include "formats/epub/epub_preparation.h"
 #include "parse.h"
 #include "settings/prefs.h"
 #include "shared/boot_trace.h"
@@ -212,32 +213,44 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
 }
 
 bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
-  if (!cache_preparing_) return false;
-  Book *book = cache_preparing_;
-  if (input.keys_down & (app_.key.b | app_.key.start)) {
-    book->CancelPendingEpubPageCacheSave();
-    cache_preparing_ = nullptr;
-    book->Close();
-    app_.SetCurrentBook(nullptr);
-    app_.SetCurrentBookSessionId(0);
-    ResetOpeningState(&app_);
-    app_.SetMode(AppMode::Browser);
-    app_.SetBrowserDirty(true);
+  if(!preparation_ || !cache_preparing_)return false;
+  Book *book=cache_preparing_;
+  if(input.keys_down&(app_.key.b|app_.key.start)) {
+    preparation_->Cancel();preparation_.reset();cache_preparing_=nullptr;
+    app_.SetCurrentBook(nullptr);app_.SetCurrentBookSessionId(0);
+    ResetOpeningState(&app_);app_.SetMode(AppMode::Browser);app_.SetBrowserDirty(true);return true;
+  }
+  if(app_.ShouldAbortWork())return true;
+  const std::string label=preparation_->Label();
+  if(label!=cache_label_ || input.timestamp_ms-cache_draw_ms_>=100) {
+    DrawOpeningSplashImpl(&app_,preparation_->Progress(),preparation_->Total(),label.c_str());
+    cache_draw_ms_=input.timestamp_ms;cache_label_=label;
+  }
+  const auto result=preparation_->Step();
+  if(app_.ShouldAbortWork())return true;
+  if(result==epub_parser::Preparation::Pending)return true;
+  if(result!=epub_parser::Preparation::Complete) {
+    DBG_LOG(&app_,"EPUB preparation failed or cancelled");
+    preparation_->Cancel();preparation_.reset();cache_preparing_=nullptr;
+    app_.SetCurrentBook(nullptr);app_.SetCurrentBookSessionId(0);
+    ResetOpeningState(&app_);app_.SetMode(AppMode::Browser);app_.SetBrowserDirty(true);return true;
+  }
+  if(preparation_->PersistenceFailed() && !(input.keys_down&app_.key.a)) {
+    if(cache_label_!=preparation_->Label()) {
+      cache_label_=preparation_->Label();DrawOpeningSplashImpl(&app_,0,0,cache_label_.c_str());
+    }
     return true;
   }
-  if (app_.ShouldAbortWork()) return true;
-  if (input.timestamp_ms - cache_draw_ms_ >= 100) {
-    DrawOpeningSplashImpl(&app_, 0, 0, "saving cache... B: cancel");
-    cache_draw_ms_ = input.timestamp_ms;
+  book->SetLayoutRevision(app_.GetLayoutRevision());
+  if(app_.IsOpeningNeedsRelayout()) {
+    const auto plan=deferred_relayout_utils::BuildOpenRelayoutPlan(true,false,
+      app_.GetOpeningOldPageCount(),app_.GetOpeningOldPosition(),book->GetPageCount(),
+      app_.MutableOpeningOldBookmarks());
+    if(plan.has_remap) {book->SetPosition(plan.mapped_position);ApplyRemappedBookmarks(book,plan.mapped_bookmarks);}
   }
-  book->PumpPendingEpubPageCacheSave();
-  if (!book->HasPendingEpubPageCacheSave()) {
-    cache_preparing_ = nullptr;
-    ResetOpeningState(&app_);
-    app_.SetMode(AppMode::Browser);
-    OpenBook();
-  }
-  return true;
+  app_.SetCurrentBook(book);app_.SetCurrentBookSessionId(app_.GetOpeningSessionId());
+  preparation_.reset();cache_preparing_=nullptr;
+  ResetOpeningState(&app_);app_.SetMode(AppMode::Browser);OpenBook();return true;
 }
 
 void ReaderController::HandleEventInOpening(const FrameInput &input)
@@ -532,6 +545,7 @@ void ReaderController::ToggleBookmark()
 
 void ReaderController::CloseBook(bool persist_progress)
 {
+  if(preparation_) {preparation_->Cancel();preparation_.reset();}
   cache_preparing_ = nullptr;
   InvalidateImageViewer();
   InvalidateSearch(true);

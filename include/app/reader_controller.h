@@ -2,8 +2,10 @@
 
 #include <stdint.h>
 #include <memory>
+#include <string>
 struct ReaderSearchSession;
 struct ReaderImageViewerSession;
+namespace epub_parser { class Preparation; }
 
 class App;
 struct FrameInput;
@@ -32,7 +34,9 @@ public:
   void OnAppletResumed();
 
 private:
+  std::unique_ptr<epub_parser::Preparation> preparation_;
   Book *cache_preparing_;
+  std::string cache_label_;
   uint64_t cache_draw_ms_;
   bool AdvanceCachePreparation(const FrameInput &input);
   void DrawImageViewer();

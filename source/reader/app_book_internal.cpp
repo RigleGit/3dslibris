@@ -235,7 +235,7 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
   }
 
   if (spine_total > 0) {
-    unsigned pct = spine_done * 100u / spine_total;
+    unsigned pct = (unsigned)((u64)spine_done * 100u / spine_total);
     char progress[32];
     snprintf(progress, sizeof(progress), "%u / %u  (%u%%)", spine_done,
              spine_total, pct);
