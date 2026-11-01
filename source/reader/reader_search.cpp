@@ -39,7 +39,7 @@ void ReaderController::InvalidateSearch(bool forget_query) {
     LogSearch(app_, *search_, "cancel");
   search_->engine.Cancel();
   if (search_->book)
-    search_->book->CancelEpubPageRequest();
+    search_->book->CancelReflowPageRequest();
   search_->active = search_->has_match = false;
   search_->book = nullptr;
   if (forget_query) search_.reset();
@@ -108,7 +108,7 @@ void ReaderController::StartSearch(bool backwards, bool first) {
   if (s.engine.GetStatus() == text_search::Searching)
     LogSearch(app_, s, "cancel");
   s.engine.Cancel();
-  s.book->CancelEpubPageRequest();
+  s.book->CancelReflowPageRequest();
   if (!s.engine.Configure(s.query, s.whole_words)) {
     s.message = s.engine.GetError(); s.editor = s.dirty = true; return;
   }
@@ -161,7 +161,7 @@ void ReaderController::DrawSearch() {
       highlight.end = current == s.match.end.page ? s.match.end.token : page->GetLength();
     }
     page->Draw(ts, on_match ? &highlight : nullptr);
-    s.book->TrimEpubPageCache();
+    s.book->TrimReflowPageCache();
     const bool landscape = orientation_utils::IsLandscape(s.book->GetOrientation());
     ts->SetScreen(landscape ? ts->screenright : ts->screenleft);
     const int height = ts->LogicalHeight();
@@ -223,7 +223,7 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
     if ((keys & app_.key.b) && s.engine.GetStatus() == text_search::Searching) {
       LogSearch(app_, s, "cancel");
       s.engine.Cancel();
-      book->CancelEpubPageRequest();
+      book->CancelReflowPageRequest();
       s.message = "Search cancelled";
       s.dirty = true;
     } else if (keys & (app_.key.a | app_.key.b)) {
@@ -258,8 +258,8 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
       const uint64_t started = osGetTime();
       do {
         s.engine.Pump(32);
-        if (s.engine.IsWaitingForPage() && book->HasPendingEpubPageRead()) {
-          if (book->AdvanceEpubPageCache() < 0) {
+        if (s.engine.IsWaitingForPage() && book->HasPendingReflowPageRead()) {
+          if (book->AdvanceReflowPageCache() < 0) {
             ReportPageCacheError();
             return;
           }

@@ -22,10 +22,10 @@ struct Book {
   bool delayed_pages = false;
   std::vector<bool> ready;
   unsigned pending = 0, cache_advances = 0;
-  bool HasPendingEpubPageRead() {
+  bool HasPendingReflowPageRead() {
     return delayed_pages && !ready[pending];
   }
-  int AdvanceEpubPageCache() {
+  int AdvanceReflowPageCache() {
     ++cache_advances;
     ready[pending] = true;
     return 0;
@@ -43,7 +43,7 @@ struct Book {
   void ResetCbzFailureState() {}
   void ClearFocusedInlineLink() {}
   void ResetReadingPaceEstimate() {}
-  void CancelEpubPageRequest() {}
+  void CancelReflowPageRequest() {}
 };
 namespace text_search {
 Source FromBook(Book *b) {

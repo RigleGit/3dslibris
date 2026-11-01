@@ -16,16 +16,16 @@ inline PageAvailability PrepareBookPage(void *context, uint32_t index) {
   Book *book = static_cast<Book *>(context);
   if (!book || index >= book->GetPageCount())
     return PageError;
-  if (book->IsEpubPageReady(index))
+  if (book->IsReflowPageReady(index))
     return PageReady;
-  if (!book->RequestEpubPage(index))
+  if (!book->RequestReflowPage(index))
     return PageError;
-  return book->IsEpubPageReady(index) ? PageReady : PagePending;
+  return book->IsReflowPageReady(index) ? PageReady : PagePending;
 }
 inline Source FromBook(Book *book) {
   Source source = {
       book, book ? (uint32_t)book->GetPageCount() : 0, ReadBookPage,
-      book && book->HasEpubPageCache() ? PrepareBookPage : nullptr};
+      book && book->HasReflowPageCache() ? PrepareBookPage : nullptr};
   return source;
 }
 } // namespace text_search

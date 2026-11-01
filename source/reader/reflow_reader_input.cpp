@@ -77,7 +77,7 @@ static size_t InlineLinkCountForPage(Book *book, int page_index) {
   if (!book || book->IsFixedLayout() || page_index < 0 ||
       page_index >= book->GetPageCount())
     return 0;
-  return book->EpubPageLinkCount(page_index);
+  return book->ReflowPageLinkCount(page_index);
 }
 
 static bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction) {
@@ -109,9 +109,9 @@ static bool MoveInlineLinkFocusSequential(Book *book, Text *ts, int direction) {
        page_index >= 0 && page_index < page_count; page_index += direction) {
     if (InlineLinkCountForPage(book, page_index) == 0) continue;
     book->SetPosition(page_index);
-    if (book->HasPendingEpubNavigation()) {
+    if (book->HasPendingReflowNavigation()) {
       book->SetFocusedInlineLinkIndex(
-          direction > 0 ? 0 : (int)book->EpubPageLinkCount(page_index) - 1);
+          direction > 0 ? 0 : (int)book->ReflowPageLinkCount(page_index) - 1);
       return true;
     }
     book->ClearFocusedInlineLink();

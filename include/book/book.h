@@ -36,7 +36,7 @@ struct fz_document;
 struct fz_display_list;
 struct fz_outline;
 namespace epub_page_cache { class StreamWriter; }
-namespace epub_block_cache {
+namespace reflow_block_cache {
 enum Result : int;
 class Reader;
 }
@@ -99,8 +99,8 @@ public:
 
 private:
   epub_page_cache::StreamWriter *epub_cache_save_writer_;
-  epub_block_cache::Reader *epub_cache_reader_;
-  int epub_pending_position_;
+  reflow_block_cache::Reader *reflow_cache_reader_;
+  int reflow_pending_position_;
   std::string filename;
   std::string foldername;
   std::string title;
@@ -464,21 +464,21 @@ public:
   void SignalReflowWorkerShutdown();
   void FinishShutdownReflowWorker();
   void FlushPendingCacheSaves();
-  bool StartEpubPageCache(const std::string &path, size_t budget);
-  bool AdoptPreparedEpubPageCache(epub_block_cache::Reader *reader);
-  epub_block_cache::Result GetEpubPageCacheResult() const;
-  void TrimEpubPageCache();
-  int AdvanceEpubPageCache(); // 1 pending, 0 ready, -1 failed; main thread
+  bool StartReflowPageCache(const std::string &path, size_t budget);
+  bool AdoptPreparedReflowPageCache(reflow_block_cache::Reader *reader);
+  reflow_block_cache::Result GetReflowPageCacheResult() const;
+  void TrimReflowPageCache();
+  int AdvanceReflowPageCache(); // 1 pending, 0 ready, -1 failed; main thread
                               // only.
-  bool HasEpubPageCache() const;
-  bool IsEpubPageReady(unsigned page) const;
-  bool RequestEpubPage(unsigned page);
-  void CancelEpubPageRequest();
-  bool HasPendingEpubNavigation() const;
-  bool HasPendingEpubPageRead() const;
-  bool IsEpubPageCacheCorrupt() const;
-  void InvalidateEpubPageCacheFile();
-  unsigned EpubPageLinkCount(unsigned page);
+  bool HasReflowPageCache() const;
+  bool IsReflowPageReady(unsigned page) const;
+  bool RequestReflowPage(unsigned page);
+  void CancelReflowPageRequest();
+  bool HasPendingReflowNavigation() const;
+  bool HasPendingReflowPageRead() const;
+  bool IsReflowPageCacheCorrupt() const;
+  void InvalidateReflowPageCacheFile();
+  unsigned ReflowPageLinkCount(unsigned page);
   void PumpPendingEpubPageCacheSave();
   void CancelPendingEpubPageCacheSave();
   bool HasPendingEpubPageCacheSave() const;

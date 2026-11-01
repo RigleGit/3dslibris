@@ -5,7 +5,7 @@
 */
 
 #include "formats/epub/epub_page_cache.h"
-#include "formats/epub/epub_block_cache.h"
+#include "formats/common/reflow_block_cache.h"
 #include "formats/common/cache_memory_utils.h"
 
 #include "book/book.h"
@@ -119,7 +119,7 @@ struct LoadSession::State {
     Done
   };
   Book *book;
-  epub_block_cache::Reader *block_reader;
+  reflow_block_cache::Reader *block_reader;
   FILE *fp;
   std::string path;
   unsigned char *buffer;
@@ -309,12 +309,12 @@ LoadSession::Result LoadSession::Begin(Book *book, const std::string &path) {
       magic == kEpubPageCacheMagic && version == 23) {
     fclose(s.fp);
     s.fp = NULL;
-    s.block_reader = new (std::nothrow) epub_block_cache::Reader;
+    s.block_reader = new (std::nothrow) reflow_block_cache::Reader;
     if (!s.block_reader)
       return s.result = NoMemory;
-    const epub_block_cache::Result r = s.block_reader->Begin(book, path, 0);
-    return s.result = r == epub_block_cache::Pending    ? Pending
-                      : r == epub_block_cache::NoMemory ? NoMemory
+    const reflow_block_cache::Result r = s.block_reader->Begin(book, path, 0);
+    return s.result = r == reflow_block_cache::Pending    ? Pending
+                      : r == reflow_block_cache::NoMemory ? NoMemory
                                                         : IoError;
   }
   rewind(s.fp);
@@ -364,12 +364,12 @@ LoadSession::Result LoadSession::Step() {
     return Cancelled;
   }
   if (s.block_reader) {
-    const epub_block_cache::Result result = s.block_reader->Step();
-    if (result == epub_block_cache::Pending)
+    const reflow_block_cache::Result result = s.block_reader->Step();
+    if (result == reflow_block_cache::Pending)
       return Pending;
-    s.result = result == epub_block_cache::Complete   ? Complete
-               : result == epub_block_cache::Corrupt  ? Corrupt
-               : result == epub_block_cache::NoMemory ? NoMemory
+    s.result = result == reflow_block_cache::Complete   ? Complete
+               : result == reflow_block_cache::Corrupt  ? Corrupt
+               : result == reflow_block_cache::NoMemory ? NoMemory
                                                       : IoError;
     if (s.result != Complete) {
       const unsigned session = s.book->GetOpenSessionId();

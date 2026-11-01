@@ -254,7 +254,7 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
 
     preview_pages_.push_back(pg);
     preview_ready_.push_back(false);
-    if (book->HasEpubPageCache()) {
+    if (book->HasReflowPageCache()) {
       labels.push_back(full_label + "\nloading preview...\n ");
       pages.push_back(pg);
       continue;
@@ -278,7 +278,7 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
 
 void BookmarkMenu::Draw() {
   Book *book = current_book_;
-  if (book && book->HasEpubPageCache()) {
+  if (book && book->HasReflowPageCache()) {
     const unsigned start = GetPageStart(page);
     const unsigned end =
         std::min((unsigned)preview_pages_.size(), start + GetPageSize(page));
@@ -290,8 +290,8 @@ void BookmarkMenu::Draw() {
         preview_ready_[i] = true;
         continue;
       }
-      if (!book->IsEpubPageReady(target)) {
-        book->RequestEpubPage(target);
+      if (!book->IsReflowPageReady(target)) {
+        book->RequestReflowPage(target);
         break;
       }
       const std::string text = ExtractPagePreview(book->GetPage(target), 120);

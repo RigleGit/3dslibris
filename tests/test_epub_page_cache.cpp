@@ -2,7 +2,7 @@
 #include "book/book_context.h"
 #include "book/page.h"
 #include "formats/epub/epub_page_cache.h"
-#include "formats/epub/epub_block_cache.h"
+#include "formats/common/reflow_block_cache.h"
 #include "file_write_failure_utils.h"
 #include "shared/status_reporter.h"
 
@@ -461,23 +461,23 @@ void TestBlockCacheRoundtrip() {
   page_search::Annotate(events, 2, page_search::Space);
   fixture.source.GetPage(47)->SetSearchEvents(events);
   const std::string path = fixture.directory + "/blocks.epc";
-  epub_block_cache::Writer writer;
+  reflow_block_cache::Writer writer;
   Require(writer.Begin(&fixture.source, path), "begin block writer");
   Require(writer.AppendDocument(0, 40), "first document");
-  while (writer.Step() == epub_block_cache::Pending) {
+  while (writer.Step() == reflow_block_cache::Pending) {
   }
   Require(writer.AppendDocument(40, 80), "second document");
-  while (writer.Step() == epub_block_cache::Pending) {
+  while (writer.Step() == reflow_block_cache::Pending) {
   }
   Require(writer.Finish(), "start publishing index");
-  while (writer.Step() == epub_block_cache::Pending) {
+  while (writer.Step() == reflow_block_cache::Pending) {
   }
-  Check(writer.GetResult() == epub_block_cache::Complete,
+  Check(writer.GetResult() == reflow_block_cache::Complete,
         "publish complete v23 cache");
   // A replacement must never damage the already published cache.
   Require(writer.Begin(&fixture.source, path), "begin replacement to cancel");
   Require(writer.AppendDocument(0, 40), "append cancelled replacement");
-  while (writer.Step() == epub_block_cache::Pending) {
+  while (writer.Step() == reflow_block_cache::Pending) {
   }
   writer.Abort();
   Check(access((path + ".tmp").c_str(), F_OK) != 0,
@@ -489,12 +489,12 @@ void TestBlockCacheRoundtrip() {
   fclose(blocker);
   Require(writer.Begin(&fixture.source, path), "begin failing replacement");
   Require(writer.AppendDocument(0, 80), "append failing replacement");
-  while (writer.Step() == epub_block_cache::Pending) {
+  while (writer.Step() == reflow_block_cache::Pending) {
   }
   Require(writer.Finish(), "finalize failing replacement");
-  while (writer.Step() == epub_block_cache::Pending) {
+  while (writer.Step() == reflow_block_cache::Pending) {
   }
-  Check(writer.GetResult() == epub_block_cache::IoError,
+  Check(writer.GetResult() == reflow_block_cache::IoError,
         "v23 publication failure is explicit");
   writer.Abort();
   Check(access((path + ".tmp").c_str(), F_OK) != 0,
@@ -505,34 +505,34 @@ void TestBlockCacheRoundtrip() {
   struct stat info;
   stat(path.c_str(), &info);
   Book memory_limited(fixture.ctx);
-  epub_block_cache::Reader failed_reader;
+  reflow_block_cache::Reader failed_reader;
   Require(failed_reader.Begin(&memory_limited, path, 0) ==
-              epub_block_cache::Pending,
+              reflow_block_cache::Pending,
           "start failing inflater");
   fail_inflate_memory = true;
   forced_inflate_calls = 0;
-  while (failed_reader.Step() == epub_block_cache::Pending) {
+  while (failed_reader.Step() == reflow_block_cache::Pending) {
   }
   fail_inflate_memory = false;
   Check(forced_inflate_calls > 0 &&
-            failed_reader.GetResult() == epub_block_cache::NoMemory,
+            failed_reader.GetResult() == reflow_block_cache::NoMemory,
         "inflate allocation failure is not cache corruption");
   Check(access(path.c_str(), R_OK) == 0, "inflate OOM keeps the cache");
   failed_reader.Close();
   memory_limited.Close();
   Book loaded(fixture.ctx);
-  epub_block_cache::Reader reader;
-  Require(reader.Begin(&loaded, path, 0) == epub_block_cache::Pending,
+  reflow_block_cache::Reader reader;
+  Require(reader.Begin(&loaded, path, 0) == reflow_block_cache::Pending,
           "open complete block reader");
   block_reads = 0;
   count_block_reads = true;
   unsigned steps = 0;
-  while (reader.Step() == epub_block_cache::Pending)
+  while (reader.Step() == reflow_block_cache::Pending)
     ++steps;
   count_block_reads = false;
   Check(block_reads <= 4,
         "complete reader groups adjacent small blocks into bounded reads");
-  Check(reader.GetResult() == epub_block_cache::Complete && steps > 1,
+  Check(reader.GetResult() == reflow_block_cache::Complete && steps > 1,
         "v23 loading is cooperative");
   Check(steps < 40, "complete reader batches decoded pages rather than waiting "
                     "one frame per page");
@@ -553,9 +553,9 @@ void TestBlockCacheRoundtrip() {
   loaded.SetPosition(47);
   reader.Begin(&loaded, path, 128 * 1024);
   unsigned initial_steps = 0;
-  while (reader.Step() == epub_block_cache::Pending && ++initial_steps < 200) {
+  while (reader.Step() == reflow_block_cache::Pending && ++initial_steps < 200) {
   }
-  Check(reader.GetResult() == epub_block_cache::Complete &&
+  Check(reader.GetResult() == reflow_block_cache::Complete &&
             reader.IsReady(47) && !reader.IsReady(0),
         "partial reader starts at saved position");
   Check(info.st_size <= 65536 || reader.BytesRead() < (size_t)info.st_size,
@@ -586,9 +586,9 @@ void TestBlockCacheRoundtrip() {
   for (unsigned page = 0; page < 80; ++page) {
     reader.Request(page);
     unsigned turns = 0;
-    while (reader.Step() == epub_block_cache::Pending && ++turns < 40) {
+    while (reader.Step() == reflow_block_cache::Pending && ++turns < 40) {
     }
-    Check(reader.GetResult() == epub_block_cache::Complete &&
+    Check(reader.GetResult() == reflow_block_cache::Complete &&
               reader.IsReady(page),
           "residency makes progress when eviction is needed");
     Check(reader.ResidentBytes() <= 128 * 1024, "payload stays within budget");
@@ -600,11 +600,11 @@ void TestBlockCacheRoundtrip() {
   inflate_failure_limit = 1;
   reader.Request(0);
   unsigned retries = 0;
-  while (reader.Step() == epub_block_cache::Pending && ++retries < 20) {
+  while (reader.Step() == reflow_block_cache::Pending && ++retries < 20) {
   }
   fail_inflate_memory = false;
   Check(forced_inflate_calls == 1 &&
-            reader.GetResult() == epub_block_cache::Complete &&
+            reader.GetResult() == reflow_block_cache::Complete &&
             reader.IsReady(0),
         "resident inflate OOM retries after releasing unrelated payload");
   Check(loaded.GetPage(47)->GetBuffer() == pinned &&
@@ -615,10 +615,10 @@ void TestBlockCacheRoundtrip() {
   inflate_failure_limit = ~0u;
   reader.Request(79);
   retries = 0;
-  while (reader.Step() == epub_block_cache::Pending && ++retries < 20) {
+  while (reader.Step() == reflow_block_cache::Pending && ++retries < 20) {
   }
   fail_inflate_memory = false;
-  Check(reader.GetResult() == epub_block_cache::NoMemory &&
+  Check(reader.GetResult() == reflow_block_cache::NoMemory &&
             forced_inflate_calls == 2 && retries < 20,
         "persistent resident OOM retries once and stops");
   Check(loaded.GetPage(47)->GetBuffer() == pinned &&
@@ -627,21 +627,21 @@ void TestBlockCacheRoundtrip() {
   reader.Close();
   loaded.Close();
   loaded.SetPosition(47);
-  Require(loaded.StartEpubPageCache(path, 128 * 1024),
+  Require(loaded.StartReflowPageCache(path, 128 * 1024),
           "attach private page backend");
-  while (loaded.AdvanceEpubPageCache() > 0) {
+  while (loaded.AdvanceReflowPageCache() > 0) {
   }
-  Check(loaded.IsEpubPageReady(47), "Book restores saved page");
+  Check(loaded.IsReflowPageReady(47), "Book restores saved page");
   loaded.SetPosition(79);
   Check(loaded.GetPosition() == 47,
         "navigation waits before committing position");
-  while (loaded.AdvanceEpubPageCache() > 0) {
+  while (loaded.AdvanceReflowPageCache() > 0) {
   }
-  Check(loaded.GetPosition() == 79 && loaded.IsEpubPageReady(79),
+  Check(loaded.GetPosition() == 79 && loaded.IsReflowPageReady(79),
         "loaded navigation commits target");
   loaded.SetPosition(78);
-  Check(loaded.GetPosition() == 78 && !loaded.HasPendingEpubNavigation() &&
-            loaded.IsEpubPageReady(78),
+  Check(loaded.GetPosition() == 78 && !loaded.HasPendingReflowNavigation() &&
+            loaded.IsReflowPageReady(78),
         "cached neighbor navigation commits synchronously");
   loaded.Close();
   epub_page_cache::LoadSession facade;
@@ -654,20 +654,20 @@ void TestBlockCacheRoundtrip() {
   loaded.Close();
   const u32 *prepared = fixture.source.GetPage(0)->GetBuffer();
   fixture.source.SetOpenSessionId(901);
-  epub_block_cache::Reader *validated = new epub_block_cache::Reader;
+  reflow_block_cache::Reader *validated = new reflow_block_cache::Reader;
   Require(validated->Begin(&fixture.source, path, 128 * 1024, true) ==
-              epub_block_cache::Pending,
+              reflow_block_cache::Pending,
           "validate index while prepared pages remain resident");
-  while (validated->Step() == epub_block_cache::Pending) {
+  while (validated->Step() == reflow_block_cache::Pending) {
   }
-  Check(validated->GetResult() == epub_block_cache::Complete &&
+  Check(validated->GetResult() == reflow_block_cache::Complete &&
             fixture.source.GetPage(0)->GetBuffer() == prepared,
         "index validation preserves prepared page buffers");
   const size_t checked_bytes = validated->BytesRead();
   Require(validated->ActivatePreparedPages() &&
-              fixture.source.AdoptPreparedEpubPageCache(validated),
+              fixture.source.AdoptPreparedReflowPageCache(validated),
           "adopt checked cache without closing the book");
-  while (fixture.source.AdvanceEpubPageCache() > 0) {
+  while (fixture.source.AdvanceReflowPageCache() > 0) {
   }
   Check(fixture.source.GetOpenSessionId() == 901 &&
             fixture.source.GetPage(0)->GetBuffer() == prepared,
@@ -681,9 +681,9 @@ void TestBlockCacheRoundtrip() {
   fputc(byte ^ 64, fp);
   fclose(fp);
   reader.Begin(&loaded, path, 0);
-  while (reader.Step() == epub_block_cache::Pending) {
+  while (reader.Step() == reflow_block_cache::Pending) {
   }
-  Check(reader.GetResult() == epub_block_cache::Corrupt,
+  Check(reader.GetResult() == reflow_block_cache::Corrupt,
         "block CRC detects changed data");
   reader.Close();
   loaded.Close();
@@ -701,24 +701,24 @@ void TestLongBlockIndexStrings() {
   fixture.source.RegisterInlineLinkHref(href);
   fixture.source.SetChapterDocStartPage(href, 0);
   const std::string path = fixture.directory + "/long.epc";
-  epub_block_cache::Writer writer;
+  reflow_block_cache::Writer writer;
   Require(writer.Begin(&fixture.source, path) && writer.AppendDocument(0, 1),
           "begin long metadata cache");
-  while (writer.Step() == epub_block_cache::Pending) {
+  while (writer.Step() == reflow_block_cache::Pending) {
   }
   Check(writer.Finish(), "long metadata can finish cache");
-  while (writer.Step() == epub_block_cache::Pending) {
+  while (writer.Step() == reflow_block_cache::Pending) {
   }
-  Check(writer.GetResult() == epub_block_cache::Complete,
+  Check(writer.GetResult() == reflow_block_cache::Complete,
         "display labels cannot disable caching");
   Book loaded(fixture.ctx);
-  epub_block_cache::Reader reader;
+  reflow_block_cache::Reader reader;
   reader.Begin(&loaded, path, 0);
-  while (reader.Step() == epub_block_cache::Pending) {
+  while (reader.Step() == reflow_block_cache::Pending) {
   }
-  Check(reader.GetResult() == epub_block_cache::Complete,
+  Check(reader.GetResult() == reflow_block_cache::Complete,
         "long metadata reopens");
-  if (reader.GetResult() == epub_block_cache::Complete) {
+  if (reader.GetResult() == reflow_block_cache::Complete) {
     Check(std::string(loaded.GetTitle()) == std::string(999, 'a'),
           "display title truncates at a UTF8 boundary");
     Check(loaded.GetChapters()[0].title == std::string(2048, 'c'),

@@ -29,7 +29,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 #include "formats/epub/epub.h"
 #include "formats/epub/epub_preparation.h"
-#include "formats/epub/epub_block_cache.h"
+#include "formats/common/reflow_block_cache.h"
 #include "formats/common/page_cache_utils.h"
 #include "shared/path_constants.h"
 #include <new>
@@ -702,8 +702,8 @@ struct Preparation::State {
   std::vector<std::string> hrefs;
   std::map<std::string, u16> page_starts;
   epub_page_cache::LoadSession loader;
-  epub_block_cache::Writer writer;
-  std::unique_ptr<epub_block_cache::Reader> validator;
+  reflow_block_cache::Writer writer;
+  std::unique_ptr<reflow_block_cache::Reader> validator;
   enum Phase {
     Cache,
     Package,
@@ -809,7 +809,7 @@ bool Preparation::Begin(Book *book, const std::string &source,
     fclose(fp);
   }
   if (v23 && residency_budget) {
-    if (!book->StartEpubPageCache(s.path, residency_budget)) {
+    if (!book->StartReflowPageCache(s.path, residency_budget)) {
       s.result = Failed;
       return false;
     }
@@ -892,14 +892,14 @@ Preparation::Result Preparation::Step() {
   if (s.phase == State::Cache) {
     auto r = epub_page_cache::LoadSession::Missing;
     if (s.resident) {
-      const int result = s.book->AdvanceEpubPageCache();
+      const int result = s.book->AdvanceReflowPageCache();
       if (result > 0)
         return Pending;
-      const auto cache_result = s.book->GetEpubPageCacheResult();
+      const auto cache_result = s.book->GetReflowPageCacheResult();
       r = result == 0 ? epub_page_cache::LoadSession::Complete
-          : cache_result == epub_block_cache::Corrupt
+          : cache_result == reflow_block_cache::Corrupt
               ? epub_page_cache::LoadSession::Corrupt
-          : cache_result == epub_block_cache::NoMemory
+          : cache_result == reflow_block_cache::NoMemory
               ? epub_page_cache::LoadSession::NoMemory
               : epub_page_cache::LoadSession::IoError;
       if (result < 0) {
@@ -994,9 +994,9 @@ Preparation::Result Preparation::Step() {
     const u64 begin = osGetTime();
     const auto r = s.writer.Step();
     s.cache_ms += osGetTime() - begin;
-    if (r == epub_block_cache::Pending)
+    if (r == reflow_block_cache::Pending)
       return Pending;
-    if (r != epub_block_cache::Ready) {
+    if (r != reflow_block_cache::Ready) {
       s.writer.Abort();
       s.writer_open = false;
       s.persistence_failed = true;
@@ -1030,9 +1030,9 @@ Preparation::Result Preparation::Step() {
     const u64 begin = osGetTime();
     const auto r = s.writer.Step();
     s.cache_ms += osGetTime() - begin;
-    if (r == epub_block_cache::Pending)
+    if (r == reflow_block_cache::Pending)
       return Pending;
-    if (r != epub_block_cache::Complete) {
+    if (r != reflow_block_cache::Complete) {
       s.persistence_failed = true;
       s.writer.Abort();
     }
@@ -1046,10 +1046,10 @@ Preparation::Result Preparation::Step() {
     const unsigned prepared_pages = s.book->GetPageCount();
 #endif
     if (s.residency_budget && !s.persistence_failed) {
-      s.validator.reset(new (std::nothrow) epub_block_cache::Reader);
+      s.validator.reset(new (std::nothrow) reflow_block_cache::Reader);
       if (s.validator &&
           s.validator->Begin(s.book, s.path, s.residency_budget, true) ==
-              epub_block_cache::Pending) {
+              reflow_block_cache::Pending) {
         s.phase = State::Validate;
         s.result = Pending;
       } else
@@ -1064,11 +1064,11 @@ Preparation::Result Preparation::Step() {
              s.persistence_failed ? 0 : 1);
   } else if (s.phase == State::Validate) {
     const auto result = s.validator->Step();
-    if (result == epub_block_cache::Pending)
+    if (result == reflow_block_cache::Pending)
       return Pending;
-    if (result == epub_block_cache::Complete &&
+    if (result == reflow_block_cache::Complete &&
         s.validator->ActivatePreparedPages() &&
-        s.book->AdoptPreparedEpubPageCache(s.validator.get())) {
+        s.book->AdoptPreparedReflowPageCache(s.validator.get())) {
       s.validator.release();
       s.resident = true;
       s.metadata = true;

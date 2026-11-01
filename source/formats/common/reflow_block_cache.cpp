@@ -1,4 +1,4 @@
-#include "formats/epub/epub_block_cache.h"
+#include "formats/common/reflow_block_cache.h"
 #include "formats/common/page_cache_codec.h"
 #include "formats/common/cache_memory_utils.h"
 #include "formats/common/page_cache_utils.h"
@@ -18,7 +18,7 @@
 #include <unistd.h>
 #include <zlib.h>
 
-namespace epub_block_cache {
+namespace reflow_block_cache {
 namespace {
 const uint32_t kMagic = 0x45504347;
 const unsigned kIndexLimit = 4 * 1024 * 1024, kBytes = 65536,
@@ -989,4 +989,4 @@ Result Reader::Advance() {
     s.result = Complete;
   return s.result;
 }
-} // namespace epub_block_cache
+} // namespace reflow_block_cache

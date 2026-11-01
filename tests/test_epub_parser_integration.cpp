@@ -675,8 +675,8 @@ void TestCooperativePreparation() {
              prep.GetResult() == epub_parser::Preparation::Complete &&
                  book.GetPageCount() == pages);
   ExpectTrue("warm preparation attaches residency",
-             book.HasEpubPageCache() &&
-                 book.IsEpubPageReady(book.GetPosition()));
+             book.HasReflowPageCache() &&
+                 book.IsReflowPageReady(book.GetPosition()));
   book.Close();
   book.SetOpenSessionId(82);
   ExpectTrue("begin memory-limited resident load",
@@ -700,7 +700,7 @@ void TestCooperativePreparation() {
   }
   ExpectTrue("corrupt resident cache reparses without losing session",
              prep.GetResult() == epub_parser::Preparation::Complete &&
-                 book.GetOpenSessionId() == 83 && book.HasEpubPageCache());
+                 book.GetOpenSessionId() == 83 && book.HasReflowPageCache());
   book.Close();
   remove(file.c_str());
   book.SetOpenSessionId(81);
@@ -729,7 +729,7 @@ void TestCooperativePreparation() {
   ExpectTrue("cache validation failure retains complete readable book",
              prep.GetResult() == epub_parser::Preparation::Complete &&
                  prep.PersistenceFailed() && prepared_pages == pages &&
-                 book.GetPageCount() == pages && !book.HasEpubPageCache() &&
+                 book.GetPageCount() == pages && !book.HasReflowPageCache() &&
                  book.GetPage(0)->GetBuffer() != nullptr &&
                  book.GetOpenSessionId() == 81);
   book.Close();
@@ -810,7 +810,7 @@ void TestRealPreparationFromEnv() {
   }
   ExpectTrue("real partial warm complete",
              prep.GetResult() == epub_parser::Preparation::Complete &&
-                 book.HasEpubPageCache() && book.GetPosition() == (int)target);
+                 book.HasReflowPageCache() && book.GetPosition() == (int)target);
   page = book.GetPage(target);
   ExpectTrue("real partial page bytes match",
              page->GetLength() == (int)target_length &&

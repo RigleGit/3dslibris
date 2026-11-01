@@ -68,7 +68,7 @@ void App::ShowLibraryView()
              bookcurrent_->GetPosition(), bookcurrent_->GetPosition() + 1,
              bookcurrent_->GetPageCount());
 #endif
-    bookcurrent_->CancelEpubPageRequest();
+    bookcurrent_->CancelReflowPageRequest();
     bookcurrent_->FlushPendingCacheSaves();
     // Persist current page/bookmarks when leaving the reader to browser view.
     PersistPrefs();

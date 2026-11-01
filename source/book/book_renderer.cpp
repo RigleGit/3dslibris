@@ -31,9 +31,9 @@ bool CanDrawReflow(Book *book) {
 }
 
 void DrawReflow(Book *book, Text *text) {
-  if (book->IsEpubPageReady(book->GetPosition())) {
+  if (book->IsReflowPageReady(book->GetPosition())) {
     book->GetPage()->Draw(text);
-    book->TrimEpubPageCache();
+    book->TrimReflowPageCache();
   }
 }
 

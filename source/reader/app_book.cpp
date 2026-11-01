@@ -45,7 +45,7 @@
 #include "shared/debug_log.h"
 #include "book/layout_reflow.h"
 #include "formats/epub/epub_preparation.h"
-#include "formats/epub/epub_block_cache.h"
+#include "formats/common/reflow_block_cache.h"
 #include "reader/search_session.h"
 #include "menus/bookmark_menu.h"
 #include "menus/chapter_menu.h"
@@ -515,7 +515,7 @@ void ReaderController::ReportPageCacheError() {
   cache_page_error_ = true;
   Book *book = app_.GetCurrentBook();
   const bool oom =
-      book && book->GetEpubPageCacheResult() == epub_block_cache::NoMemory;
+      book && book->GetReflowPageCacheResult() == reflow_block_cache::NoMemory;
   DrawOpeningSplashImpl(&app_, 0, 0,
                         oom ? "not enough cache memory; B: back"
                             : "cache read failed; A: rebuild B: back");
@@ -524,7 +524,7 @@ void ReaderController::ReportPageCacheError() {
 bool ReaderController::PumpPageCache(const FrameInput &input) {
   Book *book = app_.GetCurrentBook();
   const AppMode mode = app_.GetMode();
-  if (!book || !book->HasEpubPageCache() ||
+  if (!book || !book->HasReflowPageCache() ||
       (mode != AppMode::Book && mode != AppMode::Search &&
        mode != AppMode::Bookmarks && mode != AppMode::Chapters))
     return false;
@@ -533,14 +533,14 @@ bool ReaderController::PumpPageCache(const FrameInput &input) {
   if (cache_page_error_) {
     if (input.keys_down & (app_.key.b | app_.key.start)) {
       cache_page_error_ = false;
-      book->CancelEpubPageRequest();
+      book->CancelReflowPageRequest();
       app_.ShowLibraryView();
       return true;
     }
     if ((input.keys_down & app_.key.a) &&
-        book->GetEpubPageCacheResult() != epub_block_cache::NoMemory) {
+        book->GetReflowPageCacheResult() != reflow_block_cache::NoMemory) {
       cache_page_error_ = false;
-      book->InvalidateEpubPageCacheFile();
+      book->InvalidateReflowPageCacheFile();
       const int position = book->GetPosition();
       CloseBook(false);
       book->SetPosition(position);
@@ -550,26 +550,26 @@ bool ReaderController::PumpPageCache(const FrameInput &input) {
     }
     return true;
   }
-  const auto cache_result = book->GetEpubPageCacheResult();
-  if (cache_result == epub_block_cache::NoMemory ||
-      cache_result == epub_block_cache::IoError ||
-      cache_result == epub_block_cache::Corrupt) {
+  const auto cache_result = book->GetReflowPageCacheResult();
+  if (cache_result == reflow_block_cache::NoMemory ||
+      cache_result == reflow_block_cache::IoError ||
+      cache_result == reflow_block_cache::Corrupt) {
     ReportPageCacheError();
     return true;
   }
-  if (!book->HasPendingEpubPageRead()) {
+  if (!book->HasPendingReflowPageRead()) {
     cache_page_started_ms_ = 0;
     return false;
   }
   // The search owns its CPU/I/O budget and can resume after each requested
   // block.
-  if (mode == AppMode::Search && !book->HasPendingEpubNavigation())
+  if (mode == AppMode::Search && !book->HasPendingReflowNavigation())
     return false;
   if (!cache_page_started_ms_)
     cache_page_started_ms_ = input.timestamp_ms;
   if (mode == AppMode::Book &&
       (input.keys_down & (app_.key.b | app_.key.start))) {
-    book->CancelEpubPageRequest();
+    book->CancelReflowPageRequest();
     cache_page_loading_ = false;
     cache_page_started_ms_ = 0;
     if (input.keys_down & app_.key.start)
@@ -586,7 +586,7 @@ bool ReaderController::PumpPageCache(const FrameInput &input) {
   const u64 work_begin = osGetTime();
   int result;
   do {
-    result = book->AdvanceEpubPageCache();
+    result = book->AdvanceReflowPageCache();
   } while (result > 0 && osGetTime() - work_begin < 30 &&
            !app_.ShouldAbortWork());
   if (app_.ShouldAbortWork())

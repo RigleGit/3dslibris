@@ -568,7 +568,7 @@ bool ChapterMenu::ResolveTargetPage(u16 index, u16 *page_out) {
   }
 
   // EPUB v23 persists targets resolved during complete pagination.
-  if (book->HasEpubPageCache())
+  if (book->HasReflowPageCache())
     return true;
   TocQuality q = book->GetTocQuality();
   if (q == TOC_QUALITY_UNKNOWN) {

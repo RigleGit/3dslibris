@@ -32,7 +32,7 @@ for mode in release debug; do
   "$TEST_ROOT/source/book/heading_layout.cpp" \
   "$TEST_ROOT/source/book/inline_image_layout.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_page_cache.cpp" \
-  "$TEST_ROOT/source/formats/epub/epub_block_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/reflow_block_cache.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_codec.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_heading_markers.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_utils.cpp" \

@@ -2,7 +2,7 @@
 #include <cstddef>
 #include <string>
 class Book;
-namespace epub_block_cache {
+namespace reflow_block_cache {
 enum Result : int {
   Pending,
   Ready,
@@ -60,4 +60,4 @@ private:
   Reader(const Reader &);
   Reader &operator=(const Reader &);
 };
-} // namespace epub_block_cache
+} // namespace reflow_block_cache
