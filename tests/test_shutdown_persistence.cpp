@@ -77,6 +77,7 @@ public:
   std::unique_ptr<Preparation> preparation_;
   Book *cache_preparing_ = nullptr;
   bool cache_page_error_ = false, cache_page_loading_ = false;
+  uint64_t cache_page_started_ms_ = 0;
   Book *progress_autosave_book_ = nullptr;
   bool progress_autosave_dirty_ = false;
   u64 last_progress_persist_ms_ = 0;

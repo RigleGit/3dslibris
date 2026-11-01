@@ -108,6 +108,7 @@ void ReaderController::StartSearch(bool backwards, bool first) {
   if (s.engine.GetStatus() == text_search::Searching)
     LogSearch(app_, s, "cancel");
   s.engine.Cancel();
+  s.book->CancelEpubPageRequest();
   if (!s.engine.Configure(s.query, s.whole_words)) {
     s.message = s.engine.GetError(); s.editor = s.dirty = true; return;
   }
@@ -253,11 +254,14 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
       }
     }
     if (s.engine.GetStatus() == text_search::Searching) {
-      const uint64_t kSearchSliceMs = 12;
+      const uint64_t kSearchSliceMs = 30;
       const uint64_t started = osGetTime();
-      do { s.engine.Pump(32);
+      do {
+        s.engine.Pump(32);
+        if (s.engine.IsWaitingForPage() && book->HasPendingEpubPageRead()) {
+          if (book->AdvanceEpubPageCache() < 0) { ReportPageCacheError(); return; }
+        }
       } while (s.engine.GetStatus() == text_search::Searching &&
-               !s.engine.IsWaitingForPage() &&
                osGetTime() - started < kSearchSliceMs &&
                !app_.ShouldAbortWork());
       const uint64_t elapsed = osGetTime() - started;

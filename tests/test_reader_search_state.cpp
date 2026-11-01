@@ -19,6 +19,11 @@ bool HitsButton(const TouchCandidates&,Button*,int) { return false; }
 struct Book {
   std::vector<std::vector<uint32_t>> pages{{'h','i','t'}, {'h','i','t'}, {'n','o'}, {'n','o'}, {'h','i','t'}};
   std::vector<page_search::Events> events{5};
+  bool delayed_pages = false;
+  std::vector<bool> ready;
+  unsigned pending = 0, cache_advances = 0;
+  bool HasPendingEpubPageRead() { return delayed_pages && !ready[pending]; }
+  int AdvanceEpubPageCache() { ++cache_advances; ready[pending] = true; return 0; }
   u16 position=0;
   unsigned GetOpenSessionId() { return 1; }
   unsigned GetLayoutRevision() { return 1; }
@@ -40,6 +45,10 @@ Source FromBook(Book *b) {
     Book &book=*(Book*)ctx;
     if(i>=book.pages.size()) return false;
     *out={book.pages[i].data(),book.pages[i].size(),&book.events[i]}; return true;
+  }, [](void *ctx, uint32_t i) {
+    Book &book=*(Book*)ctx;
+    if (!book.delayed_pages || book.ready[i]) return PageReady;
+    book.pending=i; return PagePending;
   }};
 }
 }
@@ -95,6 +104,7 @@ struct ReaderController {
     auto &s=*search_; s.book=&app.book;s.session=s.revision=1;s.pages=5;
     s.active=true;s.wait_release=false;s.editor=false;s.query="hit";
   }
+  void ReportPageCacheError() { assert(false); }
   void DrawSearch() { search_->dirty=false; }
   void InvalidateSearch(bool) { search_->active=false; }
   void MarkProgressDirty(Book*) {}
@@ -198,8 +208,20 @@ void TestCancellationLogging() {
   reader.StartSearch(false,true);reader.StartSearch(true,false);
   assert(app.search_logs==std::vector<std::string>{"cancel"});
 }
+void TestSearchConsumesMoreThanOnePendingPagePerFrame() {
+  App app; ReaderController reader(app); auto &s=*reader.search_;
+  app.book.pages.assign(80, {'a', 'b'});
+  app.book.events.resize(80);
+  app.book.delayed_pages=true; app.book.ready.assign(80, false);
+  s.pages=80; s.query="missing";
+  reader.StartSearch(false, true);
+  reader.RunSearchFrame({});
+  assert(s.engine.GetStatus()==text_search::NotFound);
+  assert(app.book.cache_advances==80);
+}
 int main(int argc,char **argv) {
   struct Case { const char *name;void (*run)(); } cases[]={
+    {"pending-pages",TestSearchConsumesMoreThanOnePendingPagePerFrame},
     {"existing",TestExistingSearchState},{"shoulders",TestMappedShoulders},
     {"start-failure",TestStartFailure},{"keyboard-home",TestKeyboardDeferredByHome},
     {"exclusive-end",TestExclusiveMatchEnd},{"continuation",TestContinuationMessage},

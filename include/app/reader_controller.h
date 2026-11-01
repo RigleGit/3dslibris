@@ -43,6 +43,8 @@ private:
   bool cache_page_error_ = false;
   bool cache_page_loading_ = false;
   uint64_t cache_draw_ms_;
+  uint64_t cache_page_started_ms_ = 0;
+  void ReportPageCacheError();
   bool AdvanceCachePreparation(const FrameInput &input);
   void DrawImageViewer();
   bool LoadImageViewer(int zoom);
