@@ -431,6 +431,7 @@ void TestBlockCacheRoundtrip() {
   Require(writer.Finish(),"start publishing index");
   while(writer.Step()==epub_block_cache::Pending) {}
   Check(writer.GetResult()==epub_block_cache::Complete,"publish complete v23 cache");
+  struct stat info; stat(path.c_str(),&info);
   Book loaded(fixture.ctx); epub_block_cache::Reader reader;
   Require(reader.Begin(&loaded,path,0)==epub_block_cache::Pending,"open complete block reader");
   unsigned steps=0;
@@ -440,9 +441,36 @@ void TestBlockCacheRoundtrip() {
   Check(loaded.GetPage(47)->GetSearchEvents()==events,"search events restored");
   Check(loaded.GetChapters().size()==1 && loaded.GetChapters()[0].page==31,"chapters restored");
   u16 target=0; Check(loaded.FindChapterAnchorPage("two.xhtml#anchor",&target)&&target==47,"anchors restored");
-  struct stat info; stat(path.c_str(),&info);
+  stat(path.c_str(),&info);
   Check(info.st_size<80*1024,"block format reduces repetitive content");
   reader.Close(); loaded.Close();
+  loaded.SetPosition(47);
+  reader.Begin(&loaded,path,128*1024);
+  unsigned initial_steps=0;
+  while(reader.Step()==epub_block_cache::Pending && ++initial_steps<200) {}
+  Check(reader.GetResult()==epub_block_cache::Complete && reader.IsReady(47) && !reader.IsReady(0),
+        "partial reader starts at saved position");
+  Check(reader.BytesRead()<(size_t)info.st_size,"partial reopen avoids unrelated blocks");
+  reader.Pin(47);
+  const u32 *pinned=loaded.GetPage(47)->GetBuffer();
+  for(unsigned page=0;page<80;++page) {
+    reader.Request(page);unsigned turns=0;
+    while(reader.Step()==epub_block_cache::Pending && ++turns<40) {}
+    Check(reader.GetResult()==epub_block_cache::Complete && reader.IsReady(page),
+          "residency makes progress when eviction is needed");
+    Check(reader.ResidentBytes()<=128*1024,"payload stays within budget");
+    Check(loaded.GetPage(47)->GetBuffer()==pinned,"visible page remains pinned");
+  }
+  reader.Close(); loaded.Close();
+  loaded.SetPosition(47);
+  Require(loaded.StartEpubPageCache(path,128*1024),"attach private page backend");
+  while(loaded.AdvanceEpubPageCache()>0) {}
+  Check(loaded.IsEpubPageReady(47),"Book restores saved page");
+  loaded.SetPosition(79);
+  Check(loaded.GetPosition()==47,"navigation waits before committing position");
+  while(loaded.AdvanceEpubPageCache()>0) {}
+  Check(loaded.GetPosition()==79 && loaded.IsEpubPageReady(79),"loaded navigation commits target");
+  loaded.Close();
   epub_page_cache::LoadSession facade; facade.Begin(&loaded,path);
   while(facade.Step()==epub_page_cache::LoadSession::Pending) {}
   Check(facade.GetResult()==epub_page_cache::LoadSession::Complete && loaded.GetPageCount()==80,

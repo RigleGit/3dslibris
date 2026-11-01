@@ -300,7 +300,9 @@ struct Reader::State {
     while(usage()+incoming>limit) {
       size_t oldest=cache.size();
       for(size_t i=0;i<cache.size();++i)
-        if(cache[i].id!=wanted_block && (oldest==cache.size()||cache[i].age<cache[oldest].age))oldest=i;
+        if(cache[i].id!=wanted_block &&
+           (!budget || (cache[i].id!=refs[target].text.block && cache[i].id!=refs[target].search.block)) &&
+           (oldest==cache.size()||cache[i].age<cache[oldest].age))oldest=i;
       if(oldest!=cache.size()) {cache.erase(cache.begin()+oldest);continue;}
       if(!budget)break;
       unsigned page=header.pages;
@@ -366,7 +368,8 @@ Result Reader::Step() {
       s.index_read+=n;return Pending;
     }
     if(Crc(s.index.data(),s.index.size())!=s.header.index_crc || !s.ParseIndex())return s.result=Corrupt;
-    s.phase=2;s.target=0;return Pending;
+    s.phase=2;s.target=std::min((unsigned)std::max(0,s.book->GetPosition()),s.header.pages-1);
+    s.pinned=s.target;return Pending;
   }
   const unsigned target=s.budget?s.target:s.full_next;
   if(target>=s.header.pages)return s.result=Complete;
