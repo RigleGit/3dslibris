@@ -324,17 +324,6 @@ static int ParseEpubSpineDocuments(
     std::string path = BuildDocPath(folder, href.c_str());
     std::string path_key = NormalizePath(path);
     if (LocateZipEntrySafe(uf, path, reporter, "SPINE", &zip_index)) {
-      unz_file_info memory_info;
-      if (unzGetCurrentFileInfo(uf, &memory_info, NULL, 0, NULL, 0, NULL, 0) !=
-              UNZ_OK ||
-          memory_info.uncompressed_size >
-              std::numeric_limits<size_t>::max() / 8 ||
-          !cache_memory::HasHeadroom((size_t)memory_info.uncompressed_size *
-                                     8)) {
-        DBG_LOG(reporter, "EPUB: insufficient memory for the next document");
-        rc = XML_ERROR_NO_MEMORY;
-        break;
-      }
       u16 chapter_start_page = book->GetPageCount();
       std::string chapter_label = BuildChapterLabel(path, chapter_num);
 #ifdef DSLIBRIS_DEBUG
