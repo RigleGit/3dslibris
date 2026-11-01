@@ -37,6 +37,7 @@ struct fz_display_list;
 struct fz_outline;
 namespace epub_page_cache { class StreamWriter; }
 namespace epub_block_cache {
+enum Result : int;
 class Reader;
 }
 namespace book_meta_cache { class Index; }
@@ -464,6 +465,8 @@ public:
   void FinishShutdownReflowWorker();
   void FlushPendingCacheSaves();
   bool StartEpubPageCache(const std::string &path, size_t budget);
+  bool AdoptPreparedEpubPageCache(epub_block_cache::Reader *reader);
+  epub_block_cache::Result GetEpubPageCacheResult() const;
   void TrimEpubPageCache();
   int AdvanceEpubPageCache(); // 1 pending, 0 ready, -1 failed; main thread
                               // only.

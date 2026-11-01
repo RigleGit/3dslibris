@@ -868,6 +868,17 @@ bool Book::StartEpubPageCache(const std::string &path, size_t budget) {
   }
   return true;
 }
+bool Book::AdoptPreparedEpubPageCache(epub_block_cache::Reader *reader) {
+  if (!reader || epub_cache_reader_ || !reader->HasIndex())
+    return false;
+  epub_cache_reader_ = reader;
+  epub_pending_position_ = -1;
+  return true;
+}
+epub_block_cache::Result Book::GetEpubPageCacheResult() const {
+  return epub_cache_reader_ ? epub_cache_reader_->GetResult()
+                            : epub_block_cache::Missing;
+}
 bool Book::HasEpubPageCache() const {
   return epub_cache_reader_ != NULL;
 }

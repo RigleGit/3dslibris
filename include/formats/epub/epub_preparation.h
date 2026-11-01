@@ -5,7 +5,7 @@ class Book;
 namespace epub_parser {
 class Preparation {
 public:
-  enum Result { Pending, Complete, Cancelled, Failed };
+  enum Result { Pending, Complete, Cancelled, Failed, NoMemory, IoError };
   Preparation();
   ~Preparation();
   bool Begin(Book *book, const std::string &source,

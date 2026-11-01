@@ -45,6 +45,20 @@ extern "C" ssize_t ObserveBlockRead(int fd, void *data, size_t size) {
   return read(fd, data, size);
 }
 
+#include <zlib.h>
+#undef uncompress
+extern "C" int uncompress(Bytef *, uLongf *, const Bytef *, uLong);
+static bool fail_inflate_memory = false;
+static unsigned forced_inflate_calls = 0;
+extern "C" int ObserveUncompress(Bytef *out, uLongf *size, const Bytef *in,
+                                 uLong n) {
+  if (fail_inflate_memory) {
+    ++forced_inflate_calls;
+    return Z_MEM_ERROR;
+  }
+  return uncompress(out, size, in, n);
+}
+
 #ifdef DSLIBRIS_TEST_CLOCK
 long long dslibris_test_clock = 0;
 long long dslibris_test_clock_step = 1;
@@ -489,6 +503,22 @@ void TestBlockCacheRoundtrip() {
   // The following independent read checks that the previous content survived.
   struct stat info;
   stat(path.c_str(), &info);
+  Book memory_limited(fixture.ctx);
+  epub_block_cache::Reader failed_reader;
+  Require(failed_reader.Begin(&memory_limited, path, 0) ==
+              epub_block_cache::Pending,
+          "start failing inflater");
+  fail_inflate_memory = true;
+  forced_inflate_calls = 0;
+  while (failed_reader.Step() == epub_block_cache::Pending) {
+  }
+  fail_inflate_memory = false;
+  Check(forced_inflate_calls > 0 &&
+            failed_reader.GetResult() == epub_block_cache::NoMemory,
+        "inflate allocation failure is not cache corruption");
+  Check(access(path.c_str(), R_OK) == 0, "inflate OOM keeps the cache");
+  failed_reader.Close();
+  memory_limited.Close();
   Book loaded(fixture.ctx);
   epub_block_cache::Reader reader;
   Require(reader.Begin(&loaded, path, 0) == epub_block_cache::Pending,
@@ -592,6 +622,28 @@ void TestBlockCacheRoundtrip() {
             loaded.GetPageCount() == 80,
         "v23 reopens through the shared complete reader");
   loaded.Close();
+  const u32 *prepared = fixture.source.GetPage(0)->GetBuffer();
+  fixture.source.SetOpenSessionId(901);
+  epub_block_cache::Reader *validated = new epub_block_cache::Reader;
+  Require(validated->Begin(&fixture.source, path, 128 * 1024, true) ==
+              epub_block_cache::Pending,
+          "validate index while prepared pages remain resident");
+  while (validated->Step() == epub_block_cache::Pending) {
+  }
+  Check(validated->GetResult() == epub_block_cache::Complete &&
+            fixture.source.GetPage(0)->GetBuffer() == prepared,
+        "index validation preserves prepared page buffers");
+  const size_t checked_bytes = validated->BytesRead();
+  Require(validated->ActivatePreparedPages() &&
+              fixture.source.AdoptPreparedEpubPageCache(validated),
+          "adopt checked cache without closing the book");
+  while (fixture.source.AdvanceEpubPageCache() > 0) {
+  }
+  Check(fixture.source.GetOpenSessionId() == 901 &&
+            fixture.source.GetPage(0)->GetBuffer() == prepared,
+        "resident activation preserves session and visible payload");
+  Check(validated->BytesRead() == checked_bytes,
+        "activation does not reread the saved page from SD");
   FILE *fp = fopen(path.c_str(), "r+b");
   fseek(fp, 35, SEEK_SET);
   int byte = fgetc(fp);

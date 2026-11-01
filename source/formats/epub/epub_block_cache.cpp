@@ -468,7 +468,7 @@ struct Reader::State {
   unsigned phase;
   u64 tick, started = osGetTime(), io_ms = 0, last_slow = 0;
   size_t read_calls = 0;
-  bool logged = false;
+  bool logged = false, validate_only = false;
   std::vector<uint8_t> index;
   std::vector<PageRef> refs;
   std::vector<Block> blocks;
@@ -585,11 +585,14 @@ struct Reader::State {
               unresolved = r.Get<uint16_t>();
     if (quality > TOC_QUALITY_HEURISTIC || !r.ok)
       return false;
-    book->ReservePageCapacity(header.pages);
-    for (unsigned i = 0; i < header.pages; ++i)
-      book->AppendPage();
-    book->SetTitle(title.c_str());
-    book->SetTocConfidence((TocQuality)quality, direct, heuristic, unresolved);
+    if (!validate_only) {
+      book->ReservePageCapacity(header.pages);
+      for (unsigned i = 0; i < header.pages; ++i)
+        book->AppendPage();
+      book->SetTitle(title.c_str());
+      book->SetTocConfidence((TocQuality)quality, direct, heuristic,
+                             unresolved);
+    }
     unsigned count = r.Get<uint32_t>();
     if (count > 4000)
       return false;
@@ -599,7 +602,8 @@ struct Reader::State {
       const std::string text = r.String(2048);
       if (!r.ok || page >= header.pages)
         return false;
-      book->AddChapter(page, text, level);
+      if (!validate_only)
+        book->AddChapter(page, text, level);
     }
     for (unsigned kind = 0; kind < 2; ++kind) {
       count = r.Get<uint32_t>();
@@ -610,10 +614,12 @@ struct Reader::State {
         const std::string text = r.String();
         if (!r.ok || page >= header.pages)
           return false;
-        if (kind)
-          book->SetChapterAnchorPage(text, page);
-        else
-          book->SetChapterDocStartPage(text, page);
+        if (!validate_only) {
+          if (kind)
+            book->SetChapterAnchorPage(text, page);
+          else
+            book->SetChapterDocStartPage(text, page);
+        }
       }
     }
     for (unsigned kind = 0; kind < 2; ++kind) {
@@ -624,6 +630,8 @@ struct Reader::State {
         const std::string text = r.String();
         if (!r.ok || text.empty())
           return false;
+        if (validate_only)
+          continue;
         if (kind) {
           if (!book->RegisterInlineLinkHref(text))
             return false;
@@ -713,9 +721,11 @@ struct Reader::State {
     const Result read_result = ReadBlock(b, bytes.data());
     if (read_result != Ready)
       return read_result;
+    bool out_of_memory = false;
     if (!page_cache_codec::Unpack(bytes.data(), bytes.size(), b.encoded,
-                                  b.compressed, &encoded) ||
-        Crc(encoded.data(), encoded.size()) != b.crc)
+                                  b.compressed, &encoded, &out_of_memory))
+      return out_of_memory ? NoMemory : Corrupt;
+    if (Crc(encoded.data(), encoded.size()) != b.crc)
       return Corrupt;
     CachedBlock block;
     block.id = id;
@@ -738,7 +748,8 @@ void Reader::Close() {
 Result Reader::GetResult() const {
   return state_ ? state_->result : Cancelled;
 }
-Result Reader::Begin(Book *book, const std::string &path, size_t budget) {
+Result Reader::Begin(Book *book, const std::string &path, size_t budget,
+                     bool validate_only) {
   Close();
   state_ = new (std::nothrow) State;
   if (!state_)
@@ -747,7 +758,8 @@ Result Reader::Begin(Book *book, const std::string &path, size_t budget) {
   s.book = book;
   s.path = path;
   s.budget = budget;
-  if (!book || book->GetPageCount())
+  s.validate_only = validate_only;
+  if (!book || (!validate_only && book->GetPageCount()))
     return s.result = IoError;
   s.fd = open(path.c_str(), O_RDONLY);
   if (s.fd < 0)
@@ -759,7 +771,7 @@ Result Reader::Begin(Book *book, const std::string &path, size_t budget) {
   return s.result = Pending;
 }
 bool Reader::HasIndex() const {
-  return state_ && state_->phase == 2;
+  return state_ && state_->phase >= 2;
 }
 size_t Reader::ResidentBytes() const {
   return state_ ? state_->Memory() : 0;
@@ -790,8 +802,35 @@ void Reader::InvalidateFile() {
   if (state_)
     remove(state_->path.c_str());
 }
+bool Reader::ActivatePreparedPages() {
+  if (!state_ || !state_->validate_only || GetResult() != Complete ||
+      !state_->budget)
+    return false;
+  State &s = *state_;
+  Page *page = s.book->GetPage(s.target);
+  const PageRef &ref = s.refs[s.target];
+  if (!page || page->GetLength() != ref.text.count ||
+      page->GetSearchEvents().size() != ref.search.count)
+    return false;
+  const size_t need = 4 * ((size_t)ref.text.count + ref.search.count);
+  const size_t selections = page->GetRenderedSelectables().capacity() *
+                            sizeof(Page::SelectableRenderEntry);
+  if (need + selections > s.budget) {
+    s.result = NoMemory;
+    return false;
+  }
+  s.selection_sizes[s.target] = selections;
+  s.selection_bytes = selections;
+  s.validate_only = false;
+  s.phase = 3;
+  s.full_next = 0;
+  s.payload_bytes = need;
+  s.ready[s.target] = true;
+  s.result = Pending;
+  return true;
+}
 bool Reader::Request(unsigned page) {
-  if (!HasIndex() || page >= state_->header.pages)
+  if (!HasIndex() || state_->phase == 3 || page >= state_->header.pages)
     return false;
   state_->target = page;
   state_->result = IsReady(page) ? Complete : Pending;
@@ -815,7 +854,8 @@ Result Reader::Step() {
   } while (result == Pending && state_ && state_->phase == 2 &&
            !state_->budget && state_->read_calls == reads &&
            osGetTime() - begin < 50);
-  if (state_ && result == Complete && !state_->logged) {
+  if (state_ && result == Complete && !state_->validate_only &&
+      !state_->logged) {
     State &s = *state_;
     s.logged = true;
     DBG_LOGF(s.book->GetStatusReporter(),
@@ -843,9 +883,10 @@ Result Reader::Advance() {
         h.index_size != s.file_size - h.index_offset ||
         (uint64_t)h.pages * 22 + (uint64_t)h.blocks * 28 > h.index_size)
       return s.result = Corrupt;
-    if (!cache_memory::HasHeadroom((size_t)h.index_size * 2 +
-                                       (size_t)h.pages * sizeof(Page),
-                                   512 * 1024))
+    if (!cache_memory::HasHeadroom(
+            (size_t)h.index_size * 2 +
+                (s.validate_only ? 0 : (size_t)h.pages * sizeof(Page)),
+            512 * 1024))
       return s.result = NoMemory;
     s.index.resize(h.index_size);
     s.phase = 1;
@@ -863,11 +904,24 @@ Result Reader::Advance() {
     if (Crc(s.index.data(), s.index.size()) != s.header.index_crc ||
         !s.ParseIndex())
       return s.result = Corrupt;
+    if (s.validate_only && s.book->GetPageCount() != s.header.pages)
+      return s.result = Corrupt;
     s.phase = 2;
     s.target = std::min<unsigned>((unsigned)std::max(0, s.book->GetPosition()),
                                   s.header.pages - 1);
     s.pinned = s.target;
-    return Pending;
+    return s.validate_only ? (s.result = Complete) : Pending;
+  }
+  if (s.phase == 3) {
+    const unsigned end = std::min<unsigned>(s.header.pages, s.full_next + 64);
+    for (; s.full_next < end; ++s.full_next)
+      if (s.full_next != s.pinned)
+        s.book->GetPage(s.full_next)->FreeBuffer();
+    if (s.full_next == s.header.pages) {
+      s.phase = 2;
+      s.result = Complete;
+    }
+    return s.result;
   }
   const unsigned target = s.budget ? s.target : s.full_next;
   if (target >= s.header.pages)

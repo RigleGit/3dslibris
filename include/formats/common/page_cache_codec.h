@@ -27,5 +27,6 @@ bool Decode(const uint8_t *bytes, size_t length, size_t count,
 bool Pack(const std::vector<uint8_t> &encoded, std::vector<uint8_t> *out,
           bool *compressed);
 bool Unpack(const uint8_t *bytes, size_t length, size_t encoded_length,
-            bool compressed, std::vector<uint8_t> *out);
+            bool compressed, std::vector<uint8_t> *out,
+            bool *out_of_memory = nullptr);
 } // namespace page_cache_codec

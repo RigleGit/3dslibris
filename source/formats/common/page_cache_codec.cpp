@@ -121,7 +121,9 @@ bool Pack(const std::vector<uint8_t> &encoded, std::vector<uint8_t> *out,
   return compressor.Pack(encoded, out, compressed);
 }
 bool Unpack(const uint8_t *bytes, size_t length, size_t encoded_length,
-            bool compressed, std::vector<uint8_t> *out) {
+            bool compressed, std::vector<uint8_t> *out, bool *out_of_memory) {
+  if (out_of_memory)
+    *out_of_memory = false;
   if (!out || length > kBlockBytes || encoded_length > kBlockBytes ||
       (length && !bytes))
     return false;
@@ -136,8 +138,10 @@ bool Unpack(const uint8_t *bytes, size_t length, size_t encoded_length,
     return true;
   }
   uLongf decoded = encoded_length;
-  if (uncompress(out->data(), &decoded, bytes, length) != Z_OK ||
-      decoded != encoded_length) {
+  const int result = uncompress(out->data(), &decoded, bytes, length);
+  if (result != Z_OK || decoded != encoded_length) {
+    if (out_of_memory)
+      *out_of_memory = result == Z_MEM_ERROR;
     out->clear();
     return false;
   }

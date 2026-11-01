@@ -31,9 +31,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/epub/epub_preparation.h"
 #include "formats/epub/epub_block_cache.h"
 #include "formats/common/page_cache_utils.h"
-#include "formats/common/cache_memory_utils.h"
 #include "shared/path_constants.h"
 #include <new>
+#include <memory>
 
 #include "formats/epub/epub_cache.h"
 #include "formats/epub/epub_manifest.h"
@@ -703,6 +703,7 @@ struct Preparation::State {
   std::map<std::string, u16> page_starts;
   epub_page_cache::LoadSession loader;
   epub_block_cache::Writer writer;
+  std::unique_ptr<epub_block_cache::Reader> validator;
   enum Phase {
     Cache,
     Package,
@@ -710,6 +711,7 @@ struct Preparation::State {
     WriteDocument,
     Toc,
     Commit,
+    Validate,
     Finished
   } phase;
   Result result;
@@ -825,11 +827,17 @@ bool Preparation::PersistenceFailed() const {
 const char *Preparation::Label() const {
   if (!state_)
     return "cannot prepare book";
+  if (state_->result == NoMemory)
+    return "not enough memory to load cache";
+  if (state_->result == IoError)
+    return "cannot read page cache";
   if (state_->result == Complete && state_->persistence_failed)
-    return "cache not saved; A: read / B: back";
+    return "cache unavailable; A: read / B: back";
   switch (state_->phase) {
   case State::Cache:
     return "loading cache...";
+  case State::Validate:
+    return "checking cache... B: cancel";
   case State::WriteDocument:
   case State::Commit:
     return "saving cache... B: cancel";
@@ -880,9 +888,12 @@ Preparation::Result Preparation::Step() {
       const int result = s.book->AdvanceEpubPageCache();
       if (result > 0)
         return Pending;
+      const auto cache_result = s.book->GetEpubPageCacheResult();
       r = result == 0 ? epub_page_cache::LoadSession::Complete
-          : s.book->IsEpubPageCacheCorrupt()
+          : cache_result == epub_block_cache::Corrupt
               ? epub_page_cache::LoadSession::Corrupt
+          : cache_result == epub_block_cache::NoMemory
+              ? epub_page_cache::LoadSession::NoMemory
               : epub_page_cache::LoadSession::IoError;
       if (result < 0) {
         const unsigned session = s.book->GetOpenSessionId();
@@ -898,9 +909,10 @@ Preparation::Result Preparation::Step() {
       Cancel();
       return Cancelled;
     }
-    if (r == epub_page_cache::LoadSession::NoMemory ||
-        r == epub_page_cache::LoadSession::IoError)
-      return s.result = Failed;
+    if (r == epub_page_cache::LoadSession::NoMemory)
+      return s.result = NoMemory;
+    if (r == epub_page_cache::LoadSession::IoError)
+      return s.result = IoError;
     if (r == epub_page_cache::LoadSession::Corrupt)
       remove(s.path.c_str());
     s.cached = r == epub_page_cache::LoadSession::Complete;
@@ -959,7 +971,7 @@ Preparation::Result Preparation::Step() {
         );
     s.parse_ms += osGetTime() - begin;
     if (rc != 0 && rc != kSpinePending)
-      return s.result = Failed;
+      return s.result = rc == XML_ERROR_NO_MEMORY ? NoMemory : Failed;
     if (s.writer_open) {
       if (s.writer.AppendDocument(s.before, s.book->GetPageCount()))
         s.phase = State::WriteDocument;
@@ -1017,6 +1029,9 @@ Preparation::Result Preparation::Step() {
       s.persistence_failed = true;
       s.writer.Abort();
     }
+    // Release codec and serialized index before validating the published file.
+    s.writer.Abort();
+    s.writer_open = false;
     s.phase = State::Finished;
     s.result = Complete;
 
@@ -1024,16 +1039,14 @@ Preparation::Result Preparation::Step() {
     const unsigned prepared_pages = s.book->GetPageCount();
 #endif
     if (s.residency_budget && !s.persistence_failed) {
-      const unsigned session = s.book->GetOpenSessionId();
-      s.book->Close();
-      s.book->SetOpenSessionId(session);
-      if (!s.book->StartEpubPageCache(s.path, s.residency_budget))
-        return s.result = Failed;
-      s.resident = true;
-      s.metadata = true;
-      s.legacy = false;
-      s.phase = State::Cache;
-      s.result = Pending;
+      s.validator.reset(new (std::nothrow) epub_block_cache::Reader);
+      if (s.validator &&
+          s.validator->Begin(s.book, s.path, s.residency_budget, true) ==
+              epub_block_cache::Pending) {
+        s.phase = State::Validate;
+        s.result = Pending;
+      } else
+        s.persistence_failed = true;
     }
     DBG_LOGF(s.deps.reporter,
              "EPUB preparation done pages=%u parse_ms=%llu cache_ms=%llu "
@@ -1042,7 +1055,26 @@ Preparation::Result Preparation::Step() {
              (unsigned long long)s.cache_ms,
              (unsigned long long)(osGetTime() - s.started),
              s.persistence_failed ? 0 : 1);
+  } else if (s.phase == State::Validate) {
+    const auto result = s.validator->Step();
+    if (result == epub_block_cache::Pending)
+      return Pending;
+    if (result == epub_block_cache::Complete &&
+        s.validator->ActivatePreparedPages() &&
+        s.book->AdoptPreparedEpubPageCache(s.validator.get())) {
+      s.validator.release();
+      s.resident = true;
+      s.metadata = true;
+      s.legacy = false;
+      s.phase = State::Cache;
+    } else {
+      s.validator.reset();
+      s.persistence_failed = true;
+      s.phase = State::Finished;
+      s.result = Complete;
+    }
   }
+
   return s.result;
 }
 } // namespace epub_parser

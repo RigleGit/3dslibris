@@ -45,6 +45,7 @@
 #include "shared/debug_log.h"
 #include "book/layout_reflow.h"
 #include "formats/epub/epub_preparation.h"
+#include "formats/epub/epub_block_cache.h"
 #include "reader/search_session.h"
 #include "menus/bookmark_menu.h"
 #include "menus/chapter_menu.h"
@@ -250,7 +251,8 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
   if (result == epub_parser::Preparation::Pending)
     return true;
   if (result != epub_parser::Preparation::Complete) {
-    DBG_LOG(&app_, "EPUB preparation failed or cancelled");
+    DBG_LOGF(&app_, "EPUB preparation failed result=%d detail=%s", (int)result,
+             preparation_->Label());
     preparation_->Cancel();
     preparation_.reset();
     cache_preparing_ = nullptr;
@@ -490,7 +492,12 @@ void ReaderController::ReportPageCacheError() {
   if (search_)
     search_->engine.Cancel();
   cache_page_error_ = true;
-  DrawOpeningSplashImpl(&app_, 0, 0, "cache read failed; A: rebuild B: back");
+  Book *book = app_.GetCurrentBook();
+  const bool oom =
+      book && book->GetEpubPageCacheResult() == epub_block_cache::NoMemory;
+  DrawOpeningSplashImpl(&app_, 0, 0,
+                        oom ? "not enough cache memory; B: back"
+                            : "cache read failed; A: rebuild B: back");
 }
 
 bool ReaderController::PumpPageCache(const FrameInput &input) {
@@ -509,7 +516,8 @@ bool ReaderController::PumpPageCache(const FrameInput &input) {
       app_.ShowLibraryView();
       return true;
     }
-    if (input.keys_down & app_.key.a) {
+    if ((input.keys_down & app_.key.a) &&
+        book->GetEpubPageCacheResult() != epub_block_cache::NoMemory) {
       cache_page_error_ = false;
       book->InvalidateEpubPageCacheFile();
       const int position = book->GetPosition();
@@ -519,6 +527,13 @@ bool ReaderController::PumpPageCache(const FrameInput &input) {
       OpenBook();
       return true;
     }
+    return true;
+  }
+  const auto cache_result = book->GetEpubPageCacheResult();
+  if (cache_result == epub_block_cache::NoMemory ||
+      cache_result == epub_block_cache::IoError ||
+      cache_result == epub_block_cache::Corrupt) {
+    ReportPageCacheError();
     return true;
   }
   if (!book->HasPendingEpubPageRead()) {

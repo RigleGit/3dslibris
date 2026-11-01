@@ -313,7 +313,9 @@ LoadSession::Result LoadSession::Begin(Book *book, const std::string &path) {
     if (!s.block_reader)
       return s.result = NoMemory;
     const epub_block_cache::Result r = s.block_reader->Begin(book, path, 0);
-    return s.result = r == epub_block_cache::Pending ? Pending : IoError;
+    return s.result = r == epub_block_cache::Pending    ? Pending
+                      : r == epub_block_cache::NoMemory ? NoMemory
+                                                        : IoError;
   }
   rewind(s.fp);
   s.buffer = new (std::nothrow) unsigned char[s.capacity + 16390];

@@ -660,6 +660,61 @@ void TestCooperativePreparation() {
              book.HasEpubPageCache() &&
                  book.IsEpubPageReady(book.GetPosition()));
   book.Close();
+  book.SetOpenSessionId(82);
+  ExpectTrue("begin memory-limited resident load",
+             prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 1));
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("resident OOM is distinct from I/O error",
+             prep.GetResult() == epub_parser::Preparation::NoMemory);
+  ExpectTrue("OOM preserves valid cache and opening session",
+             access(file.c_str(), R_OK) == 0 && book.GetOpenSessionId() == 82);
+  book.Close();
+  FILE *corrupt = fopen(file.c_str(), "r+b");
+  fseek(corrupt, 28, SEEK_SET);
+  const int saved = fgetc(corrupt);
+  fseek(corrupt, 28, SEEK_SET);
+  fputc(saved ^ 1, corrupt);
+  fclose(corrupt);
+  book.SetOpenSessionId(83);
+  prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 128 * 1024);
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("corrupt resident cache reparses without losing session",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 book.GetOpenSessionId() == 83 && book.HasEpubPageCache());
+  book.Close();
+  remove(file.c_str());
+  book.SetOpenSessionId(81);
+  prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 128 * 1024);
+  bool damaged_index = false;
+  unsigned prepared_pages = 0;
+  for (unsigned i = 0;
+       i < 10000 && prep.GetResult() == epub_parser::Preparation::Pending;
+       ++i) {
+    if (!damaged_index &&
+        std::string(prep.Label()) == "checking cache... B: cancel") {
+      prepared_pages = book.GetPageCount();
+      FILE *fp = fopen(file.c_str(), "r+b");
+      ExpectTrue("published cache exists before dropping pages", fp != nullptr);
+      fseek(fp, 28, SEEK_SET);
+      const int byte = fgetc(fp);
+      fseek(fp, 28, SEEK_SET);
+      fputc(byte ^ 1, fp);
+      fclose(fp);
+      damaged_index = true;
+    }
+    prep.Step();
+  }
+  ExpectTrue("cold open validates published index before releasing pages",
+             damaged_index);
+  ExpectTrue("cache validation failure retains complete readable book",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 prep.PersistenceFailed() && prepared_pages == pages &&
+                 book.GetPageCount() == pages && !book.HasEpubPageCache() &&
+                 book.GetPage(0)->GetBuffer() != nullptr &&
+                 book.GetOpenSessionId() == 81);
+  book.Close();
   remove(file.c_str());
   prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub");
   for (unsigned i = 0; i < 4; ++i)

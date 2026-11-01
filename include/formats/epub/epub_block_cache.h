@@ -3,7 +3,7 @@
 #include <string>
 class Book;
 namespace epub_block_cache {
-enum Result {
+enum Result : int {
   Pending,
   Ready,
   Complete,
@@ -37,10 +37,12 @@ public:
   ~Reader();
   // A zero budget requests the complete cooperative reader. Nonzero enables
   // residency.
-  Result Begin(Book *book, const std::string &path, size_t budget);
+  Result Begin(Book *book, const std::string &path, size_t budget,
+               bool validate_only = false);
   Result Step();
   Result GetResult() const;
   void Close();
+  bool ActivatePreparedPages();
   bool Request(unsigned page);
   bool IsReady(unsigned page) const;
   unsigned Links(unsigned page) const;
