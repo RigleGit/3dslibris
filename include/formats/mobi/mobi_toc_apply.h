@@ -32,9 +32,32 @@ int HtmlPosToPage(u32 html_pos,
                   const std::vector<u32> &text_cursor_per_page,
                   u32 *text_pos_out = nullptr);
 
+class Session {
+public:
+  Session();
+  ~Session();
+  bool
+  Begin(Book *book,
+        const std::vector<mobi_structured_toc_parser::MobiStructuredTocEntry>
+            *entries,
+        u32 text_len, bool refine, const std::vector<std::pair<u32, u32>> *map,
+        const std::vector<u32> *cursors, const BuildCallbacks &callbacks);
+  bool Step();
+  size_t Mapped() const;
+  size_t Direct() const;
+  unsigned Progress() const;
+
+private:
+  struct State;
+  State *state_;
+  Session(const Session &);
+  Session &operator=(const Session &);
+};
+
 __attribute__((noinline)) size_t BuildChaptersFromStructuredToc(
     Book *book,
-    const std::vector<mobi_structured_toc_parser::MobiStructuredTocEntry> &entries,
+    const std::vector<mobi_structured_toc_parser::MobiStructuredTocEntry>
+        &entries,
     u32 text_len, size_t *direct_out, bool refine_with_heading_search,
     const std::vector<std::pair<u32, u32>> &html_to_text_map,
     const std::vector<u32> &text_cursor_per_page,

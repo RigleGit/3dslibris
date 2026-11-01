@@ -15,6 +15,7 @@
 #include "formats/mobi/mobi_structured_toc_parser.h"
 
 class Book;
+struct ChapterEntry;
 class IStatusReporter;
 
 namespace mobi_toc_finalize {
@@ -65,6 +66,8 @@ void FinalizePreparedToc(
     const std::vector<MobiHeadingHint> &heading_hints, u32 text_len_for_pos,
     const std::vector<std::pair<u32, u32>> &html_to_text_map,
     const std::vector<u32> &text_cursor_per_page,
-    const FinalizeCallbacks &callbacks, MobiTocFinalizeResult *out);
+    const FinalizeCallbacks &callbacks, MobiTocFinalizeResult *out,
+    size_t applied_mapped = static_cast<size_t>(-1), size_t applied_direct = 0,
+    const std::vector<ChapterEntry> *fallback_chapters = nullptr);
 
 } // namespace mobi_toc_finalize

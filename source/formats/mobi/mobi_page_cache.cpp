@@ -286,7 +286,7 @@ reflow_block_cache::Result LegacyLoader::Step() {
       ok=page_cache_utils::ReadLengthPrefixedString16(s.fp,2048,false,&path) && fread(&follow,1,1,s.fp)==1;
       if(ok){const u16 id=s.book->RegisterInlineImage(path);s.book->SetInlineImageFollowTextLines(id,follow);++s.next;}
     } else {
-      s.book->SetTocConfidence((TocQuality)s.header.toc_quality,s.header.toc_direct,s.header.toc_heuristic,s.header.toc_unresolved);
+      s.book->SetTocConfidence(s.header.toc_quality<=TOC_QUALITY_HEURISTIC ? (TocQuality)s.header.toc_quality : TOC_QUALITY_UNKNOWN,s.header.toc_direct,s.header.toc_heuristic,s.header.toc_unresolved);
       s.book->MarkMobiRenderSettingsApplied(s.book->GetMobiLineWrapFix());
       fclose(s.fp);s.fp=NULL;return s.result=Complete;
     }

@@ -71,7 +71,9 @@ void FinalizePreparedToc(
     const std::vector<MobiHeadingHint> &heading_hints, u32 text_len_for_pos,
     const std::vector<std::pair<u32, u32>> &html_to_text_map,
     const std::vector<u32> &text_cursor_per_page,
-    const FinalizeCallbacks &callbacks, MobiTocFinalizeResult *out) {
+    const FinalizeCallbacks &callbacks, MobiTocFinalizeResult *out,
+    size_t applied_mapped, size_t applied_direct,
+    const std::vector<ChapterEntry> *fallback_chapters) {
   if (!book)
     return;
 
@@ -91,14 +93,17 @@ void FinalizePreparedToc(
                                                          text_cursor_per_page);
 
   if (have_structured_toc && allow_structured_toc) {
-    const std::vector<ChapterEntry> fallback = book->GetChapters();
-    book->ClearChapters();
+    const std::vector<ChapterEntry> fallback = fallback_chapters ? *fallback_chapters : book->GetChapters();
+    if (applied_mapped == static_cast<size_t>(-1)) book->ClearChapters();
     mobi_toc_apply::BuildCallbacks toc_callbacks;
     toc_callbacks.normalize_heading_needle = callbacks.normalize_heading_needle;
     toc_callbacks.page_has_heading_needle = callbacks.page_has_heading_needle;
     toc_callbacks.add_chapter_at_page_if_unique =
         callbacks.add_chapter_at_page_if_unique;
-    mapped_structured = mobi_toc_apply::BuildChaptersFromStructuredToc(
+    if (applied_mapped != static_cast<size_t>(-1)) {
+      mapped_structured = applied_mapped;
+      structured_direct = applied_direct;
+    } else mapped_structured = mobi_toc_apply::BuildChaptersFromStructuredToc(
         book, structured_toc, text_len_for_pos, &structured_direct,
         !structured_from_filepos, html_to_text_map, text_cursor_per_page,
         toc_callbacks, reporter);
