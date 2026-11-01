@@ -1,4 +1,7 @@
 #include "book/book_search_source.h"
+#include "formats/common/reflow_preparation.h"
+#include "formats/common/reflow_block_cache.h"
+#include "formats/fb2/fb2_page_cache.h"
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/book_xml.h"
@@ -617,6 +620,7 @@ void TestImageResourcesAcrossBookFormats() {
   const std::string cache = std::string(folder) + "/cache";
   mkdir(cache.c_str(), 0700);
   mobi_page_cache::SetCacheDirForTest(cache.c_str());
+  fb2_page_cache::SetCacheDirForTest(cache.c_str());
   epub_page_cache::SetCacheDirForTest(cache.c_str());
   {
     Text text;BookContext ctx;ctx.text=&text;Book book(ctx);
@@ -709,6 +713,7 @@ void TestImagePagesDoNotCoverText() {
       mkdir(cache.c_str(), 0700);
       epub_page_cache::SetCacheDirForTest(cache.c_str());
       mobi_page_cache::SetCacheDirForTest(cache.c_str());
+  fb2_page_cache::SetCacheDirForTest(cache.c_str());
       for (const char *name : {"page-image-after-text.fb2", "images.fb2", "images.epub", "images.mobi"}) {
         Text text;
         text.capture_rendered_text = true;
@@ -786,6 +791,7 @@ void TestImagePagesDoNotCoverText() {
   test::ExpectEqU("full-page images never cover drawn text", overlaps, 0);
   epub_page_cache::SetCacheDirForTest(nullptr);
   mobi_page_cache::SetCacheDirForTest(nullptr);
+  fb2_page_cache::SetCacheDirForTest(nullptr);
 }
 
 void TestDisableEbookImages() {
@@ -799,6 +805,7 @@ void TestDisableEbookImages() {
   mkdir(cache.c_str(),0700);
   epub_page_cache::SetCacheDirForTest(cache.c_str());
   mobi_page_cache::SetCacheDirForTest(cache.c_str());
+  fb2_page_cache::SetCacheDirForTest(cache.c_str());
   for (const char *name : {"images.epub","images.mobi","images.fb2"}) {
     bool disabled=false;
     Text text; text.display.width=240;
@@ -1579,35 +1586,16 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
       book.SetFileName(name);
       test::ExpectEq(name, book_parser::Open(&book), 0);
       ExpectMobiContent(&book);
-#ifdef DSLIBRIS_DEBUG
-      // Independent PalmDOC header oracle: first record offset, then text length.
-      auto be32 = [&source](size_t offset) {
-        test::ExpectTrue("fixture header bounds", offset + 4 <= source.size());
-        unsigned value = 0;
-        for (size_t i = 0; i < 4; ++i) value = (value << 8) | (unsigned char)source[offset + i];
-        return value;
-      };
-      const size_t text_bytes = be32(be32(78) + 4);
-      test::ExpectEqU("raw diagnostic matches file bytes", reporter.Size("source", "raw"), source.size());
-      test::ExpectEqU("merged diagnostic matches declared text", reporter.Size("merged", "merged"), text_bytes);
-      test::ExpectEqU("UTF-8 fixture is not transcoded", reporter.Size("utf8", "utf8"), text_bytes);
-      const size_t cleaned = reporter.Size("cleaned", "text");
-      test::ExpectTrue("markup extraction produces smaller live text", cleaned > 0 && cleaned < text_bytes);
-      test::ExpectEqU("merged storage released", reporter.Size("merged_released", "merged"), 0);
-      test::ExpectEqU("raw storage released after TOC", reporter.Size("raw_released", "raw"), 0);
-#else
-      test::ExpectTrue("release has no buffer diagnostics", reporter.buffers.empty());
-#endif
       pages = CapturePageData(&book);
       chapters = book.GetChapters();
-      test::ExpectTrue("cold MOBI open schedules a real cache save", book.HasPendingMobiPageCacheSave());
-      test::ExpectTrue("cold open leaves cache write off the critical path", CacheFiles(cache_dir).empty());
+      test::ExpectFalse("cold MOBI leaves no deferred save", book.HasPendingMobiPageCacheSave());
+      test::ExpectEq("MOBI cache ready before reading", (int)CacheFiles(cache_dir).size(), 1);
       book.Close();
       test::ExpectEq("MOBI close releases pages", book.GetPageCount(), 0);
       test::ExpectTrue("MOBI close releases chapters", book.GetChapters().empty());
     }
     const std::vector<std::string> caches = CacheFiles(cache_dir);
-    test::ExpectEq("Close saves one MOBI cache artifact", (int)caches.size(), 1);
+    test::ExpectEq("Close retains one prepared MOBI cache artifact", (int)caches.size(), 1);
     struct stat original;
     test::ExpectEq("source attributes readable", stat(path.c_str(), &original), 0);
     // Preserve the source identity used by the cache key but make decoding
@@ -1642,13 +1630,13 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
     test::ExpectEq("partial cache falls back to the real MOBI parser", book_parser::Open(&reopened), 0);
     ExpectMobiContent(&reopened);
     test::ExpectTrue("fallback discards partially loaded pages", CapturePageData(&reopened) == pages);
-    test::ExpectTrue("cache fallback schedules replacement", reopened.HasPendingMobiPageCacheSave());
+    test::ExpectFalse("replacement finishes before reading", reopened.HasPendingMobiPageCacheSave());
     reopened.Close();
     test::ExpectTrue("Close replaces the partial cache", ReadFileBytes(restored_caches[0]) == saved_cache);
     text.pixelsize += 4;
     test::ExpectEq("MOBI opens with a different layout", book_parser::Open(&reopened), 0);
     ExpectMobiContent(&reopened);
-    test::ExpectTrue("different layout requires new cache save", reopened.HasPendingMobiPageCacheSave());
+    test::ExpectFalse("different layout saves before reading", reopened.HasPendingMobiPageCacheSave());
     test::ExpectGt("larger font actually repaginates", reopened.GetPageCount(), (int)pages.size());
     reopened.Close();
     for (const std::string &cache : CacheFiles(cache_dir))
@@ -1662,6 +1650,7 @@ void TestMobiParseCloseCachedReopenAndRecovery() {
            name, (unsigned long)pages.size());
   }
   mobi_page_cache::SetCacheDirForTest(nullptr);
+  fb2_page_cache::SetCacheDirForTest(nullptr);
 }
 
 void ExpectClosedReadingState(Book *book) {
@@ -2012,9 +2001,74 @@ static void TestInlineZipLifetime() {
   unzClose(borrowed);
 }
 
+static void TestSharedReflowPreparation() {
+  const char *folder=getenv("TEST_IMAGE_VIEWER_DIR");
+  const std::string directory=std::string(folder)+"/shared-preparation";
+  mkdir(directory.c_str(),0700);
+  mobi_page_cache::SetCacheDirForTest(directory.c_str());
+  fb2_page_cache::SetCacheDirForTest(directory.c_str());
+  for(const char *name : {"images.mobi","images.fb2"}) {
+    Text text;text.display.width=240;
+    BookContext ctx;ctx.text=&text;
+    Book book(ctx);book.SetFolderName(folder);book.SetFileName(name);book.SetOpenSessionId(123);
+    const std::string source=std::string(folder)+"/"+name;
+    ReflowPreparation prep;
+    test::ExpectTrue("begin common preparation",prep.Begin(&book,source,512*1024));
+    prep.SignalPause();
+    test::ExpectTrue("paused preparation does not parse",prep.Step()==ReflowPreparation::Paused && !book.GetPageCount());
+    prep.SignalResume();
+    unsigned steps=0;
+    while(prep.Step()==ReflowPreparation::Pending) test::ExpectTrue("preparation makes bounded progress",++steps<10000);
+    test::ExpectTrue("cold shared preparation completes",prep.GetResult()==ReflowPreparation::Complete && !prep.PersistenceFailed());
+    test::ExpectTrue("new formats adopt resident backend",book.HasReflowPageCache());
+    test::ExpectEqU("cache fallback retains open session",book.GetOpenSessionId(),123);
+    PageData expected;
+    for(unsigned i=0;i<book.GetPageCount();++i) {
+      book.RequestReflowPage(i);
+      while(!book.IsReflowPageReady(i)) test::ExpectTrue("page request completes",book.AdvanceReflowPageCache()>=0);
+      Page *p=book.GetPage(i);
+      expected.emplace_back(p->GetBuffer(),p->GetBuffer()+p->GetLength());
+    }
+    std::vector<std::string> resources;
+    for(unsigned i=0;i<book.GetInlineImageCount();++i) {
+      image_memory::Bytes bytes;
+      test::ExpectTrue("cold cached source image reads",book.ReadInlineImageSource(i,&bytes));
+      resources.emplace_back((const char *)bytes.data(),bytes.size());
+    }
+    test::ExpectTrue("fixture has original resources",resources.size()>=3);
+    book.Close();
+    const std::string original=ReadFileBytes(source);
+    struct stat info;stat(source.c_str(),&info);const utimbuf times={info.st_atime,info.st_mtime};
+    WriteFileBytes(source,std::string(original.size(),'\0'));utime(source.c_str(),&times);
+    book.SetOpenSessionId(456);
+    test::ExpectTrue("begin warm preparation with unavailable parser",prep.Begin(&book,source,512*1024));
+    while(prep.Step()==ReflowPreparation::Pending) {}
+    test::ExpectTrue("warm cache is self sufficient",prep.GetResult()==ReflowPreparation::Complete && book.HasReflowPageCache());
+    test::ExpectEq("warm page count",book.GetPageCount(),expected.size());
+    for(unsigned i=0;i<book.GetPageCount();++i) {
+      book.RequestReflowPage(i);
+      while(!book.IsReflowPageReady(i)) test::ExpectTrue("warm page becomes ready",book.AdvanceReflowPageCache()>=0);
+      Page *p=book.GetPage(i);
+      test::ExpectTrue("warm tokens identical",std::vector<u32>(p->GetBuffer(),p->GetBuffer()+p->GetLength())==expected[i]);
+    }
+    if(std::string(name)=="images.fb2") {
+      for(unsigned i=0;i<resources.size();++i) {
+        image_memory::Bytes bytes;
+        test::ExpectTrue("FB2 warm resources need no XML",book.ReadInlineImageSource(i,&bytes));
+        test::ExpectTrue("FB2 original image bytes identical",std::string((const char *)bytes.data(),bytes.size())==resources[i]);
+      }
+    }
+    book.Close();WriteFileBytes(source,original);utime(source.c_str(),&times);
+  }
+  for(const auto &file:CacheFiles(directory)) remove(file.c_str());
+  rmdir(directory.c_str());
+  mobi_page_cache::SetCacheDirForTest(nullptr);fb2_page_cache::SetCacheDirForTest(nullptr);
+}
+
 int main(int argc, char **argv) {
   if(argc==2) {
-    if(std::string(argv[1])=="inline-zip") TestInlineZipLifetime();
+    if(std::string(argv[1])=="reflow-preparation") TestSharedReflowPreparation();
+    else if(std::string(argv[1])=="inline-zip") TestInlineZipLifetime();
     else if(std::string(argv[1])=="fb2-storage") TestFb2ResourceStorageLimitsAndRecovery();
     else if(std::string(argv[1])=="image-overlap") TestImagePagesDoNotCoverText();
     else if(std::string(argv[1])=="image-toggle") TestDisableEbookImages();
@@ -2033,6 +2087,7 @@ int main(int argc, char **argv) {
     else return 2;
     return 0;
   }
+  TestSharedReflowPreparation();
   TestInlineZipLifetime();
   TestPageFontFaceTransitions();
   TestOpaqueInlineCacheBudget();

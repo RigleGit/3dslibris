@@ -980,32 +980,15 @@ void Book::CancelPendingEpubPageCacheSave() {
 }
 
 void Book::FlushPendingCacheSaves() {
-  const bool flush_mobi =
-      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
-          mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
-          (unsigned int)GetPageCount());
-  if (flush_mobi) {
-    DBG_LOGF(GetStatusReporter(), "BOOK flush-cache: save-mobi begin pages=%d book=%s",
-             (int)pages.size(), filename.c_str());
-    HomeButtonGuard home_guard;
-    mobi_page_cache::SavePending(this);
-    DBG_LOGF(GetStatusReporter(), "BOOK flush-cache: save-mobi done book=%s", filename.c_str());
-  }
+  // Page persistence belongs to visible preparation, never to reading/closing.
+  mobi_page_cache_save_pending = false;
 }
 
 void Book::Close() {
   delete reflow_cache_reader_;
   reflow_cache_reader_ = NULL;
   reflow_pending_position_ = -1;
-  const bool flush_pending_mobi_cache =
-      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
-          mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
-          (unsigned int)GetPageCount());
   CancelAsyncReflowOpen();
-  if (flush_pending_mobi_cache) {
-    HomeButtonGuard home_guard;
-    mobi_page_cache::SavePending(this);
-  }
   CancelPendingEpubPageCacheSave();
   mobi_page_cache_save_pending = false;
   std::vector<Page *>::iterator it = pages.begin();

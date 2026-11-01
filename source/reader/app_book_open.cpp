@@ -24,6 +24,7 @@
 #include <3ds.h>
 
 #include "book/book.h"
+#include "shared/string_utils.h"
 #include "formats/common/reflow_preparation.h"
 #include "book/book_renderer.h"
 #include "formats/common/book_error.h"
@@ -155,10 +156,11 @@ u8 ReaderController::OpenBook()
     return BOOK_ERR_CANCELLED;
   }
 
-  if (selected_book->format == FORMAT_EPUB) {
+  if (selected_book->format == FORMAT_EPUB || HasExtCI(selected_book->GetFileName(), ".mobi") ||
+      HasExtCI(selected_book->GetFileName(), ".fb2")) {
     app_.PauseBrowserJobs();
     DetachCurrentBookForSwitch(&app_, selected_book, session_id,
-                               "epub-preparation");
+                               "reflow-preparation");
     selected_book->SetOpenSessionId(session_id);
     preparation_.reset(new (std::nothrow) ReflowPreparation);
     const std::string source = std::string(selected_book->GetFolderName()) +

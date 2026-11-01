@@ -1,4 +1,5 @@
 #include "book/book_parser.h"
+#include "formats/common/reflow_preparation.h"
 
 #include "book/book.h"
 #include "book/book_parse_deps.h"
@@ -152,7 +153,14 @@ uint8_t OpenPrepared(Book *book) {
   DBG_LOG(book->GetStatusReporter(), logmsg);
 
   uint8_t err = 1;
-  if (book->format == FORMAT_EPUB) {
+  if (HasExtCI(book->GetFileName(), ".mobi") || HasExtCI(book->GetFileName(), ".fb2")) {
+    ReflowPreparation preparation;
+    if (!preparation.Begin(book, path)) return 1;
+    ReflowPreparation::Result result;
+    do { result=preparation.Step(); } while (result==ReflowPreparation::Pending);
+    if (result!=ReflowPreparation::Complete) {preparation.Cancel();return 1;}
+    err=0;
+  } else if (book->format == FORMAT_EPUB) {
     DBG_LOGF(book->GetStatusReporter(),
              "BOOK parser enter: backend=epub-open file=%s",
              book->GetFileName() ? book->GetFileName() : "");
