@@ -1,8 +1,10 @@
 #pragma once
 #include <cstddef>
 #include <string>
+#include "formats/common/image_buffer.h"
 class Book;
 namespace reflow_block_cache {
+enum Format { Epub, Mobi, Fb2 };
 enum Result : int {
   Pending,
   Ready,
@@ -17,7 +19,7 @@ class Writer {
 public:
   Writer();
   ~Writer();
-  bool Begin(Book *book, const std::string &path);
+  bool Begin(Book *book, const std::string &path, Format format = Epub);
   bool AppendDocument(unsigned first, unsigned end);
   Result Step();
   bool Finish();
@@ -38,7 +40,7 @@ public:
   // A zero budget requests the complete cooperative reader. Nonzero enables
   // residency.
   Result Begin(Book *book, const std::string &path, size_t budget,
-               bool validate_only = false);
+               bool validate_only = false, Format format = Epub);
   Result Step();
   Result GetResult() const;
   void Close();
@@ -52,6 +54,8 @@ public:
   size_t ResidentBytes() const;
   size_t BytesRead() const;
   bool HasIndex() const;
+  // Resource errors never change the pending page result.
+  Result ReadResource(const std::string &id, image_memory::Bytes *out);
 
 private:
   Result Advance();

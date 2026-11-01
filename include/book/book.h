@@ -39,6 +39,7 @@ namespace epub_page_cache { class StreamWriter; }
 namespace reflow_block_cache {
 enum Result : int;
 class Reader;
+class Writer;
 }
 namespace book_meta_cache { class Index; }
 
@@ -98,6 +99,8 @@ public:
   };
 
 private:
+  friend class reflow_block_cache::Writer;
+  friend class reflow_block_cache::Reader;
   epub_page_cache::StreamWriter *epub_cache_save_writer_;
   reflow_block_cache::Reader *reflow_cache_reader_;
   int reflow_pending_position_;

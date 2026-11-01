@@ -12,6 +12,7 @@
 */
 
 #include "book/book.h"
+#include "shared/string_utils.h"
 
 #include "book/book_context.h"
 #include "formats/cbz/cbz_state.h"
@@ -860,7 +861,9 @@ bool Book::StartReflowPageCache(const std::string &path, size_t budget) {
   reflow_pending_position_ = -1;
   if (!reflow_cache_reader_)
     return false;
-  if (reflow_cache_reader_->Begin(this, path, budget) !=
+  if (reflow_cache_reader_->Begin(this, path, budget, false,
+          HasExtCI(GetFileName(), ".mobi") ? reflow_block_cache::Mobi :
+          HasExtCI(GetFileName(), ".fb2") ? reflow_block_cache::Fb2 : reflow_block_cache::Epub) !=
       reflow_block_cache::Pending) {
     delete reflow_cache_reader_;
     reflow_cache_reader_ = NULL;

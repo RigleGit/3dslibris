@@ -870,6 +870,30 @@ void TestCacheSaveMetricsSeparateIdleAndClosing() {
 
 } // namespace
 
+static void TestMobiBlockIdentity() {
+  BookContext ctx;
+  Book book(ctx);
+  const u32 tokens[] = {'M', 0xffffffffU, 0x10000U};
+  book.AppendPage()->SetBuffer(tokens, 3);
+  const std::string path = "/tmp/3dslibris-mpc27-test.mpc";
+  reflow_block_cache::Writer writer;
+  Require(writer.Begin(&book, path, reflow_block_cache::Mobi), "begin MPC27");
+  Require(writer.AppendDocument(0, 1), "append MPC27");
+  while (writer.Step() == reflow_block_cache::Pending) {}
+  Require(writer.Finish(), "finish MPC27");
+  while (writer.Step() == reflow_block_cache::Pending) {}
+  Check(writer.GetResult() == reflow_block_cache::Complete, "MPC27 publishes");
+  Book warm(ctx), wrong(ctx);
+  reflow_block_cache::Reader reader, epub;
+  reader.Begin(&warm, path, 128*1024, false, reflow_block_cache::Mobi);
+  while (reader.Step() == reflow_block_cache::Pending) {}
+  Check(reader.GetResult() == reflow_block_cache::Complete && warm.GetPageCount()==1 && warm.GetPage(0)->GetBuffer()[1]==0xffffffffU, "MPC27 preserves render tokens");
+  epub.Begin(&wrong, path, 128*1024);
+  while (epub.Step() == reflow_block_cache::Pending) {}
+  Check(epub.GetResult()==reflow_block_cache::Corrupt, "EPC rejects MPC header");
+  remove(path.c_str());
+}
+
 int main(int argc, char **argv) {
   const std::string selected = argc > 1 ? argv[1] : "all";
   if (argc > 2 || (selected != "all" && selected != "maps" &&
@@ -883,6 +907,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (selected == "all") {
+    TestMobiBlockIdentity();
     TestLongBlockIndexStrings();
     TestBlockCacheRoundtrip();
     TestCooperativeLegacyLoad();
