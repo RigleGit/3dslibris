@@ -50,9 +50,10 @@ extern "C" ssize_t ObserveBlockRead(int fd, void *data, size_t size) {
 extern "C" int uncompress(Bytef *, uLongf *, const Bytef *, uLong);
 static bool fail_inflate_memory = false;
 static unsigned forced_inflate_calls = 0;
+static unsigned inflate_failure_limit = ~0u;
 extern "C" int ObserveUncompress(Bytef *out, uLongf *size, const Bytef *in,
                                  uLong n) {
-  if (fail_inflate_memory) {
+  if (fail_inflate_memory && forced_inflate_calls < inflate_failure_limit) {
     ++forced_inflate_calls;
     return Z_MEM_ERROR;
   }
@@ -594,6 +595,35 @@ void TestBlockCacheRoundtrip() {
     Check(loaded.GetPage(47)->GetBuffer() == pinned,
           "visible page remains pinned");
   }
+  fail_inflate_memory = true;
+  forced_inflate_calls = 0;
+  inflate_failure_limit = 1;
+  reader.Request(0);
+  unsigned retries = 0;
+  while (reader.Step() == epub_block_cache::Pending && ++retries < 20) {
+  }
+  fail_inflate_memory = false;
+  Check(forced_inflate_calls == 1 &&
+            reader.GetResult() == epub_block_cache::Complete &&
+            reader.IsReady(0),
+        "resident inflate OOM retries after releasing unrelated payload");
+  Check(loaded.GetPage(47)->GetBuffer() == pinned &&
+            reader.ResidentBytes() <= 128 * 1024,
+        "OOM retry preserves pinned page and residency budget");
+  fail_inflate_memory = true;
+  forced_inflate_calls = 0;
+  inflate_failure_limit = ~0u;
+  reader.Request(79);
+  retries = 0;
+  while (reader.Step() == epub_block_cache::Pending && ++retries < 20) {
+  }
+  fail_inflate_memory = false;
+  Check(reader.GetResult() == epub_block_cache::NoMemory &&
+            forced_inflate_calls == 2 && retries < 20,
+        "persistent resident OOM retries once and stops");
+  Check(loaded.GetPage(47)->GetBuffer() == pinned &&
+            access(path.c_str(), R_OK) == 0,
+        "persistent OOM keeps visible page and cache");
   reader.Close();
   loaded.Close();
   loaded.SetPosition(47);

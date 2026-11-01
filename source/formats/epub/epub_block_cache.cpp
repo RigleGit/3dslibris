@@ -468,7 +468,7 @@ struct Reader::State {
   unsigned phase;
   u64 tick, started = osGetTime(), io_ms = 0, last_slow = 0;
   size_t read_calls = 0;
-  bool logged = false, validate_only = false;
+  bool logged = false, validate_only = false, memory_retry_used = false;
   std::vector<uint8_t> index;
   std::vector<PageRef> refs;
   std::vector<Block> blocks;
@@ -712,6 +712,23 @@ struct Reader::State {
       ready[page] = false;
     }
   }
+  bool RecoverMemory() {
+    if (result != NoMemory || !budget || phase != 2 || memory_retry_used)
+      return false;
+    memory_retry_used = true;
+    const size_t before = Memory();
+    // Drop everything dispensable, retaining the visible Page and blocks needed
+    // by the pending target. Retry only when this actually recovered memory.
+    Trim(budget);
+    const size_t after = Memory();
+    if (after >= before)
+      return false;
+    DBG_LOGF(book->GetStatusReporter(),
+             "CACHE memory retry page=%u before=%u after=%u", target,
+             (unsigned)before, (unsigned)after);
+    result = Pending;
+    return true;
+  }
   Result LoadBlock(unsigned id) {
     const Block &b = blocks[id];
     Trim(b.words * 4);
@@ -832,6 +849,8 @@ bool Reader::ActivatePreparedPages() {
 bool Reader::Request(unsigned page) {
   if (!HasIndex() || state_->phase == 3 || page >= state_->header.pages)
     return false;
+  if (state_->target != page || state_->result == Complete)
+    state_->memory_retry_used = false;
   state_->target = page;
   state_->result = IsReady(page) ? Complete : Pending;
   if (IsReady(page))
@@ -841,7 +860,7 @@ bool Reader::Request(unsigned page) {
     for (const Ref &ref : {state_->refs[page].text, state_->refs[page].search})
       if (ref.count && !state_->Find(ref.block))
         return true;
-    return Advance() == Complete;
+    return Step() == Complete || GetResult() == Pending;
   }
   return true;
 }
@@ -854,6 +873,8 @@ Result Reader::Step() {
   } while (result == Pending && state_ && state_->phase == 2 &&
            !state_->budget && state_->read_calls == reads &&
            osGetTime() - begin < 50);
+  if (state_ && result == NoMemory && state_->RecoverMemory())
+    result = Pending;
   if (state_ && result == Complete && !state_->validate_only &&
       !state_->logged) {
     State &s = *state_;
