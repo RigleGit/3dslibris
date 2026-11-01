@@ -156,6 +156,11 @@ inline const std::string &GetMobiCacheDir() {
   return path;
 }
 
+inline const std::string &GetFb2CacheDir() {
+  static const std::string path = GetCacheBaseDir() + "/fb2";
+  return path;
+}
+
 inline const std::string &GetMobiCoverMetaCacheDir() {
   static const std::string path = GetCacheBaseDir() + "/mobi-cover";
   return path;

@@ -9,6 +9,7 @@
 */
 
 #include "book/book.h"
+#include "formats/common/reflow_block_cache.h"
 #include "shared/screen_dimensions.h"
 
 #include "book/inline_image_page_layout_utils.h"
@@ -313,9 +314,10 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
       key.erase(0, 1);
     std::unordered_map<std::string, image_memory::Bytes>::const_iterator hit =
         fb2_inline_images.find(key);
-    if (hit == fb2_inline_images.end() || hit->second.empty())
-      return false;
-    out->Borrow(hit->second.data(),hit->second.size());
+    if (hit == fb2_inline_images.end() || hit->second.empty()) {
+      if (!reflow_cache_reader_ || reflow_cache_reader_->ReadResource(key, out) != reflow_block_cache::Ready)
+        return false;
+    } else out->Borrow(hit->second.data(),hit->second.size());
     if (resolved_path)
       *resolved_path = image_path;
     return true;

@@ -1124,7 +1124,7 @@ void SettingsController::ClearAllCaches() {
   }
 
   const std::string cache_dirs[] = {
-      paths::GetEpubCacheDir(), paths::GetMobiCacheDir(),
+      paths::GetEpubCacheDir(), paths::GetMobiCacheDir(), paths::GetFb2CacheDir(),
       paths::GetMobiCoverMetaCacheDir(), paths::GetMetaCacheDir(),
       paths::GetCoverCacheDir()};
   for (size_t i = 0; i < sizeof(cache_dirs) / sizeof(cache_dirs[0]); i++) {

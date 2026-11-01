@@ -171,6 +171,7 @@ struct Writer::State {
   page_cache_codec::Compressor compressor;
   uint64_t logical;
   unsigned first, end, next, document, words, kind;
+  unsigned completed_records = 0;
   enum Phase {
     Idle,
     Records,
@@ -324,7 +325,7 @@ Result Writer::GetResult() const {
   return state_ ? state_->result : Cancelled;
 }
 unsigned Writer::Progress() const {
-  return state_ ? state_->next : 0;
+  return state_ ? state_->completed_records / 2 : 0;
 }
 bool Writer::Begin(Book *book, const std::string &path, Format format) {
   Abort();
@@ -433,6 +434,7 @@ Result Writer::Step() {
       s.refs[s.next].links = page->GetSelectableCount();
       s.words += count;
       ++s.next;
+      ++s.completed_records;
     } else if (s.phase == State::Resources) {
       if (s.resource_next == s.resources.size()) {
         s.BuildIndex();
@@ -925,6 +927,10 @@ bool Reader::ActivatePreparedPages() {
   }
   s.selection_sizes[s.target] = selections;
   s.selection_bytes = selections;
+  if (s.format == Fb2) {
+    s.book->fb2_inline_images.clear();
+    s.book->fb2_inline_images_bytes = 0;
+  }
   s.validate_only = false;
   s.phase = 3;
   s.full_next = 0;
