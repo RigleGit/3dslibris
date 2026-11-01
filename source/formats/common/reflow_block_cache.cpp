@@ -20,8 +20,12 @@
 
 namespace reflow_block_cache {
 namespace {
-uint32_t Magic(Format f) { return f == Mobi ? 0x4d504347U : f == Fb2 ? 0x46504347U : 0x45504347U; }
-unsigned Version(Format f) { return f == Mobi ? 27 : f == Fb2 ? 1 : 23; }
+uint32_t Magic(Format f) {
+  return f == Mobi ? 0x4d504347U : f == Fb2 ? 0x46504347U : 0x45504347U;
+}
+unsigned Version(Format f) {
+  return f == Mobi ? 27 : f == Fb2 ? 1 : 23;
+}
 struct Resource {
   std::string id;
   uint64_t offset;
@@ -167,7 +171,9 @@ struct Writer::State {
   size_t resource_next = 0, resource_cursor = 0;
   std::vector<PageRef> refs;
   std::vector<Block> blocks;
-  std::vector<uint8_t> encoded, packed, staging, index;
+  std::vector<uint8_t> encoded, packed, index;
+  std::unique_ptr<uint8_t[]> staging;
+  size_t staged = 0, staging_capacity = kBytes;
   page_cache_codec::Compressor compressor;
   uint64_t logical;
   unsigned first, end, next, document, words, kind;
@@ -192,10 +198,7 @@ struct Writer::State {
       : book(NULL), fd(-1), result(Ready), logical(sizeof(Header)), first(0),
         end(0), next(0), document(0), words(0), kind(0), phase(Idle),
         after_drain(Records), pending_offset(0), index_offset(0),
-        compressed(false), finishing(false), started(osGetTime()), calls(0) {
-    encoded.reserve(kBytes);
-    staging.reserve(kBytes);
-  }
+        compressed(false), finishing(false), started(osGetTime()), calls(0) {}
   ~State() {
     if (fd >= 0)
       close(fd);
@@ -218,16 +221,17 @@ struct Writer::State {
   }
   bool Queue(const uint8_t *p, size_t n, size_t &offset) {
     while (offset < n) {
-      const size_t part = std::min(n - offset, kBytes - staging.size());
-      staging.insert(staging.end(), p + offset, p + offset + part);
+      const size_t part = std::min(n - offset, staging_capacity - staged);
+      memcpy(staging.get() + staged, p + offset, part);
+      staged += part;
       offset += part;
       logical += part;
-      if (staging.size() == kBytes) {
-        if (!Write(staging.data(), staging.size())) {
+      if (staged == staging_capacity) {
+        if (!Write(staging.get(), staged)) {
           result = IoError;
           return false;
         }
-        staging.clear();
+        staged = 0;
         return false; // Yield after one data write.
       }
     }
@@ -293,7 +297,8 @@ struct Writer::State {
       if (format != Epub) {
         const auto &image = book->inline_images[i];
         w.Put<uint8_t>(image.follow_text_lines);
-        w.Put<uint8_t>((image.metadata_probed ? 1 : 0) | (image.metadata_ok ? 2 : 0));
+        w.Put<uint8_t>((image.metadata_probed ? 1 : 0) |
+                       (image.metadata_ok ? 2 : 0));
         w.Put<uint32_t>(image.source_width);
         w.Put<uint32_t>(image.source_height);
       }
@@ -342,9 +347,25 @@ bool Writer::Begin(Book *book, const std::string &path, Format format) {
   s.book = book;
   s.format = format;
   s.path = path;
+  if (!cache_memory::HasHeadroom(kBytes, 0)) {
+    s.result = NoMemory;
+    return false;
+  }
+  s.encoded.reserve(kBytes);
+  s.staging.reset(new (std::nothrow) uint8_t[s.staging_capacity]);
+  if (!s.staging) {
+    s.staging_capacity = 16384;
+    s.staging.reset(new (std::nothrow) uint8_t[s.staging_capacity]);
+  }
+  if (!s.staging) {
+    s.result = NoMemory;
+    return false;
+  }
   s.temporary = path + ".tmp";
   s.fd = open(s.temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
   Header h = {Magic(format), (uint16_t)Version(format), 0, 0, 0, 0, 0, 0};
+  if (s.fd < 0)
+    s.temporary.clear(); // No file was acquired: Abort must not remove it.
   if (!book || s.fd < 0 || !s.Write(&h, sizeof(h))) {
     s.result = IoError;
     return false;
@@ -373,14 +394,18 @@ bool Writer::Finish() {
   if (state_->format == Fb2) {
     uint64_t offset = state_->logical;
     for (const auto &item : state_->book->fb2_inline_images) {
-      if (item.second.empty()) continue;
+      if (item.second.empty())
+        continue;
       Resource r = {item.first, offset, (uint32_t)item.second.size(), 0};
-      if (r.size > 4u*1024u*1024u || offset - state_->logical + r.size > 12u*1024u*1024u) return false;
+      if (r.size > 4u * 1024u * 1024u ||
+          offset - state_->logical + r.size > 12u * 1024u * 1024u)
+        return false;
       state_->resources.push_back(r);
       offset += r.size;
     }
     state_->phase = State::Resources;
-  } else state_->BuildIndex();
+  } else
+    state_->BuildIndex();
   if (state_->result != IoError)
     state_->result = Pending;
   return state_->result == Pending;
@@ -448,11 +473,15 @@ Result Writer::Step() {
       }
       Resource &r = s.resources[s.resource_next];
       const auto item = s.book->fb2_inline_images.find(r.id);
-      if (item == s.book->fb2_inline_images.end() || item->second.size() != r.size) return s.result = Corrupt;
+      if (item == s.book->fb2_inline_images.end() ||
+          item->second.size() != r.size)
+        return s.result = Corrupt;
       const size_t before = s.resource_cursor;
       const bool done = s.Queue(item->second.data(), r.size, s.resource_cursor);
-      r.crc = crc32(r.crc, item->second.data()+before, s.resource_cursor-before);
-      if (!done) return s.result;
+      r.crc = crc32(r.crc, item->second.data() + before,
+                    s.resource_cursor - before);
+      if (!done)
+        return s.result;
       ++s.resource_next;
       s.resource_cursor = 0;
     } else if (s.phase == State::Index) {
@@ -460,12 +489,12 @@ Result Writer::Step() {
         return s.result;
       s.phase = State::Tail;
     } else if (s.phase == State::Tail) {
-      if (!s.staging.empty()) {
-        if (!s.Write(s.staging.data(), s.staging.size())) {
+      if (s.staged != 0) {
+        if (!s.Write(s.staging.get(), s.staged)) {
           s.result = IoError;
           break;
         }
-        s.staging.clear();
+        s.staged = 0;
         s.phase = State::HeaderCommit;
         return Pending;
       }
@@ -630,7 +659,8 @@ struct Reader::State {
       offset += b.size;
     }
     const uint64_t resource_start = offset;
-    if (format != Fb2 && offset != header.index_offset) return false;
+    if (format != Fb2 && offset != header.index_offset)
+      return false;
     for (const PageRef &p : refs)
       if (p.text.count > 4096 || p.search.count > p.text.count + 1 ||
           !ValidRef(p.text, 0) || !ValidRef(p.search, 1))
@@ -688,13 +718,19 @@ struct Reader::State {
           return false;
         unsigned follow = 0, flags = 0, width = 0, height = 0;
         if (!kind && format != Epub) {
-          follow = r.Get<uint8_t>(); flags = r.Get<uint8_t>();
-          width = r.Get<uint32_t>(); height = r.Get<uint32_t>();
-          if ((flags & ~3U) || ((flags & 2) && (!(flags & 1) || !width || !height)) ||
-              width > 0x7fffffffU || height > 0x7fffffffU) return false;
+          follow = r.Get<uint8_t>();
+          flags = r.Get<uint8_t>();
+          width = r.Get<uint32_t>();
+          height = r.Get<uint32_t>();
+          if ((flags & ~3U) ||
+              ((flags & 2) && (!(flags & 1) || !width || !height)) ||
+              width > 0x7fffffffU || height > 0x7fffffffU)
+            return false;
         }
-        if (!r.ok) return false;
-        if (validate_only) continue;
+        if (!r.ok)
+          return false;
+        if (validate_only)
+          continue;
         if (kind) {
           if (!book->RegisterInlineLinkHref(text))
             return false;
@@ -703,28 +739,36 @@ struct Reader::State {
           book->SetInlineImageFollowTextLines(id, follow);
           if (format != Epub && id < book->inline_images.size()) {
             auto &image = book->inline_images[id];
-            image.metadata_probed = flags & 1; image.metadata_ok = flags & 2;
-            image.source_width = width; image.source_height = height;
+            image.metadata_probed = flags & 1;
+            image.metadata_ok = flags & 2;
+            image.source_width = width;
+            image.source_height = height;
           }
         }
       }
     }
     if (format == Fb2) {
       const unsigned count = r.Get<uint32_t>();
-      if (count > 65535) return false;
+      if (count > 65535)
+        return false;
       uint64_t next = resource_start;
       std::unordered_map<std::string, bool> seen;
       for (unsigned i = 0; i < count; ++i) {
         Resource v;
-        v.id = r.String(); v.offset = r.Get<uint64_t>();
-        v.size = r.Get<uint32_t>(); v.crc = r.Get<uint32_t>();
+        v.id = r.String();
+        v.offset = r.Get<uint64_t>();
+        v.size = r.Get<uint32_t>();
+        v.crc = r.Get<uint32_t>();
         if (!r.ok || v.id.empty() || !seen.emplace(v.id, true).second ||
-            v.offset != next || !v.size || v.size > 4u*1024u*1024u ||
-            next > header.index_offset || v.size > header.index_offset-next ||
-            next-resource_start+v.size > 12u*1024u*1024u) return false;
-        next += v.size; resources.push_back(v);
+            v.offset != next || !v.size || v.size > 4u * 1024u * 1024u ||
+            next > header.index_offset || v.size > header.index_offset - next ||
+            next - resource_start + v.size > 12u * 1024u * 1024u)
+          return false;
+        next += v.size;
+        resources.push_back(v);
       }
-      if (next != header.index_offset) return false;
+      if (next != header.index_offset)
+        return false;
     }
     if (!r.ok || r.p != r.end)
       return false;
@@ -850,20 +894,31 @@ void Reader::Close() {
   state_ = NULL;
 }
 Result Reader::ReadResource(const std::string &id, image_memory::Bytes *out) {
-  if (!out) return IoError;
+  if (!out)
+    return IoError;
   out->clear();
-  if (!HasIndex()) return Missing;
-  for (const auto &r : state_->resources) if (r.id == id) {
-    if (!out->resize(r.size, 4u*1024u*1024u)) return NoMemory;
-    uint32_t crc = 0;
-    for (size_t off = 0; off < r.size;) {
-      const size_t n = std::min<size_t>(kBytes, r.size-off);
-      if (!state_->ReadAt(r.offset+off, out->mutable_data()+off, n)) { out->clear(); return IoError; }
-      crc = crc32(crc, out->data()+off, n); off += n;
+  if (!HasIndex())
+    return Missing;
+  for (const auto &r : state_->resources)
+    if (r.id == id) {
+      if (!out->resize(r.size, 4u * 1024u * 1024u))
+        return NoMemory;
+      uint32_t crc = 0;
+      for (size_t off = 0; off < r.size;) {
+        const size_t n = std::min<size_t>(kBytes, r.size - off);
+        if (!state_->ReadAt(r.offset + off, out->mutable_data() + off, n)) {
+          out->clear();
+          return IoError;
+        }
+        crc = crc32(crc, out->data() + off, n);
+        off += n;
+      }
+      if (crc != r.crc) {
+        out->clear();
+        return Corrupt;
+      }
+      return Ready;
     }
-    if (crc != r.crc) { out->clear(); return Corrupt; }
-    return Ready;
-  }
   return Missing;
 }
 Result Reader::GetResult() const {
@@ -944,7 +999,8 @@ bool Reader::ActivatePreparedPages() {
   s.selection_sizes[s.target] = selections;
   s.selection_bytes = selections;
   if (s.format == Fb2) {
-    s.book->fb2_inline_images.clear();
+    std::unordered_map<std::string, image_memory::Bytes>().swap(
+        s.book->fb2_inline_images);
     s.book->fb2_inline_images_bytes = 0;
   }
   s.validate_only = false;
@@ -1006,10 +1062,10 @@ Result Reader::Advance() {
     if (!s.ReadAt(0, &s.header, sizeof(Header)))
       return s.result = IoError;
     const Header &h = s.header;
-    if (h.magic != Magic(s.format) || h.version != Version(s.format) || h.flags || !h.pages ||
-        h.pages > 50000 || h.blocks > 50000 || !h.index_size ||
-        h.index_size > kIndexLimit || h.index_offset < sizeof(Header) ||
-        h.index_offset > s.file_size ||
+    if (h.magic != Magic(s.format) || h.version != Version(s.format) ||
+        h.flags || !h.pages || h.pages > 50000 || h.blocks > 50000 ||
+        !h.index_size || h.index_size > kIndexLimit ||
+        h.index_offset < sizeof(Header) || h.index_offset > s.file_size ||
         h.index_size != s.file_size - h.index_offset ||
         (uint64_t)h.pages * 22 + (uint64_t)h.blocks * 28 > h.index_size)
       return s.result = Corrupt;

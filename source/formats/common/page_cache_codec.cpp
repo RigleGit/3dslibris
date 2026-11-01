@@ -1,4 +1,5 @@
 #include "formats/common/page_cache_codec.h"
+#include "formats/common/cache_memory_utils.h"
 #include <zlib.h>
 #include <cstring>
 #include <new>
@@ -99,6 +100,12 @@ bool Compressor::Pack(const std::vector<uint8_t> &encoded,
     s.initialized = true;
   } else if (deflateReset(&s.stream) != Z_OK)
     return false;
+  const size_t capacity = compressBound(kBlockBytes);
+  if (out->capacity() < capacity) {
+    if (!cache_memory::HasHeadroom(capacity, 0))
+      return false;
+    out->reserve(capacity);
+  }
   out->resize(compressBound(encoded.size()));
   s.stream.next_in = const_cast<Bytef *>(encoded.data());
   s.stream.avail_in = encoded.size();

@@ -14,6 +14,22 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+#include <new>
+
+static bool refuse_large_array=false, refuse_all_arrays=false;
+static unsigned refused_arrays=0;
+void *operator new[](size_t n,const std::nothrow_t &) noexcept {
+  if(refuse_all_arrays || (refuse_large_array && n==65536)){++refused_arrays;return NULL;}
+  return ::operator new[](n);
+}
+#undef write
+extern "C" ssize_t write(int,const void *,size_t);
+static bool observe_block_writes=false;
+static size_t largest_block_write=0;
+extern "C" ssize_t ObserveBlockWrite(int fd,const void *p,size_t n) {
+  if(observe_block_writes) largest_block_write=std::max(largest_block_write,n);
+  return write(fd,p,n);
+}
 
 #undef fflush
 extern "C" int fflush(FILE *);
@@ -870,6 +886,34 @@ void TestCacheSaveMetricsSeparateIdleAndClosing() {
 
 } // namespace
 
+static void TestPhysicalWriterFallback() {
+  BookContext ctx;Book book(ctx);
+  for(unsigned p=0;p<8;++p) {
+    u32 tokens[4096];for(unsigned i=0;i<4096;++i) tokens[i]=((i+p*4096)*2654435761u)|0x10000u;
+    book.AppendPage()->SetBuffer(tokens,4096);
+  }
+  const std::string path="/tmp/3dslibris-writer-fallback.epc";
+  reflow_block_cache::Writer writer;
+  refuse_large_array=true;refused_arrays=0;
+  Require(writer.Begin(&book,path),"writer falls back to small physical staging");
+  refuse_large_array=false;
+  Check(refused_arrays==1,"writer really attempted the fallible large staging");
+  observe_block_writes=true;largest_block_write=0;
+  Require(writer.AppendDocument(0,book.GetPageCount()),"append with 16K staging");
+  while(writer.Step()==reflow_block_cache::Pending) {}
+  Require(writer.Finish(),"finish with 16K staging");
+  while(writer.Step()==reflow_block_cache::Pending) {}
+  observe_block_writes=false;
+  Check(writer.GetResult()==reflow_block_cache::Complete && largest_block_write==16384,"physical fallback groups writes at 16K");
+  Book warm(ctx);reflow_block_cache::Reader reader;
+  reader.Begin(&warm,path,0);while(reader.Step()==reflow_block_cache::Pending) {}
+  Check(reader.GetResult()==reflow_block_cache::Complete && warm.GetPageCount()==8 && warm.GetPage(7)->GetBuffer()[4095]==(((4095+7*4096)*2654435761u)|0x10000u),"fallback keeps complete payload");
+  writer.Abort();refuse_all_arrays=true;
+  Check(!writer.Begin(&book,path) && writer.GetResult()==reflow_block_cache::NoMemory,"physical staging OOM is explicit");
+  refuse_all_arrays=false;writer.Abort();
+  reader.Close();remove(path.c_str());
+}
+
 static void TestMobiBlockIdentity() {
   BookContext ctx;
   Book book(ctx);
@@ -907,6 +951,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (selected == "all") {
+    TestPhysicalWriterFallback();
     TestMobiBlockIdentity();
     TestLongBlockIndexStrings();
     TestBlockCacheRoundtrip();
