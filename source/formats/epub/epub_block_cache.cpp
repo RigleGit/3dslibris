@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <limits>
 #include <new>
+#include <memory>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <zlib.h>
@@ -475,6 +476,9 @@ struct Reader::State {
     u64 age;
   };
   std::vector<CachedBlock> cache;
+  std::unique_ptr<uint8_t[]> read_window;
+  size_t window_capacity = 0, window_size = 0;
+  uint64_t window_offset = 0, fd_offset = 0;
   State()
       : book(NULL), fd(-1), result(Missing), file_size(0), index_read(0),
         budget(0), read_bytes(0), payload_bytes(0), selection_bytes(0),
@@ -489,12 +493,14 @@ struct Reader::State {
     if (offset > file_size || n > file_size - offset)
       return false;
     const u64 begin = osGetTime();
-    if (lseek(fd, offset, SEEK_SET) < 0)
+    if (offset != fd_offset && lseek(fd, offset, SEEK_SET) < 0)
       return false;
     ++read_calls;
     const ssize_t got = read(fd, p, n);
-    if (got > 0)
+    if (got > 0) {
       read_bytes += got;
+      fd_offset = offset + got;
+    }
     const u64 now = osGetTime(), elapsed = now - begin;
     io_ms += elapsed;
     if (elapsed >= 100 && (!last_slow || now - last_slow >= 5000)) {
@@ -503,6 +509,27 @@ struct Reader::State {
                (unsigned)n, (unsigned long long)elapsed);
     }
     return got == (ssize_t)n;
+  }
+  Result ReadBlock(const Block &b, uint8_t *out) {
+    if (!read_window) {
+      window_capacity = kBytes;
+      read_window.reset(new (std::nothrow) uint8_t[window_capacity]);
+      if (!read_window) {
+        window_capacity = 16384;
+        read_window.reset(new (std::nothrow) uint8_t[window_capacity]);
+      }
+      if (!read_window) return NoMemory;
+    }
+    if (b.size > window_capacity)
+      return ReadAt(b.offset, out, b.size) ? Ready : IoError;
+    if (b.offset < window_offset || b.offset - window_offset > window_size ||
+        b.size > window_size - (size_t)(b.offset - window_offset)) {
+      window_offset = b.offset;
+      window_size = std::min<uint64_t>(window_capacity, header.index_offset - b.offset);
+      if (!ReadAt(window_offset, read_window.get(), window_size)) { window_size = 0; return IoError; }
+    }
+    memcpy(out, read_window.get() + (size_t)(b.offset - window_offset), b.size);
+    return Ready;
   }
   bool ValidRef(const Ref &r, unsigned kind) {
     if (!r.count)
@@ -674,8 +701,8 @@ struct Reader::State {
     if (budget && Memory() + b.words * 4 > budget)
       return NoMemory;
     std::vector<uint8_t> bytes(b.size), encoded;
-    if (!ReadAt(b.offset, bytes.data(), bytes.size()))
-      return IoError;
+    const Result read_result = ReadBlock(b, bytes.data());
+    if (read_result != Ready) return read_result;
     if (!page_cache_codec::Unpack(bytes.data(), bytes.size(), b.encoded,
                                   b.compressed, &encoded) ||
         Crc(encoded.data(), encoded.size()) != b.crc)
@@ -758,8 +785,13 @@ bool Reader::Request(unsigned page) {
     return false;
   state_->target = page;
   state_->result = IsReady(page) ? Complete : Pending;
-  if (IsReady(page))
-    state_->ages[page] = ++state_->tick;
+  if (IsReady(page)) state_->ages[page] = ++state_->tick;
+  else {
+    // Decode blocks are already owned: materialize this page without any I/O.
+    for (const Ref &ref : {state_->refs[page].text, state_->refs[page].search})
+      if (ref.count && !state_->Find(ref.block)) return true;
+    return Advance() == Complete;
+  }
   return true;
 }
 Result Reader::Step() {

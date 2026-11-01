@@ -10,7 +10,7 @@ for mode in release debug; do
 
 "${CXX:-c++}" -std=c++11 \
   ${CXXFLAGS:-} \
-  -DDSLIBRIS_HOST_TEST -Dfflush=ObserveCacheFlush -Dfwrite=ObserveCacheWrite \
+  -DDSLIBRIS_HOST_TEST -Dfflush=ObserveCacheFlush -Dfwrite=ObserveCacheWrite -Dread=ObserveBlockRead \
   ${flags[@]+"${flags[@]}"} \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \

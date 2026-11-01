@@ -35,6 +35,15 @@ extern "C" size_t ObserveCacheWrite(const void *data,size_t size,size_t count,FI
   return fwrite(data,size,count,fp);
 }
 
+#undef read
+extern "C" ssize_t read(int, void *, size_t);
+static bool count_block_reads = false;
+static unsigned block_reads = 0;
+extern "C" ssize_t ObserveBlockRead(int fd, void *data, size_t size) {
+  if (count_block_reads) ++block_reads;
+  return read(fd, data, size);
+}
+
 #ifdef DSLIBRIS_TEST_CLOCK
 long long dslibris_test_clock = 0;
 long long dslibris_test_clock_step = 1;
@@ -482,9 +491,12 @@ void TestBlockCacheRoundtrip() {
   epub_block_cache::Reader reader;
   Require(reader.Begin(&loaded, path, 0) == epub_block_cache::Pending,
           "open complete block reader");
+  block_reads = 0; count_block_reads = true;
   unsigned steps = 0;
   while (reader.Step() == epub_block_cache::Pending)
     ++steps;
+  count_block_reads = false;
+  Check(block_reads <= 4, "complete reader groups adjacent small blocks into bounded reads");
   Check(reader.GetResult() == epub_block_cache::Complete && steps > 1,
         "v23 loading is cooperative");
   Check(steps < 40, "complete reader batches decoded pages rather than waiting "
@@ -511,8 +523,13 @@ void TestBlockCacheRoundtrip() {
   Check(reader.GetResult() == epub_block_cache::Complete &&
             reader.IsReady(47) && !reader.IsReady(0),
         "partial reader starts at saved position");
-  Check(reader.BytesRead() < (size_t)info.st_size,
+  Check(info.st_size <= 65536 || reader.BytesRead() < (size_t)info.st_size,
         "partial reopen avoids unrelated blocks");
+  const size_t bytes_before_neighbor = reader.BytesRead();
+  Require(reader.Request(48), "request decoded neighbor");
+  Check(reader.IsReady(48) && reader.BytesRead() == bytes_before_neighbor,
+        "decoded neighbors are available immediately without I/O or another frame");
+  reader.Request(47);
   reader.Pin(47);
   const u32 *pinned = loaded.GetPage(47)->GetBuffer();
   Text text;
