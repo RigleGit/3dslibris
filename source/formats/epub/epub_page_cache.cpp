@@ -6,6 +6,7 @@
 
 #include "formats/epub/epub_page_cache.h"
 #include "formats/epub/epub_block_cache.h"
+#include "formats/common/cache_memory_utils.h"
 
 #include "book/book.h"
 #include "book/page.h"
@@ -44,9 +45,6 @@ static const std::string &GetEffectiveCacheDir() {
 static const u32 kEpubPageCacheMagic = 0x45504347U;
 static const u16 kEpubPageCacheVersion = 22;
 static const u16 kPageCacheHrefMaxBytes = 2048;
-// Bulk-loading cache files duplicates memory (file buffer + decoded pages).
-// Stream larger caches to avoid retaining a second full copy in memory.
-static const long kMaxBulkCacheLoadBytes = 16L * 1024L * 1024L;
 
 struct EpubPageCacheHeader {
   u32 magic;
@@ -302,6 +300,9 @@ LoadSession::Result LoadSession::Begin(Book *book, const std::string &path) {
   if (!s.fp)
     return s.result = errno == ENOENT ? Missing : IoError;
   setvbuf(s.fp, NULL, _IONBF, 0);
+  struct stat st;
+  if (fstat(fileno(s.fp), &st) == 0)
+    s.file_size = (size_t)st.st_size;
   uint32_t magic = 0;
   uint16_t version = 0;
   if (fread(&magic, 1, 4, s.fp) == 4 && fread(&version, 1, 2, s.fp) == 2 &&
@@ -315,9 +316,6 @@ LoadSession::Result LoadSession::Begin(Book *book, const std::string &path) {
     return s.result = r == epub_block_cache::Pending ? Pending : IoError;
   }
   rewind(s.fp);
-  struct stat st;
-  if (fstat(fileno(s.fp), &st) == 0)
-    s.file_size = (size_t)st.st_size;
   s.buffer = new (std::nothrow) unsigned char[s.capacity + 16390];
   if (!s.buffer) {
     s.capacity = 16384;
@@ -378,6 +376,8 @@ LoadSession::Result LoadSession::Step() {
   const u64 start = osGetTime();
   // Do not refill after a CPU yield: prefetched records still own the buffer.
   if (s.need_fill) {
+    if (!cache_memory::HasHeadroom(s.capacity * 4, 512 * 1024))
+      s.result = NoMemory;
     if (s.begin) {
       memmove(s.buffer, s.buffer + s.begin, s.end - s.begin);
       s.end -= s.begin;
@@ -385,7 +385,7 @@ LoadSession::Result LoadSession::Step() {
     }
     if (s.end > 16390)
       s.result = Corrupt;
-    else {
+    else if (s.result == Pending) {
       const size_t got = fread(s.buffer + s.end, 1, s.capacity, s.fp);
       ++s.calls;
       s.bytes += got;

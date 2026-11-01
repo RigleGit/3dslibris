@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/epub/epub_preparation.h"
 #include "formats/epub/epub_block_cache.h"
 #include "formats/common/page_cache_utils.h"
+#include "formats/common/cache_memory_utils.h"
 #include "shared/path_constants.h"
 #include <new>
 
@@ -323,6 +324,17 @@ static int ParseEpubSpineDocuments(
     std::string path = BuildDocPath(folder, href.c_str());
     std::string path_key = NormalizePath(path);
     if (LocateZipEntrySafe(uf, path, reporter, "SPINE", &zip_index)) {
+      unz_file_info memory_info;
+      if (unzGetCurrentFileInfo(uf, &memory_info, NULL, 0, NULL, 0, NULL, 0) !=
+              UNZ_OK ||
+          memory_info.uncompressed_size >
+              std::numeric_limits<size_t>::max() / 8 ||
+          !cache_memory::HasHeadroom((size_t)memory_info.uncompressed_size *
+                                     8)) {
+        DBG_LOG(reporter, "EPUB: insufficient memory for the next document");
+        rc = XML_ERROR_NO_MEMORY;
+        break;
+      }
       u16 chapter_start_page = book->GetPageCount();
       std::string chapter_label = BuildChapterLabel(path, chapter_num);
 #ifdef DSLIBRIS_DEBUG
@@ -1016,6 +1028,10 @@ Preparation::Result Preparation::Step() {
     }
     s.phase = State::Finished;
     s.result = Complete;
+
+#ifdef DSLIBRIS_DEBUG
+    const unsigned prepared_pages = s.book->GetPageCount();
+#endif
     if (s.residency_budget && !s.persistence_failed) {
       const unsigned session = s.book->GetOpenSessionId();
       s.book->Close();
@@ -1031,7 +1047,7 @@ Preparation::Result Preparation::Step() {
     DBG_LOGF(s.deps.reporter,
              "EPUB preparation done pages=%u parse_ms=%llu cache_ms=%llu "
              "total_ms=%llu saved=%u",
-             s.book->GetPageCount(), (unsigned long long)s.parse_ms,
+             prepared_pages, (unsigned long long)s.parse_ms,
              (unsigned long long)s.cache_ms,
              (unsigned long long)(osGetTime() - s.started),
              s.persistence_failed ? 0 : 1);

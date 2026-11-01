@@ -905,6 +905,10 @@ unsigned Book::EpubPageLinkCount(unsigned page) {
          : page < GetPageCount() ? GetPage(page)->GetSelectableCount()
                                  : 0;
 }
+void Book::TrimEpubPageCache() {
+  if (epub_cache_reader_)
+    epub_cache_reader_->FrameEnd();
+}
 int Book::AdvanceEpubPageCache() {
   if (!epub_cache_reader_)
     return 0;
@@ -961,17 +965,16 @@ void Book::CancelPendingEpubPageCacheSave() {
 }
 
 void Book::FlushPendingCacheSaves() {
-  IStatusReporter *r = GetStatusReporter();
   const bool flush_mobi =
       reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
           mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
           (unsigned int)GetPageCount());
   if (flush_mobi) {
-    DBG_LOGF(r, "BOOK flush-cache: save-mobi begin pages=%d book=%s",
+    DBG_LOGF(GetStatusReporter(), "BOOK flush-cache: save-mobi begin pages=%d book=%s",
              (int)pages.size(), filename.c_str());
     HomeButtonGuard home_guard;
     mobi_page_cache::SavePending(this);
-    DBG_LOGF(r, "BOOK flush-cache: save-mobi done book=%s", filename.c_str());
+    DBG_LOGF(GetStatusReporter(), "BOOK flush-cache: save-mobi done book=%s", filename.c_str());
   }
 }
 

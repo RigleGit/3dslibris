@@ -160,6 +160,7 @@ void ReaderController::DrawSearch() {
       highlight.end = current == s.match.end.page ? s.match.end.token : page->GetLength();
     }
     page->Draw(ts, on_match ? &highlight : nullptr);
+    s.book->TrimEpubPageCache();
     const bool landscape = orientation_utils::IsLandscape(s.book->GetOrientation());
     ts->SetScreen(landscape ? ts->screenright : ts->screenleft);
     const int height = ts->LogicalHeight();
@@ -219,7 +220,11 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
     }
   } else {
     if ((keys & app_.key.b) && s.engine.GetStatus() == text_search::Searching) {
-      LogSearch(app_, s, "cancel"); s.engine.Cancel(); s.message = "Search cancelled"; s.dirty = true;
+      LogSearch(app_, s, "cancel");
+      s.engine.Cancel();
+      book->CancelEpubPageRequest();
+      s.message = "Search cancelled";
+      s.dirty = true;
     } else if (keys & (app_.key.a | app_.key.b)) {
       InvalidateSearch(false); app_.ShowCurrentBookView(); book_nav::DrawPage(book, app_.ts.get()); return;
     } else if (keys & app_.key.x) {

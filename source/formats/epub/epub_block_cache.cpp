@@ -1,5 +1,6 @@
 #include "formats/epub/epub_block_cache.h"
 #include "formats/common/page_cache_codec.h"
+#include "formats/common/cache_memory_utils.h"
 #include "formats/common/page_cache_utils.h"
 #include "book/book.h"
 #include "book/page.h"
@@ -168,7 +169,7 @@ struct Writer::State {
   Phase after_drain;
   size_t pending_offset, index_offset;
   bool compressed, finishing;
-  u64 started;
+  u64 started, io_ms = 0, last_slow = 0;
   size_t calls;
   State()
       : book(NULL), fd(-1), result(Ready), logical(sizeof(Header)), first(0),
@@ -185,8 +186,18 @@ struct Writer::State {
       remove(temporary.c_str());
   }
   bool Write(const void *p, size_t n) {
+    const u64 begin = osGetTime();
     ++calls;
-    return write(fd, p, n) == (ssize_t)n;
+    const bool ok = write(fd, p, n) == (ssize_t)n;
+    const u64 now = osGetTime(), elapsed = now - begin;
+    io_ms += elapsed;
+    if (elapsed >= 100 && (!last_slow || now - last_slow >= 5000)) {
+      last_slow = now;
+      DBG_LOGF(book->GetStatusReporter(),
+               "CACHE IO slow write bytes=%u ms=%llu", (unsigned)n,
+               (unsigned long long)elapsed);
+    }
+    return ok;
   }
   bool Queue(const uint8_t *p, size_t n, size_t &offset) {
     while (offset < n) {
@@ -444,10 +455,10 @@ Result Writer::Step() {
       s.result = Complete;
       s.phase = State::Done;
       DBG_LOGF(s.book->GetStatusReporter(),
-               "CACHE IO save bytes=%llu calls=%u ms=%llu pages=%u",
+               "CACHE IO save bytes=%llu calls=%u ms=%llu io_ms=%llu pages=%u",
                (unsigned long long)s.logical, (unsigned)s.calls,
                (unsigned long long)(osGetTime() - s.started),
-               (unsigned)s.refs.size());
+               (unsigned long long)s.io_ms, (unsigned)s.refs.size());
     }
   } while (s.result == Pending && osGetTime() - start < 50);
   return s.result;
@@ -459,10 +470,14 @@ struct Reader::State {
   int fd;
   Result result;
   Header header;
-  size_t file_size, index_read, budget, read_bytes;
+  size_t file_size, index_read, budget, read_bytes, payload_bytes,
+      selection_bytes;
+  std::vector<size_t> selection_sizes;
   unsigned target, full_next, pinned;
   unsigned phase;
-  u64 tick;
+  u64 tick, started = osGetTime(), io_ms = 0, last_slow = 0;
+  size_t read_calls = 0;
+  bool logged = false;
   std::vector<uint8_t> index;
   std::vector<PageRef> refs;
   std::vector<Block> blocks;
@@ -476,8 +491,8 @@ struct Reader::State {
   std::vector<CachedBlock> cache;
   State()
       : book(NULL), fd(-1), result(Missing), file_size(0), index_read(0),
-        budget(0), read_bytes(0), target(0), full_next(0), pinned(0), phase(0),
-        tick(0) {
+        budget(0), read_bytes(0), payload_bytes(0), selection_bytes(0),
+        target(0), full_next(0), pinned(0), phase(0), tick(0) {
     memset(&header, 0, sizeof(header));
   }
   ~State() {
@@ -485,12 +500,22 @@ struct Reader::State {
       close(fd);
   }
   bool ReadAt(uint64_t offset, void *p, size_t n) {
-    if (offset > file_size || n > file_size - offset ||
-        lseek(fd, offset, SEEK_SET) < 0)
+    if (offset > file_size || n > file_size - offset)
       return false;
+    const u64 begin = osGetTime();
+    if (lseek(fd, offset, SEEK_SET) < 0)
+      return false;
+    ++read_calls;
     const ssize_t got = read(fd, p, n);
     if (got > 0)
       read_bytes += got;
+    const u64 now = osGetTime(), elapsed = now - begin;
+    io_ms += elapsed;
+    if (elapsed >= 100 && (!last_slow || now - last_slow >= 5000)) {
+      last_slow = now;
+      DBG_LOGF(book->GetStatusReporter(), "CACHE IO slow read bytes=%u ms=%llu",
+               (unsigned)n, (unsigned long long)elapsed);
+    }
     return got == (ssize_t)n;
   }
   bool ValidRef(const Ref &r, unsigned kind) {
@@ -588,6 +613,7 @@ struct Reader::State {
       return false;
     ready.assign(header.pages, false);
     ages.assign(header.pages, 0);
+    selection_sizes.assign(header.pages, 0);
     std::vector<uint8_t>().swap(index);
     return true;
   }
@@ -599,11 +625,18 @@ struct Reader::State {
       }
     return NULL;
   }
+  void UpdateSelections(unsigned page) {
+    if (page >= ready.size() || !ready[page])
+      return;
+    const size_t bytes =
+        book->GetPage(page)->GetRenderedSelectables().capacity() *
+        sizeof(Page::SelectableRenderEntry);
+    selection_bytes -= selection_sizes[page];
+    selection_bytes += bytes;
+    selection_sizes[page] = bytes;
+  }
   size_t Memory() const {
-    size_t bytes = 0;
-    for (unsigned i = 0; i < ready.size(); ++i)
-      if (ready[i])
-        bytes += 4 * ((size_t)refs[i].text.count + refs[i].search.count);
+    size_t bytes = payload_bytes + selection_bytes;
     for (const auto &b : cache)
       bytes += 4 * b.words.capacity();
     return bytes;
@@ -623,8 +656,9 @@ struct Reader::State {
       size_t oldest = cache.size();
       for (size_t i = 0; i < cache.size(); ++i)
         if (cache[i].id != wanted_block &&
-            (!budget || (cache[i].id != refs[target].text.block &&
-                         cache[i].id != refs[target].search.block)) &&
+            (!budget || ready[target] ||
+             (cache[i].id != refs[target].text.block &&
+              cache[i].id != refs[target].search.block)) &&
             (oldest == cache.size() || cache[i].age < cache[oldest].age))
           oldest = i;
       if (oldest != cache.size()) {
@@ -640,6 +674,10 @@ struct Reader::State {
           page = i;
       if (page == header.pages)
         break;
+      payload_bytes -=
+          4 * ((size_t)refs[page].text.count + refs[page].search.count);
+      selection_bytes -= selection_sizes[page];
+      selection_sizes[page] = 0;
       book->GetPage(page)->FreeBuffer();
       ready[page] = false;
     }
@@ -648,6 +686,9 @@ struct Reader::State {
     const Block &b = blocks[id];
     Trim(b.words * 4);
     if (budget && Memory() + b.words * 4 > budget)
+      return NoMemory;
+    if (!cache_memory::HasHeadroom((size_t)b.words * 4 + (size_t)b.size * 3,
+                                   512 * 1024))
       return NoMemory;
     std::vector<uint8_t> bytes(b.size), encoded;
     if (!ReadAt(b.offset, bytes.data(), bytes.size()))
@@ -714,8 +755,16 @@ bool Reader::IsReady(unsigned page) const {
   return HasIndex() && page < state_->ready.size() && state_->ready[page];
 }
 void Reader::Pin(unsigned page) {
-  if (state_)
+  if (state_) {
+    state_->UpdateSelections(state_->pinned);
     state_->pinned = page;
+  }
+}
+void Reader::FrameEnd() {
+  if (HasIndex() && state_->budget) {
+    state_->UpdateSelections(state_->pinned);
+    state_->Trim(0);
+  }
 }
 void Reader::InvalidateFile() {
   if (state_)
@@ -731,6 +780,28 @@ bool Reader::Request(unsigned page) {
   return true;
 }
 Result Reader::Step() {
+  const u64 begin = osGetTime();
+  const size_t reads = state_ ? state_->read_calls : 0;
+  Result result;
+  do {
+    result = Advance();
+  } while (result == Pending && state_ && state_->phase == 2 &&
+           !state_->budget && state_->read_calls == reads &&
+           osGetTime() - begin < 50);
+  if (state_ && result == Complete && !state_->logged) {
+    State &s = *state_;
+    s.logged = true;
+    DBG_LOGF(s.book->GetStatusReporter(),
+             "CACHE IO load v=23 bytes=%u calls=%u io_ms=%llu total_ms=%llu "
+             "resident=%u pages=%u",
+             (unsigned)s.read_bytes, (unsigned)s.read_calls,
+             (unsigned long long)s.io_ms,
+             (unsigned long long)(osGetTime() - s.started),
+             (unsigned)s.Memory(), s.header.pages);
+  }
+  return result;
+}
+Result Reader::Advance() {
   if (!state_ || state_->result != Pending)
     return GetResult();
   State &s = *state_;
@@ -745,6 +816,10 @@ Result Reader::Step() {
         h.index_size != s.file_size - h.index_offset ||
         (uint64_t)h.pages * 22 + (uint64_t)h.blocks * 28 > h.index_size)
       return s.result = Corrupt;
+    if (!cache_memory::HasHeadroom((size_t)h.index_size * 2 +
+                                       (size_t)h.pages * sizeof(Page),
+                                   512 * 1024))
+      return s.result = NoMemory;
     s.index.resize(h.index_size);
     s.phase = 1;
     return Pending;
@@ -802,6 +877,7 @@ Result Reader::Step() {
       page_buffer_utils::AdoptPageBuffer(&text);
   page->AdoptBuffer(&owned);
   page->SetSearchEvents(events);
+  s.payload_bytes += need;
   s.ready[target] = true;
   s.ages[target] = ++s.tick;
   if (s.budget)

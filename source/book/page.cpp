@@ -255,6 +255,7 @@ void Page::AdoptBuffer(page_buffer_utils::OwnedPageBuffer *owned) {
 }
 
 void Page::FreeBuffer() {
+  std::vector<SelectableRenderEntry>().swap(rendered_selectables_);
   page_search::Events().swap(search_events_);
   std::vector<u32>().swap(storage);
   SyncBufferAlias();

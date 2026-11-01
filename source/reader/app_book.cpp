@@ -523,6 +523,8 @@ bool ReaderController::PumpPageCache(const FrameInput &input) {
     }
     return true;
   }
+  if (mode != AppMode::Book && input.keys_down)
+    return false; // Deliver cancellation/navigation before data I/O.
   const int before = book->GetPosition();
   const int result = book->AdvanceEpubPageCache();
   if (app_.ShouldAbortWork())

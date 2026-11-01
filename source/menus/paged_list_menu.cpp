@@ -487,6 +487,8 @@ void PagedListMenu::SelectItem(u16 index) {
 }
 
 void PagedListMenu::Back() {
+  if (current_book_)
+    current_book_->CancelEpubPageRequest();
   const bool from_book_settings = context_.IsBookSettingsContext();
   DBG_LOGF(status_reporter, "LIST back title=%s from_book_ctx=%d",
            header_title.c_str(), from_book_settings ? 1 : 0);

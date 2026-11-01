@@ -46,11 +46,13 @@ public:
   unsigned Links(unsigned page) const;
   void Pin(unsigned page);
   void InvalidateFile();
+  void FrameEnd();
   size_t ResidentBytes() const;
   size_t BytesRead() const;
   bool HasIndex() const;
 
 private:
+  Result Advance();
   struct State;
   State *state_;
   Reader(const Reader &);

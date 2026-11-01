@@ -421,6 +421,14 @@ void TestBlockCacheRoundtrip() {
   fixture.source.SetChapterDocStartPage("two.xhtml", 40);
   fixture.source.SetChapterAnchorPage("two.xhtml#anchor", 47);
   fixture.source.RegisterInlineLinkHref("two.xhtml#anchor");
+  std::vector<u32> linked;
+  for (unsigned i = 0; i < 256; ++i) {
+    linked.push_back(TEXT_LINK_START);
+    linked.push_back(1);
+    linked.push_back('x');
+    linked.push_back(TEXT_LINK_END);
+  }
+  fixture.source.GetPage(47)->SetBuffer(linked.data(), linked.size());
   page_search::Events events;
   page_search::Annotate(events, 2, page_search::Space);
   fixture.source.GetPage(47)->SetSearchEvents(events);
@@ -438,6 +446,34 @@ void TestBlockCacheRoundtrip() {
   }
   Check(writer.GetResult() == epub_block_cache::Complete,
         "publish complete v23 cache");
+  // A replacement must never damage the already published cache.
+  Require(writer.Begin(&fixture.source, path), "begin replacement to cancel");
+  Require(writer.AppendDocument(0, 40), "append cancelled replacement");
+  while (writer.Step() == epub_block_cache::Pending) {
+  }
+  writer.Abort();
+  Check(access((path + ".tmp").c_str(), F_OK) != 0,
+        "v23 cancellation removes only temporary output");
+  const std::string blocked_backup = path + ".bak";
+  Require(mkdir(blocked_backup.c_str(), 0700) == 0, "block backup publication");
+  FILE *blocker = fopen((blocked_backup + "/keep").c_str(), "wb");
+  Require(blocker != NULL, "create deterministic publication refusal");
+  fclose(blocker);
+  Require(writer.Begin(&fixture.source, path), "begin failing replacement");
+  Require(writer.AppendDocument(0, 80), "append failing replacement");
+  while (writer.Step() == epub_block_cache::Pending) {
+  }
+  Require(writer.Finish(), "finalize failing replacement");
+  while (writer.Step() == epub_block_cache::Pending) {
+  }
+  Check(writer.GetResult() == epub_block_cache::IoError,
+        "v23 publication failure is explicit");
+  writer.Abort();
+  Check(access((path + ".tmp").c_str(), F_OK) != 0,
+        "failed replacement cleans temporary output");
+  remove((blocked_backup + "/keep").c_str());
+  rmdir(blocked_backup.c_str());
+  // The following independent read checks that the previous content survived.
   struct stat info;
   stat(path.c_str(), &info);
   Book loaded(fixture.ctx);
@@ -449,6 +485,8 @@ void TestBlockCacheRoundtrip() {
     ++steps;
   Check(reader.GetResult() == epub_block_cache::Complete && steps > 1,
         "v23 loading is cooperative");
+  Check(steps < 40, "complete reader batches decoded pages rather than waiting "
+                    "one frame per page");
   Check(loaded.GetPageCount() == 80 && loaded.GetPage(79)->GetLength() == 1024,
         "all pages restored");
   Check(loaded.GetPage(47)->GetSearchEvents() == events,
@@ -475,6 +513,21 @@ void TestBlockCacheRoundtrip() {
         "partial reopen avoids unrelated blocks");
   reader.Pin(47);
   const u32 *pinned = loaded.GetPage(47)->GetBuffer();
+  Text text;
+  std::vector<u16> left(400 * 240), right(400 * 240);
+  text.screenleft = left.data();
+  text.screenright = right.data();
+  text.screen = right.data();
+  text.capture_rendered_text = true;
+  loaded.GetPage(47)->Draw(&text);
+  const size_t selections =
+      loaded.GetPage(47)->GetRenderedSelectables().capacity() *
+      sizeof(Page::SelectableRenderEntry);
+  reader.FrameEnd();
+  Check(selections > 0 && reader.ResidentBytes() >= selections,
+        "residency includes rendered selectable storage");
+  Check(reader.ResidentBytes() <= 128 * 1024,
+        "frame boundary trims auxiliary page payload");
   for (unsigned page = 0; page < 80; ++page) {
     reader.Request(page);
     unsigned turns = 0;

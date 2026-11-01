@@ -32,6 +32,7 @@ struct Book {
   void ResetCbzFailureState() {}
   void ClearFocusedInlineLink() {}
   void ResetReadingPaceEstimate() {}
+  void CancelEpubPageRequest() {}
 };
 namespace text_search {
 Source FromBook(Book *b) {

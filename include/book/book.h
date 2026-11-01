@@ -464,6 +464,7 @@ public:
   void FinishShutdownReflowWorker();
   void FlushPendingCacheSaves();
   bool StartEpubPageCache(const std::string &path, size_t budget);
+  void TrimEpubPageCache();
   int AdvanceEpubPageCache(); // 1 pending, 0 ready, -1 failed; main thread
                               // only.
   bool HasEpubPageCache() const;
