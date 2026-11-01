@@ -129,6 +129,8 @@ fi
   "$TEST_ROOT/source/formats/epub/epub_toc_package_loader_utils.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_toc_title_match_utils.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_page_cache.cpp" \
+  "$TEST_ROOT/source/formats/epub/epub_block_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/page_cache_codec.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_cache.cpp" \
   "$TEST_ROOT/source/formats/common/plain_parser.cpp" \
   "$TEST_ROOT/source/formats/common/plain_text_stream.cpp" \

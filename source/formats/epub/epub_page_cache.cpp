@@ -5,6 +5,7 @@
 */
 
 #include "formats/epub/epub_page_cache.h"
+#include "formats/epub/epub_block_cache.h"
 
 #include "book/book.h"
 #include "book/page.h"
@@ -109,6 +110,7 @@ std::string CachePath(Book *book, const char *source,
 struct LoadSession::State {
   enum Stage { Header, Title, Pages, Search, Chapters, Documents, Anchors, Images, Links, Done };
   Book *book;
+  epub_block_cache::Reader *block_reader;
   FILE *fp;
   std::string path;
   unsigned char *buffer;
@@ -119,11 +121,11 @@ struct LoadSession::State {
   Result result;
   EpubPageCacheHeader header;
   u64 started, marks[9];
-  State() : book(NULL), fp(NULL), buffer(NULL), capacity(65536), begin(0), end(0),
+  State() : book(NULL), block_reader(NULL), fp(NULL), buffer(NULL), capacity(65536), begin(0), end(0),
             bytes(0), calls(0), file_size(0), need_fill(true), eof(false), stage(Header), index(0), result(Missing), started(0) {
     memset(&header,0,sizeof(header)); memset(marks,0,sizeof(marks));
   }
-  ~State() { if(fp) fclose(fp); delete[] buffer; }
+  ~State() { if(fp) fclose(fp); delete block_reader; delete[] buffer; }
   void Advance() { marks[(unsigned)stage]=osGetTime(); stage=(Stage)(stage+1); index=0; }
   bool One(page_cache_utils::BufReader &r) {
     using namespace page_cache_utils;
@@ -207,6 +209,16 @@ LoadSession::Result LoadSession::Begin(Book *book,const std::string &path) {
   s.fp=fopen(path.c_str(),"rb");
   if(!s.fp) return s.result=errno==ENOENT ? Missing : IoError;
   setvbuf(s.fp,NULL,_IONBF,0);
+  uint32_t magic=0; uint16_t version=0;
+  if(fread(&magic,1,4,s.fp)==4 && fread(&version,1,2,s.fp)==2 &&
+      magic==kEpubPageCacheMagic && version==23) {
+    fclose(s.fp); s.fp=NULL;
+    s.block_reader=new(std::nothrow) epub_block_cache::Reader;
+    if(!s.block_reader) return s.result=NoMemory;
+    const epub_block_cache::Result r=s.block_reader->Begin(book,path,0);
+    return s.result=r==epub_block_cache::Pending?Pending:IoError;
+  }
+  rewind(s.fp);
   struct stat st; if(fstat(fileno(s.fp),&st)==0) s.file_size=(size_t)st.st_size;
   s.buffer=new(std::nothrow) unsigned char[s.capacity+16390];
   if(!s.buffer) { s.capacity=16384; s.buffer=new(std::nothrow) unsigned char[s.capacity+16390]; }
@@ -214,13 +226,14 @@ LoadSession::Result LoadSession::Begin(Book *book,const std::string &path) {
   return s.result=Pending;
 }
 LoadSession::Result LoadSession::GetResult() const { return state_ ? state_->result : NoMemory; }
-unsigned LoadSession::Progress() const { return state_ ? (unsigned)(state_->bytes-state_->end+state_->begin) : 0; }
+unsigned LoadSession::Progress() const { return state_ ? (state_->block_reader ? (unsigned)state_->block_reader->BytesRead() : (unsigned)(state_->bytes-state_->end+state_->begin)) : 0; }
 unsigned LoadSession::Total() const { return state_ ? (unsigned)state_->file_size : 0; }
 
 void LoadSession::Cancel() {
   if(state_ && state_->result==Pending) {
     state_->result=Cancelled;
     if(state_->fp) { fclose(state_->fp); state_->fp=NULL; }
+    if(state_->block_reader) state_->block_reader->Close();
     if(state_->book) state_->book->Close();
   }
 }
@@ -229,6 +242,15 @@ LoadSession::Result LoadSession::Step() {
   State &s=*state_;
   if(open_cancel_poll::Poll(s.book,s.book->GetStatusReporter(),"epub-cache-load")) {
     Cancel(); return Cancelled;
+  }
+  if(s.block_reader) {
+    const epub_block_cache::Result result=s.block_reader->Step();
+    if(result==epub_block_cache::Pending)return Pending;
+    s.result=result==epub_block_cache::Complete?Complete:
+      result==epub_block_cache::Corrupt?Corrupt:
+      result==epub_block_cache::NoMemory?NoMemory:IoError;
+    if(s.result!=Complete)s.book->Close();
+    return s.result;
   }
   const u64 start=osGetTime();
   // Do not refill after a CPU yield: prefetched records still own the buffer.

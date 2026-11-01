@@ -2,6 +2,7 @@
 #include "book/book_context.h"
 #include "book/page.h"
 #include "formats/epub/epub_page_cache.h"
+#include "formats/epub/epub_block_cache.h"
 #include "file_write_failure_utils.h"
 #include "shared/status_reporter.h"
 
@@ -411,6 +412,49 @@ void TestBookOwnsPendingWriter() {
         "completion after idle work saves every page exactly once");
 }
 
+void TestBlockCacheRoundtrip() {
+  Fixture fixture; fixture.AddPages(80,1024);
+  fixture.source.SetTitle("Block cache"); fixture.source.AddChapter(31,"Middle",1);
+  fixture.source.SetChapterDocStartPage("one.xhtml",0);
+  fixture.source.SetChapterDocStartPage("two.xhtml",40);
+  fixture.source.SetChapterAnchorPage("two.xhtml#anchor",47);
+  fixture.source.RegisterInlineLinkHref("two.xhtml#anchor");
+  page_search::Events events; page_search::Annotate(events,2,page_search::Space);
+  fixture.source.GetPage(47)->SetSearchEvents(events);
+  const std::string path=fixture.directory+"/blocks.epc";
+  epub_block_cache::Writer writer;
+  Require(writer.Begin(&fixture.source,path),"begin block writer");
+  Require(writer.AppendDocument(0,40),"first document");
+  while(writer.Step()==epub_block_cache::Pending) {}
+  Require(writer.AppendDocument(40,80),"second document");
+  while(writer.Step()==epub_block_cache::Pending) {}
+  Require(writer.Finish(),"start publishing index");
+  while(writer.Step()==epub_block_cache::Pending) {}
+  Check(writer.GetResult()==epub_block_cache::Complete,"publish complete v23 cache");
+  Book loaded(fixture.ctx); epub_block_cache::Reader reader;
+  Require(reader.Begin(&loaded,path,0)==epub_block_cache::Pending,"open complete block reader");
+  unsigned steps=0;
+  while(reader.Step()==epub_block_cache::Pending) ++steps;
+  Check(reader.GetResult()==epub_block_cache::Complete && steps>1,"v23 loading is cooperative");
+  Check(loaded.GetPageCount()==80 && loaded.GetPage(79)->GetLength()==1024,"all pages restored");
+  Check(loaded.GetPage(47)->GetSearchEvents()==events,"search events restored");
+  Check(loaded.GetChapters().size()==1 && loaded.GetChapters()[0].page==31,"chapters restored");
+  u16 target=0; Check(loaded.FindChapterAnchorPage("two.xhtml#anchor",&target)&&target==47,"anchors restored");
+  struct stat info; stat(path.c_str(),&info);
+  Check(info.st_size<80*1024,"block format reduces repetitive content");
+  reader.Close(); loaded.Close();
+  epub_page_cache::LoadSession facade; facade.Begin(&loaded,path);
+  while(facade.Step()==epub_page_cache::LoadSession::Pending) {}
+  Check(facade.GetResult()==epub_page_cache::LoadSession::Complete && loaded.GetPageCount()==80,
+        "v23 reopens through the shared complete reader");
+  loaded.Close();
+  FILE *fp=fopen(path.c_str(),"r+b"); fseek(fp,35,SEEK_SET); int byte=fgetc(fp); fseek(fp,35,SEEK_SET); fputc(byte^64,fp); fclose(fp);
+  reader.Begin(&loaded,path,0);
+  while(reader.Step()==epub_block_cache::Pending) {}
+  Check(reader.GetResult()==epub_block_cache::Corrupt,"block CRC detects changed data");
+  reader.Close(); loaded.Close(); remove(path.c_str());
+}
+
 void TestCooperativeLegacyLoad() {
   Fixture fixture; fixture.AddPages(60,1024); fixture.Save();
   Book loaded(fixture.ctx);
@@ -544,6 +588,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (selected == "all") {
+    TestBlockCacheRoundtrip();
     TestCooperativeLegacyLoad();
     TestCloseNeverStartsDeferredEpubSave();
     TestPreviousLayoutCacheIsRejected();
