@@ -217,11 +217,12 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
 }
 
 bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
-  if (!preparation_ || !cache_preparing_)
+  if (!cache_preparing_)
     return false;
   Book *book = cache_preparing_;
   if (input.keys_down & (app_.key.b | app_.key.start)) {
-    preparation_->Cancel();
+    if (preparation_)
+      preparation_->Cancel();
     preparation_.reset();
     cache_preparing_ = nullptr;
     app_.SetCurrentBook(nullptr);
@@ -233,6 +234,15 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
   }
   if (app_.ShouldAbortWork())
     return true;
+  // A fatal preparation error releases its resources but keeps this screen
+  // until acknowledgement. It must not fall through to the legacy opener.
+  if (!preparation_) {
+    if (input.timestamp_ms - cache_draw_ms_ >= 100) {
+      DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
+      cache_draw_ms_ = input.timestamp_ms;
+    }
+    return true;
+  }
   const std::string label = preparation_->Label();
   if (label != cache_label_ || input.timestamp_ms - cache_draw_ms_ >= 100) {
     DrawOpeningSplashImpl(&app_, preparation_->Progress(),
@@ -251,8 +261,19 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
   if (result == epub_parser::Preparation::Pending)
     return true;
   if (result != epub_parser::Preparation::Complete) {
-    DBG_LOGF(&app_, "EPUB preparation failed result=%d detail=%s", (int)result,
-             preparation_->Label());
+    if (result != epub_parser::Preparation::Cancelled) {
+      char failure_label[128];
+      snprintf(failure_label, sizeof(failure_label), "%s; B: back",
+               preparation_->Label());
+      preparation_->Cancel();
+      preparation_.reset();
+      cache_label_ = failure_label;
+      DBG_LOGF(&app_, "EPUB preparation failed result=%d detail=%s",
+               (int)result, cache_label_.c_str());
+      DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
+      cache_draw_ms_ = input.timestamp_ms;
+      return true;
+    }
     preparation_->Cancel();
     preparation_.reset();
     cache_preparing_ = nullptr;

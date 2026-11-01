@@ -586,6 +586,24 @@ void TestEpubContentAllocationFailureAndRecovery() {
               book.HasPendingEpubPageCacheSave());
   book.Close();
 
+  {
+    epub_parser::Preparation prep;
+    ExpectTrue("begin visible preparation after allocation failure",
+               prep.Begin(&book, path));
+    while (prep.GetResult() == epub_parser::Preparation::Pending &&
+           !book.GetPageCount())
+      prep.Step();
+    ExpectTrue("visible preparation reaches content", book.GetPageCount() > 0);
+    g_reject_nothrow_allocations = true;
+    while (prep.Step() == epub_parser::Preparation::Pending) {
+    }
+    g_reject_nothrow_allocations = false;
+    ExpectTrue("pagination allocation failure remains explicit",
+               prep.GetResult() == epub_parser::Preparation::NoMemory);
+    ExpectTrue("pagination OOM message identifies pagination",
+               std::string(prep.Label()).find("paginate") != std::string::npos);
+    prep.Cancel();
+  }
   fail_after_first_document = false;
   ExpectTrue("same EPUB recovers after allocation failure", EpubOpen(&book) == 0);
   ExpectTrue("recovery parses both chapter targets", book.GetChapters().size() == 2);

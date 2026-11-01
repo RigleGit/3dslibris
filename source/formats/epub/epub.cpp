@@ -827,8 +827,15 @@ bool Preparation::PersistenceFailed() const {
 const char *Preparation::Label() const {
   if (!state_)
     return "cannot prepare book";
-  if (state_->result == NoMemory)
-    return "not enough memory to load cache";
+  if (state_->result == NoMemory) {
+    if (state_->phase == State::Cache)
+      return "not enough memory to load cache";
+    if (state_->phase == State::Spine)
+      return "not enough memory to paginate book";
+    return "not enough memory to prepare book";
+  }
+  if (state_->result == Failed)
+    return "cannot prepare book";
   if (state_->result == IoError)
     return "cannot read page cache";
   if (state_->result == Complete && state_->persistence_failed)

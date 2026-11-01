@@ -184,6 +184,30 @@ void TestLoadingForHand(u8 handedness) {
       assert(characters * 7 <= width - 24);
     }
 }
+void TestPreparationErrorFits() {
+  for (u8 hand : {u8(0), u8(1)}) {
+    App app;
+    app.portrait_orientation = hand;
+    app.book.name = "Book.epub";
+    const std::string reason = "not enough memory to paginate book; B: back";
+    reader_internal::DrawOpeningSplashImpl(&app, 0, 0, reason.c_str());
+    std::string shown;
+    int last_reason_y = 0;
+    for (const auto &line : app.ts->printed) {
+      assert(line.x + (int)line.value.size() * 7 <=
+             app.ts->LogicalWidth() - 12);
+      if (line.value == app.book.name) {
+        assert(line.y >= last_reason_y + 16);
+        continue;
+      }
+      if (!shown.empty())
+        shown += ' ';
+      shown += line.value;
+      last_reason_y = line.y;
+    }
+    assert(shown == reason);
+  }
+}
 void TestOpeningToReaderTransition() {
   for (u8 hand : {u8(0), u8(1)}) {
     App app;
@@ -206,6 +230,7 @@ int main() {
   TestLoadingForHand(0);
   TestLoadingForHand(1);
   TestOpeningToReaderTransition();
+  TestPreparationErrorFits();
   puts("PASS: opening stays portrait until reading, with bounded title measurements "
        "and valid UTF-8");
 }

@@ -217,8 +217,17 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
   app->ts->SetScreen(app->ts->screenright);
   app->ts->ClearScreen();
   app->DrawBottomGradientBackground();
-  app->ts->SetPen(12, 28);
-  app->ts->PrintString(label ? label : "opening book ...");
+  const int line_width =
+      std::max(1, app->ts->LogicalWidth() - 2 * kOpeningTitleMargin);
+  const std::vector<std::string> label_lines = BuildOpeningTitleLines(
+      app->ts.get(), label ? label : "opening book ...", line_width,
+      kOpeningTitleMaxLines, TEXT_STYLE_BROWSER);
+  for (size_t i = 0; i < label_lines.size(); ++i) {
+    app->ts->SetPen(12, (u16)(28 + (int)i * kOpeningTitleLineHeight));
+    app->ts->PrintString(label_lines[i].c_str());
+  }
+  const int label_extra =
+      std::max(0, (int)label_lines.size() - 1) * kOpeningTitleLineHeight;
 
   const char *name = selected->GetFileName();
   if (!name || !*name)
@@ -229,7 +238,8 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
         std::max(1, app->ts->LogicalWidth() - 2 * kOpeningTitleMargin),
         kOpeningTitleMaxLines, TEXT_STYLE_BROWSER);
     for (size_t i = 0; i < lines.size(); ++i) {
-      app->ts->SetPen(12, (u16)(50 + (int)i * kOpeningTitleLineHeight));
+      app->ts->SetPen(
+          12, (u16)(50 + label_extra + (int)i * kOpeningTitleLineHeight));
       app->ts->PrintString(lines[i].c_str());
     }
   }
@@ -239,7 +249,7 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
     char progress[32];
     snprintf(progress, sizeof(progress), "%u / %u  (%u%%)", spine_done,
              spine_total, pct);
-    app->ts->SetPen(12, 106);
+    app->ts->SetPen(12, (u16)(106 + label_extra));
     app->ts->PrintString(progress);
   }
 
