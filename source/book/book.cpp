@@ -866,7 +866,7 @@ void Book::PumpPendingEpubPageCacheSave() {
       return;
     }
   }
-  if (epub_cache_save_writer_->Step(this, 16384, 8) !=
+  if (epub_cache_save_writer_->Step(this, 65536, 50) !=
       epub_page_cache::StreamWriter::Pending)
     CancelPendingEpubPageCacheSave();
 }

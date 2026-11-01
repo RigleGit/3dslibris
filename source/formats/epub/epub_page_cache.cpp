@@ -97,396 +97,183 @@ static void EnsureCacheDirs() {
   initialized = true;
 }
 
-static void AppendPages(Book *book,
-                        const std::vector<page_cache_utils::CachedPage> &pages) {
-  if (!book)
-    return;
-
-  book->ReservePageCapacity(pages.size());
-
-  for (size_t i = 0; i < pages.size(); i++) {
-    page_cache_utils::CachedPage &cached_page =
-        const_cast<page_cache_utils::CachedPage &>(pages[i]);
-    Page *page = book->AppendPage();
-    page_buffer_utils::OwnedPageBuffer owned =
-        page_buffer_utils::AdoptPageBuffer(&cached_page);
-    page->AdoptBuffer(&owned);
-  }
-}
-
-static bool AppendPagesFromFile(FILE *fp, Book *book, u32 count,
-                                u16 max_page_codepoints) {
-  if (!fp || !book)
-    return false;
-
-  book->ReservePageCapacity(count);
-  for (u32 i = 0; i < count; i++) {
-    u16 length = 0;
-    if (fread(&length, 1, sizeof(length), fp) != sizeof(length) ||
-        length > max_page_codepoints) {
-      return false;
-    }
-
-    page_cache_utils::CachedPage cached_page(length);
-    const size_t byte_count = (size_t)length * sizeof(u32);
-    if (length > 0 &&
-        fread(cached_page.data(), 1, byte_count, fp) != byte_count) {
-      return false;
-    }
-
-    Page *page = book->AppendPage();
-    page_buffer_utils::OwnedPageBuffer owned =
-        page_buffer_utils::AdoptPageBuffer(&cached_page);
-    page->AdoptBuffer(&owned);
-  }
-  return true;
-}
-
-
-static void AppendChapters(
-    Book *book, const std::vector<page_cache_utils::CachedChapter> &chapters) {
-  if (!book)
-    return;
-
-  for (size_t i = 0; i < chapters.size(); i++) {
-    const page_cache_utils::CachedChapter &chapter = chapters[i];
-    if (chapter.page < book->GetPageCount())
-      book->AddChapter(chapter.page, chapter.title, chapter.level);
-  }
-}
-
 } // namespace
 
 namespace epub_page_cache {
+
+std::string CachePath(Book *book, const char *source,
+                      const page_cache_utils::PageCacheLayoutParams &params) {
+  return BuildCachePath(book, source, params);
+}
+
+struct LoadSession::State {
+  enum Stage { Header, Title, Pages, Search, Chapters, Documents, Anchors, Images, Links, Done };
+  Book *book;
+  FILE *fp;
+  std::string path;
+  unsigned char *buffer;
+  size_t capacity, begin, end, bytes, calls, file_size;
+  bool need_fill, eof;
+  Stage stage;
+  u32 index;
+  Result result;
+  EpubPageCacheHeader header;
+  u64 started, marks[9];
+  State() : book(NULL), fp(NULL), buffer(NULL), capacity(65536), begin(0), end(0),
+            bytes(0), calls(0), file_size(0), need_fill(true), eof(false), stage(Header), index(0), result(Missing), started(0) {
+    memset(&header,0,sizeof(header)); memset(marks,0,sizeof(marks));
+  }
+  ~State() { if(fp) fclose(fp); delete[] buffer; }
+  void Advance() { marks[(unsigned)stage]=osGetTime(); stage=(Stage)(stage+1); index=0; }
+  bool One(page_cache_utils::BufReader &r) {
+    using namespace page_cache_utils;
+    if(stage==Header) {
+      EpubPageCacheHeader h;
+      if(!r.ReadRaw(&h,sizeof(h))) return false;
+      if(!IsValidHeader(h)) { result=Corrupt; return false; }
+      header=h; book->ReservePageCapacity(h.page_count); Advance(); return true;
+    }
+    if(stage==Title) {
+      std::string title;
+      if(!ReadRawString(&r,header.title_len,&title)) return false;
+      if(!title.empty()) book->SetTitle(title.c_str());
+      Advance(); return true;
+    }
+    const u32 counts[]={0,0,header.page_count,header.page_count,header.chapter_count,
+      header.doc_start_count,header.anchor_count,header.image_count,header.link_href_count};
+    if(index>=counts[(unsigned)stage]) { Advance(); return true; }
+    if(stage==Pages || stage==Search) {
+      u16 n=0;
+      if(!r.ReadRaw(&n,2)) return false;
+      const unsigned limit=stage==Pages ? page_cache_limits::kPageMaxBytes :
+                                          book->GetPage(index)->GetLength()+1;
+      if(n>limit) { result=Corrupt; return false; }
+      if(!r.Remaining((size_t)n*4)) return false;
+      std::vector<u32> words(n);
+      if(n) r.ReadRaw(words.data(),(size_t)n*4);
+      if(stage==Pages) {
+        Page *page=book->AppendPage();
+        page_buffer_utils::OwnedPageBuffer owned=page_buffer_utils::AdoptPageBuffer(&words);
+        page->AdoptBuffer(&owned);
+      } else {
+        Page *page=book->GetPage(index);
+        if(!page_search::Valid(words,page->GetLength())) { result=Corrupt; return false; }
+        page->SetSearchEvents(words);
+      }
+    } else {
+      u16 page=0; u8 level=0;
+      const bool ref=stage==Chapters || stage==Documents || stage==Anchors;
+      if(ref && !r.ReadRaw(&page,2)) return false;
+      if(stage==Chapters && !r.ReadRaw(&level,1)) return false;
+      u16 n=0;
+      if(!r.ReadRaw(&n,2)) return false;
+      const unsigned maximum=stage==Chapters ? page_cache_limits::kChapterTitleMaxBytes : 2048;
+      if(n>maximum || ((stage==Images || stage==Links) && !n) ||
+          (ref && stage!=Chapters && page>=header.page_count)) { result=Corrupt; return false; }
+      if(!r.Remaining(n)) return false;
+      std::string text((const char*)r.cur,n); r.cur+=n;
+      if(stage==Chapters) { if(page<header.page_count) book->AddChapter(page,text,level); }
+      else if(stage==Documents) book->SetChapterDocStartPage(text,page);
+      else if(stage==Anchors) book->SetChapterAnchorPage(text,page);
+      else if(stage==Images) book->RegisterInlineImage(text);
+      else if(!book->RegisterInlineLinkHref(text)) { result=Corrupt; return false; }
+    }
+    ++index; return true;
+  }
+  void Log() {
+#ifdef DSLIBRIS_DEBUG
+    DBG_LOGF(book->GetStatusReporter(),
+      "EPUB cache load: hdr=%llums pages=%llums(%u) chapters=%llums(%u) doc_starts=%llums(%u) anchors=%llums(%u) images=%llums(%u) hrefs=%llums(%u) total=%llums",
+      (unsigned long long)(marks[Title]-started),
+      (unsigned long long)(marks[Search]-marks[Title]),header.page_count,
+      (unsigned long long)(marks[Chapters]-marks[Search]),header.chapter_count,
+      (unsigned long long)(marks[Documents]-marks[Chapters]),header.doc_start_count,
+      (unsigned long long)(marks[Anchors]-marks[Documents]),header.anchor_count,
+      (unsigned long long)(marks[Images]-marks[Anchors]),header.image_count,
+      (unsigned long long)(marks[Links]-marks[Images]),header.link_href_count,
+      (unsigned long long)(osGetTime()-started));
+    DBG_LOGF(book->GetStatusReporter(),"CACHE IO load bytes=%u calls=%u buffer=%u ms=%llu",
+      (unsigned)bytes,(unsigned)calls,(unsigned)capacity,(unsigned long long)(osGetTime()-started));
+#endif
+  }
+};
+LoadSession::LoadSession() : state_(NULL) {}
+LoadSession::~LoadSession() { Cancel(); delete state_; }
+LoadSession::Result LoadSession::Begin(Book *book,const std::string &path) {
+  Cancel(); delete state_; state_=new(std::nothrow) State;
+  if(!state_) return NoMemory;
+  State &s=*state_; s.book=book; s.path=path; s.started=osGetTime();
+  if(!book || book->GetPageCount()) return s.result=IoError;
+  s.fp=fopen(path.c_str(),"rb");
+  if(!s.fp) return s.result=errno==ENOENT ? Missing : IoError;
+  setvbuf(s.fp,NULL,_IONBF,0);
+  struct stat st; if(fstat(fileno(s.fp),&st)==0) s.file_size=(size_t)st.st_size;
+  s.buffer=new(std::nothrow) unsigned char[s.capacity+16390];
+  if(!s.buffer) { s.capacity=16384; s.buffer=new(std::nothrow) unsigned char[s.capacity+16390]; }
+  if(!s.buffer) return s.result=NoMemory;
+  return s.result=Pending;
+}
+LoadSession::Result LoadSession::GetResult() const { return state_ ? state_->result : NoMemory; }
+unsigned LoadSession::Progress() const { return state_ ? (unsigned)(state_->bytes-state_->end+state_->begin) : 0; }
+unsigned LoadSession::Total() const { return state_ ? (unsigned)state_->file_size : 0; }
+
+void LoadSession::Cancel() {
+  if(state_ && state_->result==Pending) {
+    state_->result=Cancelled;
+    if(state_->fp) { fclose(state_->fp); state_->fp=NULL; }
+    if(state_->book) state_->book->Close();
+  }
+}
+LoadSession::Result LoadSession::Step() {
+  if(!state_ || state_->result!=Pending) return GetResult();
+  State &s=*state_;
+  if(open_cancel_poll::Poll(s.book,s.book->GetStatusReporter(),"epub-cache-load")) {
+    Cancel(); return Cancelled;
+  }
+  const u64 start=osGetTime();
+  // Do not refill after a CPU yield: prefetched records still own the buffer.
+  if(s.need_fill) {
+    if(s.begin) { memmove(s.buffer,s.buffer+s.begin,s.end-s.begin); s.end-=s.begin; s.begin=0; }
+    if(s.end>16390) s.result=Corrupt;
+    else {
+      const size_t got=fread(s.buffer+s.end,1,s.capacity,s.fp); ++s.calls;
+      s.bytes+=got; s.end+=got; s.eof=!got; s.need_fill=false;
+      if(ferror(s.fp)) s.result=IoError;
+    }
+  }
+  while(s.result==Pending && s.stage!=State::Done) {
+    page_cache_utils::BufReader r(s.buffer+s.begin,s.end-s.begin);
+    if(!s.One(r)) {
+      s.need_fill=true;
+      if(s.eof && s.result==Pending) s.result=Corrupt;
+      break;
+    }
+    s.begin=(size_t)(r.cur-s.buffer);
+    if(osGetTime()-start>=50) break;
+  }
+  if(s.stage==State::Done) { s.result=Complete; s.Log(); }
+  if(s.result!=Pending) {
+    fclose(s.fp); s.fp=NULL;
+    if(s.result!=Complete) s.book->Close();
+  }
+  return s.result;
+}
 
 bool TryLoad(Book *book, const char *book_path, int pixel_size,
              int line_spacing, int paragraph_spacing, int paragraph_indent,
              int orientation, int margin_left, int margin_right, int margin_top,
              int margin_bottom, const char *regular_font) {
-  if (!book || !book_path)
-    return false;
-
+  if(!book || !book_path) return false;
   EnsureCacheDirs();
-
-  page_cache_utils::PageCacheLayoutParams params =
-      page_cache_utils::BuildLayoutParams(
-      book_path, pixel_size, line_spacing, paragraph_spacing, paragraph_indent,
-      orientation, margin_left, margin_right, margin_top, margin_bottom,
-      regular_font);
-
-  std::string cache_path = BuildCachePath(book, book_path, params);
-  if (cache_path.empty())
-    return false;
-
-#ifdef DSLIBRIS_DEBUG
-  // The pages phase includes the associated search data in both readers.
-  const u64 t_load_begin = osGetTime();
-  u64 t_after_hdr = t_load_begin;
-  u64 t_after_pages = t_load_begin;
-  u64 t_after_chapters = t_load_begin;
-  u64 t_after_doc_starts = t_load_begin;
-  u64 t_after_anchors = t_load_begin;
-  u64 t_after_images = t_load_begin;
-  u64 t_after_hrefs = t_load_begin;
-#endif
-
-  // Bulk-read smaller caches; larger ones stay on the bounded-memory path.
-  FILE *fp = fopen(cache_path.c_str(), "rb");
-  if (!fp)
-    return false;
-  if (fseek(fp, 0, SEEK_END) != 0) {
-    fclose(fp);
-    return false;
-  }
-  long file_size_long = ftell(fp);
-  if (file_size_long <= (long)sizeof(EpubPageCacheHeader)) {
-    fclose(fp);
-    remove(cache_path.c_str());
-    return false;
-  }
-  const bool use_stream_load = (file_size_long > kMaxBulkCacheLoadBytes);
-  rewind(fp);
-
-  EpubPageCacheHeader hdr;
-  if (fread(&hdr, 1, sizeof(hdr), fp) != sizeof(hdr) || !IsValidHeader(hdr)) {
-    fclose(fp);
-    remove(cache_path.c_str());
-    return false;
-  }
-
-  std::string title;
-  if (!page_cache_utils::ReadRawString(fp, hdr.title_len, &title)) {
-    fclose(fp);
-    remove(cache_path.c_str());
-    return false;
-  }
-#ifdef DSLIBRIS_DEBUG
-  t_after_hdr = osGetTime();
-#endif
-
-  bool ok = true;
-  if (use_stream_load) {
-#ifdef DSLIBRIS_DEBUG
-    if (book->GetStatusReporter()) {
-      DBG_LOGF(book->GetStatusReporter(),
-               "EPUB cache load: stream large cache size=%ld path=%s",
-               file_size_long, cache_path.c_str());
-    }
-#endif
-    ok = AppendPagesFromFile(fp, book, hdr.page_count,
-                             page_cache_limits::kPageMaxBytes);
-    if (ok) ok = book_search_cache::Read(fp, book);
-#ifdef DSLIBRIS_DEBUG
-    t_after_pages = osGetTime();
-#endif
-  } else {
-    std::vector<uint8_t> file_buf((size_t)file_size_long);
-    memcpy(file_buf.data(), &hdr, sizeof(hdr));
-    if (hdr.title_len > 0)
-      memcpy(file_buf.data() + sizeof(hdr), title.data(), hdr.title_len);
-    const size_t remaining =
-        file_buf.size() - (sizeof(hdr) + (size_t)hdr.title_len);
-    if (remaining > 0 &&
-        fread(file_buf.data() + sizeof(hdr) + hdr.title_len, 1, remaining,
-              fp) != remaining) {
-      fclose(fp);
-      remove(cache_path.c_str());
-      return false;
-    }
-
-    page_cache_utils::BufReader reader(file_buf.data(), file_buf.size());
-    EpubPageCacheHeader skip_hdr;
-    std::string skip_title;
-    if (!reader.ReadRaw(&skip_hdr, sizeof(skip_hdr)) ||
-        !page_cache_utils::ReadRawString(&reader, skip_hdr.title_len,
-                                         &skip_title)) {
-      fclose(fp);
-      remove(cache_path.c_str());
-      return false;
-    }
-
-    std::vector<page_cache_utils::CachedPage> pages;
-    ok = page_cache_utils::ReadPages(&reader, hdr.page_count,
-                                     page_cache_limits::kPageMaxBytes, &pages);
-    if (ok)
-      AppendPages(book, pages);
-    if (ok) ok = book_search_cache::Read(&reader, book);
-#ifdef DSLIBRIS_DEBUG
-    t_after_pages = osGetTime();
-#endif
-
-    if (ok) {
-      std::vector<page_cache_utils::CachedChapter> chapters;
-      ok = page_cache_utils::ReadChapters(&reader, hdr.chapter_count,
-                                          page_cache_limits::kChapterTitleMaxBytes,
-                                          &chapters);
-      if (ok)
-        AppendChapters(book, chapters);
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_chapters = osGetTime();
-#endif
-
-    if (ok) {
-      for (u32 i = 0; i < hdr.doc_start_count; i++) {
-        u16 doc_page = 0;
-        if (!reader.ReadRaw(&doc_page, sizeof(doc_page)) ||
-            doc_page >= hdr.page_count) {
-          ok = false;
-          break;
-        }
-        std::string docpath;
-        if (!page_cache_utils::ReadLengthPrefixedString16(
-                &reader, page_cache_limits::kPathMaxBytes, true, &docpath)) {
-          ok = false;
-          break;
-        }
-        book->SetChapterDocStartPage(docpath, doc_page);
-      }
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_doc_starts = osGetTime();
-#endif
-
-    if (ok) {
-      for (u32 i = 0; i < hdr.anchor_count; i++) {
-        u16 anchor_page = 0;
-        if (!reader.ReadRaw(&anchor_page, sizeof(anchor_page)) ||
-            anchor_page >= hdr.page_count) {
-          ok = false;
-          break;
-        }
-        std::string href;
-        if (!page_cache_utils::ReadLengthPrefixedString16(
-                &reader, kPageCacheHrefMaxBytes, true, &href)) {
-          ok = false;
-          break;
-        }
-        book->SetChapterAnchorPage(href, anchor_page);
-      }
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_anchors = osGetTime();
-#endif
-
-    if (ok) {
-      for (u32 i = 0; i < hdr.image_count; i++) {
-        std::string imgpath;
-        if (!page_cache_utils::ReadLengthPrefixedString16(
-                &reader, page_cache_limits::kPathMaxBytes, false, &imgpath)) {
-          ok = false;
-          break;
-        }
-        book->RegisterInlineImage(imgpath);
-      }
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_images = osGetTime();
-#endif
-
-    if (ok) {
-      for (u32 i = 0; i < hdr.link_href_count; i++) {
-        std::string href;
-        if (!page_cache_utils::ReadLengthPrefixedString16(
-                &reader, kPageCacheHrefMaxBytes, true, &href)) {
-          ok = false;
-          break;
-        }
-        if (book->RegisterInlineLinkHref(href) == 0) {
-          ok = false;
-          break;
-        }
-      }
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_hrefs = osGetTime();
-#endif
-    fclose(fp);
-    fp = NULL;
-  }
-  if (use_stream_load) {
-    std::vector<page_cache_utils::CachedChapter> chapters;
-    if (ok)
-      ok = page_cache_utils::ReadChapters(fp, hdr.chapter_count,
-                                          page_cache_limits::kChapterTitleMaxBytes,
-                                          &chapters);
-    if (ok)
-      AppendChapters(book, chapters);
-#ifdef DSLIBRIS_DEBUG
-    t_after_chapters = osGetTime();
-#endif
-
-    if (ok) {
-      for (u32 i = 0; i < hdr.doc_start_count; i++) {
-        u16 doc_page = 0;
-        if (fread(&doc_page, 1, sizeof(doc_page), fp) != sizeof(doc_page) ||
-            doc_page >= hdr.page_count) {
-          ok = false;
-          break;
-        }
-        std::string docpath;
-        if (!page_cache_utils::ReadLengthPrefixedString16(
-                fp, page_cache_limits::kPathMaxBytes, true, &docpath)) {
-          ok = false;
-          break;
-        }
-        book->SetChapterDocStartPage(docpath, doc_page);
-      }
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_doc_starts = osGetTime();
-#endif
-
-    if (ok) {
-      for (u32 i = 0; i < hdr.anchor_count; i++) {
-        u16 anchor_page = 0;
-        if (fread(&anchor_page, 1, sizeof(anchor_page), fp) !=
-            sizeof(anchor_page) || anchor_page >= hdr.page_count) {
-          ok = false;
-          break;
-        }
-        std::string href;
-        if (!page_cache_utils::ReadLengthPrefixedString16(
-                fp, kPageCacheHrefMaxBytes, true, &href)) {
-          ok = false;
-          break;
-        }
-        book->SetChapterAnchorPage(href, anchor_page);
-      }
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_anchors = osGetTime();
-#endif
-
-    if (ok) {
-      for (u32 i = 0; i < hdr.image_count; i++) {
-        std::string imgpath;
-        if (!page_cache_utils::ReadLengthPrefixedString16(
-                fp, page_cache_limits::kPathMaxBytes, false, &imgpath)) {
-          ok = false;
-          break;
-        }
-        book->RegisterInlineImage(imgpath);
-      }
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_images = osGetTime();
-#endif
-
-    if (ok) {
-      for (u32 i = 0; i < hdr.link_href_count; i++) {
-        std::string href;
-        if (!page_cache_utils::ReadLengthPrefixedString16(
-                fp, kPageCacheHrefMaxBytes, true, &href)) {
-          ok = false;
-          break;
-        }
-        if (book->RegisterInlineLinkHref(href) == 0) {
-          ok = false;
-          break;
-        }
-      }
-    }
-#ifdef DSLIBRIS_DEBUG
-    t_after_hrefs = osGetTime();
-#endif
-    fclose(fp);
-    fp = NULL;
-  }
-#ifdef DSLIBRIS_DEBUG
-  if (book->GetStatusReporter()) {
-    DBG_LOGF(book->GetStatusReporter(),
-             "EPUB cache load: hdr=%llums pages=%llums(%u) chapters=%llums(%u) "
-             "doc_starts=%llums(%u) anchors=%llums(%u) images=%llums(%u) "
-             "hrefs=%llums(%u) total=%llums",
-             (unsigned long long)(t_after_hdr - t_load_begin),
-             (unsigned long long)(t_after_pages - t_after_hdr),
-             (unsigned)hdr.page_count,
-             (unsigned long long)(t_after_chapters - t_after_pages),
-             (unsigned)hdr.chapter_count,
-             (unsigned long long)(t_after_doc_starts - t_after_chapters),
-             (unsigned)hdr.doc_start_count,
-             (unsigned long long)(t_after_anchors - t_after_doc_starts),
-             (unsigned)hdr.anchor_count,
-             (unsigned long long)(t_after_images - t_after_anchors),
-             (unsigned)hdr.image_count,
-             (unsigned long long)(t_after_hrefs - t_after_images),
-             (unsigned)hdr.link_href_count,
-             (unsigned long long)(osGetTime() - t_load_begin));
-  }
-#endif
-  if (!ok) {
-    if (fp)
-      fclose(fp);
-    book->Close();
-    remove(cache_path.c_str());
-    return false;
-  }
-
-  if (!title.empty())
-    book->SetTitle(title.c_str());
-
-  return true;
+  const page_cache_utils::PageCacheLayoutParams params=page_cache_utils::BuildLayoutParams(
+    book_path,pixel_size,line_spacing,paragraph_spacing,paragraph_indent,orientation,
+    margin_left,margin_right,margin_top,margin_bottom,regular_font);
+  const std::string path=BuildCachePath(book,book_path,params);
+  LoadSession reader;
+  LoadSession::Result result=reader.Begin(book,path);
+  while(result==LoadSession::Pending) result=reader.Step();
+  if(result==LoadSession::Corrupt) remove(path.c_str());
+  return result==LoadSession::Complete;
 }
 
 void Save(Book *book, const char *book_path, int pixel_size,
@@ -850,7 +637,7 @@ bool StreamWriter::Begin(Book *book, const char *book_path, int pixel_size,
   s.path = BuildCachePath(book, book_path, params);
   s.temporary = s.path + ".tmp";
   if (s.path.empty() || !(s.fp = fopen(s.temporary.c_str(), "wb")) ||
-      setvbuf(s.fp, NULL, _IOFBF, 16384) != 0) {
+      setvbuf(s.fp, NULL, _IOFBF, 65536) != 0) {
     Abort();
     return false;
   }
@@ -867,7 +654,7 @@ bool StreamWriter::Begin(Book *book, const char *book_path, int pixel_size,
     Abort();
     return false;
   }
-  DBG_LOGF(book->GetStatusReporter(), "EPUB cache save: begin pages=%u buffer_bytes=16384 setup_ms=%llu",
+  DBG_LOGF(book->GetStatusReporter(), "EPUB cache save: begin pages=%u buffer_bytes=65536 setup_ms=%llu",
            (unsigned)book->GetPageCount(), (unsigned long long)(osGetTime() - setup_begin));
   return true;
 }

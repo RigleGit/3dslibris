@@ -411,6 +411,24 @@ void TestBookOwnsPendingWriter() {
         "completion after idle work saves every page exactly once");
 }
 
+void TestCooperativeLegacyLoad() {
+  Fixture fixture; fixture.AddPages(60,1024); fixture.Save();
+  Book loaded(fixture.ctx);
+  epub_page_cache::LoadSession reader;
+  Check(reader.Begin(&loaded,fixture.CacheFile())==epub_page_cache::LoadSession::Pending,
+        "legacy load opens without decoding all pages");
+  Check(loaded.GetPageCount()==0,"begin never exposes partial page collection");
+  unsigned steps=0;
+  while(reader.Step()==epub_page_cache::LoadSession::Pending) ++steps;
+  Check(reader.GetResult()==epub_page_cache::LoadSession::Complete && steps>1 &&
+        loaded.GetPageCount()==60,"bounded buffered load restores complete book");
+  loaded.Close();
+  reader.Begin(&loaded,fixture.CacheFile()); reader.Step(); reader.Cancel();
+  Check(reader.GetResult()==epub_page_cache::LoadSession::Cancelled && loaded.GetPageCount()==0,
+        "cancelling clears partial pages");
+  Check(access(fixture.CacheFile().c_str(),R_OK)==0,"cancellation preserves valid input file");
+}
+
 void TestCloseNeverStartsDeferredEpubSave() {
   Fixture fixture;
   fixture.AddPages(2);
@@ -456,7 +474,9 @@ void TestCacheLoadMetricsStayWithinTotal() {
     BookContext ctx = fixture.ctx;
     ctx.status_reporter = &reporter;
     Book loaded(ctx);
+    if (large) dslibris_test_clock_step=100;
     Require(fixture.Load(&loaded), "load real cache for metrics");
+    dslibris_test_clock_step=1;
     const unsigned long long total = Metric(reporter.load, " total=");
     Check(total > 0, "load metrics use elapsed platform time");
     for (const char *key : {" hdr=", " pages=", " chapters=", " doc_starts=",
@@ -524,6 +544,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (selected == "all") {
+    TestCooperativeLegacyLoad();
     TestCloseNeverStartsDeferredEpubSave();
     TestPreviousLayoutCacheIsRejected();
   }

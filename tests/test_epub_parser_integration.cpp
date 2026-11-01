@@ -589,6 +589,7 @@ void TestEpubContentAllocationFailureAndRecovery() {
   ExpectTrue("recovery parses both chapter targets", book.GetChapters().size() == 2);
   ExpectTrue("recovery preserves chapter titles",
              book.GetChapters()[0].title == "Chapter One");
+  while (book.HasPendingEpubPageCacheSave()) book.PumpPendingEpubPageCacheSave();
   book.Close();
   const std::string cache_file = CacheFilePath(cache_dir);
   ExpectTrue("remove recovery cache", remove(cache_file.c_str()) == 0);
