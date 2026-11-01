@@ -746,7 +746,8 @@ void Book::SetPosition(int pos) {
     epub_pending_position_ = next;
     epub_cache_reader_->Pin(position);
     epub_cache_reader_->Request(next);
-    return;
+    if (!epub_cache_reader_->IsReady((unsigned)next))
+      return;
   }
   position = next;
   epub_pending_position_ = -1;

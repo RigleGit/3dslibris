@@ -579,6 +579,10 @@ void TestBlockCacheRoundtrip() {
   }
   Check(loaded.GetPosition() == 79 && loaded.IsEpubPageReady(79),
         "loaded navigation commits target");
+  loaded.SetPosition(78);
+  Check(loaded.GetPosition() == 78 && !loaded.HasPendingEpubNavigation() &&
+            loaded.IsEpubPageReady(78),
+        "cached neighbor navigation commits synchronously");
   loaded.Close();
   epub_page_cache::LoadSession facade;
   facade.Begin(&loaded, path);
