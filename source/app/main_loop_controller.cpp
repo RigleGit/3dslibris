@@ -38,7 +38,6 @@ int MainLoopController::RunMainLoop()
   int heap_log_countdown = 0;
   int lifecycle_log_budget = 32;
 #endif
-  u64 reader_last_interaction_ms = osGetTime();
   auto handle_lifecycle_pause = [&]() -> bool {
     boot_trace::FlushAptHooks();
     if (app_.IsAppletExitRequested())
@@ -60,7 +59,6 @@ int MainLoopController::RunMainLoop()
         lifecycle_log_budget--;
       }
 #endif
-      reader_last_interaction_ms = osGetTime();
       app_.HandleAppletSuspend();
       boot_trace::Boot("main loop suspend handled");
       svcSleepThread(1000000LL); // 1ms yield: aptMainLoop() may return briefly while HOME transitions
@@ -152,8 +150,6 @@ int MainLoopController::RunMainLoop()
 #endif
     // Dispatch frame processing based on the current app mode, handling input and updates for each mode. After processing, present the frame if it was marked dirty.
     const AppMode input_mode = app_.GetMode();
-    if (input_mode != AppMode::Book || input.keys_down || input.keys_held)
-      reader_last_interaction_ms = input.timestamp_ms;
 #ifdef DSLIBRIS_DEBUG
     const uint64_t input_started_ms = osGetTime();
     uint64_t browser_input_ms = 0;
@@ -306,15 +302,6 @@ int MainLoopController::RunMainLoop()
             osGetTime(), app_.GetBrowserLastInteractionMs(),
             app_.IsBrowserWaitingInputRelease()))
       app_.ProcessJobs(3);
-    if (!wrote_prefs && app_.GetMode() == AppMode::Book &&
-        input.keys_down == 0 && input.keys_held == 0 &&
-        input.timestamp_ms >= reader_last_interaction_ms &&
-        input.timestamp_ms - reader_last_interaction_ms >= 1000 &&
-        !app_.ShouldAbortWork() && aptIsActive()) {
-      Book *book = app_.GetCurrentBook();
-      if (book)
-        book->PumpPendingEpubPageCacheSave();
-    }
     fixed_perf::Flush(&app_);
   }
   fixed_perf::Flush(&app_);

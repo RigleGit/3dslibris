@@ -781,7 +781,7 @@ struct StreamWriter::State {
   void Record(Book *book, u64 begin, bool closing, StepResult result) {
 #ifdef DSLIBRIS_DEBUG
     const u64 now = osGetTime();
-    const u64 elapsed = now - (slices ? begin : started_ms);
+    const u64 elapsed = now - begin;
     active_ms += elapsed;
     max_slice_ms = std::max(max_slice_ms, elapsed);
     if (closing)

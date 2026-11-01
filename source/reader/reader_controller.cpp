@@ -5,7 +5,7 @@
 #include "app/app.h"
 
 ReaderController::ReaderController(App &app)
-    : app_(app), progress_autosave_book_(nullptr),
+    : cache_preparing_(nullptr), cache_draw_ms_(0), app_(app), progress_autosave_book_(nullptr),
       progress_autosave_dirty_(false), last_progress_persist_ms_(0) {}
 
 ReaderController::~ReaderController() {}

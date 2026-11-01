@@ -95,7 +95,6 @@ public:
 
 private:
   epub_page_cache::StreamWriter *epub_cache_save_writer_;
-  void FinishPendingEpubPageCacheSave();
   std::string filename;
   std::string foldername;
   std::string title;

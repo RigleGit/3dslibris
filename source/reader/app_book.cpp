@@ -211,12 +211,42 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
   return true;
 }
 
+bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
+  if (!cache_preparing_) return false;
+  Book *book = cache_preparing_;
+  if (input.keys_down & (app_.key.b | app_.key.start)) {
+    book->CancelPendingEpubPageCacheSave();
+    cache_preparing_ = nullptr;
+    book->Close();
+    app_.SetCurrentBook(nullptr);
+    app_.SetCurrentBookSessionId(0);
+    ResetOpeningState(&app_);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
+    return true;
+  }
+  if (app_.ShouldAbortWork()) return true;
+  if (input.timestamp_ms - cache_draw_ms_ >= 100) {
+    DrawOpeningSplashImpl(&app_, 0, 0, "saving cache... B: cancel");
+    cache_draw_ms_ = input.timestamp_ms;
+  }
+  book->PumpPendingEpubPageCacheSave();
+  if (!book->HasPendingEpubPageCacheSave()) {
+    cache_preparing_ = nullptr;
+    ResetOpeningState(&app_);
+    app_.SetMode(AppMode::Browser);
+    OpenBook();
+  }
+  return true;
+}
+
 void ReaderController::HandleEventInOpening(const FrameInput &input)
 {
   Prefs *prefs = app_.prefs.get();
   Text *ts = app_.ts.get();
   if (app_.ShouldAbortWork())
     return;
+  if (AdvanceCachePreparation(input)) return;
   MaybeDrawOpeningSplashProgress(&app_);
   const u32 keys = input.keys_down;
 
@@ -502,6 +532,7 @@ void ReaderController::ToggleBookmark()
 
 void ReaderController::CloseBook(bool persist_progress)
 {
+  cache_preparing_ = nullptr;
   InvalidateImageViewer();
   InvalidateSearch(true);
   Book *bookcurrent_ = app_.GetCurrentBook();

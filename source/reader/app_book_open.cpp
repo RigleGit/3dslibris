@@ -261,6 +261,17 @@ u8 ReaderController::OpenBook()
     ClearDeferredRelayoutState();
   }
 
+  if (bookcurrent_->HasPendingEpubPageCacheSave()) {
+    cache_preparing_ = bookcurrent_;
+    cache_draw_ms_ = osGetTime();
+    app_.SetOpeningPending(true);
+    app_.SetOpeningBook(bookcurrent_);
+    app_.SetOpeningSessionId(session_id);
+    app_.SetMode(AppMode::Opening);
+    DrawOpeningSplashImpl(&app_, 0, 0, "saving cache... B: cancel");
+    return 0;
+  }
+
   EnsureBookMode(&app_, "OpenBook: switched mode to APP_MODE_BOOK");
   if (app_.ShouldAbortWork())
   {

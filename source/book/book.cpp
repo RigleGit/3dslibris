@@ -877,32 +877,12 @@ void Book::CancelPendingEpubPageCacheSave() {
   epub_page_cache_save_pending = false;
 }
 
-void Book::FinishPendingEpubPageCacheSave() {
-  if (epub_cache_save_writer_) {
-    epub_cache_save_writer_->Step(this, 0, 0, true);
-    CancelPendingEpubPageCacheSave();
-  } else {
-    epub_page_cache::SavePending(this, true);
-  }
-}
-
 void Book::FlushPendingCacheSaves() {
   IStatusReporter *r = GetStatusReporter();
-  const bool flush_epub =
-      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
-          epub_page_cache_save_pending, IsAsyncReflowOpenPending(),
-          (unsigned int)GetPageCount());
   const bool flush_mobi =
       reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
           mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
           (unsigned int)GetPageCount());
-  if (flush_epub) {
-    DBG_LOGF(r, "BOOK flush-cache: save-epub begin pages=%d book=%s",
-             (int)pages.size(), filename.c_str());
-    HomeButtonGuard home_guard;
-    FinishPendingEpubPageCacheSave();
-    DBG_LOGF(r, "BOOK flush-cache: save-epub done book=%s", filename.c_str());
-  }
   if (flush_mobi) {
     DBG_LOGF(r, "BOOK flush-cache: save-mobi begin pages=%d book=%s",
              (int)pages.size(), filename.c_str());
@@ -913,19 +893,11 @@ void Book::FlushPendingCacheSaves() {
 }
 
 void Book::Close() {
-  const bool flush_pending_epub_cache =
-      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
-          epub_page_cache_save_pending, IsAsyncReflowOpenPending(),
-          (unsigned int)GetPageCount());
   const bool flush_pending_mobi_cache =
       reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
           mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
           (unsigned int)GetPageCount());
   CancelAsyncReflowOpen();
-  if (flush_pending_epub_cache) {
-    HomeButtonGuard home_guard;
-    FinishPendingEpubPageCacheSave();
-  }
   if (flush_pending_mobi_cache) {
     HomeButtonGuard home_guard;
     mobi_page_cache::SavePending(this);

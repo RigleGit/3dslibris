@@ -32,6 +32,9 @@ public:
   void OnAppletResumed();
 
 private:
+  Book *cache_preparing_;
+  uint64_t cache_draw_ms_;
+  bool AdvanceCachePreparation(const FrameInput &input);
   void DrawImageViewer();
   bool LoadImageViewer(int zoom);
   bool RestoreImageViewerBitmap(bool refresh = false);

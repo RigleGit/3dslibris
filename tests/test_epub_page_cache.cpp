@@ -401,13 +401,27 @@ void TestBookOwnsPendingWriter() {
         "shutdown cancellation releases the writer and removes its temporary");
   mark_pending();
   fixture.source.PumpPendingEpubPageCacheSave();
-  fixture.source.FlushPendingCacheSaves();
+  while (fixture.source.HasPendingEpubPageCacheSave())
+    fixture.source.PumpPendingEpubPageCacheSave();
   Check(!fixture.source.HasPendingEpubPageCacheSave(),
         "explicit flush completes the pending writer");
   Book loaded(fixture.ctx);
   Check(fixture.Load(&loaded) && loaded.GetPageCount() == 20 &&
             loaded.GetPage(19)->GetLength() == 1024,
         "completion after idle work saves every page exactly once");
+}
+
+void TestCloseNeverStartsDeferredEpubSave() {
+  Fixture fixture;
+  fixture.AddPages(2);
+  fixture.source.SetFolderName("/tmp");
+  fixture.source.SetFileName("3dslibris-epub-cache-owner.epub");
+  fixture.source.SetPendingEpubPageCacheSaveWithParams(14,2,0,0,0,12,12,10,36,NULL);
+  observe_cache_writes=true; cache_step_bytes=0;
+  fixture.source.Close();
+  observe_cache_writes=false;
+  Check(cache_step_bytes==0,"closing never writes a deferred EPUB cache");
+  Check(fixture.CacheFile().empty(),"closing does not publish an optional cache");
 }
 
 #if defined(DSLIBRIS_DEBUG) && defined(DSLIBRIS_TEST_CLOCK)
@@ -464,6 +478,7 @@ void TestCacheSaveMetricsSeparateIdleAndClosing() {
   epub_page_cache::StreamWriter writer;
   Require(writer.Begin(&book, kBookPath, 14, 2, 0, 0, 0,
                        12, 12, 10, 36, NULL), "begin metrics save");
+  dslibris_test_clock += 10000; // Time outside Step must not count as active I/O.
   Require(writer.Step(&book, 10, 0) == epub_page_cache::StreamWriter::Pending,
           "save starts with a bounded idle step");
   // Closing is deliberately slower; it must not contaminate the idle maximum.
@@ -508,8 +523,10 @@ int main(int argc, char **argv) {
                     "load-large-search|stream-counts|write-failure|replacement|steps|owner|metrics]\n", argv[0]);
     return 2;
   }
-  if (selected == "all")
+  if (selected == "all") {
+    TestCloseNeverStartsDeferredEpubSave();
     TestPreviousLayoutCacheIsRejected();
+  }
   if (selected == "all" || selected == "write-failure")
     TestBufferedWriteFailureRemovesCache();
   if (selected == "all" || selected == "replacement")
