@@ -2,10 +2,28 @@
 
 #include <3ds.h>
 #include <string>
+#include "formats/common/page_cache_utils.h"
+#include "formats/common/reflow_block_cache.h"
 
 class Book;
 
 namespace mobi_page_cache {
+std::string CachePath(Book *book,const char *source,const page_cache_utils::PageCacheLayoutParams &params);
+class LegacyLoader {
+public:
+  LegacyLoader();
+  ~LegacyLoader();
+  reflow_block_cache::Result Begin(Book *book,const std::string &path);
+  reflow_block_cache::Result Step();
+  unsigned Progress() const;
+  unsigned Total() const;
+private:
+  struct State;
+  State *state_;
+  LegacyLoader(const LegacyLoader &);
+  LegacyLoader &operator=(const LegacyLoader &);
+};
+
 
 bool TryLoad(Book *book, const char *book_path,
              int pixel_size, int line_spacing,

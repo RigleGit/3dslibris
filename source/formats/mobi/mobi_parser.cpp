@@ -1,4 +1,12 @@
 #include "formats/mobi/mobi_parser.h"
+#include "formats/mobi/mobi_preparation.h"
+#include "formats/mobi/mobi_record_decode.h"
+#include "formats/mobi/mobi_book_hooks.h"
+#include "formats/mobi/mobi_safe_markup_extract.h"
+#include "formats/common/cache_memory_utils.h"
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "shared/debug_log.h"
 #include "formats/common/buffered_status_log.h"
@@ -978,6 +986,143 @@ u8 ParseFile(Book *book, const char *path, const Hooks &hooks) {
   if (reporter)
     append_debug_log("MOBI: parse end");
   return 0;
+}
+
+// Parser-only cooperative preparation. Persistence and residency are owned by
+// ReflowPreparation, so parsing never saves from Book mode or from Close.
+struct Preparation::State {
+  Book *book;
+  BookParseDeps deps;
+  Hooks hooks;
+  int fd=-1;
+  size_t file_size=0, read_bytes=0;
+  std::string raw, merged, utf8;
+  MobiHeaderInfo header;
+  MobiDeferredState deferred;
+  mobi_record_decode::MergeSession merger;
+  mobi_text_decode::Session decoder;
+  mobi_safe_markup_extract::Session extractor;
+  enum Phase { Read, Header, Merge, Decode, Markup, Cleanup, TocPrepare, Init, Pages, Toc, Done } phase=Read;
+  ReflowPreparation::Result result=ReflowPreparation::Pending;
+  ~State() { if (fd>=0) close(fd); }
+};
+Preparation::Preparation() : state_(NULL) {}
+Preparation::~Preparation() { delete state_; }
+bool Preparation::Begin(Book *book,const std::string &source) {
+  delete state_;state_=new(std::nothrow) State;
+  if (!state_ || !book) return false;
+  State &s=*state_;s.book=book;s.deps=BuildBookParseDeps(book);s.hooks=mobi_book_hooks::Make();
+  s.fd=open(source.c_str(),O_RDONLY);
+  struct stat info;
+  if (s.fd<0 || fstat(s.fd,&info)!=0 || info.st_size<=0 || (uint64_t)info.st_size>kMobiMaxBytes) return false;
+  s.file_size=info.st_size;
+  s.deferred.line_wrap_fix_applied=book->GetMobiLineWrapFix();
+  return true;
+}
+ReflowPreparation::Result Preparation::Step() {
+  if (!state_) return ReflowPreparation::Failed;
+  State &s=*state_;
+  if (s.result!=ReflowPreparation::Pending) return s.result;
+  if (s.phase==State::Read) {
+    const size_t n=std::min<size_t>(65536,s.file_size-s.read_bytes);
+    if (!cache_memory::HasHeadroom(s.raw.size()+n,512*1024)) return s.result=ReflowPreparation::NoMemory;
+    const size_t old=s.raw.size();s.raw.resize(old+n);
+    if (read(s.fd,&s.raw[old],n)!=(ssize_t)n) return s.result=ReflowPreparation::IoError;
+    s.read_bytes+=n;
+    if (s.read_bytes==s.file_size) {close(s.fd);s.fd=-1;s.phase=State::Header;}
+  } else if (s.phase==State::Header) {
+    if (mobi_parser_core::ParseMobiHeader(s.raw,&s.header)!=0) return s.result=ReflowPreparation::Failed;
+    mobi_text_decode::ApplyEmbeddedTitle(s.book,s.raw,s.header);
+    mobi_record_decode::MobiRecord0Header h;
+    h.compression=s.header.compression;h.text_len=s.header.text_len;h.text_rec_count=s.header.text_rec_count;
+    h.trailing_flags=s.header.trailing_flags;h.huffcdic_record_index=s.header.huffcdic_record_index;
+    h.num_huffcdic_records=s.header.num_huffcdic_records;
+    if (!s.merger.Begin(&s.raw,&s.header.offsets,h,&s.merged)) return s.result=ReflowPreparation::Failed;
+    s.phase=State::Merge;
+  } else if (s.phase==State::Merge) {
+    const int r=s.merger.Step();
+    if (r<0) return s.result=ReflowPreparation::Failed;
+    if (!r) {
+      if (!s.decoder.Begin(&s.merged,s.header.encoding,&s.utf8)) return s.result=ReflowPreparation::NoMemory;
+      s.phase=State::Decode;
+    }
+  } else if (s.phase==State::Decode) {
+    if (s.decoder.Step()) {
+      std::string().swap(s.merged);
+      s.book->ClearInlineImages();
+      mobi_safe_markup_extract::InlineImageCallbacks images;
+      if (s.book->GetEbookImagesEnabled()) {
+        images.user_data=s.book;
+        images.register_inline_image=[](void *b,const std::string &path) {return static_cast<Book *>(b)->RegisterInlineImage(path);};
+      }
+      const bool capture=mobi_decode_plan::Build(s.header.text_len ? s.header.text_len : s.utf8.size()).capture_toc_metadata;
+      if (!s.extractor.Begin(&s.utf8,&s.deferred.text_utf8,images,capture ? &s.deferred.html_to_text_map : NULL)) return s.result=ReflowPreparation::NoMemory;
+      s.phase=State::Markup;
+    }
+  } else if (s.phase==State::Markup) {
+    if (s.extractor.Step()) s.phase=State::Cleanup;
+  } else if (s.phase==State::Cleanup) {
+    CleanupDecodedMobiText(s.deps.reporter,&s.deferred.text_utf8,
+                          s.deferred.html_to_text_map.empty() ? NULL : &s.deferred.html_to_text_map,
+                          s.deferred.line_wrap_fix_applied);
+    s.phase=State::TocPrepare;
+  } else if (s.phase==State::TocPrepare) {
+    s.deferred.text_len_for_pos=s.header.text_len ? s.header.text_len : s.utf8.size();
+    s.deferred.have_structured_toc=mobi_toc_prepare::Prepare(s.raw,s.header.offsets,s.header.ncx_index,
+        s.header.encoding,&s.utf8,s.deferred.text_len_for_pos,s.hooks.make_structured_toc_callbacks(),
+        s.hooks.make_inline_title_callbacks(),&s.deferred.structured_toc,&s.deferred.structured_from_filepos,s.deps.reporter);
+    std::string().swap(s.raw);std::string().swap(s.utf8);s.phase=State::Init;
+  } else if (s.phase==State::Init) {
+    if (!InitPlainTextStreamStateLocal(s.book,s.deferred.text_utf8,s.deps,false,&s.deferred.stream)) return s.result=ReflowPreparation::Failed;
+    s.book->MarkMobiRenderSettingsApplied(s.deferred.line_wrap_fix_applied);s.phase=State::Pages;
+  } else if (s.phase==State::Pages) {
+    const size_t before=s.deferred.stream.cursor;
+    const bool done=plain_text_stream::ContinueState(&s.deferred.stream,s.deferred.text_utf8,20,8,0,
+        &s.deferred.text_cursor_per_page,NULL,s.hooks.make_plain_continue_callbacks());
+    if (done) s.phase=State::Toc;
+    else if (before==s.deferred.stream.cursor) return s.result=ReflowPreparation::Failed;
+  } else if (s.phase==State::Toc) {
+    mobi_toc_finalize::FinalizePreparedToc(s.book,s.deps.reporter,s.deferred.structured_toc,
+        s.deferred.have_structured_toc,s.deferred.structured_from_filepos,s.deferred.heading_hints,
+        s.deferred.text_len_for_pos,s.deferred.html_to_text_map,s.deferred.text_cursor_per_page,
+        s.hooks.make_finalize_callbacks(),NULL);
+    s.book->MarkMobiRenderSettingsApplied(s.deferred.line_wrap_fix_applied);
+    s.phase=State::Done;s.result=s.book->GetPageCount() ? ReflowPreparation::Complete : ReflowPreparation::Failed;
+  }
+  return s.result;
+}
+const char *Preparation::Label() const {
+  if (!state_) return "cannot prepare MOBI";
+  switch (state_->phase) {
+    case State::Read:return "reading book... B: cancel";
+    case State::Header:case State::Merge:return "decompressing book... B: cancel";
+    case State::Decode:return "decoding text... B: cancel";
+    case State::Markup:case State::Cleanup:return "preparing text... B: cancel";
+    case State::Init:case State::Pages:return "paginating book... B: cancel";
+    default:return "preparing index... B: cancel";
+  }
+}
+unsigned Preparation::Progress() const {
+  if (!state_) return 0;const State &s=*state_;
+  switch(s.phase) {
+    case State::Read:return s.read_bytes;
+    case State::Merge:return s.merger.Progress();
+    case State::Decode:return s.decoder.Progress();
+    case State::Markup:return s.extractor.Progress();
+    case State::Pages:return s.deferred.stream.text_bytes_fed;
+    default:return 0;
+  }
+}
+unsigned Preparation::Total() const {
+  if (!state_) return 0;const State &s=*state_;
+  switch(s.phase) {
+    case State::Read:return s.file_size;
+    case State::Merge:return s.header.text_rec_count;
+    case State::Decode:return s.decoder.Total();
+    case State::Markup:return s.utf8.size();
+    case State::Pages:return s.deferred.text_utf8.size();
+    default:return 0;
+  }
 }
 
 } // namespace mobi_parser
