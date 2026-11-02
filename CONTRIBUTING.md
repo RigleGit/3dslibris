@@ -8,7 +8,8 @@ Thanks for contributing to `3dslibris`.
 - Keep PRs focused and small when possible.
 
 ## Local setup
-- Recommended: Docker image `devkitpro/devkitarm`
+- Recommended: the project Docker image built from `docker/Dockerfile.cia`.
+- Require libctru 2.7.1 or later for compatibility with extended application memory layouts such as Luma's Dev1. Updating Luma or Homebrew Menu alone does not update an existing application binary.
 - Required outputs must be reproducible from source.
 
 ## Build commands
@@ -21,9 +22,11 @@ make
 Or with Docker (recommended for consistency):
 
 ```bash
+docker build --platform linux/amd64 -f docker/Dockerfile.cia -t 3dslibris-cia .
 docker run --rm -v "$(pwd):/project" -w /project \
+  --platform linux/amd64 \
   -e DEVKITPRO=/opt/devkitpro -e DEVKITARM=/opt/devkitpro/devkitARM \
-  devkitpro/devkitarm \
+  3dslibris-cia \
   sh -lc 'make clean && make -j2 && make zip-sdmc && make debug-3dsx'
 ```
 

@@ -4,6 +4,12 @@ ARG TARGETPLATFORM
 ARG BANNERTOOL_REF=v1.2.2
 ARG MAKEROM_VERSION=makerom-v0.18.4
 
+# The base image predates libctru's heap fix for extended memory layouts.
+# Update the complete toolchain together; do not publish builds with the old runtime.
+RUN /opt/devkitpro/pacman/bin/pacman -Syu --noconfirm && \
+    /opt/devkitpro/pacman/bin/pacman -T 'libctru>=2.7.1' && \
+    /opt/devkitpro/pacman/bin/pacman -Q libctru devkitARM citro2d citro3d
+
 RUN set -eux; \
     echo "Building for platform: ${TARGETPLATFORM}"; \
     if [ -f /etc/apt/sources.list.d/devkitpro.list ]; then \

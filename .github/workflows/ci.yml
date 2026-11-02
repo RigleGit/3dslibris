@@ -4,7 +4,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   DEVKITPRO: /opt/devkitpro
   DEVKITARM: /opt/devkitpro/devkitARM
-  DEVKITARM_IMAGE: devkitpro/devkitarm:20260221
+  DEVKITARM_IMAGE: 3dslibris-build
 
 on:
   pull_request:
@@ -85,6 +85,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: Build toolchain image
+        run: docker build -f docker/Dockerfile.cia -t "$DEVKITARM_IMAGE" .
 
       - name: Build
         run: |
