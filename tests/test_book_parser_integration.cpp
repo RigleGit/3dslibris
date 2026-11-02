@@ -2154,6 +2154,14 @@ static void TestSharedReflowPreparation() {
   }
   {
     Text text;BookContext ctx;ctx.text=&text;Book book(ctx);
+    book.SetFolderName(folder);book.SetFileName("images.fb2");book.AppendPage();
+    ReflowPreparation prep;
+    test::ExpectFalse("preparation rejects an already populated book",prep.Begin(&book,std::string(folder)+"/images.fb2"));
+    test::ExpectTrue("invalid Begin reports failure instead of loading",prep.GetResult()==ReflowPreparation::Failed);
+    prep.Cancel();
+  }
+  {
+    Text text;BookContext ctx;ctx.text=&text;Book book(ctx);
     book.SetFolderName(folder);book.SetFileName("missing-source.mobi");
     ReflowPreparation prep;
     test::ExpectFalse("missing source fails initial preparation",prep.Begin(&book,std::string(folder)+"/missing-source.mobi"));

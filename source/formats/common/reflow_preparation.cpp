@@ -126,8 +126,10 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
     s.format = reflow_block_cache::Fb2;
   if (s.format == reflow_block_cache::Epub)
     return s.epub.Begin(book, source, budget);
-  if (book->GetPageCount())
+  if (book->GetPageCount()) {
+    s.result = Failed;
     return false;
+  }
   book->PrepareForOpen();
   book->CaptureEbookImageSetting();
   const auto deps = BuildBookParseDeps(book);
