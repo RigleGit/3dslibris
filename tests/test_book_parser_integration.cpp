@@ -2,6 +2,7 @@
 #include "formats/common/reflow_preparation.h"
 #include "formats/common/reflow_block_cache.h"
 #include "formats/fb2/fb2_page_cache.h"
+#include "formats/fb2/fb2_parser.h"
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/book_xml.h"
@@ -2051,6 +2052,29 @@ static void TestSharedReflowPreparation() {
       resources.emplace_back((const char *)bytes.data(),bytes.size());
     }
     test::ExpectTrue("fixture has original resources",resources.size()>=3);
+    if(std::string(name)=="images.fb2") {
+      const auto deps=BuildBookParseDeps(&book);const auto &l=deps.layout;
+      const auto params=page_cache_utils::BuildLayoutParams(source.c_str(),l.pixel_size,l.linespacing,
+          deps.paragraph_spacing,deps.paragraph_indent,deps.orientation,l.margin_left,l.margin_right,l.margin_top,l.margin_bottom,l.regular_font_path.c_str());
+      const std::string initial=fb2_page_cache::CachePath(&book,source.c_str(),params);
+      book.SetStylePublisherTextIndentOverride(0);
+      test::ExpectTrue("FB2 indent policy has a separate persistent cache key",fb2_page_cache::CachePath(&book,source.c_str(),params)!=initial);
+      book.SetStylePublisherTextIndentOverride(-1);book.SetStylePublisherBlockMarginsOverride(0);
+      test::ExpectTrue("FB2 vertical-margin policy has a separate persistent cache key",fb2_page_cache::CachePath(&book,source.c_str(),params)!=initial);
+      book.SetStylePublisherBlockMarginsOverride(-1);book.SetStylePublisherHorizontalMarginsOverride(0);
+      test::ExpectTrue("FB2 horizontal-margin policy has a separate persistent cache key",fb2_page_cache::CachePath(&book,source.c_str(),params)!=initial);
+      book.SetStylePublisherHorizontalMarginsOverride(-1);
+      Book reference(ctx);reference.SetFolderName(folder);reference.SetFileName(name);
+      reference.PrepareForOpen();reference.CaptureEbookImageSetting();
+      test::ExpectEq("legacy XML parser remains a reference",fb2_parser::Parse(&reference,source.c_str(),true,BuildBookParseDeps(&reference)),0);
+      test::ExpectTrue("8K XML feeds preserve legacy page tokens",CapturePageData(&reference)==expected);
+      test::ExpectEq("8K XML feeds preserve legacy chapter count",reference.GetChapters().size(),book.GetChapters().size());
+      for(unsigned i=0;i<reference.GetChapters().size();++i) {
+        test::ExpectEq("XML feed boundaries preserve chapter targets",reference.GetChapters()[i].page,book.GetChapters()[i].page);
+        test::ExpectTrue("XML feed boundaries preserve chapter labels",reference.GetChapters()[i].title==book.GetChapters()[i].title);
+      }
+    }
+
     book.Close();
     if(std::string(name)=="images.mobi") {
       // Produce a real v26 file through the legacy writer, then migrate it.

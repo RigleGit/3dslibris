@@ -10,8 +10,15 @@ std::string directory;
 std::string CachePath(Book *book, const char *source,
                       const page_cache_utils::PageCacheLayoutParams &params) {
   auto p = params;
+  p.variant_token = "pub3:";
+  p.variant_token +=
+      book && book->GetPublisherTextIndentEnabled() ? "i1" : "i0";
+  p.variant_token +=
+      book && book->GetPublisherBlockMarginsEnabled() ? ":m1" : ":m0";
+  p.variant_token +=
+      book && book->GetPublisherHorizontalMarginsEnabled() ? ":h1" : ":h0";
   if (book && !book->GetEbookImagesEnabled())
-    p.variant_token = "no-images";
+    p.variant_token += ":no-images";
 #ifdef DSLIBRIS_HOST_TEST
   const std::string &dir =
       directory.empty() ? paths::GetFb2CacheDir() : directory;
