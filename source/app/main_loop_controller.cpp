@@ -24,6 +24,7 @@
 #include "shared/debug_log.h"
 #include "library/browser_warmup_utils.h"
 #include "shared/debug_runtime_mode.h"
+#include "shared/mcp_input_mailbox.h"
 #include "settings/prefs.h"
 
 MainLoopController::MainLoopController(App &app) : app_(app) {}
@@ -114,8 +115,12 @@ int MainLoopController::RunMainLoop()
     hidScanInput(); // Update input state for this frame, must be called before reading keys.
     touchPosition raw_touch = {};
     hidTouchRead(&raw_touch);
-    const u32 frame_keys_down = hidKeysDown();
-    const u32 frame_keys_held = hidKeysHeld();
+    u32 frame_keys_down = hidKeysDown();
+    u32 frame_keys_held = hidKeysHeld();
+#ifdef DSLIBRIS_DEBUG
+    mcp_input::SetUserValue(0, (u32)app_.GetMode());
+    mcp_input::Apply(frame_keys_down, frame_keys_held, raw_touch);
+#endif
     const FrameInput input(frame_keys_down, frame_keys_held,
                            (frame_keys_held & KEY_TOUCH) != 0,
                            (int)raw_touch.px, (int)raw_touch.py, osGetTime());
