@@ -33,6 +33,14 @@ static u32 GlyphCacheKey(u32 ucs, FT_Face face) {
   return (height << 24) | (ucs & 0x00FFFFFFu);
 }
 
+// Empty outlines are normal for spaces. Only Arabic presentation forms are
+// known to contain mapped, advancing glyphs that need a fallback for ink.
+static bool IsGhostGlyph(u32 ucs, FT_GlyphSlot glyph) {
+  return ucs >= 0xFE70u && ucs <= 0xFEFFu && glyph->advance.x != 0 &&
+         glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
+         glyph->outline.n_contours == 0;
+}
+
 static bool FileReadable(const char *path) {
   if (!path || !*path)
     return false;
@@ -436,9 +444,7 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     bool needs_fallback = !FT_Get_Char_Index(face, ucs);
     if (!needs_fallback && ucs >= 0xFE70u && ucs <= 0xFEFFu) {
       FT_Error load_err = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
-      if (!load_err && face->glyph->advance.x != 0 &&
-          face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
-          face->glyph->outline.n_contours == 0) {
+      if (!load_err && IsGhostGlyph(ucs, face->glyph)) {
         needs_fallback = true;
       }
     }
@@ -568,6 +574,8 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       return (glyph->advance).x;
   } else {
     bool needs_fallback = false;
+    bool primary_loaded = false;
+    u8 primary_advance = 0;
 #ifdef ADVANCE_NO_CACHE
     FONT_ADVANCE_COUNT(misses);
     auto gindex = FT_Get_Char_Index(face, ucs);
@@ -577,9 +585,9 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       FONT_ADVANCE_COUNT(loads);
       error = FT_Load_Glyph(face, gindex, FT_LOAD_DEFAULT);
       if (!error) {
-        bool ghost = face->glyph->advance.x != 0 &&
-                     face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
-                     face->glyph->outline.n_contours == 0;
+        primary_loaded = true;
+        primary_advance = face->glyph->advance.x >> 6;
+        bool ghost = IsGhostGlyph(ucs, face->glyph);
         if (!ghost)
           return face->glyph->advance.x >> 6;
         needs_fallback = true;
@@ -601,9 +609,9 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       FONT_ADVANCE_COUNT(loads);
       error = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
       if (!error) {
-        bool ghost = face->glyph->advance.x != 0 &&
-                     face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
-                     face->glyph->outline.n_contours == 0;
+        primary_loaded = true;
+        primary_advance = face->glyph->advance.x >> 6;
+        bool ghost = IsGhostGlyph(ucs, face->glyph);
         if (!ghost) {
           u8 advance = face->glyph->advance.x >> 6;
           faceAdvanceCache.insert(std::make_pair(cache_key, advance));
@@ -642,6 +650,13 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
         }
 #endif
       }
+    }
+    // A mapped ghost without a usable fallback still renders on the primary.
+    if (primary_loaded) {
+#ifndef ADVANCE_NO_CACHE
+      faceAdvanceCache.insert(std::make_pair(cache_key, primary_advance));
+#endif
+      return primary_advance;
     }
   }
 

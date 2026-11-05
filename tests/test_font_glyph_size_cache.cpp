@@ -87,6 +87,56 @@ static void ExpectGlyph(FT_GlyphSlot actual, FT_GlyphSlot expected) {
                        expected->bitmap.buffer+y*expected->bitmap.pitch,
                        expected->bitmap.width));
 }
+// Measuring blank glyphs through a fallback underestimates large-font lines.
+// Compare both public paths with an independent primary FreeType face, so a
+// matching but equally wrong measurement/render pair cannot hide the error.
+static void ExpectPrimaryAdvances(FontManager &manager, FT_Library library,
+                                  const char *fontdir, const char *fallback) {
+  FT_Face oracle;
+  const std::string path=std::string(fontdir)+"/"+
+                         manager.GetFontFile(TEXT_STYLE_REGULAR);
+  assert(!FT_New_Face(library,path.c_str(),0,&oracle));
+  unsigned mismatches=0;
+  for (bool with_fallback : {false,true}) {
+    manager.UnloadFallbackFonts();
+    manager.SetPixelSize(12);
+    if (with_fallback) assert(manager.SetFallbackFile(0,fallback));
+    manager.ClearCache();
+    for (u8 px=8; px<=20; ++px) {
+      manager.SetPixelSize(px);
+      FT_Face face=manager.GetFace(TEXT_STYLE_REGULAR);
+      assert(!FT_Set_Pixel_Sizes(oracle,0,px));
+      for (u32 cp : {u32(' '),u32(0x00a0),u32(0x2002),u32('A'),
+                     u32(0x2019)}) {
+        assert(FT_Get_Char_Index(oracle,cp));
+        assert(!FT_Load_Char(oracle,cp,FT_LOAD_RENDER|FT_LOAD_TARGET_NORMAL));
+        const int expected=oracle->glyph->advance.x>>6;
+        // Repeat to cover advance-cache hits as well as misses.
+        for (int pass=0; pass<2; ++pass) {
+          const int measured=manager.GetAdvance(cp,face);
+          FT_GlyphSlot glyph=manager.GetGlyph(cp,FT_LOAD_RENDER|FT_LOAD_TARGET_NORMAL,face);
+          if (measured!=expected || !glyph || (glyph->advance.x>>6)!=expected) {
+            std::fprintf(stderr,"advance U+%04x px=%u fallback=%d: measured=%d expected=%d\n",
+                         cp,px,with_fallback,measured,expected);
+            ++mismatches;
+          }
+        }
+      }
+    }
+  }
+  manager.SetPixelSize(14);
+  FT_Face face=manager.GetFace(TEXT_STYLE_REGULAR);
+  int width=0;
+  for (const char *s="you last spring, I will not watch one of"; *s; ++s)
+    width+=manager.GetAdvance(static_cast<unsigned char>(*s),face);
+  if (width<=214) {
+    std::fprintf(stderr,"issue #172: line measured %d px, must exceed 214 px\n",width);
+    ++mismatches;
+  }
+  FT_Done_Face(oracle);
+  manager.UnloadFallbackFonts();
+  assert(mismatches==0);
+}
 int main() {
   const char *fontdir=std::getenv("TEST_ADVANCE_FONT_DIR");
   const char *fallback=std::getenv("TEST_ADVANCE_FALLBACK");
@@ -123,6 +173,7 @@ int main() {
   FT_Library library;
   assert(!FT_Init_FreeType(&library));
   const int flags=FT_LOAD_RENDER|FT_LOAD_TARGET_NORMAL;
+  ExpectPrimaryAdvances(manager,library,fontdir,fallback);
   {
     FT_Face oracle;
     const std::string path=std::string(fontdir)+"/"+
