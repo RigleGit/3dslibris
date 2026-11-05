@@ -43,7 +43,8 @@ static const std::string &GetEffectiveCacheDir() {
   return kEpubCacheDir;
 }
 static const u32 kEpubPageCacheMagic = 0x45504347U;
-static const u16 kEpubPageCacheVersion = 22;
+// Skip the old indexed v23 as well: both layouts used incorrect font metrics.
+static const u16 kEpubPageCacheVersion = 24;
 static const u16 kPageCacheHrefMaxBytes = 2048;
 
 struct EpubPageCacheHeader {
@@ -306,7 +307,7 @@ LoadSession::Result LoadSession::Begin(Book *book, const std::string &path) {
   uint32_t magic = 0;
   uint16_t version = 0;
   if (fread(&magic, 1, 4, s.fp) == 4 && fread(&version, 1, 2, s.fp) == 2 &&
-      magic == kEpubPageCacheMagic && version == 23) {
+      magic == kEpubPageCacheMagic && version == 25) {
     fclose(s.fp);
     s.fp = NULL;
     s.block_reader = new (std::nothrow) reflow_block_cache::Reader;

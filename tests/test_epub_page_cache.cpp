@@ -202,8 +202,11 @@ void TestPreviousLayoutCacheIsRejected() {
   fixture.Save();
   Check(fixture.CacheFile() == fixture.directory + "/e1978dc2cc1b3c11.epc",
         "existing EPUB layout keeps its persistent cache identity");
-  fixture.PatchPageIndex(sizeof(u32), 21);
-  CheckRejected(fixture, "previous image pagination is rebuilt");
+  for (u16 version : {21,22,23}) {
+    fixture.Save();
+    fixture.PatchPageIndex(sizeof(u32), version);
+    CheckRejected(fixture, "layouts measured before the font fix are rebuilt");
+  }
 }
 
 void TestBufferedWriteFailureRemovesCache() {
@@ -938,6 +941,50 @@ static void TestMobiBlockIdentity() {
   remove(path.c_str());
 }
 
+// Otherwise-valid old payloads must be rejected solely for their layout
+// version, before either the complete or resident reader exposes any pages.
+static void TestOldBlockLayoutsAreRejected() {
+  const struct { reflow_block_cache::Format format; u16 version; } cases[] = {
+    {reflow_block_cache::Epub,23},
+    {reflow_block_cache::Mobi,27},
+    {reflow_block_cache::Fb2,1}
+  };
+  for (const auto &test : cases) {
+    Fixture fixture;
+    fixture.AddPages(1);
+    const std::string path=fixture.directory+"/old-layout.cache";
+    reflow_block_cache::Writer writer;
+    Require(writer.Begin(&fixture.source,path,test.format),"begin layout fixture");
+    Require(writer.AppendDocument(0,1),"append layout fixture");
+    while (writer.Step()==reflow_block_cache::Pending) {}
+    Require(writer.Finish(),"finish layout fixture");
+    while (writer.Step()==reflow_block_cache::Pending) {}
+    Require(writer.GetResult()==reflow_block_cache::Complete,"publish layout fixture");
+    FILE *fp=fopen(path.c_str(),"r+b");
+    Require(fp!=NULL,"open old layout fixture");
+    Require(!fseek(fp,4,SEEK_SET),"seek layout version");
+    Require(fwrite(&test.version,1,2,fp)==2,"patch old layout version");
+    fclose(fp);
+    for (size_t budget : {size_t(0),size_t(128*1024)}) {
+      Book loaded(fixture.ctx);
+      reflow_block_cache::Reader reader;
+      reader.Begin(&loaded,path,budget,false,test.format);
+      while (reader.Step()==reflow_block_cache::Pending) {}
+      Check(reader.GetResult()==reflow_block_cache::Corrupt && loaded.GetPageCount()==0,
+            "old block layout cannot expose pages");
+    }
+    if (test.format==reflow_block_cache::Epub) {
+      Book loaded(fixture.ctx);
+      epub_page_cache::LoadSession facade;
+      facade.Begin(&loaded,path);
+      while (facade.Step()==epub_page_cache::LoadSession::Pending) {}
+      Check(facade.GetResult()!=epub_page_cache::LoadSession::Complete &&
+                loaded.GetPageCount()==0,"EPUB facade rejects old block layout");
+    }
+    remove(path.c_str());
+  }
+}
+
 int main(int argc, char **argv) {
   const std::string selected = argc > 1 ? argv[1] : "all";
   if (argc > 2 || (selected != "all" && selected != "maps" &&
@@ -958,6 +1005,7 @@ int main(int argc, char **argv) {
     TestCooperativeLegacyLoad();
     TestCloseNeverStartsDeferredEpubSave();
     TestPreviousLayoutCacheIsRejected();
+    TestOldBlockLayoutsAreRejected();
   }
   if (selected == "all" || selected == "write-failure")
     TestBufferedWriteFailureRemovesCache();

@@ -23,7 +23,8 @@ namespace mobi_page_cache {
 namespace {
 
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-static const u16 kMobiPageCacheVersion = 26;
+// Skip the old indexed v27 as well: both layouts used incorrect font metrics.
+static const u16 kMobiPageCacheVersion = 28;
 static const size_t kPageCacheIoBufferBytes = 262144;
 // Bulk reads avoid per-record SD overhead for small books. Stream larger
 // caches so the full serialized file does not coexist with decoded pages.

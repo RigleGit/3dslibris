@@ -24,7 +24,8 @@ uint32_t Magic(Format f) {
   return f == Mobi ? 0x4d504347U : f == Fb2 ? 0x46504347U : 0x45504347U;
 }
 unsigned Version(Format f) {
-  return f == Mobi ? 27 : f == Fb2 ? 1 : 23;
+  // Old legacy and indexed layouts must both rebuild after the font fix.
+  return f == Mobi ? 29 : f == Fb2 ? 2 : 25;
 }
 struct Resource {
   std::string id;

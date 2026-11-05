@@ -274,12 +274,13 @@ void TestTruncatedCaches() {
   ExpectEq("fixture event offset matches wire schema", bytes[event], 33);
   for (bool stream : {false, true}) {
     mobi_page_cache::SetMaxBulkCacheLoadBytesForTest(stream ? 1 : -1);
-    for (int fault = 0; fault < 5; ++fault) {
+    for (int fault = 0; fault < 6; ++fault) {
       std::vector<unsigned char> corrupt = bytes;
       if (fault == 0) corrupt[event] = (5 << 5) | 1; // Beyond four-token page.
       if (fault == 1) corrupt[event] = 32; // Offset one without any event flag.
       if (fault == 3) corrupt[event] = 32 | 8; // Unclosed RTL range.
       if (fault == 4) corrupt[event] = 32 | 16; // RTL end without a start.
+      if (fault == 5) corrupt[4] = 26; // Layout measured with old font advances.
       if (fault == 2) corrupt[4] = 25; // Previous image pagination must be rebuilt.
       fp = fopen(cache_file.c_str(), "wb");
       ExpectTrue("open corrupt metadata fixture", fp != nullptr);
