@@ -154,7 +154,7 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
       fread(&magic, 1, 4, fp);
       fread(&version, 1, 2, fp);
       fclose(fp);
-      legacy = magic == 0x4d504347U && version == 26;
+      legacy = magic == 0x4d504347U && version == 28;
     }
   }
   if (legacy) {

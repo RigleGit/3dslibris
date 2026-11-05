@@ -2077,31 +2077,38 @@ static void TestSharedReflowPreparation() {
 
     book.Close();
     if(std::string(name)=="images.mobi") {
-      // Produce a real v26 file through the legacy writer, then migrate it.
+      // Produce a real v28 file through the legacy writer, then migrate it.
       Book legacy(ctx);legacy.SetFolderName(folder);legacy.SetFileName(name);
-      test::ExpectEq("full diagnostic reader opens before v26 fixture",book_parser::Open(&legacy),0);
+      test::ExpectEq("full diagnostic reader opens before v28 fixture",book_parser::Open(&legacy),0);
       const auto deps=BuildBookParseDeps(&legacy);const auto &l=deps.layout;
       mobi_page_cache::Save(&legacy,source.c_str(),l.pixel_size,l.linespacing,deps.paragraph_spacing,
           deps.paragraph_indent,deps.orientation,l.margin_left,l.margin_right,l.margin_top,l.margin_bottom,
           l.regular_font_path.c_str(),legacy.GetMobiLineWrapFix());
       legacy.Close();
       const std::string file=CacheFiles(directory)[0];
-      const std::string v26=ReadFileBytes(file);
-      test::ExpectEq("legacy fixture really is v26",(unsigned char)v26[4],26);
+      const std::string v28=ReadFileBytes(file);
+      test::ExpectEq("legacy fixture really is v28",(unsigned char)v28[4],28);
       // An unavailable temporary must retain the old valid cache and prepared pages.
       const std::string blocked=file+".tmp";
       mkdir(blocked.c_str(),0700);WriteFileBytes(blocked+"/keep","owned by fixture");
+      // Migration must read the valid legacy layout without reparsing MOBI.
+      const std::string migration_source=ReadFileBytes(source);
+      struct stat migration_info;stat(source.c_str(),&migration_info);
+      const utimbuf migration_times={migration_info.st_atime,migration_info.st_mtime};
+      WriteFileBytes(source,std::string(migration_source.size(),'\0'));
+      utime(source.c_str(),&migration_times);
       test::ExpectTrue("start migration with unwritable temporary",prep.Begin(&book,source,512*1024));
       while(prep.Step()==ReflowPreparation::Pending) {}
       test::ExpectTrue("persistence failure still allows reading",prep.GetResult()==ReflowPreparation::Complete && prep.PersistenceFailed() && book.GetPageCount()==expected.size());
-      test::ExpectTrue("failed migration keeps original v26",ReadFileBytes(file)==v26);
+      test::ExpectTrue("failed migration keeps original v28",ReadFileBytes(file)==v28);
       prep.Cancel();
       test::ExpectEq("cancelled preparation releases pages",book.GetPageCount(),0);
       remove((blocked+"/keep").c_str());rmdir(blocked.c_str());
-      test::ExpectTrue("restart v26 migration",prep.Begin(&book,source,512*1024));
+      WriteFileBytes(source,migration_source);utime(source.c_str(),&migration_times);
+      test::ExpectTrue("restart v28 migration",prep.Begin(&book,source,512*1024));
       while(prep.Step()==ReflowPreparation::Pending) {}
-      test::ExpectTrue("v26 becomes resident v27",prep.GetResult()==ReflowPreparation::Complete && !prep.PersistenceFailed() && book.HasReflowPageCache());
-      test::ExpectEq("published cache is v27",(unsigned char)ReadFileBytes(file)[4],27);
+      test::ExpectTrue("v28 becomes resident v29",prep.GetResult()==ReflowPreparation::Complete && !prep.PersistenceFailed() && book.HasReflowPageCache());
+      test::ExpectEq("published cache is v29",(unsigned char)ReadFileBytes(file)[4],29);
       book.Close();
     }
     // Cancel a fresh layout after it has produced pages; the original cache survives.

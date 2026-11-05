@@ -798,17 +798,17 @@ bool Preparation::Begin(Book *book, const std::string &source,
     mkdir(s.path.substr(0, slash).c_str(), 0777);
   s.metadata = book->TryLoadMetadataFromCache();
   FILE *fp = fopen(s.path.c_str(), "rb");
-  bool v23 = false;
+  bool indexed = false;
   if (fp) {
     u32 magic = 0;
     u16 version = 0;
     fread(&magic, 1, 4, fp);
     fread(&version, 1, 2, fp);
-    s.legacy = version == 22;
-    v23 = magic == 0x45504347U && version == 23;
+    s.legacy = magic == 0x45504347U && version == 24;
+    indexed = magic == 0x45504347U && version == 25;
     fclose(fp);
   }
-  if (v23 && residency_budget) {
+  if (indexed && residency_budget) {
     if (!book->StartReflowPageCache(s.path, residency_budget)) {
       s.result = Failed;
       return false;
