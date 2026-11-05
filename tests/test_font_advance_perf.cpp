@@ -81,13 +81,19 @@ int main() {
   const u8 latin18 = NativeAdvance(manager.GetFace(TEXT_STYLE_REGULAR), 'A');
   assert(manager.GetAdvance('A', primary) == latin18);
   assert(manager.GetAdvance('A', primary) == latin18);
+  assert(FT_Set_Pixel_Sizes(oracle_fallback, 0, 18) == 0);
+  const u8 fallback18 = NativeAdvance(oracle_fallback, armenian);
+  assert(manager.GetAdvance(armenian, primary) == fallback18);
+  assert(manager.GetAdvance(armenian, primary) == fallback18);
+  assert(manager.GetAdvance(armenian, manager.GetFace(TEXT_STYLE_BROWSER)) == fallback12);
+  assert(manager.GetAdvance(armenian, manager.GetFace(TEXT_STYLE_BOLD)) == fallback18);
   assert(!Contains(reporter, "ADVANCE")); // No per-glyph or size-change logs.
   manager.ClearCache();
 #ifdef DSLIBRIS_DEBUG
-  assert(Contains(reporter, "ADVANCE calls=8 hits=3 misses=5 loads=3"));
-  assert(Contains(reporter, "ADVANCE fallback searches=3 hits=1 unresolved=1 ftc=0"));
+  assert(Contains(reporter, "ADVANCE calls=12 hits=4 misses=8 loads=4"));
+  assert(Contains(reporter, "ADVANCE fallback searches=6 hits=3 unresolved=1 ftc=0"));
   assert(Contains(reporter, FaceSize(primary, 12, 2)));
-  assert(Contains(reporter, FaceSize(primary, 18, 1)));
+  assert(Contains(reporter, FaceSize(primary, 18, 2)));
   assert(Contains(reporter, FaceSize(bold, 12, 1)));
   unsigned faces = 0, entries = 0;
   for (const auto &line : reporter.lines) {
@@ -99,7 +105,7 @@ int main() {
       entries += static_cast<unsigned>(std::strtoul(line.c_str() + field + 8, nullptr, 10));
     }
   }
-  assert(faces == 3 && entries == 5); // Includes the deduplicated fallback face.
+  assert(faces == 4 && entries == 9); // Includes the deduplicated fallback face.
 #else
   assert(!Contains(reporter, "ADVANCE"));
 #endif

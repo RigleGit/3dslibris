@@ -27,7 +27,7 @@
 namespace {
 
 // Rendered bitmaps share one bounded LRU across sizes. Use the face's actual
-// size because the browser face stays at 12px and fallbacks have their own size.
+// size because the browser face stays at 12px and fallbacks follow the requester.
 static u32 GlyphCacheKey(u32 ucs, FT_Face face) {
   const u32 height = face && face->size ? face->size->metrics.y_ppem : 0;
   return (height << 24) | (ucs & 0x00FFFFFFu);
@@ -157,13 +157,18 @@ FT_Face FontManager::GetFace(u8 style) {
 void FontManager::EnsureFacePixelSize(FT_Face face) {
   if (ftc || !face)
     return;
-  // Fallbacks retain their own active size, as before the lazy primary-face
-  // update. Do not resize them to a temporary browser/reader request.
+  // Fallback sizes are selected from the requesting face before CacheGlyph.
+  // Preserve that selection when CacheGlyph ensures the resolved face again.
   for (int i = 0; i < fallback_count_; ++i) {
     if (fallback_faces_[i] == face)
       return;
   }
-  const int size = faces[TEXT_STYLE_BROWSER] == face ? 12 : pixelsize;
+  SetFacePixelSize(face, faces[TEXT_STYLE_BROWSER] == face ? 12 : pixelsize);
+}
+
+void FontManager::SetFacePixelSize(FT_Face face, unsigned size) {
+  if (!face)
+    return;
   if (face->size && face->size->metrics.y_ppem == size)
     return;
   Cache *face_cache = GetFaceCache(face);
@@ -451,6 +456,7 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     if (needs_fallback) {
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
+        SetFacePixelSize(fb, face->size->metrics.y_ppem);
         face = fb;
       }
     }
@@ -594,7 +600,7 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       }
     }
 #else
-    const u32 cache_key = ((u32)pixelsize << 24) | (ucs & 0x00FFFFFFu);
+    const u32 cache_key = GlyphCacheKey(ucs, face);
     auto &faceAdvanceCache = advanceCache[face];
     auto iter = faceAdvanceCache.find(cache_key);
     if (iter != faceAdvanceCache.end()) {
@@ -626,17 +632,20 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       FONT_ADVANCE_COUNT(fallback_searches);
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
+        SetFacePixelSize(fb, face->size->metrics.y_ppem);
 #ifdef ADVANCE_NO_CACHE
         FONT_ADVANCE_COUNT(loads);
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
         if (!error)
           return fb->glyph->advance.x >> 6;
 #else
+        const u32 fb_cache_key = GlyphCacheKey(ucs, fb);
         auto &fbAdvanceCache = advanceCache[fb];
-        auto fb_iter = fbAdvanceCache.find(cache_key);
+        auto fb_iter = fbAdvanceCache.find(fb_cache_key);
         if (fb_iter != fbAdvanceCache.end()) {
           FONT_ADVANCE_COUNT(fallback_hits);
-          faceAdvanceCache.insert(std::make_pair(cache_key, fb_iter->second));
+          if (fb_cache_key == cache_key)
+            faceAdvanceCache.insert(std::make_pair(cache_key, fb_iter->second));
           return fb_iter->second;
         }
 
@@ -644,8 +653,9 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
         if (!error) {
           u8 advance = fb->glyph->advance.x >> 6;
-          fbAdvanceCache.insert(std::make_pair(cache_key, advance));
-          faceAdvanceCache.insert(std::make_pair(cache_key, advance));
+          fbAdvanceCache.insert(std::make_pair(fb_cache_key, advance));
+          if (fb_cache_key == cache_key)
+            faceAdvanceCache.insert(std::make_pair(cache_key, advance));
           return advance;
         }
 #endif

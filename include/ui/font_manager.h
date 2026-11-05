@@ -143,6 +143,7 @@ private:
 
   FT_Face FindFallbackFace(u32 ucs);
   void EnsureFacePixelSize(FT_Face face);
+  void SetFacePixelSize(FT_Face face, unsigned size);
   Cache *GetFaceCache(FT_Face face);
   FT_Error CreateConfiguredFace(int style);
 

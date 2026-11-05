@@ -16,10 +16,11 @@
 extern "C" FT_Error FT_Set_Pixel_Sizes(FT_Face, FT_UInt, FT_UInt);
 extern "C" FT_Error FT_New_Size(FT_Face, FT_Size *);
 static size_t pixel_size_setups=0, size_allocations=0;
-static bool reject_size_allocation=false;
+static bool reject_size_allocation=false, reject_pixel_size=false;
 extern "C" FT_Error ObserveSetPixelSizes(FT_Face face, FT_UInt width,
                                          FT_UInt height) {
   ++pixel_size_setups;
+  if (reject_pixel_size) return FT_Err_Invalid_Pixel_Size;
   return FT_Set_Pixel_Sizes(face,width,height);
 }
 extern "C" FT_Error ObserveNewSize(FT_Face face, FT_Size *size) {
@@ -262,19 +263,52 @@ int main() {
   assert(reads==0);
   manager.GetGlyph(33,flags,regular);
   assert(reads>0);
-  // A real fallback remains native at its own active size across primary
-  // size changes, and replacing/unloading it retires its cached bitmaps.
+  // Fallbacks follow the requesting face, including browser's fixed 12px.
+  // Replacing/unloading a fallback must still retire its cached bitmaps.
   const u32 before_fallback=manager.GetRevision();
   assert(manager.SetFallbackFile(0,fallback));
   assert(manager.GetRevision()!=before_fallback);
   FT_Face oracle;
   assert(!FT_New_Face(library,fallback,0,&oracle));
-  assert(!FT_Set_Pixel_Sizes(oracle,0,10));
-  assert(!FT_Load_Char(oracle,0x0531,flags));
-  for (u8 px : {10,18,10}) {
-    manager.SetPixelSize(px);
-    ExpectGlyph(manager.GetGlyph(0x0531,flags,regular),oracle->glyph);
+  const size_t fallback_allocations=size_allocations;
+  for (int pass=0; pass<2; ++pass) {
+    for (u8 px=8; px<=20; ++px) {
+      manager.SetPixelSize(px);
+      assert(!FT_Set_Pixel_Sizes(oracle,0,px));
+      assert(!FT_Load_Char(oracle,0x0531,flags));
+      ExpectGlyph(manager.GetGlyph(0x0531,flags,regular),oracle->glyph);
+      assert(manager.GetAdvance(0x0531,regular)==(oracle->glyph->advance.x>>6));
+      FT_Face browser=manager.GetFace(TEXT_STYLE_BROWSER);
+      assert(!FT_Set_Pixel_Sizes(oracle,0,12));
+      assert(!FT_Load_Char(oracle,0x0531,flags));
+      ExpectGlyph(manager.GetGlyph(0x0531,flags,browser),oracle->glyph);
+      assert(manager.GetAdvance(0x0531,browser)==(oracle->glyph->advance.x>>6));
+    }
   }
+  assert(size_allocations<=fallback_allocations+1);
+  // After priming two sizes, body/script alternation needs no size setup.
+  for (int pass=0; pass<4; ++pass) {
+    pixel_size_setups=0;
+    for (u8 px : {16,11}) {
+      manager.SetPixelSize(px);
+      assert(!FT_Set_Pixel_Sizes(oracle,0,px));
+      assert(!FT_Load_Char(oracle,0x0531,flags));
+      ExpectGlyph(manager.GetGlyph(0x0531,flags,regular),oracle->glyph);
+    }
+    if (pass) assert(pixel_size_setups==0);
+  }
+  // A failed fallback resize retains its previous glyph and can retry later.
+  manager.SetPixelSize(18);
+  manager.GetFace(TEXT_STYLE_REGULAR);
+  manager.ClearCache();
+  reject_pixel_size=true;
+  ExpectGlyph(manager.GetGlyph(0x0531,flags,regular),oracle->glyph);
+  assert(manager.GetAdvance(0x0531,regular)==(oracle->glyph->advance.x>>6));
+  reject_pixel_size=false;
+  assert(!FT_Set_Pixel_Sizes(oracle,0,18));
+  assert(!FT_Load_Char(oracle,0x0531,flags));
+  ExpectGlyph(manager.GetGlyph(0x0531,flags,regular),oracle->glyph);
+  assert(manager.GetAdvance(0x0531,regular)==(oracle->glyph->advance.x>>6));
   const u32 before_replacement=manager.GetRevision();
   assert(manager.SetFallbackFile(0,fallback));
   assert(manager.GetRevision()!=before_replacement);
@@ -283,6 +317,35 @@ int main() {
   manager.UnloadFallbackFonts();
   assert(manager.GetRevision()!=before_unload);
   FT_Done_Face(oracle);
+  const struct { const char *file; u32 cp; } scripts[] = {
+    {"NotoNaskhArabic-VariableFont_wght.ttf",0xfe8e},
+    {"NotoSansHebrew-VariableFont_wdth,wght.ttf",0x05d0},
+    {"DroidSansFallbackFull.ttf",0x4e2d}
+  };
+  Text script_text;
+  FontManager script_manager(&script_text);
+  script_manager.SetFontDir(fontdir);
+  script_manager.SetFontFile(fallback,TEXT_STYLE_REGULAR);
+  assert(!script_manager.Init());
+  script_manager.UnloadFallbackFonts();
+  FT_Face script_primary=script_manager.GetFace(TEXT_STYLE_REGULAR);
+  for (const auto &script : scripts) {
+    script_manager.SetPixelSize(12);
+    const std::string path=std::string(fontdir)+"/"+script.file;
+    assert(script_manager.SetFallbackFile(0,path.c_str()));
+    assert(!FT_New_Face(library,path.c_str(),0,&oracle));
+    assert(FT_Get_Char_Index(oracle,script.cp));
+    assert(!FT_Get_Char_Index(script_primary,script.cp));
+    for (u8 px : {8,12,14,16,18,20,12}) {
+      script_manager.SetPixelSize(px);
+      assert(!FT_Set_Pixel_Sizes(oracle,0,px));
+      assert(!FT_Load_Char(oracle,script.cp,flags));
+      assert(script_manager.GetAdvance(script.cp,script_primary)==(oracle->glyph->advance.x>>6));
+      ExpectGlyph(script_manager.GetGlyph(script.cp,flags,script_primary),oracle->glyph);
+    }
+    script_manager.UnloadFallbackFonts();
+    FT_Done_Face(oracle);
+  }
   for (u8 style : {TEXT_STYLE_REGULAR, TEXT_STYLE_BOLD, TEXT_STYLE_BROWSER})
     Unobserve(manager.GetFace(style));
   FT_Done_FreeType(library);
