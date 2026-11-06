@@ -219,6 +219,22 @@ void TestNestedTablePreservesOuterCells() {
   ExpectTrue("nested styles remain hidden", text.find("STYLELEAK") == std::string::npos);
 }
 
+void TestMetadataCallbacksPreserveTitleAndStack() {
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  auto opts = MakeXmlOpts(&p);
+  opts.start_element = xml::book::metadata::start;
+  opts.end_element = xml::book::metadata::end;
+  opts.character_data = xml::book::metadata::chardata;
+  const auto result = xml_parse_utils::ParseXmlString(
+      "<html><head><meta/><title>Alpha&amp;Beta</title></head><body/></html>", opts);
+  ExpectTrue("metadata XML parses", result.ok);
+  ExpectTrue("metadata title accumulates split bounded callbacks",
+             std::string(book.GetTitle()) == "Alpha&Beta");
+  ExpectIntEq("metadata stack is balanced", p.stacksize, 0);
+}
+
 void TestTableImgSuppressed() {
   // Before the fix, <img> inside <td> appended "[image]" to the cell text
   // buffer, which then appeared as literal text in the page output. After the
@@ -1275,6 +1291,7 @@ int main() {
   TestHrAtPageEdgeKeepsFollowingHeading();
   TestRubyAnnotationEmitsBrackets();
   TestNestedTablePreservesOuterCells();
+  TestMetadataCallbacksPreserveTitleAndStack();
   TestTableImgSuppressed();
   TestHiddenElementsDoNotEmitLayoutTokens();
   TestSemanticPageBreakVisibility();
