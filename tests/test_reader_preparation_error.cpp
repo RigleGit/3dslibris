@@ -115,6 +115,7 @@ static Plan BuildOpenRelayoutPlan(bool, bool, unsigned, unsigned, unsigned,
 static void ApplyRemappedBookmarks(Book *, const std::vector<unsigned> &) {
   std::abort();
 }
+static void ClearSavedRelayoutState(const Book *) { std::abort(); }
 static void ResetOpeningState(App *app) {
   ++app->resets;
 }

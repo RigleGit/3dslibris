@@ -321,6 +321,7 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
       }
     }
   }
+  ClearSavedRelayoutState(book);
   app_.SetCurrentBook(book);
   app_.SetCurrentBookSessionId(app_.GetOpeningSessionId());
   preparation_.reset();

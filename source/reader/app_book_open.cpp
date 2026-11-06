@@ -130,6 +130,7 @@ u8 ReaderController::OpenBook()
     app_.RequestStatusRedraw();
     app_.SetPrefsLayoutNoticePending(false);
     prefs->Write();
+    ClearSavedRelayoutState(selected_book);
     boot_trace::Boot("open book reuse done");
     return 0;
   }
@@ -345,6 +346,7 @@ u8 ReaderController::OpenBook()
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
+  ClearSavedRelayoutState(bookcurrent_);
   boot_trace::Boot("open book done");
   return 0;
 }

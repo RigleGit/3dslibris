@@ -13,6 +13,7 @@
 #include "app/app.h"
 
 #include <algorithm>
+#include <map>
 #include <stdio.h>
 #include <string>
 #include <vector>
@@ -29,6 +30,14 @@
 #include "formats/common/book_error.h"
 
 namespace reader_internal {
+
+namespace {
+std::map<const Book *, OpenBookRelayoutState> saved_relayout_states;
+}
+
+void ClearSavedRelayoutState(const Book *book) {
+  saved_relayout_states.erase(book);
+}
 
 const char *SafeBookName(Book *book) {
   if (!book)
@@ -186,12 +195,18 @@ bool ReuseParsedBook(App *app) {
 
 OpenBookRelayoutState CaptureRelayoutState(Book *book, bool needs_relayout) {
   OpenBookRelayoutState state = {needs_relayout, 0, 0, std::list<int>()};
-  if (!book || !needs_relayout)
+  if (!book)
+    return state;
+  const auto saved = saved_relayout_states.find(book);
+  if (book->GetPageCount() == 0 && saved != saved_relayout_states.end())
+    return saved->second;
+  if (!needs_relayout || book->GetPageCount() == 0)
     return state;
 
   state.old_page_count = book->GetPageCount();
   state.old_position = book->GetPosition();
   state.old_bookmarks = CopyBookmarksAsInts(book->GetBookmarks());
+  saved_relayout_states[book] = state;
   book->Close();
   return state;
 }

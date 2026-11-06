@@ -1,4 +1,5 @@
 #include "app/library_controller.h"
+#include "reader/app_book_internal.h"
 #include "library/library_search_session.h"
 #include "library/library_preload_session.h"
 
@@ -457,6 +458,7 @@ static void ClearBrowserBooksAndButtons(App *app) {
     }
   }
   for (size_t i = 0; i < app->books.size(); i++) {
+    reader_internal::ClearSavedRelayoutState(app->books[i]);
     delete app->books[i];
   }
   app->books.clear();
@@ -579,8 +581,10 @@ LibraryController::LibraryController(App &app)
       browser_assets_pending_(true) {}
 
 LibraryController::~LibraryController() {
-  for (auto book : root_books_)
+  for (auto book : root_books_) {
+    reader_internal::ClearSavedRelayoutState(book);
     delete book;
+  }
   for (auto button : root_buttons_)
     delete button;
 }
