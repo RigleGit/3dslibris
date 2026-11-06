@@ -115,7 +115,7 @@ inline void ResetCbzBitmapCache(Book::CbzState::BitmapCache *cache) {
   cache->zoom_index = -1;
   cache->bitmap_width = 0;
   cache->bitmap_height = 0;
-  cache->pixels.clear();
+  std::vector<u16>().swap(cache->pixels);
 }
 
 inline bool CbzBitmapCacheValid(const Book::CbzState::BitmapCache &cache,

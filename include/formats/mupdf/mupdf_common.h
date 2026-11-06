@@ -113,7 +113,7 @@ inline void ResetBitmapCache(Book::MuPdfState::BitmapCache *cache) {
   cache->height = 1.0f;
   cache->bitmap_width = 0;
   cache->bitmap_height = 0;
-  cache->pixels.clear();
+  std::vector<u16>().swap(cache->pixels);
   cache->native_pixels.reset();
 }
 

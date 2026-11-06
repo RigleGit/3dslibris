@@ -60,6 +60,14 @@ static void TestInitialFitKeepsEveryCorner() {
   assert(screen[127*400]==0x7777 && screen[272*400]==0x7777);
 }
 int main() {
+  Book::CbzState::BitmapCache reset_cache;
+  reset_cache.pixels.resize(4096);
+  ResetCbzBitmapCache(&reset_cache);
+  assert(reset_cache.pixels.capacity() == 0 && "reset must release backing storage");
+  Book::CbzState::PageBitmap reset_source;
+  reset_source.bitmap.pixels.resize(4096);
+  ResetCbzPageBitmap(&reset_source);
+  assert(reset_source.bitmap.pixels.capacity() == 0 && "source reset must release storage");
   TestInitialFitKeepsEveryCorner();
   FixtureState s;
   assert(EnsureCbzPreviewCache(&s, 0));

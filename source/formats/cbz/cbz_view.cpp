@@ -135,7 +135,7 @@ void ResetCbzPageBitmap(Book::CbzState::PageBitmap *page_bitmap) {
   page_bitmap->original_height = 0;
   page_bitmap->bitmap.width = 0;
   page_bitmap->bitmap.height = 0;
-  page_bitmap->bitmap.pixels.clear();
+  std::vector<u16>().swap(page_bitmap->bitmap.pixels);
 }
 
 bool DecodeCbzPageImageWithFallback(const std::vector<unsigned char> &bytes,
