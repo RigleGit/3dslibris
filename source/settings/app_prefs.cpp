@@ -1378,6 +1378,10 @@ void SettingsController::PrefsHandlePress() {
     const bool can_open_current = CanOpenBookIndexInCurrentContext(book, is_book_ctx);
     const bool can_open_selected = CanOpenSelectedBookIndex(selected);
     if (can_open_current) {
+      if (app_.BookNeedsRelayout(book)) {
+        app_.ReturnFromPrefs();
+        return;
+      }
       app_.ShowChaptersView();
     } else if (can_open_selected) {
       app_.OpenBook();
@@ -1393,6 +1397,10 @@ void SettingsController::PrefsHandlePress() {
     if (is_book_ctx && book && !book->SupportsBookmarks()) {
       app_.PrintStatus("Bookmarks unavailable for PDF");
     } else if (is_book_ctx && book) {
+      if (app_.BookNeedsRelayout(book)) {
+        app_.ReturnFromPrefs();
+        return;
+      }
       app_.ShowBookmarksView();
     } else if (!is_book_ctx && app_.GetSelectedBook() &&
                !app_.GetSelectedBook()->IsBrowserFolder()) {
