@@ -1009,6 +1009,8 @@ bool Reader::ActivatePreparedPages() {
   s.full_next = 0;
   s.payload_bytes = need;
   s.ready[s.target] = true;
+  if (s.book->GetPosition() < 0 || s.book->GetPosition() >= (int)s.header.pages)
+    s.book->SetPosition((int)s.target);
   s.result = Pending;
   return true;
 }
@@ -1148,8 +1150,11 @@ Result Reader::Advance() {
   s.payload_bytes += need;
   s.ready[target] = true;
   s.ages[target] = ++s.tick;
-  if (s.budget)
+  if (s.budget) {
+    if (s.book->GetPosition() < 0 || s.book->GetPosition() >= (int)s.header.pages)
+      s.book->SetPosition((int)s.target);
     return s.result = Complete;
+  }
   ++s.full_next;
   if (s.full_next == s.header.pages)
     s.result = Complete;

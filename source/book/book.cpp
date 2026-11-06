@@ -744,6 +744,7 @@ void Book::SetPosition(int pos) {
   const int next = ClampPositionToPageCount(pos, GetPageCount());
   if (reflow_cache_reader_ && reflow_cache_reader_->HasIndex() &&
       !reflow_cache_reader_->IsReady((unsigned)next)) {
+    position = ClampPositionToPageCount(position, GetPageCount());
     reflow_pending_position_ = next;
     reflow_cache_reader_->Pin(position);
     reflow_cache_reader_->Request(next);

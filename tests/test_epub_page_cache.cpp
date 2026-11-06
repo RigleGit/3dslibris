@@ -663,6 +663,30 @@ void TestBlockCacheRoundtrip() {
             loaded.IsReflowPageReady(78),
         "cached neighbor navigation commits synchronously");
   loaded.Close();
+  loaded.SetPosition(150);
+  Require(loaded.StartReflowPageCache(path, 128 * 1024),
+          "open cache with stale saved position");
+  while (loaded.AdvanceReflowPageCache() > 0) {}
+  Check(loaded.GetPosition() == 79 && loaded.IsReflowPageReady(79),
+        "cache open clamps stale position to resident last page");
+  loaded.SetPosition(0);
+  Check(loaded.GetPosition() >= 0 && loaded.GetPosition() < 80,
+        "pending navigation never exposes stale out-of-range position");
+  while (loaded.AdvanceReflowPageCache() > 0) {}
+  Check(loaded.GetPosition() == 0 && loaded.GetPage()->GetLength() > 0,
+        "navigation from stale saved position reaches first page");
+  loaded.Close();
+  loaded.SetPosition(150);
+  Require(loaded.StartReflowPageCache(path, 128 * 1024),
+          "start stale cache before first page is resident");
+  while (!loaded.GetPageCount() && loaded.AdvanceReflowPageCache() > 0) {}
+  loaded.SetPosition(0);
+  Check(loaded.GetPosition() >= 0 && loaded.GetPosition() < 80,
+        "navigation during initial cache load clamps previous position");
+  while (loaded.AdvanceReflowPageCache() > 0) {}
+  Check(loaded.GetPosition() == 0 && loaded.IsReflowPageReady(0),
+        "initial pending navigation commits requested page");
+  loaded.Close();
   epub_page_cache::LoadSession facade;
   facade.Begin(&loaded, path);
   while (facade.Step() == epub_page_cache::LoadSession::Pending) {
