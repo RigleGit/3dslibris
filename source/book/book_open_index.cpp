@@ -2,6 +2,7 @@
     3dslibris - book_open_index.cpp
 */
 
+#include "shared/path_utils.h"
 #include "book/book.h"
 
 #include <sys/stat.h>
@@ -22,7 +23,7 @@ bool Book::TryLoadMetadataFromCache(book_meta_cache::Index *index) {
   book_meta_cache::EnsureDir();
   struct stat st;
   long long fsize = 0, fmtime = 0;
-  if (stat(path.c_str(), &st) == 0) {
+  if (paths::StatWithMtime(path.c_str(), &st)) {
     fsize  = (long long)st.st_size;
     fmtime = (long long)st.st_mtime;
   }

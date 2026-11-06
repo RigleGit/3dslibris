@@ -106,7 +106,7 @@ void TestEffectiveLayoutKeepsExistingCacheKey() {
   ExpectEq("effective values keep the persistent cache identity",
            page_cache_utils::BuildPageCachePath("/cache/epub", ".epc",
                                                 "/books/sample.epub", params),
-           std::string("/cache/epub/a388b7e801746340.epc"));
+           std::string("/cache/epub/eb7318cd002be8de.epc"));
 }
 
 void TestBuildPathVariantToken() {

@@ -1,3 +1,4 @@
+#include "shared/path_utils.h"
 #include "app/library_controller.h"
 #include "reader/app_book_internal.h"
 #include "library/library_search_session.h"
@@ -97,7 +98,7 @@ static time_t BookFileMtime(Book *b) {
   path.push_back('/');
   path.append(b->GetFileName());
   struct stat st;
-  return stat(path.c_str(), &st) == 0 ? st.st_mtime : 0;
+  return paths::StatWithMtime(path.c_str(), &st) ? st.st_mtime : 0;
 }
 
 static bool BookRecentLessThan(Book *a, Book *b) {
@@ -119,7 +120,7 @@ static std::string ToLowerAscii(const std::string &s) {
 
 static bool PathIsDirectory(const std::string &path) {
   struct stat st;
-  return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+  return paths::StatWithMtime(path.c_str(), &st) && S_ISDIR(st.st_mode);
 }
 
 // An existing user library is authoritative, even when it is empty.
@@ -129,7 +130,7 @@ static std::string LibraryBookSource(const std::string &configured) {
 
 static bool PathIsRegularFile(const std::string &path) {
   struct stat st;
-  return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+  return paths::StatWithMtime(path.c_str(), &st) && S_ISREG(st.st_mode);
 }
 
 static std::string BasenameFromPath(const std::string &path) {

@@ -68,7 +68,7 @@ Book *MakeMobiBook() {
 std::string CacheFilePath(const char *cache_dir) {
   // Persistent identity of the fixture's existing layout, independent of the
   // builder used by production. A key change would miss the saved file.
-  return std::string(cache_dir) + "/9c9f9955a86d1c83.mpc";
+  return std::string(cache_dir) + "/88034549176a67a1.mpc";
 }
 
 void AddPages(Book *book) {

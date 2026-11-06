@@ -12,6 +12,30 @@
 #include <string>
 #include <vector>
 
+#include <sys/stat.h>
+#ifdef __3DS__
+// libctru's archive.h has no extern "C" guard; without it the C++ build looks
+// for a mangled archive_getmtime and fails to link.
+extern "C" {
+#include <3ds/archive.h>
+}
+#endif
+
+namespace paths {
+// libctru stat leaves st_mtime zero. archive_getmtime already returns UNIX
+// seconds; immutable/unsupported archives retain stat's fallback timestamp.
+inline bool StatWithMtime(const char *name, struct stat *info) {
+  if (!name || !info || ::stat(name, info) != 0)
+    return false;
+#ifdef __3DS__
+  u64 modified = 0;
+  if (archive_getmtime(name, &modified) == 0)
+    info->st_mtime = (time_t)modified;
+#endif
+  return true;
+}
+} // namespace paths
+
 // --- URL decoding ---
 
 inline std::string UrlDecode(const std::string &input) {

@@ -90,7 +90,7 @@ static void LoadCoverCacheIndex() {
     char full[512];
     snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir.c_str(), ent->d_name);
     struct stat st;
-    if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
+    if (!paths::StatWithMtime(full, &st) || !S_ISREG(st.st_mode))
       continue;
 
     CoverCacheEntry ce;
@@ -230,12 +230,12 @@ static CoverSourcePaths ResolveCoverSourcePaths(Book *book,
   struct stat st;
   long long fsize = 0;
   long long fmtime = 0;
-  if (stat(book_path.c_str(), &st) == 0) {
+  if (paths::StatWithMtime(book_path.c_str(), &st)) {
     fsize = (long long)st.st_size;
     fmtime = (long long)st.st_mtime;
   }
 
-  std::string key = book_path;
+  std::string key = "src2|" + book_path;
   key.push_back('|');
   key += std::to_string(fsize);
   key.push_back('|');
@@ -249,7 +249,7 @@ static CoverSourcePaths ResolveCoverSourcePaths(Book *book,
     const std::vector<std::string> candidates =
         cover_override_utils::BuildBookCandidates(book_path);
     for (size_t i = 0; i < candidates.size(); ++i) {
-      if (stat(candidates[i].c_str(), &cover_st) == 0 &&
+      if (paths::StatWithMtime(candidates[i].c_str(), &cover_st) &&
           S_ISREG(cover_st.st_mode)) {
         paths.adjacent_path = candidates[i];
         break;

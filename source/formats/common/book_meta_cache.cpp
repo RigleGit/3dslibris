@@ -129,7 +129,7 @@ static void AppendIndexRecord(const std::string &cache_path, const MetaEntry &en
 
 std::string BuildPath(const std::string &book_path, long long file_size,
                       long long file_mtime) {
-  std::string key = book_path;
+  std::string key = "src2|" + book_path;
   key.push_back('|');
   key += std::to_string(file_size);
   key.push_back('|');

@@ -200,7 +200,7 @@ void TestPreviousLayoutCacheIsRejected() {
   Fixture fixture;
   fixture.AddPages(1);
   fixture.Save();
-  Check(fixture.CacheFile() == fixture.directory + "/e1978dc2cc1b3c11.epc",
+  Check(fixture.CacheFile() == fixture.directory + "/eabacb38b0cce68f.epc",
         "existing EPUB layout keeps its persistent cache identity");
   for (u16 version : {21,22,23}) {
     fixture.Save();

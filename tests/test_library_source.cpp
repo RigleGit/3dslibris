@@ -1,4 +1,5 @@
 #include "shared/app_flow_utils.h"
+#include "shared/path_utils.h"
 #include "shared/path_constants.h"
 #include "shared/utf8_utils.h"
 #include <algorithm>

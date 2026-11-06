@@ -304,7 +304,7 @@ Status Prepare(const std::string &path,Value *out,Cancelled cancelled,void *cont
       cbz=HasExtCI(path.c_str(),".cbz"),xps=HasExtCI(path.c_str(),".xps") || HasExtCI(path.c_str(),".oxps"),
       pdf=HasExtCI(path.c_str(),".pdf") || xps;
   if(!epub && !fb2 && !mobi && !cbz && !pdf) return Status::Unsupported;
-  struct stat st;if(stat(path.c_str(),&st) || !S_ISREG(st.st_mode)) return Status::Error;
+  struct stat st;if(!paths::StatWithMtime(path.c_str(),&st) || !S_ISREG(st.st_mode)) return Status::Error;
   const auto cache=book_meta_cache::BuildPath(path,st.st_size,st.st_mtime);
   bool prepared=false;
   if(book_meta_cache::Load(cache,&out->entry,&prepared) && prepared) return Status::Ready;

@@ -55,6 +55,7 @@ static void Expect(bool condition, const char *message) {
   if (!condition) { fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
 }
 // Interpose only the syscall boundary, retaining its actual result.
+namespace paths { inline bool StatWithMtime(const char *name, struct stat *info) { return CountedStat(name, info) == 0; } }
 #define stat(...) CountedStat(__VA_ARGS__)
 #include "library_sort.inc"
 #undef stat

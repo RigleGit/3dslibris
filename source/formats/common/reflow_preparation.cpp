@@ -1,3 +1,4 @@
+#include "shared/path_utils.h"
 #include "formats/common/reflow_preparation.h"
 #include "formats/epub/epub_preparation.h"
 #include "formats/common/reflow_block_cache.h"
@@ -115,7 +116,7 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
   s.source = source;
   s.budget = budget;
   s.started = osGetTime();
-  if (stat(source.c_str(), &s.identity) != 0) {
+  if (!paths::StatWithMtime(source.c_str(), &s.identity)) {
     s.source_error = true;
     s.result = IoError;
     return false;
@@ -196,7 +197,7 @@ ReflowPreparation::Result ReflowPreparation::Step() {
   if (s.resume) {
     s.resume = false;
     struct stat identity;
-    if (stat(s.source.c_str(), &identity) != 0 ||
+    if (!paths::StatWithMtime(s.source.c_str(), &identity) ||
         identity.st_size != s.identity.st_size ||
         identity.st_mtime != s.identity.st_mtime)
       s.source_error = true;
