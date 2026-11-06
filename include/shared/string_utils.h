@@ -66,8 +66,11 @@ inline bool EqualsAsciiNoCase(const char *a, const char *b) {
 inline bool ContainsNoCase(const std::string &haystack, const char *needle) {
   if (!needle || !needle[0])
     return false;
-  return ToLowerAscii(haystack).find(ToLowerAscii(std::string(needle))) !=
-         std::string::npos;
+  const size_t length = strlen(needle);
+  return std::search(haystack.begin(), haystack.end(), needle, needle + length,
+                     [](unsigned char a, unsigned char b) {
+                       return tolower(a) == tolower(b);
+                     }) != haystack.end();
 }
 
 inline bool HasExtCI(const char *name, const char *ext) {
@@ -175,13 +178,10 @@ inline bool ContainsNoCase(const std::string &haystack,
     return true;
   if (haystack.empty())
     return false;
-  std::string h = haystack;
-  std::string n = needle;
-  std::transform(h.begin(), h.end(), h.begin(),
-                 [](unsigned char c) { return (char)tolower(c); });
-  std::transform(n.begin(), n.end(), n.begin(),
-                 [](unsigned char c) { return (char)tolower(c); });
-  return h.find(n) != std::string::npos;
+  return std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+                     [](unsigned char a, unsigned char b) {
+                       return tolower(a) == tolower(b);
+                     }) != haystack.end();
 }
 
 inline std::string SanitizeFat32Name(const std::string &input,

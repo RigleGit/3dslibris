@@ -2,6 +2,7 @@
 #include "test_assert.h"
 
 #include <string>
+#include "allocation_counter.h"
 
 static void TestSanitizeBasic() {
   std::string r = SanitizeFat32Name("Hello World");
@@ -115,7 +116,29 @@ static void TestSanitizeBrokenContinuation() {
   test::ExpectStrEq("broken continuation", r.c_str(), "a_b");
 }
 
+static void TestContainsWithoutCopies() {
+  const std::string values[] = {"", "AbCd", std::string("a\0Bc", 4),
+      std::string(1, (char)0x80) + "Z", std::string(100, 'A')};
+  for (const auto &h : values) for (const auto &n : values) {
+    const bool expected = ToLowerAscii(h).find(ToLowerAscii(n)) != std::string::npos;
+    test::ExpectEq("string search preserves byte and empty semantics", ContainsNoCase(h, n), expected);
+    const std::string cneedle(n.c_str());
+    const bool cexpected = !cneedle.empty() &&
+        ToLowerAscii(h).find(ToLowerAscii(cneedle)) != std::string::npos;
+    test::ExpectEq("C search preserves NUL and empty semantics", ContainsNoCase(h, n.c_str()), cexpected);
+  }
+  test::ExpectFalse("null needle", ContainsNoCase("abc", (const char *)nullptr));
+  const std::string haystack(256, 'A'), needle(32, 'a');
+  allocation_count = 0; count_allocations = true;
+  const bool strings = ContainsNoCase(haystack, needle);
+  const bool cstrings = ContainsNoCase(haystack, needle.c_str());
+  count_allocations = false;
+  test::ExpectTrue("both searches match", strings && cstrings);
+  test::ExpectEq("case insensitive search never copies input", (int)allocation_count, 0);
+}
+
 int main() {
+  TestContainsWithoutCopies();
   TestSanitizeBasic();
   TestSanitizeSpecialChars();
   TestSanitizeNonAscii();
