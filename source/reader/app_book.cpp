@@ -271,6 +271,10 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
                preparation_->Label());
       preparation_->Cancel();
       preparation_.reset();
+      if (app_.GetCurrentBook() == book) {
+        app_.SetCurrentBook(nullptr);
+        app_.SetCurrentBookSessionId(0);
+      }
       cache_label_ = failure_label;
       DBG_LOGF(&app_, "Reflow preparation failed result=%d detail=%s",
                (int)result, cache_label_.c_str());

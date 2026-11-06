@@ -64,6 +64,8 @@ struct App {
     unsigned b = 1, start = 2, a = 4;
   } key;
   AppMode mode = AppMode::Opening;
+  Book *current = nullptr;
+  Book *GetCurrentBook() { return current; }
   bool abort_work = false, browser_dirty = false;
   unsigned resets = 0;
   std::vector<std::string> displays;
@@ -72,6 +74,7 @@ struct App {
   }
   void SetCurrentBook(Book *book) {
     assert(!book);
+    current = book;
   }
   void SetCurrentBookSessionId(unsigned session) {
     assert(!session);
@@ -147,10 +150,12 @@ int main() {
       App app;
       Book book;
       ReaderController reader(app, book);
+      app.current = &book;
       reader.preparation_->outcome = failure;
       assert(reader.AdvanceCachePreparation({}));
       assert(app.mode == AppMode::Opening && !app.browser_dirty && !app.resets);
       assert(cancellations == 1 && destructions == 1);
+      assert(!app.current);
       assert(app.displays.back().find("test preparation failure") !=
              std::string::npos);
       assert(app.displays.back().find("B:") != std::string::npos);
