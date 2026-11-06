@@ -82,7 +82,20 @@ void TestFitRectPreserveAspect() {
 
 } // namespace
 
+static void TestEveryRoundedRowSpan() {
+  for (int w = 0; w <= 90; ++w) for (int h = 0; h <= 120; ++h)
+    for (int y = -1; y <= h; ++y) {
+      int left = -1, right = -1;
+      browser_grid_geometry_utils::RoundedRectRowSpan(y, w, h, 5, &left, &right);
+      for (int x = -1; x <= w; ++x)
+        ExpectEq("span equals existing per-pixel mask",
+            x >= left && x < right,
+            browser_grid_geometry_utils::RoundedRectContains(x, y, w, h, 5));
+    }
+}
+
 int main() {
+  TestEveryRoundedRowSpan();
   TestRoundedRectContainsClipsCorners();
   TestRoundedRectContainsHandlesDegenerateInputs();
   TestFitRectPreserveAspect();
