@@ -236,12 +236,12 @@ int LoadCssClassMapForDoc(const std::string &archive_path,
   return 0;
 }
 
-void NormalizeHtmlEntityChunkForXml(const std::string &chunk, bool final,
+void NormalizeHtmlEntityChunkForXml(const char *chunk, size_t size, bool final,
                                     void *transform_ctx, std::string *out) {
   html_entity_utils::ChunkedEntityNormalizerState *state =
       static_cast<html_entity_utils::ChunkedEntityNormalizerState *>(
           transform_ctx);
-  html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(chunk, final, state,
+  html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(chunk, size, final, state,
                                                            out);
 }
 

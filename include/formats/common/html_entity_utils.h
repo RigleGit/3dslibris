@@ -12,7 +12,7 @@ struct ChunkedEntityNormalizerState {
 bool DecodeHtmlEntityCodepoint(const std::string &entity, uint32_t *out);
 bool DecodeHtmlEntityUtf8(const std::string &entity, std::string *out);
 std::string NormalizeHtmlNamedEntitiesForXml(const std::string &in);
-void NormalizeHtmlNamedEntitiesForXmlChunk(const std::string &chunk, bool final,
+void NormalizeHtmlNamedEntitiesForXmlChunk(const char *chunk, size_t size, bool final,
                                            ChunkedEntityNormalizerState *state,
                                            std::string *out);
 

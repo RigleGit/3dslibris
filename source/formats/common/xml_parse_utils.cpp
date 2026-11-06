@@ -200,8 +200,7 @@ XmlParseResult ParseXmlZipEntryTransformed(unzFile uf,
       epub_parse_perf::ScopedTime perf_transform_ms(&epub_parse_perf::Snapshot::transform_ms);
 #endif
       transformed.clear();
-      transform_chunk(std::string(buffer.data(), (size_t)std::max(len, 0)),
-                      final, transform_ctx, &transformed);
+      transform_chunk(buffer.data(), (size_t)len, final, transform_ctx, &transformed);
       parse_bytes = transformed.c_str();
       parse_len = (int)transformed.size();
     }
