@@ -945,8 +945,13 @@ Preparation::Result Preparation::Step() {
                                 &container, &root
 #endif
         );
-    if (rc)
+    if (rc) {
+      if (rc == BOOK_ERR_CANCELLED || ShouldAbortEpubOpen(s.book)) {
+        Cancel();
+        return Cancelled;
+      }
       return s.result = Failed;
+    }
     ApplyEpubMetadataOnlyResult(s.book, s.data, s.folder);
     if (s.cached) {
       if (s.book->GetChapters().empty()) {
@@ -977,8 +982,13 @@ Preparation::Result Preparation::Step() {
 #endif
         );
     s.parse_ms += osGetTime() - begin;
-    if (rc != 0 && rc != kSpinePending)
+    if (rc != 0 && rc != kSpinePending) {
+      if (rc == BOOK_ERR_CANCELLED || ShouldAbortEpubOpen(s.book)) {
+        Cancel();
+        return Cancelled;
+      }
       return s.result = rc == XML_ERROR_NO_MEMORY ? NoMemory : Failed;
+    }
     if (s.writer_open) {
       if (s.writer.AppendDocument(s.before, s.book->GetPageCount()))
         s.phase = State::WriteDocument;
