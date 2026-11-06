@@ -4,9 +4,45 @@
 #include <fstream>
 #include <iterator>
 #include <cstdio>
+#include <cmath>
+#include <algorithm>
+
+static void TestResampling(const char *path) {
+  std::ifstream file(path, std::ios::binary);
+  const std::vector<unsigned char> png((std::istreambuf_iterator<char>(file)), {});
+  for (int w = 1; w <= 7; ++w) for (int h = 1; h <= 6; ++h) {
+    raster_image::ArgbBitmap image;
+    const char *error = nullptr;
+    assert(raster_image::DecodeArgb(png.data(), png.size(), w, h, &image, &error, true));
+    for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x) {
+      const double fx = std::max(0.0, (x + 0.5) * 4 / w - 0.5);
+      const double fy = std::max(0.0, (y + 0.5) * 3 / h - 0.5);
+      const int x0 = std::min(3, (int)fx), y0 = std::min(2, (int)fy);
+      const double tx = fx - x0, ty = fy - y0;
+      double channels[3] = {}, alpha = 0;
+      for (int k = 0; k < 4; ++k) {
+        const int sx = std::min(3, x0 + (k & 1));
+        const int sy = std::min(2, y0 + (k >> 1));
+        const double weight = ((k & 1) ? tx : 1-tx) * ((k & 2) ? ty : 1-ty);
+        const int a = (sx*53+sy*71)%256;
+        const int rgb[] = {(sx*63+sy*19)%256,(sx*11+sy*101)%256,(sx*79+sy*37)%256};
+        alpha += weight * a;
+        for (int c = 0; c < 3; ++c) channels[c] += weight * rgb[c] * a / 255.0;
+      }
+      const uint32_t pixel = image.pixels[(size_t)y*w+x];
+      assert(std::abs((int)(pixel >> 24) - (int)(alpha+0.5)) <= 1);
+      for (int c = 0; c < 3; ++c) {
+        const int expected = alpha > 0 ? (int)(channels[c]*255/alpha+0.5) : 0;
+        const int actual = (pixel >> ((2-c)*8)) & 255;
+        assert(std::abs(actual-expected) <= 1);
+      }
+    }
+  }
+}
 
 int main(int argc, char **argv) {
-  assert(argc == 4);
+  assert(argc == 5);
+  TestResampling(argv[4]);
   raster_image::Bitmap image;
   const char *error = NULL;
   std::ifstream input(argv[1], std::ios::binary);
