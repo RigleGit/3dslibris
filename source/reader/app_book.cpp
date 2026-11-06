@@ -304,6 +304,21 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
     if (plan.has_remap) {
       book->SetPosition(plan.mapped_position);
       ApplyRemappedBookmarks(book, plan.mapped_bookmarks);
+      while (book->HasPendingReflowNavigation()) {
+        const int rc = book->AdvanceReflowPageCache();
+        if (rc > 0)
+          return true;
+        if (rc < 0) {
+          preparation_->Cancel();
+          preparation_.reset();
+          if (app_.GetCurrentBook() == book) {
+            app_.SetCurrentBook(nullptr);
+            app_.SetCurrentBookSessionId(0);
+          }
+          cache_label_ = "Page cache read failed; B: back";
+          return true;
+        }
+      }
     }
   }
   app_.SetCurrentBook(book);

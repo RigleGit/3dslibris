@@ -17,6 +17,8 @@ struct FrameInput {
   u64 timestamp_ms = 1000;
 };
 struct Book {
+  bool HasPendingReflowNavigation() { std::abort(); }
+  int AdvanceReflowPageCache() { std::abort(); }
   void SetLayoutRevision(unsigned) {
     std::abort();
   }
