@@ -26,6 +26,10 @@ bool TryLoadCachedOnly(Book *book, const std::string &book_path);
 
 bool TryLoad(Book *book, const std::string &book_path);
 bool Save(Book *book, const std::string &book_path);
+// A verified "this source has no cover" record, keyed like the thumbnail so a
+// changed book or sidecar invalidates it. It spares repeated extractor runs.
+bool MarkAbsent(Book *book, const std::string &book_path);
+bool IsMarkedAbsent(Book *book, const std::string &book_path);
 bool HasAdjacentOverride(Book *book, const std::string &book_path);
 bool TryLoadAdjacentOverride(Book *book, const std::string &book_path);
 

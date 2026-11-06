@@ -14,6 +14,28 @@ int main() {
     mkdir(paths::GetCoverRetentionPath().c_str(),0777);
     assert(!cover_cache::EnableFullRetention());return 0;
   }
+  if(mode=="absent") {
+    Book book;const auto path=root+"/nocover.epub";
+    book.SetBrowserFolderEntry(root,"folder",path);
+    assert(!cover_cache::IsMarkedAbsent(&book,path));
+    assert(cover_cache::MarkAbsent(&book,path));
+    assert(cover_cache::IsMarkedAbsent(&book,path));
+    // The marker is not a thumbnail and must not be treated as corrupt data.
+    assert(!cover_cache::TryLoadCachedOnly(&book,path) && !book.coverPixels);
+    std::string marker;DIR *dir=opendir(paths::GetCoverCacheDir().c_str());assert(dir);
+    while(auto *entry=readdir(dir)) if(HasExtCI(entry->d_name,".cvr")) marker=paths::GetCoverCacheDir()+"/"+entry->d_name;
+    closedir(dir);assert(!marker.empty());
+    // A partial marker is ignored rather than trusted.
+    assert(truncate(marker.c_str(),3)==0);assert(!cover_cache::IsMarkedAbsent(&book,path));
+    assert(cover_cache::MarkAbsent(&book,path)&&cover_cache::IsMarkedAbsent(&book,path));
+    // A real thumbnail saved later replaces the marker.
+    book.coverWidth=85;book.coverHeight=115;book.coverPixels=new u16[85*115];
+    std::fill(book.coverPixels,book.coverPixels+85*115,(u16)7);
+    assert(cover_cache::Save(&book,path));assert(!cover_cache::IsMarkedAbsent(&book,path));
+    Book again;again.SetBrowserFolderEntry(root,"folder",path);
+    assert(cover_cache::TryLoadCachedOnly(&again,path)&&again.coverPixels[0]==7);
+    puts("PASS: absent-cover marker is keyed, ignored when partial and replaced by a thumbnail");return 0;
+  }
   if(mode=="write") {
     assert(cover_cache::EnableFullRetention());size_t resident=0;
     for(int i=0;i<1000;++i) {

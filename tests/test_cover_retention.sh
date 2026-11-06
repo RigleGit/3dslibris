@@ -3,7 +3,7 @@ set -euo pipefail
 source "$(dirname "$0")/test_build.sh"
 TASK_TMP="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMP"' EXIT
-mkdir -p "$TASK_TMP/library" "$TASK_TMP/failure"
+mkdir -p "$TASK_TMP/library" "$TASK_TMP/failure" "$TASK_TMP/absent"
 python3 - "$TEST_ROOT" "$TASK_TMP" <<'PY'
 from pathlib import Path
 import sys
@@ -19,3 +19,4 @@ build_test test_cover_retention -- -I"$TASK_TMP" -I"$TEST_ROOT/tests" -I"$TEST_R
  "$TEST_ROOT/source/formats/common/file_read_utils.cpp" "$TEST_ROOT/source/library/cover_override_utils.cpp"
 RETENTION_TEST=restart "$TEST_OUTDIR/test_cover_retention"
 FOLDER_COVER_TEST_ROOT="$TASK_TMP/failure" RETENTION_TEST=failure "$TEST_OUTDIR/test_cover_retention"
+FOLDER_COVER_TEST_ROOT="$TASK_TMP/absent" RETENTION_TEST=absent "$TEST_OUTDIR/test_cover_retention"

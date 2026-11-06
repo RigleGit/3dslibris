@@ -49,6 +49,7 @@ namespace {
 static const std::string &kCoverCacheBaseDir = paths::GetCacheBaseDir();
 static const std::string &kCoverCacheDir = paths::GetCoverCacheDir();
 static const char *kCoverCacheMagic = "CVR4";
+static const char *kCoverAbsentMagic = "CVN4";
 static const size_t kCoverCacheMaxFiles = 512;
 static const size_t kCoverCacheMaxBytes = 16 * 1024 * 1024;
 
@@ -411,6 +412,44 @@ bool Save(Book *book, const std::string &book_path) {
              cache_path.c_str(), book->coverWidth, book->coverHeight);
   }
 #endif
+  return ok;
+}
+
+bool MarkAbsent(Book *book, const std::string &book_path) {
+  if (!book || book_path.empty())
+    return false;
+  EnsureCoverCacheDirs();
+  const std::string cache_path = GetCoverSourcePaths(book, book_path).cache_path;
+  u8 header[8] = {};
+  memcpy(header, kCoverAbsentMagic, 4);
+  FILE *fp = fopen(cache_path.c_str(), "wb");
+  if (!fp)
+    return false;
+  bool ok = fwrite(header, 1, sizeof(header), fp) == sizeof(header);
+  ok = (fclose(fp) == 0) && ok;
+  if (!ok) {
+    remove(cache_path.c_str());
+    return false;
+  }
+  if (!g_full_retention) {
+    RecordCoverCacheSave(cache_path, sizeof(header));
+    PruneCoverCache();
+  }
+  return true;
+}
+
+bool IsMarkedAbsent(Book *book, const std::string &book_path) {
+  if (!book || book_path.empty())
+    return false;
+  EnsureCoverCacheDirs();
+  FILE *fp = fopen(GetCoverSourcePaths(book, book_path).cache_path.c_str(), "rb");
+  if (!fp)
+    return false;
+  u8 header[8];
+  const bool ok = fread(header, 1, sizeof(header), fp) == sizeof(header) &&
+                  memcmp(header, kCoverAbsentMagic, 4) == 0 &&
+                  !header[4] && !header[5] && !header[6] && !header[7];
+  fclose(fp);
   return ok;
 }
 

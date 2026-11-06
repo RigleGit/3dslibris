@@ -129,10 +129,13 @@ OUTCOME_BACKEND(mobi_parser, 2)
 OUTCOME_BACKEND(pdf_parser, 3)
 OUTCOME_BACKEND(cbz_parser, 4)
 namespace epub_parser { int ResolveToc(Book *, const std::string &) { std::abort(); } }
+static bool absent_marked = false; static int absent_writes = 0;
 namespace cover_cache {
 bool TryLoad(Book *, const std::string &) { return false; }
 bool TryLoadCachedOnly(Book *, const std::string &) { return false; }
 bool HasAdjacentOverride(Book *, const std::string &) { return false; }
+bool IsMarkedAbsent(Book *, const std::string &) { return absent_marked; }
+bool MarkAbsent(Book *, const std::string &) { ++absent_writes; return true; }
 bool Save(Book *book, const std::string &path) {
   assert(book == expected_extraction_book && !book->IsBrowserFolder());
   assert(path == expected_extraction_path && book->coverPixels);
@@ -190,7 +193,9 @@ static void TestEmbeddedCoverResults(const std::string &root) {
         controller.ProcessJobs(3);
         Expect(extraction_calls == 1 && extraction_backend == backend,
                "cover job dispatches exactly one matching extractor");
-        const int attempts = backend == 3 ? outcome.pdf_attempts : outcome.attempts;
+        // FB2 code 3 (no cover id) is a verified absence, so it stops retrying.
+        const int attempts = backend == 3 ? outcome.pdf_attempts
+            : (backend == 1 && outcome.rc == 3) ? 3 : outcome.attempts;
         Expect(book->coverAttempts == attempts, "cover result preserves attempt policy");
         const bool retry = !new_device && outcome.old_retry && attempts < 3;
         const u64 expected_retry = outcome.rc == 0 && outcome.pixels
@@ -224,7 +229,49 @@ static void TestCoverlessAdmission() {
   Expect(extraction_calls==0,"coverless sources never invoke extractors");
 }
 
+static void TestAbsentMarker() {
+  Book book{BookContext()};
+  book.format=FORMAT_PDF; book.filename="plain.pdf";
+  free_bytes=32u*1024u*1024u;
+  expected_extraction_book=&book; expected_extraction_path="/library/plain.pdf";
+  extraction_rc=0; extraction_pixels=false; extraction_calls=0;
+  absent_marked=false; absent_writes=0;
+  auto result=library_cover::Prepare(&book,"/library/plain.pdf",false,false);
+  Expect(result.status==library_cover::Status::Absent && extraction_calls==1,
+         "clean extraction without pixels reports an absent cover");
+  Expect(absent_writes==1,"a verified absent cover is recorded once");
+  book.coverAttempts=0; extraction_calls=0; absent_writes=0; absent_marked=true;
+  result=library_cover::Prepare(&book,"/library/plain.pdf",false,false);
+  Expect(result.status==library_cover::Status::Absent && !result.heavy &&
+         extraction_calls==0 && absent_writes==0 && book.coverAttempts==3,
+         "a recorded absent cover skips extraction and further retries");
+  absent_marked=false; extraction_rc=7; extraction_calls=0; absent_writes=0; book.coverAttempts=0;
+  result=library_cover::Prepare(&book,"/library/plain.pdf",false,false);
+  Expect(result.status==library_cover::Status::Error && absent_writes==0,
+         "an extractor error is not recorded as a missing cover");
+  // FB2 reports a missing cover id (3) or binary (5) deterministically; other
+  // codes (parse failure, memory) may be transient and must keep retrying.
+  Book fb2{BookContext()};
+  fb2.format=FORMAT_XHTML; fb2.filename="story.fb2";
+  expected_extraction_book=&fb2; expected_extraction_path="/library/story.fb2";
+  for(int code : {3,5}) {
+    extraction_rc=code; extraction_calls=0; absent_writes=0; absent_marked=false; fb2.coverAttempts=0;
+    result=library_cover::Prepare(&fb2,"/library/story.fb2",false,false);
+    Expect(result.status==library_cover::Status::Absent && absent_writes==1 && fb2.coverAttempts==3,
+           "FB2 without a cover id or binary is recorded as absent");
+  }
+  for(int code : {2,4,6}) {
+    extraction_rc=code; extraction_calls=0; absent_writes=0; absent_marked=false; fb2.coverAttempts=0;
+    result=library_cover::Prepare(&fb2,"/library/story.fb2",false,false);
+    Expect(result.status==library_cover::Status::Error && absent_writes==0 && fb2.coverAttempts==1,
+           "FB2 parse or decode failures stay retryable and unrecorded");
+  }
+  expected_extraction_book=nullptr;
+  puts("PASS: absent-cover marker skips repeated extraction without hiding errors");
+}
+
 int main() {
   TestEmbeddedCoverResults("/test/library");
+  TestAbsentMarker();
   TestCoverlessAdmission();
 }

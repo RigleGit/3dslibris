@@ -15,6 +15,10 @@ namespace library_cover {
 Result Prepare(Book *book,const std::string &path,bool is_new,bool selected,bool cache_only) {
   if(!book || path.empty()) return {Status::Absent,0,false};
   if(cover_cache::TryLoadCachedOnly(book,path)) return {Status::Cached,0,false};
+  if(!book->IsBrowserFolder() && cover_cache::IsMarkedAbsent(book,path)) {
+    book->coverAttempts=cover_cache::kMaxAttempts;
+    return {Status::Absent,0,false};
+  }
   const bool adjacent=cover_cache::HasAdjacentOverride(book,path);
   if(!adjacent) {
     if(book->IsBrowserFolder()) return {Status::Absent,0,false};
@@ -60,12 +64,21 @@ Result Prepare(Book *book,const std::string &path,bool is_new,bool selected,bool
     book->coverAttempts=cover_cache::kMaxAttempts;book->coverRetryAfterMs=0;
     return {cover_cache::Save(book,path) ? Status::Prepared : Status::WriteError,0,true};
   }
+  const bool fb2=book->format==FORMAT_XHTML && HasExtCI(book->GetFileName(),".fb2");
+  if(fb2 && !adjacent && !book->IsBrowserFolder() && browser_warmup_utils::IsDefinitiveFb2NoCover(rc)) {
+    book->coverAttempts=cover_cache::kMaxAttempts;
+    cover_cache::MarkAbsent(book,path);
+    return {Status::Absent,0,true};
+  }
   if(rc!=0) {
     if(book->IsBrowserFolder() || (book->format==FORMAT_PDF && browser_warmup_utils::IsPermanentCoverFailure(rc))) book->coverAttempts=cover_cache::kMaxAttempts;
     else ++book->coverAttempts;
     return {Status::Error,rc,true};
   }
   book->coverAttempts=cover_cache::kMaxAttempts;
+  // The extractor ran cleanly and found nothing: remember that for this exact
+  // source so later sessions do not reopen the document. Errors never qualify.
+  if(supported && !adjacent && !book->IsBrowserFolder()) cover_cache::MarkAbsent(book,path);
   return {supported || book->IsBrowserFolder() ? Status::Absent : Status::Unsupported,0,supported || adjacent};
 }
 }
