@@ -615,9 +615,21 @@ struct Reader::State {
       return ReadAt(b.offset, out, b.size) ? Ready : IoError;
     if (b.offset < window_offset || b.offset - window_offset > window_size ||
         b.size > window_size - (size_t)(b.offset - window_offset)) {
+      // A block before the current window means the reader is moving backward.
+      // End the new window at this block so earlier neighbors are inside it,
+      // instead of re-reading forward data that was just consumed.
+      const bool backward = window_size && b.offset < window_offset;
+      const uint64_t block_end = b.offset + b.size;
       window_offset = b.offset;
       window_size =
           std::min<uint64_t>(window_capacity, header.index_offset - b.offset);
+      if (backward) {
+        window_offset = block_end > window_capacity
+                            ? std::max<uint64_t>(sizeof(Header),
+                                                 block_end - window_capacity)
+                            : sizeof(Header);
+        window_size = block_end - window_offset;
+      }
       if (!ReadAt(window_offset, read_window.get(), window_size)) {
         window_size = 0;
         return IoError;

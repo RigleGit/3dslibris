@@ -461,6 +461,31 @@ void TestBookOwnsPendingWriter() {
         "completion after idle work saves every page exactly once");
 }
 
+static unsigned ResidentSweepReads(Fixture &fixture, const std::string &path,
+                                   bool backward) {
+  Book book(fixture.ctx);
+  book.SetPosition(backward ? 79 : 0);
+  reflow_block_cache::Reader reader;
+  Require(reader.Begin(&book, path, 128 * 1024) == reflow_block_cache::Pending,
+          "begin sweep reader");
+  while (reader.Step() == reflow_block_cache::Pending) {
+  }
+  block_reads = 0;
+  count_block_reads = true;
+  for (unsigned i = 0; i < 80; ++i) {
+    const unsigned page = backward ? 79 - i : i;
+    reader.Request(page);
+    reader.Pin(page);
+    unsigned turns = 0;
+    while (reader.Step() == reflow_block_cache::Pending && ++turns < 40) {
+    }
+    reader.FrameEnd();
+    Check(reader.IsReady(page), "sweep reaches every page");
+  }
+  count_block_reads = false;
+  return block_reads;
+}
+
 void TestBlockCacheRoundtrip() {
   Fixture fixture;
   fixture.AddPages(80, 1024);
@@ -647,6 +672,14 @@ void TestBlockCacheRoundtrip() {
         "persistent OOM keeps visible page and cache");
   reader.Close();
   loaded.Close();
+  const unsigned forward_reads = ResidentSweepReads(fixture, path, false);
+  const unsigned backward_reads = ResidentSweepReads(fixture, path, true);
+  // The fixture has five blocks. A forward window per block needed five reads
+  // when paging backward; ending the window at the requested block lets
+  // earlier neighbors share it. Text and search blocks still alternate in the
+  // single 64 KiB window, so three reads is the bound for this layout.
+  Check(forward_reads == 0 && backward_reads <= 3,
+        "backward paging shares physical reads between neighboring blocks");
   loaded.SetPosition(47);
   Require(loaded.StartReflowPageCache(path, 128 * 1024),
           "attach private page backend");
