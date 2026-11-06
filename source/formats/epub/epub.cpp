@@ -1,3 +1,4 @@
+#include "formats/common/epub_parse_perf.h"
 /*
 
 dslibris - an ebook reader for the Nintendo DS.
@@ -64,23 +65,6 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "shared/status_reporter.h"
 #include "shared/text_layout_utils.h"
 
-#ifdef DSLIBRIS_DEBUG
-// Process-wide aggregator defined in epub_manifest.cpp. Forward-declared
-// here to keep the per-doc accumulator private to that translation unit
-// while still letting the spine-level summary read it.
-namespace epub_parse_perf {
-struct Snapshot {
-  u64 chardata_ms;
-  u64 element_ms;
-  u64 flush_ms;
-  u32 chardata_calls;
-  u32 element_calls;
-  u32 flush_calls;
-  u32 page_overflows;
-};
-Snapshot Get();
-} // namespace epub_parse_perf
-#endif
 #include "parse.h"
 #include "book/reflow_cache_save_utils.h"
 #include "stb_image.h"
@@ -219,6 +203,9 @@ static std::string BuildChapterLabelFromText(const std::string &raw_title,
 static int OpenEpubArchive(const std::string &name, unzFile *uf) {
   if (!uf)
     return 1;
+#ifdef DSLIBRIS_DEBUG
+  epub_parse_perf::ScopedTime perf_zip_open_ms(&epub_parse_perf::Snapshot::zip_open_ms);
+#endif
   *uf = unzOpen(name.c_str());
   return *uf ? 0 : 1;
 }
@@ -268,6 +255,12 @@ static int ParseEpubSpineDocuments(
   epub_zip_utils::ZipEntryIndex &zip_index = work.zip_index;
   int rc = 0;
   if (!work.initialized) {
+#ifdef DSLIBRIS_DEBUG
+    work.started = osGetTime();
+    work.layout_before = text_layout_utils::GetPerfStats();
+    work.parse_before = epub_parse_perf::Get();
+#endif
+
     for (auto *ctx : parsedata->ctx)
       delete ctx;
     parsedata->ctx.clear();
@@ -277,15 +270,15 @@ static int ParseEpubSpineDocuments(
     book->ClearChapterDocStartPages();
     book->ClearInlineImages();
     page_start_by_href->clear();
-    work.inline_zip =
-        book->GetEbookImagesEnabled() ? unzOpen(archive_path.c_str()) : NULL;
-    work.css_zip = unzOpen(archive_path.c_str());
-    work.initialized = true;
+    {
 #ifdef DSLIBRIS_DEBUG
-    work.started = osGetTime();
-    work.layout_before = text_layout_utils::GetPerfStats();
-    work.parse_before = epub_parse_perf::Get();
+      epub_parse_perf::ScopedTime perf_zip_open_ms(&epub_parse_perf::Snapshot::zip_open_ms);
 #endif
+      work.inline_zip =
+          book->GetEbookImagesEnabled() ? unzOpen(archive_path.c_str()) : NULL;
+      work.css_zip = unzOpen(archive_path.c_str());
+    }
+    work.initialized = true;
   }
   book->SetInlineImageProbeZip(work.inline_zip);
   unzFile css_scan_uf = work.css_zip;
@@ -491,7 +484,9 @@ static int ParseEpubSpineDocuments(
              "EPUB: spine breakdown total=%llums layout=%llums(%u%%) "
              "shape=%llums(%u%%) measure=%llums(%u%%) linebreak=%llums(%u%%) "
              "elem=%llums(%u%%)/%u chardata=%llums(%u%%)/%u "
-             "flush=%llums(%u%%)/%u overflows=%u glyphs=%u",
+             "flush=%llums(%u%%)/%u overflows=%u glyphs=%u "
+             "zip_read=%llums transform=%llums xml=%llums css=%llums "
+             "yield=%llums image_probe=%llums zip_index=%llums zip_open=%llums",
              (unsigned long long)spine_ms, (unsigned long long)layout_ms,
              layout_pct, (unsigned long long)shape_ms, shape_pct,
              (unsigned long long)measure_ms, measure_pct,
@@ -501,7 +496,15 @@ static int ParseEpubSpineDocuments(
              (unsigned)chardata_calls, (unsigned long long)flush_ms,
              flush_pct, (unsigned)flush_calls, (unsigned)overflows,
              (unsigned)(after.shaped_glyphs -
-                        spine_layout_before.shaped_glyphs));
+                        spine_layout_before.shaped_glyphs),
+             (unsigned long long)(parse_after.zip_read_ms - spine_parse_before.zip_read_ms),
+             (unsigned long long)(parse_after.transform_ms - spine_parse_before.transform_ms),
+             (unsigned long long)(parse_after.xml_ms - spine_parse_before.xml_ms),
+             (unsigned long long)(parse_after.css_ms - spine_parse_before.css_ms),
+             (unsigned long long)(parse_after.yield_ms - spine_parse_before.yield_ms),
+             (unsigned long long)(parse_after.image_probe_ms - spine_parse_before.image_probe_ms),
+             (unsigned long long)(parse_after.zip_index_ms - spine_parse_before.zip_index_ms),
+             (unsigned long long)(parse_after.zip_open_ms - spine_parse_before.zip_open_ms));
   }
 #endif
   return rc;
@@ -721,6 +724,9 @@ struct Preparation::State {
   size_t range, residency_budget;
   bool resident;
   u64 started, parse_ms, cache_ms;
+#ifdef DSLIBRIS_DEBUG
+  u64 last_step_end_ms = 0;
+#endif
   State()
       : book(NULL), data(), zip(NULL), phase(Cache), result(Pending),
         cached(false), metadata(false), legacy(false),
@@ -885,6 +891,9 @@ Preparation::Result Preparation::Step() {
   if (!state_ || state_->result != Pending)
     return GetResult();
   State &s = *state_;
+#ifdef DSLIBRIS_DEBUG
+  epub_parse_perf::StepGap perf_step_gap(s.last_step_end_ms);
+#endif
   if (ShouldAbortEpubOpen(s.book)) {
     Cancel();
     return Cancelled;

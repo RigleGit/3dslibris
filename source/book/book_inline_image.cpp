@@ -1,3 +1,4 @@
+#include "formats/common/epub_parse_perf.h"
 /*
     3dslibris - book_inline_image.cpp
     New module for the 3DS port by Rigle.
@@ -67,6 +68,9 @@ static bool LocateBookInlineZipEntry(
     return false;
 
   if (!*index_built) {
+#ifdef DSLIBRIS_DEBUG
+    epub_parse_perf::ScopedTime perf_zip_index_ms(&epub_parse_perf::Snapshot::zip_index_ms);
+#endif
     *index_built = true;
     int rc = unzGoToFirstFile(uf);
     while (rc == UNZ_OK) {
@@ -254,6 +258,9 @@ void *Book::GetInlineImageReadZip() {
   if (inline_image_probe_uf)
     return inline_image_probe_uf;
   if (!inline_image_read_uf_) {
+#ifdef DSLIBRIS_DEBUG
+    epub_parse_perf::ScopedTime perf_zip_open_ms(&epub_parse_perf::Snapshot::zip_open_ms);
+#endif
     const std::string path = foldername + "/" + filename;
     inline_image_read_uf_ = unzOpen(path.c_str());
   }
@@ -522,6 +529,9 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
 
   InlineImageEntry &entry = inline_images[image_id];
   if (!entry.metadata_probed) {
+#ifdef DSLIBRIS_DEBUG
+    epub_parse_perf::ScopedTime perf_image_probe_ms(&epub_parse_perf::Snapshot::image_probe_ms);
+#endif
     entry.metadata_ok = false;
     entry.source_width = 0;
     entry.source_height = 0;

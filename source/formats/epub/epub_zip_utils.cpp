@@ -1,3 +1,4 @@
+#include "formats/common/epub_parse_perf.h"
 /*
     3dslibris - epub_zip_utils.cpp
     ZIP archive utilities for EPUB parsing.
@@ -18,6 +19,10 @@ bool LocateSafe(unzFile uf, const std::string &entry_path,
     return false;
 
   if (index && !index->built) {
+#ifdef DSLIBRIS_DEBUG
+    epub_parse_perf::ScopedTime perf_zip_index_ms(&epub_parse_perf::Snapshot::zip_index_ms);
+#endif
+
     index->built = true;
     int rc = unzGoToFirstFile(uf);
     if (rc == UNZ_OK) {

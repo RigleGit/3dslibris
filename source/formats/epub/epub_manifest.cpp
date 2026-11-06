@@ -1,3 +1,4 @@
+#include "formats/common/epub_parse_perf.h"
 /*
 
 dslibris - an ebook reader for the Nintendo DS.
@@ -74,29 +75,14 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 
 #ifdef DSLIBRIS_DEBUG
 namespace epub_parse_perf {
-// Process-wide aggregator for parsedata_t perf counters across a single
-// EPUB open. ParseEpubSpineDocuments snapshots before the spine loop and
-// diffs after to attribute the non-layout portion of spine time (XML
-// element dispatch, character data emission, page flush).
-struct Snapshot {
-  u64 chardata_ms;
-  u64 element_ms;
-  u64 flush_ms;
-  u32 chardata_calls;
-  u32 element_calls;
-  u32 flush_calls;
-  u32 page_overflows;
-};
-static Snapshot g_accum = {0, 0, 0, 0, 0, 0, 0};
-Snapshot Get() { return g_accum; }
 void Add(const parsedata_t &pd, const Snapshot &before_doc) {
-  g_accum.chardata_ms += pd.perf_chardata_ms - before_doc.chardata_ms;
-  g_accum.element_ms += pd.perf_element_ms - before_doc.element_ms;
-  g_accum.flush_ms += pd.perf_flush_ms - before_doc.flush_ms;
-  g_accum.chardata_calls += pd.perf_chardata_calls - before_doc.chardata_calls;
-  g_accum.element_calls += pd.perf_element_calls - before_doc.element_calls;
-  g_accum.flush_calls += pd.perf_flush_calls - before_doc.flush_calls;
-  g_accum.page_overflows +=
+  Counters().chardata_ms += pd.perf_chardata_ms - before_doc.chardata_ms;
+  Counters().element_ms += pd.perf_element_ms - before_doc.element_ms;
+  Counters().flush_ms += pd.perf_flush_ms - before_doc.flush_ms;
+  Counters().chardata_calls += pd.perf_chardata_calls - before_doc.chardata_calls;
+  Counters().element_calls += pd.perf_element_calls - before_doc.element_calls;
+  Counters().flush_calls += pd.perf_flush_calls - before_doc.flush_calls;
+  Counters().page_overflows +=
       pd.perf_page_overflows - before_doc.page_overflows;
 }
 } // namespace epub_parse_perf
@@ -581,6 +567,9 @@ int epub_parse_currentfile(unzFile uf, epub_data_t *epd, const EpubDeps &deps,
     InitParsedataWithEpubDeps(&pd, epd->book, deps);
     pd.docpath = epd->docpath;
     if (!epd->archive_path.empty()) {
+#ifdef DSLIBRIS_DEBUG
+      epub_parse_perf::ScopedTime perf_css_ms(&epub_parse_perf::Snapshot::css_ms);
+#endif
       const int css_rc = LoadCssClassMapForDoc(
           epd->archive_path, epd->docpath, deps.reporter, epd,
           &pd.css_class_map, css_scan_uf, uf, &content_prefix, zip_index);

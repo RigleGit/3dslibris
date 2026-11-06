@@ -496,11 +496,12 @@ void FontManager::LogAdvancePerf() {
   if (!reporter || !DBG_SHOULD_LOG(DBG_LEVEL_INFO, DBG_CAT_PERF))
     return;
   DBG_LOGF_CAT(reporter, DBG_LEVEL_INFO, DBG_CAT_PERF,
-               "ADVANCE calls=%llu hits=%llu misses=%llu loads=%llu",
+               "ADVANCE calls=%llu hits=%llu misses=%llu loads=%llu load_ms=%llu",
                (unsigned long long)advance_perf_.calls,
                (unsigned long long)advance_perf_.hits,
                (unsigned long long)advance_perf_.misses,
-               (unsigned long long)advance_perf_.loads);
+               (unsigned long long)advance_perf_.loads,
+               (unsigned long long)advance_perf_.load_ms);
   DBG_LOGF_CAT(reporter, DBG_LEVEL_INFO, DBG_CAT_PERF,
                "ADVANCE fallback searches=%llu hits=%llu unresolved=%llu ftc=%d",
                (unsigned long long)advance_perf_.fallback_searches,
@@ -589,7 +590,13 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       needs_fallback = true;
     } else {
       FONT_ADVANCE_COUNT(loads);
+#ifdef DSLIBRIS_DEBUG
+      const u64 advance_load_begin = osGetTime();
+#endif
       error = FT_Load_Glyph(face, gindex, FT_LOAD_DEFAULT);
+#ifdef DSLIBRIS_DEBUG
+      advance_perf_.load_ms += osGetTime() - advance_load_begin;
+#endif
       if (!error) {
         primary_loaded = true;
         primary_advance = face->glyph->advance.x >> 6;
@@ -613,7 +620,13 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       needs_fallback = true;
     } else {
       FONT_ADVANCE_COUNT(loads);
+#ifdef DSLIBRIS_DEBUG
+      const u64 advance_load_begin = osGetTime();
+#endif
       error = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
+#ifdef DSLIBRIS_DEBUG
+      advance_perf_.load_ms += osGetTime() - advance_load_begin;
+#endif
       if (!error) {
         primary_loaded = true;
         primary_advance = face->glyph->advance.x >> 6;
@@ -635,7 +648,14 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
         SetFacePixelSize(fb, face->size->metrics.y_ppem);
 #ifdef ADVANCE_NO_CACHE
         FONT_ADVANCE_COUNT(loads);
+#ifdef DSLIBRIS_DEBUG
+      const u64 advance_load_begin = osGetTime();
+#endif
+
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
+#ifdef DSLIBRIS_DEBUG
+      advance_perf_.load_ms += osGetTime() - advance_load_begin;
+#endif
         if (!error)
           return fb->glyph->advance.x >> 6;
 #else
@@ -650,7 +670,14 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
         }
 
         FONT_ADVANCE_COUNT(loads);
+#ifdef DSLIBRIS_DEBUG
+      const u64 advance_load_begin = osGetTime();
+#endif
+
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
+#ifdef DSLIBRIS_DEBUG
+      advance_perf_.load_ms += osGetTime() - advance_load_begin;
+#endif
         if (!error) {
           u8 advance = fb->glyph->advance.x >> 6;
           fbAdvanceCache.insert(std::make_pair(fb_cache_key, advance));
