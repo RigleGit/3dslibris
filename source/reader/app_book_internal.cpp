@@ -176,6 +176,8 @@ bool ReuseParsedBook(App *app) {
     selected->ResetCbzFailureState();
     selected->ResetCbzTransientViewState(true);
     DBG_LOG(app, "BOOK reopen: state reset complete");
+  } else if (selected->IsFixedLayout()) {
+    selected->CancelMuPdfIncrementalRender();
   }
   app->SetCurrentBook(selected);
   if (app->GetMode() == AppMode::Browser) {
