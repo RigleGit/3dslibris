@@ -110,6 +110,9 @@ u8 ReaderController::OpenBook()
 
   // Switching books closes the previous one in DetachCurrentBookForSwitch().
   // Persist first so Close() cannot reset/write it back as page 1.
+  if (progress_autosave_dirty_ && progress_autosave_book_ &&
+      progress_autosave_book_ != selected_book)
+    TryPersistProgress(progress_autosave_book_, true);
   if (switching_books) {
     TryPersistProgress(bookcurrent_, true);
   }
@@ -131,6 +134,7 @@ u8 ReaderController::OpenBook()
     app_.SetPrefsLayoutNoticePending(false);
     prefs->Write();
     ClearSavedRelayoutState(selected_book);
+    ResetProgressAutosave(selected_book);
     boot_trace::Boot("open book reuse done");
     return 0;
   }
@@ -347,6 +351,7 @@ u8 ReaderController::OpenBook()
   app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
   ClearSavedRelayoutState(bookcurrent_);
+  ResetProgressAutosave(bookcurrent_);
   boot_trace::Boot("open book done");
   return 0;
 }
