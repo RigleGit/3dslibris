@@ -324,12 +324,6 @@ bool ReadZipEntryText(unzFile uf, const std::string &path, std::string &out,
   }
   if (path.empty())
     return false;
-  EpubDiag(reporter, "EPUB: %s locate begin", t);
-  if (!epub_zip_utils::LocateSafe(uf, path, index)) {
-    EpubDiag(reporter, "EPUB: %s locate fail", t);
-    return false;
-  }
-  EpubDiag(reporter, "EPUB: %s locate ok", t);
   bool ok =
       epub_zip_utils::ReadText(uf, path, out, epub_limits::kTocMaxBytes, index);
   if (!ok) {

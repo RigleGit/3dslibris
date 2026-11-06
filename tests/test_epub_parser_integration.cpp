@@ -1,3 +1,4 @@
+#include "formats/epub/epub_package_toc_utils.h"
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/page.h"
@@ -19,6 +20,15 @@
 #include <dirent.h>
 #include <vector>
 #include <zlib.h>
+
+#undef unzLocateFile
+extern "C" int unzLocateFile(unzFile, const char *, int);
+static bool observe_toc_locates = false;
+static unsigned toc_locates = 0;
+extern "C" int ObserveTocLocate(unzFile file, const char *name, int cases) {
+  if (observe_toc_locates) ++toc_locates;
+  return unzLocateFile(file, name, cases);
+}
 
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
@@ -827,7 +837,23 @@ void TestRealPreparationFromEnv() {
   rmdir(dir);
 }
 
+void TestTocReadLocatesOnce() {
+  unzFile file = unzOpen(TEST_FIXTURES_DIR "/books/basic.epub");
+  ExpectTrue("TOC archive opens", file != nullptr);
+  std::string text;
+  toc_locates = 0; observe_toc_locates = true;
+  const bool ok = epub_package_toc_utils::ReadZipEntryText(
+      file, "META-INF/container.xml", text, nullptr, "test", nullptr);
+  observe_toc_locates = false;
+  ExpectTrue("TOC read keeps content", ok && text.find("container") != std::string::npos);
+  ExpectTrue("TOC read locates exactly once", toc_locates == 1);
+  ExpectTrue("missing TOC entry fails", !epub_package_toc_utils::ReadZipEntryText(
+      file, "missing.xml", text, nullptr, "test", nullptr) && text.empty());
+  unzClose(file);
+}
+
 int main() {
+  TestTocReadLocatesOnce();
   TestRealPreparationFromEnv();
   TestCooperativePreparation();
   TestOptionalCacheAllocationFailureKeepsReading();
