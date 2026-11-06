@@ -514,9 +514,6 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
   DBG_LOGF(&app_, "recently-opened: recording t=%lu for \"%s\"",
            (unsigned long)bookcurrent_->GetLastOpenedTime(),
            bookcurrent_->GetFileName() ? bookcurrent_->GetFileName() : "?");
-  if (app_.prefs)
-    app_.prefs->Write();
-
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   book_nav::DrawPage(bookcurrent_, ts);
