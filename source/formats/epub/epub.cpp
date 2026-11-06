@@ -457,6 +457,9 @@ static int ParseEpubSpineDocuments(
         parse_after.chardata_ms - spine_parse_before.chardata_ms;
     const u64 flush_ms =
         parse_after.flush_ms - spine_parse_before.flush_ms;
+    const u64 xml_ms = parse_after.xml_ms - spine_parse_before.xml_ms;
+    const u64 callback_ms = elem_ms + chardata_ms;
+    const u64 xml_net_ms = xml_ms > callback_ms ? xml_ms - callback_ms : 0;
     const u32 elem_calls =
         parse_after.element_calls - spine_parse_before.element_calls;
     const u32 chardata_calls =
@@ -485,7 +488,7 @@ static int ParseEpubSpineDocuments(
              "shape=%llums(%u%%) measure=%llums(%u%%) linebreak=%llums(%u%%) "
              "elem=%llums(%u%%)/%u chardata=%llums(%u%%)/%u "
              "flush=%llums(%u%%)/%u overflows=%u glyphs=%u "
-             "zip_read=%llums transform=%llums xml=%llums css=%llums "
+             "zip_read=%llums transform=%llums xml=%llums xml_net=%llums css=%llums "
              "yield=%llums image_probe=%llums zip_index=%llums zip_open=%llums",
              (unsigned long long)spine_ms, (unsigned long long)layout_ms,
              layout_pct, (unsigned long long)shape_ms, shape_pct,
@@ -499,7 +502,7 @@ static int ParseEpubSpineDocuments(
                         spine_layout_before.shaped_glyphs),
              (unsigned long long)(parse_after.zip_read_ms - spine_parse_before.zip_read_ms),
              (unsigned long long)(parse_after.transform_ms - spine_parse_before.transform_ms),
-             (unsigned long long)(parse_after.xml_ms - spine_parse_before.xml_ms),
+             (unsigned long long)xml_ms, (unsigned long long)xml_net_ms,
              (unsigned long long)(parse_after.css_ms - spine_parse_before.css_ms),
              (unsigned long long)(parse_after.yield_ms - spine_parse_before.yield_ms),
              (unsigned long long)(parse_after.image_probe_ms - spine_parse_before.image_probe_ms),
