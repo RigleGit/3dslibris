@@ -24,14 +24,20 @@ static bool AttrNameEq(const char *name, const char *needle) {
                       : needle[0];
   if (ca != cn)
     return false;
-  const std::string name_lc = ToLowerAscii(std::string(name));
-  if (name_lc == needle)
+  const auto matches = [needle](const char *value) {
+    const char *target = needle;
+    while (*value && *target) {
+      if (tolower((unsigned char)*value) != (unsigned char)*target)
+        return false;
+      ++value;
+      ++target;
+    }
+    return *value == '\0' && *target == '\0';
+  };
+  if (matches(name))
     return true;
   const char *colon = strrchr(name, ':');
-  if (!colon)
-    return false;
-  const std::string local = ToLowerAscii(std::string(colon + 1));
-  return local == needle;
+  return colon && matches(colon + 1);
 }
 
 static bool HasClassToken(const char *class_name, const char *token) {

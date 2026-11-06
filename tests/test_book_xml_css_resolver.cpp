@@ -2,8 +2,36 @@
 #include "book/book_xml_css_style_utils.h"
 #include "book/epub_css_class_map.h"
 #include "test_assert.h"
+#include "allocation_counter.h"
+#include "shared/string_utils.h"
 
 namespace {
+
+bool LegacyStyleName(const char *name) {
+  if (!strcmp(name, "style")) return true;
+  const char first = name[0] >= 'A' && name[0] <= 'Z' ? name[0] - 'A' + 'a' : name[0];
+  if (first != 's') return false;
+  if (ToLowerAscii(name) == "style") return true;
+  const char *colon = strrchr(name, ':');
+  return colon && ToLowerAscii(colon + 1) == "style";
+}
+void TestAttributeNamesWithoutCopies() {
+  const char *names[] = {"", "style", "STYLE", "s:StYlE", "x:style",
+      "s:other:STYLE", "s:style:", "\x80:style",
+      "sLongAttributePrefixThatDoesNotFitSSO:StYlE"};
+  for (const char *name : names) {
+    const char *attrs[] = {name, "x", nullptr};
+    const bool expected = LegacyStyleName(name);
+    test::ExpectEq("attribute namespace semantics unchanged",
+        book_xml_css_resolver::ExtractStyleAttr(attrs) == "x", expected);
+  }
+  const char *attrs[] = {names[8], "x", nullptr};
+  allocation_count = 0; count_allocations = true;
+  const std::string result = book_xml_css_resolver::ExtractStyleAttr(attrs);
+  count_allocations = false;
+  test::ExpectStrEq("namespaced style resolves", result.c_str(), "x");
+  test::ExpectEq("attribute matching does not allocate", (int)allocation_count, 0);
+}
 
 void TestExtractStyleAttr() {
   const char *attr[] = {"class", "foo", "style", "color:red", nullptr};
@@ -291,6 +319,7 @@ void TestParseElementStyleFlagsFromClass() {
 } // namespace
 
 int main() {
+  TestAttributeNamesWithoutCopies();
   TestExtractStyleAttr();
   TestExtractClassAttr();
   TestParseCssLengthPxUnits();
