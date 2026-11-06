@@ -28,7 +28,7 @@ for signature in ('static bool PathIsDirectory(', 'static bool PathIsRegularFile
     if signature in path.read_text():
         extracted+=subprocess.check_output(['python3',str(root/'tests/extract_test_function.py'),str(path),signature],text=True)
 extracted+=subprocess.check_output(['python3',str(root/'tests/extract_test_function.py'),str(root/'source/book/book_folder_cover.cpp'),'const std::string &Book::GetBrowserFolderCoverPath() const'],text=True)
-extracted+='\nvoid AppendTestFolder(App *app,const std::string &root,const std::string &name,std::set<std::string> *seen) { AppendFolderEntry(app,root,name,seen); }\n'
+extracted+='\nvoid AppendTestFolder(App *app,const std::string &root,const std::string &name,std::set<std::string> *seen) { AppendFolderEntry(app,root,name,nullptr,seen); }\n'
 (tmp/'folders.cpp').write_text(extracted)
 def chunk(name,data): return struct.pack('>I',len(data))+name+data+struct.pack('>I',zlib.crc32(name+data))
 png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',85,115,8,2,0,0,0))+chunk(b'IDAT',zlib.compress((b'\x00'+b'\xaa\x55\x22'*85)*115))+chunk(b'IEND',b'')

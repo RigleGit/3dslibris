@@ -54,7 +54,7 @@ struct LibraryGradientContext {Text *ts;const unsigned char *color_mode;};
 static void AppendBookFromFilename(App *app,LibraryGradientContext*,const std::string &dir,const char *name,std::set<std::string>*) {
   if(app_flow_utils::ShouldIndexBookFilename(name)) app->books.push_back(new Book{dir,name,false});
 }
-static void AppendFolderEntry(App *app,const std::string &dir,const std::string &name,std::set<std::string>*) {
+static void AppendFolderEntry(App *app,const std::string &dir,const std::string &name,LibraryGradientContext*,std::set<std::string>*) {
   if(!name.empty() && name[0]!='.') app->books.push_back(new Book{dir,name,true});
 }
 struct LibraryController {

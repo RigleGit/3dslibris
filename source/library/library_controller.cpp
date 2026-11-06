@@ -412,6 +412,7 @@ static bool DirectoryHasDirectSupportedBook(const std::string &dir) {
 
 static void AppendFolderEntry(App *app, const std::string &source_dir,
                               const std::string &folder_name,
+                              LibraryGradientContext *gradient_ctx,
                               std::set<std::string> *seen_keys) {
   if (!app || folder_name.empty() || folder_name[0] == '.')
     return;
@@ -434,9 +435,9 @@ static void AppendFolderEntry(App *app, const std::string &source_dir,
   ctx.orientation = &app->reader_layout.orientation;
   ctx.status_reporter = app;
   ctx.draw_background = &DrawBottomGradientFromApp;
-  ctx.draw_background_user_data = app;
+  ctx.draw_background_user_data = gradient_ctx;
   ctx.draw_top_background = &DrawTopGradientFromApp;
-  ctx.draw_top_background_user_data = app;
+  ctx.draw_top_background_user_data = gradient_ctx;
   ctx.on_spine_progress = &DrawOpeningSplashWithProgress;
   ctx.on_spine_progress_user_data = app;
 
@@ -625,7 +626,7 @@ int LibraryController::FindBooks() {
         if (filename.empty())
           continue;
         if (entries[i].attributes & FS_ATTRIBUTE_DIRECTORY)
-          AppendFolderEntry(&app_, dir, filename, &seen_keys);
+          AppendFolderEntry(&app_, dir, filename, &gradient_ctx_, &seen_keys);
         else
           AppendBookFromFilename(&app_, &gradient_ctx_, dir, filename.c_str(), &seen_keys);
       }
@@ -646,7 +647,7 @@ int LibraryController::FindBooks() {
         continue;
       std::string child = dir + "/" + ent->d_name;
       if (PathIsDirectory(child))
-        AppendFolderEntry(&app_, dir, ent->d_name, &seen_keys);
+        AppendFolderEntry(&app_, dir, ent->d_name, &gradient_ctx_, &seen_keys);
       else
         AppendBookFromFilename(&app_, &gradient_ctx_, dir, ent->d_name, &seen_keys);
     }
