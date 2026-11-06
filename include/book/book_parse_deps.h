@@ -4,6 +4,7 @@
 
 #include "book/book.h"
 #include "ui/text.h"
+#include "shared/string_utils.h"
 
 struct TextLayoutSnapshot {
   int pixel_size;
@@ -62,4 +63,19 @@ inline BookParseDeps BuildBookParseDeps(Book *book) {
   deps.paragraph_indent = book ? book->GetParagraphIndent() : 0;
   deps.orientation = book ? book->GetOrientation() : 0;
   return deps;
+}
+
+inline std::string CapturePageCacheFontIdentity(Text *text) {
+  if (!text)
+    return std::string();
+  std::string names;
+  for (unsigned style = 0; style < 9; ++style) {
+    const std::string path = text->GetFontFile((u8)style);
+    names += std::to_string(path.size()) + ":" + path;
+  }
+  for (int index = 0; index < 8; ++index) {
+    const std::string path = text->GetFallbackFontFile(index);
+    names += std::to_string(path.size()) + ":" + path;
+  }
+  return ":fonts1:" + std::to_string(Fnv1a64(names));
 }

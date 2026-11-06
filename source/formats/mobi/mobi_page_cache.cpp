@@ -1,3 +1,4 @@
+#include "book/book_parse_deps.h"
 #include "formats/common/book_search_cache.h"
 #include "formats/mobi/mobi_page_cache.h"
 
@@ -101,6 +102,7 @@ static std::string BuildCachePath(Book *book, const char *book_path,
   if (book && !book->GetEbookImagesEnabled())
     params.variant_token += ":no-images";
 
+  params.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);
   return page_cache_utils::BuildPageCachePath(
       GetEffectiveCacheDir(), ".mpc", book_path, params);
 }
@@ -217,6 +219,7 @@ std::string CachePath(Book *book,const char *source,const page_cache_utils::Page
   auto p=params;
   p.variant_token=book && book->GetMobiLineWrapFix() ? "1" : "0";
   if (book && !book->GetEbookImagesEnabled()) p.variant_token+=":no-images";
+  p.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);
   return page_cache_utils::BuildPageCachePath(GetEffectiveCacheDir(),".mpc",source,p);
 }
 struct LegacyLoader::State {

@@ -1,3 +1,4 @@
+#include "book/book_parse_deps.h"
 #include "formats/fb2/fb2_page_cache.h"
 #include "book/book.h"
 #include "shared/path_constants.h"
@@ -19,6 +20,7 @@ std::string CachePath(Book *book, const char *source,
       book && book->GetPublisherHorizontalMarginsEnabled() ? ":h1" : ":h0";
   if (book && !book->GetEbookImagesEnabled())
     p.variant_token += ":no-images";
+  p.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);
 #ifdef DSLIBRIS_HOST_TEST
   const std::string &dir =
       directory.empty() ? paths::GetFb2CacheDir() : directory;

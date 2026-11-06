@@ -1,3 +1,5 @@
+#include "ui/text.h"
+#include "formats/common/page_cache_utils.h"
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/page.h"
@@ -1009,6 +1011,26 @@ static void TestOldBlockLayoutsAreRejected() {
   }
 }
 
+static void TestEveryEffectiveFontInvalidates() {
+  Text text;
+  BookContext context; context.text = &text;
+  Book book(context);
+  const auto params = page_cache_utils::BuildLayoutParams(kBookPath,14,2,0,0,0,12,12,10,36,"");
+  const std::string original = epub_page_cache::CachePath(&book,kBookPath,params);
+  for (int style=0;style<9;++style) {
+    text.font_files[style]="replacement.ttf";
+    Check(epub_page_cache::CachePath(&book,kBookPath,params)!=original,
+          "every effective style font invalidates persistent layout");
+    text.font_files[style].clear();
+  }
+  for (int index=0;index<8;++index) {
+    text.fallback_files[index]="fallback.ttf";
+    Check(epub_page_cache::CachePath(&book,kBookPath,params)!=original,
+          "every effective fallback invalidates persistent layout");
+    text.fallback_files[index].clear();
+  }
+}
+
 int main(int argc, char **argv) {
   const std::string selected = argc > 1 ? argv[1] : "all";
   if (argc > 2 || (selected != "all" && selected != "maps" &&
@@ -1022,6 +1044,7 @@ int main(int argc, char **argv) {
     return 2;
   }
   if (selected == "all") {
+    TestEveryEffectiveFontInvalidates();
     TestPhysicalWriterFallback();
     TestMobiBlockIdentity();
     TestLongBlockIndexStrings();

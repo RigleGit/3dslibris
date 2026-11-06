@@ -68,7 +68,9 @@ public:
   // Style
   void SetStyle(int) {}
   int GetStyle() const { return 0; }
-  std::string GetFontFile(u8) const { return ""; }
+  std::string font_files[9], fallback_files[8];
+  std::string GetFontFile(u8 style) const { return style < 9 ? font_files[style] : ""; }
+  std::string GetFallbackFontFile(int index) const { return index >= 0 && index < 8 ? fallback_files[index] : ""; }
   void SetFontFile(const char *, u8) { ++font_revision; }
   std::string GetFontFile(u8, int) const { return ""; }
   int GetColorMode() { return color_mode; }

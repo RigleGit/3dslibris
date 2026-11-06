@@ -4,6 +4,7 @@
     Extracted from epub.cpp by Rigle.
 */
 
+#include "book/book_parse_deps.h"
 #include "formats/epub/epub_page_cache.h"
 #include "formats/common/reflow_block_cache.h"
 #include "formats/common/cache_memory_utils.h"
@@ -84,6 +85,7 @@ static std::string BuildCachePath(Book *book, const char *book_path,
       book && book->GetPublisherHorizontalMarginsEnabled() ? ":h1" : ":h0";
   if (book && !book->GetEbookImagesEnabled())
     layout_params.variant_token += ":no-images";
+  layout_params.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);
   return page_cache_utils::BuildPageCachePath(
       GetEffectiveCacheDir(), ".epc", book_path, layout_params);
 }
