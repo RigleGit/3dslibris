@@ -25,7 +25,7 @@ namespace {
 static const u32 kCbzInteractiveDeferredDelayMs = 180;
 static const u32 kCbzPreloadDeferredDelayMs = 600;
 
-inline bool CbzSourceValid(const Book::CbzState::PageBitmap &page_bitmap,
+inline bool CbzSourceRenderable(const Book::CbzState::PageBitmap &page_bitmap,
                            int page_index, int zoom_index,
                            int target_width, int target_height) {
   if (page_bitmap.page != page_index || page_bitmap.bitmap.width <= 0 ||
@@ -52,6 +52,14 @@ inline bool CbzSourceValid(const Book::CbzState::PageBitmap &page_bitmap,
       fit_scale * pdf_view_utils::ZoomForIndex(zoom_index));
   return page_bitmap.bitmap.width >= page_bitmap.original_width * scale &&
          page_bitmap.bitmap.height >= page_bitmap.original_height * scale;
+}
+
+inline bool CbzSourceValid(const Book::CbzState::PageBitmap &page_bitmap,
+                           int page_index, int zoom_index,
+                           int target_width, int target_height) {
+  return !page_bitmap.bitmap.pixels.empty() &&
+         CbzSourceRenderable(page_bitmap, page_index, zoom_index,
+                             target_width, target_height);
 }
 
 inline int ClampCbzPageIndex(int page_index, u16 page_count) {
@@ -602,7 +610,7 @@ void Book::DrawCurrentCbzView(Text *ts) {
   // The synchronous source includes an accepted lower-resolution memory
   // fallback. Let the GPU scale it without a second full bitmap allocation.
   bool use_source = debug_runtime::ForceSynchronousCbzDecode() &&
-      CbzSourceValid(cbz_state->current_source, page_index,
+      CbzSourceRenderable(cbz_state->current_source, page_index,
                      cbz_state->viewport.zoom_index,
                      cbz_state->target_top_width,
                      cbz_state->target_top_height);
@@ -610,7 +618,7 @@ void Book::DrawCurrentCbzView(Text *ts) {
       !CbzBitmapCacheValid(cbz_state->current_interactive, page_index,
                            cbz_state->viewport.zoom_index)) {
     EnsureCbzInteractiveCache(cbz_state, page_index, ts);
-    use_source = CbzSourceValid(cbz_state->current_source, page_index,
+    use_source = CbzSourceRenderable(cbz_state->current_source, page_index,
                                 cbz_state->viewport.zoom_index,
                                 cbz_state->target_top_width,
                                 cbz_state->target_top_height);
