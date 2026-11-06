@@ -17,6 +17,9 @@ int main() {
   const auto replaced=page_cache_utils::BuildLayoutParams(filename,12,0,0,0,0,0,0,0,0,"");
   assert(first.file_size==replaced.file_size);
   assert(page_cache_utils::BuildPageCachePath("cache",".epc",filename,first)!=page_cache_utils::BuildPageCachePath("cache",".epc",filename,replaced));
+  timestamp=946684800;utimbuf stable={1234,1234};assert(utime(filename,&stable)==0);
+  const auto unsupported=page_cache_utils::BuildLayoutParams(filename,12,0,0,0,0,0,0,0,0,"");
+  assert(unsupported.file_mtime==1234 && "an untouched archive timestamp must not replace stat's value");
   unlink(filename);
   puts("PASS: zero console stat mtime cannot hide same-size source replacement");
 }

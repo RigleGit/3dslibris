@@ -29,7 +29,11 @@ inline bool StatWithMtime(const char *name, struct stat *info) {
     return false;
 #ifdef __3DS__
   u64 modified = 0;
-  if (archive_getmtime(name, &modified) == 0)
+  // Emulators stub the FS control call: success with an untouched output.
+  // libctru then returns exactly the 2000-01-01 epoch offset, which is "no
+  // timestamp" rather than a file date, so keep stat's fallback.
+  static const u64 kFatEpochUnix = 946684800;
+  if (archive_getmtime(name, &modified) == 0 && modified > kFatEpochUnix)
     info->st_mtime = (time_t)modified;
 #endif
   return true;
