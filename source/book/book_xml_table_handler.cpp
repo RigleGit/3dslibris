@@ -208,6 +208,22 @@ bool HandleTableStart(parsedata_t *p, Text *ts, const char *el,
   bool hidden = false;
   HideFlags(attr, &hidden);
 
+  // Nested tables are flattened into the active outer cell. Keep their
+  // structural tags from resetting the outer row/cell capture.
+  unsigned table_depth = 0;
+  for (unsigned i = 0; i < p->stacksize; ++i)
+    if (p->stack[i] == TAG_TABLE)
+      ++table_depth;
+  if (inside_table && (entering_table || table_depth > 1)) {
+    const context_t tag = entering_table ? TAG_TABLE :
+        !strcmp(el, "script") ? TAG_SCRIPT :
+        !strcmp(el, "style") ? TAG_STYLE : TAG_UNKNOWN;
+    parse_push(p, tag);
+    HideCurrentStack(p, hidden);
+    if (!hidden) AppendCapturedTableSeparator(p, ' ');
+    return true;
+  }
+
   if (entering_table) {
     fns.flush_inline_tail(p, ts);
     if (p->linebegan && p->buflen > 0 && p->buf[p->buflen - 1] != '\n')
@@ -303,6 +319,16 @@ bool HandleTableStart(parsedata_t *p, Text *ts, const char *el,
 bool HandleTableEnd(parsedata_t *p, Text *ts, const char *el,
                     const TableHandlerFns &fns) {
   if (!p || !el || !parse_in(p, TAG_TABLE)) return false;
+
+  unsigned table_depth = 0;
+  for (unsigned i = 0; i < p->stacksize; ++i)
+    if (p->stack[i] == TAG_TABLE)
+      ++table_depth;
+  if (table_depth > 1) {
+    AppendCapturedTableSeparator(p, ' ');
+    parse_pop(p);
+    return true;
+  }
 
   if (!strcmp(el, "th") || !strcmp(el, "td")) {
     FinishCapturedTableCell(p);
