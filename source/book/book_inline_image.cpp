@@ -862,6 +862,8 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
     }
   }
 
+  decoded.pixels.clear();
+
   bool opaque = true;
   for (size_t i = 0; i < entry.pixels.size(); ++i) {
     if ((entry.pixels[i] >> 24) != 255) { opaque = false; break; }
