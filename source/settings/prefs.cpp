@@ -587,9 +587,9 @@ void Prefs::RememberSavedLastOpened(const char *folder, const char *filename,
 void Prefs::ApplySavedBookState(Book *book) const {
   if (!book)
     return;
+  const std::string book_key = MakeSavedBookKey(book->GetFolderName(), book->GetFileName());
   const auto state_it =
-      saved_state_by_book_key.find(MakeSavedBookKey(book->GetFolderName(),
-                                                    book->GetFileName()));
+      saved_state_by_book_key.find(book_key);
   if (state_it != saved_state_by_book_key.end()) {
     const SavedBookState &state = state_it->second;
     book->SetMobiLineWrapFix(state.mobi_line_wrap_fix);
@@ -610,8 +610,7 @@ void Prefs::ApplySavedBookState(Book *book) const {
   }
 
   const auto it =
-      last_opened_by_book_key.find(MakeSavedBookKey(book->GetFolderName(),
-                                                    book->GetFileName()));
+      last_opened_by_book_key.find(book_key);
   if (it != last_opened_by_book_key.end())
     book->SetLastOpenedTime(it->second);
 }
