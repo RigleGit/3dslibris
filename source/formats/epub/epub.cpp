@@ -487,9 +487,7 @@ static int ParseEpubSpineDocuments(
              "EPUB: spine breakdown total=%llums layout=%llums(%u%%) "
              "shape=%llums(%u%%) measure=%llums(%u%%) linebreak=%llums(%u%%) "
              "elem=%llums(%u%%)/%u chardata=%llums(%u%%)/%u "
-             "flush=%llums(%u%%)/%u overflows=%u glyphs=%u "
-             "zip_read=%llums transform=%llums xml=%llums xml_net=%llums css=%llums "
-             "yield=%llums image_probe=%llums zip_index=%llums zip_open=%llums",
+             "flush=%llums(%u%%)/%u overflows=%u glyphs=%u",
              (unsigned long long)spine_ms, (unsigned long long)layout_ms,
              layout_pct, (unsigned long long)shape_ms, shape_pct,
              (unsigned long long)measure_ms, measure_pct,
@@ -499,11 +497,17 @@ static int ParseEpubSpineDocuments(
              (unsigned)chardata_calls, (unsigned long long)flush_ms,
              flush_pct, (unsigned)flush_calls, (unsigned)overflows,
              (unsigned)(after.shaped_glyphs -
-                        spine_layout_before.shaped_glyphs),
+                        spine_layout_before.shaped_glyphs));
+    DBG_LOGF(reporter,
+             "EPUB timing XML: zip_read=%llums transform=%llums "
+             "xml_total=%llums xml_net=%llums css=%llums",
              (unsigned long long)(parse_after.zip_read_ms - spine_parse_before.zip_read_ms),
              (unsigned long long)(parse_after.transform_ms - spine_parse_before.transform_ms),
              (unsigned long long)xml_ms, (unsigned long long)xml_net_ms,
-             (unsigned long long)(parse_after.css_ms - spine_parse_before.css_ms),
+             (unsigned long long)(parse_after.css_ms - spine_parse_before.css_ms));
+    DBG_LOGF(reporter,
+             "EPUB timing assets: yield=%llums image_probe=%llums "
+             "zip_index=%llums zip_open=%llums",
              (unsigned long long)(parse_after.yield_ms - spine_parse_before.yield_ms),
              (unsigned long long)(parse_after.image_probe_ms - spine_parse_before.image_probe_ms),
              (unsigned long long)(parse_after.zip_index_ms - spine_parse_before.zip_index_ms),
