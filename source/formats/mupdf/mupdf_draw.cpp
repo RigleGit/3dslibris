@@ -7,6 +7,7 @@
 
 #include "book/page.h"
 #include "formats/common/fixed_layout_blit_utils.h"
+#include "formats/common/fixed_layout_mosaic_config.h"
 #include "formats/common/fixed_layout_screen_constants.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "settings/prefs.h"
@@ -331,6 +332,10 @@ static bool BlitRawBitmapViewportRegion(
 bool Book::HasPendingMuPdfDeferredWork() const {
   if (!IsPdf() || !mupdf_state || !mupdf_state->ctx || !mupdf_state->doc)
     return false;
+  if (mupdf_state->refine_pending && !mupdf_state->refine_go)
+    return true;
+  if (mupdf_state->preview_pending || MuPdfMosaicWantsIdleWork(mupdf_state))
+    return true;
   if (debug_runtime::ForceSynchronousMuPdfRender())
     return false;
 
@@ -384,6 +389,7 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
     CancelMuPdfIncrementalRenderState(mupdf_state);
     ResetBitmapCache(&mupdf_state->current_interactive_tile);
     ResetBitmapCache(&mupdf_state->current_final_zoom);
+    mupdf_state->mosaic.Clear();
     ResetAdjacentSlot(&mupdf_state->prev_slot, mupdf_state->ctx);
     ResetAdjacentSlot(&mupdf_state->next_slot, mupdf_state->ctx);
     ResetMuPdfRenderFailureState(mupdf_state);
@@ -404,6 +410,7 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
     ResetBitmapCache(&mupdf_state->current_preview);
     ResetBitmapCache(&mupdf_state->current_interactive_tile);
     ResetBitmapCache(&mupdf_state->current_final_zoom);
+    mupdf_state->mosaic.Clear();
     ResetAdjacentSlot(&mupdf_state->prev_slot, mupdf_state->ctx);
     ResetAdjacentSlot(&mupdf_state->next_slot, mupdf_state->ctx);
     ResetMuPdfRenderFailureState(mupdf_state);
@@ -446,7 +453,22 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   perf_phase = fixed_perf::Now();
   if (!BitmapCacheValid(mupdf_state->current_preview, page_index))
     mupdf_state->preview_panel.valid = false;
-  const bool preview_ok = EnsureCurrentMuPdfPreviewCache(mupdf_state, page_index, ts);
+  const bool use_mosaic = UseMuPdfMosaic(mupdf_state);
+  if (!use_mosaic && mupdf_state->mosaic.HasTiles())
+    mupdf_state->mosaic.Clear();
+  bool preview_ok;
+  if (fixed_layout_mosaic::kDeferPreview && use_mosaic &&
+      mupdf_state->preview_failed_page != page_index &&
+      !BitmapCacheValid(mupdf_state->current_preview, page_index)) {
+    // Present the sharp top screen first: the overview (display list walk at
+    // 221x312) is rendered by the idle pump and drawn with a placeholder until
+    // then. The complexity gate still runs now.
+    preview_ok = !IsMuPdfPageRenderBlocked(mupdf_state, page_index);
+    mupdf_state->preview_pending = preview_ok;
+  } else {
+    preview_ok = EnsureCurrentMuPdfPreviewCache(mupdf_state, page_index, ts);
+    mupdf_state->preview_pending = false;
+  }
   fixed_perf::ViewStage("pdf.ensure_preview", fixed_perf::Now() - perf_phase,
                         preview_ok ? 1 : 0);
   if (!preview_ok) {
@@ -498,10 +520,15 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
       !HasMuPdfFinalRenderFailed(mupdf_state, page_index);
   const bool high_quality_viewport =
       !mupdf_state->viewport.interaction_active;
-  const float preview_source_width =
-      std::max(1.0f, (float)mupdf_state->current_preview.bitmap_width);
-  const float preview_source_height =
-      std::max(1.0f, (float)mupdf_state->current_preview.bitmap_height);
+  // Until the deferred overview exists, lay the frame out from page geometry.
+  const bool preview_ready =
+      BitmapCacheValid(mupdf_state->current_preview, page_index);
+  const float preview_source_width = std::max(
+      1.0f, preview_ready ? (float)mupdf_state->current_preview.bitmap_width
+                          : mupdf_state->page_width);
+  const float preview_source_height = std::max(
+      1.0f, preview_ready ? (float)mupdf_state->current_preview.bitmap_height
+                          : mupdf_state->page_height);
   const pdf_view_utils::PreviewLayout preview_layout =
       pdf_view_utils::ComputePreviewLayoutInBounds(
           preview_source_width, preview_source_height, kPdfPreviewPadding,
@@ -520,7 +547,15 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   fixed_perf::ViewStage("pdf.view_setup", fixed_perf::Now() - perf_phase);
   perf_phase = fixed_perf::Now();
   bool gpu_drawn = false;
-  if (debug_runtime::ForceSynchronousMuPdfRender() && !has_final_cache &&
+  if (use_mosaic && !has_final_cache && !mupdf_state->incremental.active &&
+      !mupdf_state->gpu_draw_failed) {
+    mupdf_state->mosaic.reporter = GetStatusReporter();
+    gpu_drawn = DrawMuPdfMosaic(mupdf_state, ts, page_index, viewport, top_layout);
+    // A mosaic that cannot draw hands the page back to the classic raster.
+    if (!gpu_drawn)
+      mupdf_state->gpu_draw_failed = true;
+  }
+  if (!gpu_drawn && debug_runtime::ForceSynchronousMuPdfRender() && !has_final_cache &&
       !mupdf_state->incremental.active && has_interactive_tile &&
       !mupdf_state->gpu_draw_failed) {
     Book::MuPdfState::BitmapCache &cache =
@@ -674,7 +709,7 @@ void Book::DrawCurrentMuPdfView(Text *ts) {
   ts->margin.bottom = saved_bottom_margin;
   fixed_perf::ViewStage("pdf.overlay", fixed_perf::Now() - perf_phase);
   fixed_perf::ViewStage("pdf.draw_total", fixed_perf::Now() - perf_draw_start);
-  fixed_perf::Drawn(has_final_cache ? 3 : has_interactive_tile ? 2 : 1);
+  fixed_perf::Drawn(has_final_cache ? 3 : (has_interactive_tile || gpu_drawn) ? 2 : 1);
   DBG_LOGF_CAT(GetStatusReporter(), DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF draw: end page=%d", page_index);
 }
@@ -692,8 +727,29 @@ bool Book::PumpDeferredMuPdfWork(u32 budget_ms) {
   (void)budget_ms;
   if (!IsPdf() || !mupdf_state || !mupdf_state->ctx || !mupdf_state->doc)
     return false;
-  if (debug_runtime::ForceSynchronousMuPdfRender())
+  if (mupdf_state->refine_pending && !mupdf_state->refine_go) {
+    // Input is idle: release the sharp re-render. The caller redraws, and that
+    // draw owns the GPU text context needed to rasterize straight to a texture.
+    mupdf_state->refine_go = true;
+    return true;
+  }
+  if (debug_runtime::ForceSynchronousMuPdfRender()) {
+    const int page = ClampMuPdfPageIndex(position, mupdf_state->page_count);
+    // Order: sharp visible tiles (the draw owns them) > overview > margin tiles.
+    const bool mosaic_work = MuPdfMosaicWantsIdleWork(mupdf_state);
+    if (mosaic_work && (mupdf_state->mosaic.visible_pending ||
+                        !mupdf_state->preview_pending)) {
+      mupdf_state->mosaic.idle_go = true;
+      return true;
+    }
+    if (mupdf_state->preview_pending) {
+      mupdf_state->preview_pending = false;
+      if (!EnsureCurrentMuPdfPreviewCache(mupdf_state, page))
+        mupdf_state->preview_failed_page = page;
+      return true;
+    }
     return false;
+  }
 
   const int page_index = ClampMuPdfPageIndex(position, mupdf_state->page_count);
   const u64 start_ms = osGetTime();

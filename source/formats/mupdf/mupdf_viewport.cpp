@@ -11,20 +11,27 @@
 #include "shared/debug_runtime_mode.h"
 #include "ui/text.h"
 
-bool CanReuseMuPdfInteractiveRaster(
+bool MuPdfInteractiveTileCoversViewport(
     const Book::MuPdfState *state, int page_index,
     const pdf_view_utils::NormalizedRect &viewport) {
   if (!state)
     return false;
   const Book::MuPdfState::BitmapCache &cache = state->current_interactive_tile;
   const float epsilon = 0.000001f;
-  if (!BitmapCacheValid(cache, page_index) || cache.width <= 0 ||
-      cache.height <= 0 || viewport.width <= 0 || viewport.height <= 0 ||
-      cache.left > viewport.left + epsilon ||
-      cache.top > viewport.top + epsilon ||
-      cache.left + cache.width < viewport.left + viewport.width - epsilon ||
-      cache.top + cache.height < viewport.top + viewport.height - epsilon)
+  return BitmapCacheValid(cache, page_index) && cache.width > 0 &&
+         cache.height > 0 && viewport.width > 0 && viewport.height > 0 &&
+         cache.left <= viewport.left + epsilon &&
+         cache.top <= viewport.top + epsilon &&
+         cache.left + cache.width >= viewport.left + viewport.width - epsilon &&
+         cache.top + cache.height >= viewport.top + viewport.height - epsilon;
+}
+
+bool CanReuseMuPdfInteractiveRaster(
+    const Book::MuPdfState *state, int page_index,
+    const pdf_view_utils::NormalizedRect &viewport) {
+  if (!MuPdfInteractiveTileCoversViewport(state, page_index, viewport))
     return false;
+  const Book::MuPdfState::BitmapCache &cache = state->current_interactive_tile;
   // Preserve a successful lower-density fallback at its original zoom. Retry
   // only after the request changes, rather than rerasterizing every frame.
   if (cache.zoom_index == state->viewport.zoom_index)
@@ -52,9 +59,34 @@ static void ResetMuPdfDeferredCachesForSynchronousRender(
     return;
   CancelMuPdfIncrementalRenderState(mupdf_state);
   const auto viewport = ComputeCurrentMuPdfViewport(mupdf_state);
-  if (!CanReuseMuPdfInteractiveRaster(
-          mupdf_state, mupdf_state->current_interactive_tile.page, viewport))
-    ResetBitmapCache(&mupdf_state->current_interactive_tile);
+  const int tile_page = mupdf_state->current_interactive_tile.page;
+  mupdf_state->refine_pending = false;
+  mupdf_state->refine_go = false;
+  if (UseMuPdfMosaic(mupdf_state)) {
+    // Fixed GPU tiles take over. A classic tile that still spans the viewport
+    // and the tiles of the previous zoom stay as scaled stand-ins until the
+    // idle pump releases the sharp ones (same flags as the single-tile
+    // progressive path).
+    const bool tile_covers =
+        MuPdfInteractiveTileCoversViewport(mupdf_state, tile_page, viewport);
+    if (!tile_covers)
+      ResetBitmapCache(&mupdf_state->current_interactive_tile);
+    mupdf_state->refine_pending = tile_covers || mupdf_state->mosaic.HasTiles();
+    mupdf_state->refine_go = false;
+  } else {
+    // Back to the classic raster: stand-in mosaic tiles would never be drawn.
+    mupdf_state->mosaic.Clear();
+    if (CanReuseMuPdfInteractiveRaster(mupdf_state, tile_page, viewport)) {
+      // Already sharp enough for the new zoom.
+    } else if (MuPdfInteractiveTileCoversViewport(mupdf_state, tile_page,
+                                                  viewport)) {
+      // Present the cached tile scaled by the GPU right away, like CBZ, and
+      // let the idle pump re-rasterize the sharp tile afterwards.
+      mupdf_state->refine_pending = true;
+    } else {
+      ResetBitmapCache(&mupdf_state->current_interactive_tile);
+    }
+  }
   ResetBitmapCache(&mupdf_state->current_final_zoom);
   // Zoom changes raster dimensions, not the page's drawing commands.
   // Keep the list; EnsureMuPdfDisplayListForPage invalidates it on page change.

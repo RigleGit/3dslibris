@@ -4,8 +4,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT/tests/test_build.sh"
 TASK_TMP="$(mktemp -d)"
 trap 'rm -rf "$TASK_TMP"' EXIT
-python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_viewport.cpp" 'bool CanReuseMuPdfInteractiveRaster(' > "$TASK_TMP/mupdf_preview_under_test.inc"
-for signature in 'void ResetMuPdfRenderFailureState(' 'bool EnsureMuPdfDisplayListForPage(' 'bool EnsureCurrentMuPdfPreviewCache(' 'bool EnsureCurrentMuPdfInteractiveTile('; do
+python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_viewport.cpp" 'bool MuPdfInteractiveTileCoversViewport(' > "$TASK_TMP/mupdf_preview_under_test.inc"
+python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_viewport.cpp" 'bool CanReuseMuPdfInteractiveRaster(' >> "$TASK_TMP/mupdf_preview_under_test.inc"
+for signature in 'void ResetMuPdfRenderFailureState(' 'static void RetireMuPdfDisplayList(' 'bool EnsureMuPdfDisplayListForPage(' 'bool IsMuPdfPageRenderBlocked(' 'bool EnsureCurrentMuPdfPreviewCache(' 'bool EnsureCurrentMuPdfInteractiveTile('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_worker.cpp" "$signature" >> "$TASK_TMP/mupdf_preview_under_test.inc"
 done
 python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_viewport.cpp" "static void ResetMuPdfDeferredCachesForSynchronousRender(" >> "$TASK_TMP/mupdf_preview_under_test.inc"

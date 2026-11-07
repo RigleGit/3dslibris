@@ -8,7 +8,12 @@
 #include "formats/common/fixed_layout_blit_utils.h"
 #include "formats/mupdf/mupdf_render_policy_utils.h"
 #include "formats/mupdf/mupdf_view.h"
+#include "formats/common/fixed_layout_mosaic_config.h"
+#include "formats/common/fixed_layout_mosaic_utils.h"
 #include "shared/debug_runtime_mode.h"
+#ifdef __3DS__
+#include <malloc.h>
+#endif
 
 
 namespace {
@@ -78,6 +83,14 @@ void ReleaseMuPdfMemoryForSuspendImpl(Book::MuPdfState *mupdf_state) {
     mupdf_state->cached_display_list = NULL;
   }
   mupdf_state->cached_display_list_page = -1;
+  mupdf_state->cached_display_list_bytes = 0;
+  mupdf_state->mosaic.Clear();
+  mupdf_state->preview_pending = false;
+  if (mupdf_state->kept_display_list && mupdf_state->ctx)
+    fz_drop_display_list(mupdf_state->ctx, mupdf_state->kept_display_list);
+  mupdf_state->kept_display_list = NULL;
+  mupdf_state->kept_display_list_page = -1;
+  mupdf_state->kept_display_list_bytes = 0;
   ReleaseAdjacentSlotMemory(&mupdf_state->prev_slot, mupdf_state->ctx);
   ReleaseAdjacentSlotMemory(&mupdf_state->next_slot, mupdf_state->ctx);
 }
@@ -131,12 +144,48 @@ bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *mupdf_state,
     fz_drop_display_list(mupdf_state->ctx, mupdf_state->cached_display_list);
   mupdf_state->cached_display_list = slot->display_list;
   mupdf_state->cached_display_list_page = page_index;
+  mupdf_state->cached_display_list_bytes = 0;
   slot->display_list = NULL;
   slot->page = -1;
   mupdf_state->final_cache_pending =
       app_flow_utils::MuPdfWantsFinalQualityRender(
           mupdf_state->document_kind);
   return true;
+}
+
+// Called before the cached list of another page is replaced. Keeps it as the
+// "previous page" list when the heap has headroom for it plus the next list,
+// otherwise drops it (Old3DS heap is tight; the kept list is the first thing
+// given back on any allocation failure or suspend).
+static void RetireMuPdfDisplayList(Book::MuPdfState *s) {
+  if (!s->ctx)
+    return;
+  if (s->kept_display_list) {
+    fz_drop_display_list(s->ctx, s->kept_display_list);
+    s->kept_display_list = NULL;
+    s->kept_display_list_page = -1;
+    s->kept_display_list_bytes = 0;
+  }
+  if (!s->cached_display_list)
+    return;
+  bool keep = false;
+  if (fixed_layout_mosaic::kKeepPreviousList) {
+#ifdef __3DS__
+    const struct mallinfo mi = mallinfo();
+    keep = fixed_layout_mosaic::ShouldKeepDisplayList(
+        (size_t)mi.fordblks, s->cached_display_list_bytes, s->is_new_3ds);
+#endif
+  }
+  if (keep) {
+    s->kept_display_list = s->cached_display_list;
+    s->kept_display_list_page = s->cached_display_list_page;
+    s->kept_display_list_bytes = s->cached_display_list_bytes;
+  } else {
+    fz_drop_display_list(s->ctx, s->cached_display_list);
+  }
+  s->cached_display_list = NULL;
+  s->cached_display_list_page = -1;
+  s->cached_display_list_bytes = 0;
 }
 
 bool EnsureMuPdfDisplayListForPage(Book::MuPdfState *mupdf_state,
@@ -157,13 +206,63 @@ bool EnsureMuPdfDisplayListForPage(Book::MuPdfState *mupdf_state,
   }
 
   CancelMuPdfIncrementalRenderState(mupdf_state);
-  if (mupdf_state->cached_display_list && mupdf_state->ctx) {
-    fz_drop_display_list(mupdf_state->ctx, mupdf_state->cached_display_list);
-    mupdf_state->cached_display_list = NULL;
-    mupdf_state->cached_display_list_page = -1;
+  if (fixed_layout_mosaic::kKeepPreviousList &&
+      mupdf_state->kept_display_list_page == page_index &&
+      mupdf_state->kept_display_list && mupdf_state->ctx) {
+    // Going back to the page visited before this one: its list is still here,
+    // so skip pdf.display_list. The list being left becomes the kept one when
+    // the heap can afford both.
+    const uint64_t started = fixed_perf::Now();
+    fz_display_list *wanted = mupdf_state->kept_display_list;
+    const size_t wanted_bytes = mupdf_state->kept_display_list_bytes;
+    mupdf_state->kept_display_list = NULL;
+    mupdf_state->kept_display_list_page = -1;
+    mupdf_state->kept_display_list_bytes = 0;
+    RetireMuPdfDisplayList(mupdf_state);
+    mupdf_state->cached_display_list = wanted;
+    mupdf_state->cached_display_list_page = page_index;
+    mupdf_state->cached_display_list_bytes = wanted_bytes;
+    fixed_perf::Record(mupdf_state->doc, page_index, -1, "pdf.display_list_kept",
+                       fixed_perf::Now() - started, 1, wanted_bytes);
+    *out_list = wanted;
+    return true;
   }
+  RetireMuPdfDisplayList(mupdf_state);
   *out_list = NULL;
   return true;
+}
+
+bool IsMuPdfPageRenderBlocked(Book::MuPdfState *mupdf_state, int page_index) {
+  if (!mupdf_state)
+    return false;
+  if (mupdf_state->document_kind == app_flow_utils::MuPdfDocumentKind::Pdf) {
+    u8 *status = page_index >= 0 &&
+        (size_t)page_index < mupdf_state->page_complexity_status.size()
+        ? &mupdf_state->page_complexity_status[(size_t)page_index] : NULL;
+    bool skip = status && *status == 2;
+    if (!status || *status == 0) {
+      int xobject_count = 0;
+      size_t content_bytes = 0;
+      if (EstimateMuPdfPageRenderComplexity(
+              mupdf_state->ctx, mupdf_state->doc, page_index,
+              &xobject_count, &content_bytes)) {
+        skip = mupdf_render_policy_utils::ShouldSkipPdfPageRender(
+            mupdf_state->document_kind, xobject_count, content_bytes);
+        if (status)
+          *status = skip ? 2 : 1;
+        if (skip)
+          DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
+                       "MUPDF preview: skip-complex page=%d xobjects=%d "
+                       "content_bytes=%u",
+                       page_index, xobject_count, (unsigned)content_bytes);
+      }
+    }
+    if (skip) {
+      mupdf_state->page_too_complex_for_device = page_index;
+      return true;
+    }
+  }
+  return false;
 }
 
 bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_index,
@@ -190,33 +289,8 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
       "MUPDF preview: render-begin page=%d scale=%.4f page_size=(%.2f,%.2f)",
       page_index, (double)preview_scale, (double)page_width,
       (double)page_height);
-  if (mupdf_state->document_kind == app_flow_utils::MuPdfDocumentKind::Pdf) {
-    u8 *status = page_index >= 0 &&
-        (size_t)page_index < mupdf_state->page_complexity_status.size()
-        ? &mupdf_state->page_complexity_status[(size_t)page_index] : NULL;
-    bool skip = status && *status == 2;
-    if (!status || *status == 0) {
-      int xobject_count = 0;
-      size_t content_bytes = 0;
-      if (EstimateMuPdfPageRenderComplexity(
-              mupdf_state->ctx, mupdf_state->doc, page_index,
-              &xobject_count, &content_bytes)) {
-        skip = mupdf_render_policy_utils::ShouldSkipPdfPageRender(
-            mupdf_state->document_kind, xobject_count, content_bytes);
-        if (status)
-          *status = skip ? 2 : 1;
-        if (skip)
-          DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_WARN, DBG_CAT_RENDER,
-                       "MUPDF preview: skip-complex page=%d xobjects=%d "
-                       "content_bytes=%u",
-                       page_index, xobject_count, (unsigned)content_bytes);
-      }
-    }
-    if (skip) {
-      mupdf_state->page_too_complex_for_device = page_index;
-      return false;
-    }
-  }
+  if (IsMuPdfPageRenderBlocked(mupdf_state, page_index))
+    return false;
   // Reuse a complete bounded top raster at any zoom. A cropped high-zoom tile
   // still needs the independent overview render below.
   if (debug_runtime::ForceSynchronousMuPdfRender() &&
@@ -264,6 +338,7 @@ bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *mupdf_state, int page_inde
   if (new_list) {
     mupdf_state->cached_display_list = new_list;
     mupdf_state->cached_display_list_page = page_index;
+    mupdf_state->cached_display_list_bytes = LastMuPdfDisplayListBytes();
   }
   DBG_LOGF_CAT(mupdf_state->reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                "MUPDF preview: render-done page=%d bmp=%dx%d", page_index,
@@ -288,11 +363,26 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   if (!mupdf_state)
     return false;
   PromoteMuPdfAdjacentSlotIfMatching(mupdf_state, page_index);
+  // Mosaic zoom: fixed GPU tiles replace this raster. They are produced by the
+  // draw owner (DrawMuPdfMosaic); nothing to prepare here.
+  if (UseMuPdfMosaic(mupdf_state))
+    return true;
   const bool visible_tile = debug_runtime::ForceSynchronousMuPdfRender();
   const pdf_view_utils::NormalizedRect viewport = visible_tile
       ? ComputeCurrentMuPdfViewport(mupdf_state)
       : pdf_view_utils::NormalizedRect{0.0f, 0.0f, 1.0f, 1.0f};
   Book::MuPdfState::BitmapCache &cache = mupdf_state->current_interactive_tile;
+  // After a zoom change the previous tile may still span the viewport. Keep
+  // presenting it (scaled) until the idle pump releases the sharp render.
+  const bool defer_refine = visible_tile && mupdf_state->refine_pending &&
+      !mupdf_state->refine_go &&
+      MuPdfInteractiveTileCoversViewport(mupdf_state, page_index, viewport);
+  if (!defer_refine) {
+    mupdf_state->refine_pending = false;
+    mupdf_state->refine_go = false;
+  } else {
+    return true;
+  }
   if (visible_tile && CanReuseMuPdfInteractiveRaster(mupdf_state,page_index,viewport))
     return true;
   if (visible_tile &&
@@ -357,13 +447,19 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
         (mupdf_state->is_new_3ds || mupdf_state->viewport.interaction_active ||
          pdf_view_utils::ZoomForIndex(mupdf_state->viewport.zoom_index) <= 2.0f)) {
       region = pdf_view_utils::NormalizedRect{0, 0, 1, 1};
-    } else if (mupdf_state->viewport.interaction_active) {
-      region.width = std::min(1.0f, viewport.width * 1.5f);
-      region.height = std::min(1.0f, viewport.height * 1.5f);
-      region.left = std::max(0.0f, std::min(1.0f - region.width,
-          viewport.left - (region.width - viewport.width) * 0.5f));
-      region.top = std::max(0.0f, std::min(1.0f - region.height,
-          viewport.top - (region.height - viewport.height) * 0.5f));
+    } else {
+      // Page does not fit: grow the tile toward the pixel budget so panning
+      // crosses its border less often. Old3DS keeps the tile near the sizes
+      // already seen to fit its heap, with a smaller minimum margin: a wide
+      // viewport at 1.5x per axis alone reached ~450k samples (1.3 MiB RGB
+      // pixmap, ~62 ms upload) and left only ~100 KB of heap on a 2DS XL.
+      const bool new3ds = mupdf_state->is_new_3ds;
+      const double budget = new3ds
+          ? 0.9 * (double)raster_pixel_limit
+          : std::min(0.9 * (double)raster_pixel_limit, 380000.0);
+      region = pdf_view_utils::GrowViewportTileRegion(viewport, full_pixels,
+                                                       budget,
+                                                       new3ds ? 1.5 : 1.3);
     }
     expanded = region.left != viewport.left || region.top != viewport.top ||
                region.width != viewport.width || region.height != viewport.height;
@@ -432,6 +528,7 @@ bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *mupdf_state,
   if (new_list && !display_list) {
     mupdf_state->cached_display_list = new_list;
     mupdf_state->cached_display_list_page = page_index;
+    mupdf_state->cached_display_list_bytes = LastMuPdfDisplayListBytes();
   }
   return true;
 }

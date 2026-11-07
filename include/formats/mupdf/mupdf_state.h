@@ -5,6 +5,7 @@
 #include "formats/common/fixed_layout_gpu_renderer.h"
 #include "formats/common/fixed_layout_preview_panel.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
+#include "formats/mupdf/mupdf_mosaic.h"
 #include "shared/app_flow_utils.h"
 #include "shared/status_reporter.h"
 
@@ -129,6 +130,24 @@ struct Book::MuPdfState {
   AdjacentSlot next_slot;
   IncrementalRenderState incremental;
   bool gpu_draw_failed = false;
+  // Zoom changed while the cached tile still covers the new viewport: the tile
+  // is drawn scaled now and re-rasterized sharp once input goes idle.
+  // refine_go is set by the idle pump so the next draw (which owns the GPU
+  // text context) performs the render.
+  bool refine_pending = false;
+  bool refine_go = false;
+  mupdf_mosaic::Mosaic mosaic;
+  // The overview render was skipped so the sharp top screen could present
+  // first; the idle pump renders it.
+  bool preview_pending = false;
+  // The idle overview render failed for this page: do not defer it again.
+  int preview_failed_page = -1;
+  // Heap growth measured when the cached list was built (0 = unknown).
+  size_t cached_display_list_bytes = 0;
+  // List of the page visited before the current one, kept while heap allows.
+  fz_display_list *kept_display_list = NULL;
+  int kept_display_list_page = -1;
+  size_t kept_display_list_bytes = 0;
   MuPdfWorker *worker;
   bool worker_init_attempted;
   IStatusReporter *reporter;

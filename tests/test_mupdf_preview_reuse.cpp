@@ -1,4 +1,6 @@
 #include "formats/common/fixed_layout_gpu_upload.h"
+#include "formats/common/fixed_layout_mosaic_config.h"
+#include "formats/common/fixed_layout_mosaic_utils.h"
 #include <cassert>
 #include <cstdio>
 #include <cstddef>
@@ -51,6 +53,13 @@ struct Book {
     int target_top_width = 240, target_top_height = 400;
     bool is_new_3ds = true, wide_top_screen = false;
     bool gpu_draw_failed = false;
+    bool refine_pending = false, refine_go = false;
+    struct { bool has = false, cleared = false; void Clear() { has = false; cleared = true; }
+             bool HasTiles() const { return has; } } mosaic;
+    bool preview_pending = false;
+    size_t cached_display_list_bytes = 0, kept_display_list_bytes = 0;
+    fz_display_list *kept_display_list = nullptr;
+    int kept_display_list_page = -1;
     int interactive_render_failed_page=-1, interactive_render_failed_zoom=-1;
     int final_render_failed_page=-1, final_render_failed_zoom=-1;
     app_flow_utils::MuPdfDocumentKind document_kind = app_flow_utils::MuPdfDocumentKind::Pdf;
@@ -68,15 +77,19 @@ static pdf_view_utils::NormalizedRect requested_viewport={0,0,1,1};
 pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport(const Book::MuPdfState *) { return requested_viewport; }
 bool EnsureCurrentMuPdfInteractiveTile(Book::MuPdfState *, int, Text * = nullptr);
 bool EnsureCurrentMuPdfPreviewCache(Book::MuPdfState *, int, Text * = nullptr);
+bool IsMuPdfPageRenderBlocked(Book::MuPdfState *, int);
 bool HasMuPdfInteractiveRenderFailed(const Book::MuPdfState *,int) { return false; }
 float ComputeFitScale(float w,float h,int tw,int th) { return std::min(tw/w,th/h); }
 float ComputeEffectiveMuPdfZoom(app_flow_utils::MuPdfDocumentKind,int z) { return pdf_view_utils::ZoomForIndex(z); }
+static bool mosaic_on = false;
+bool UseMuPdfMosaic(const Book::MuPdfState *) { return mosaic_on; }
+size_t LastMuPdfDisplayListBytes() { return 4096; }
 static int renders = 0, builds = 0, drops = 0, cancels = 0, complexity_checks = 0;
 static bool fail = false;
 static std::vector<std::string> events;
 bool PromoteMuPdfAdjacentSlotIfMatching(Book::MuPdfState *, int) { return false; }
 void CancelMuPdfIncrementalRenderState(Book::MuPdfState *) { ++cancels; events.push_back("cancel"); }
-void fz_drop_display_list(fz_context *, fz_display_list *p) { assert(!events.empty() && events.back() == "cancel" && "each old list must be cancelled before disposal"); events.push_back("drop"); ++drops; delete p; }
+void fz_drop_display_list(fz_context *, fz_display_list *p) { assert(!events.empty() && (events.back() == "cancel" || events.back() == "drop") && "each old list must be cancelled before disposal"); events.push_back("drop"); ++drops; delete p; }
 bool BitmapCacheValid(const Cache &c, int p) { return c.page == p && c.bitmap_width>0 && c.bitmap_height>0 && (c.gpu_only || c.pixels.size()==(size_t)c.bitmap_width*c.bitmap_height); }
 float ComputeMuPdfPreviewScale(float, float, int, int) { return 0.2f; }
 bool EstimateMuPdfPageRenderComplexity(fz_context *, fz_document *, int, int *, size_t *) { ++complexity_checks; return true; }
@@ -143,7 +156,36 @@ static void TestZoomRasterReuse() {
     c.pixels.assign(240*360,0x1234); s.viewport.zoom_index=4;
     s.wide_top_screen=wide;
     ResetMuPdfDeferredCachesForSynchronousRender(&s);
-    assert((c.page==0)==!wide && "wide density must count before reusing a normal-density raster");
+    assert(c.page==0 && s.refine_pending==wide &&
+           "wide density must count before reusing a normal-density raster; a covering tile is kept and refined");
+  }
+  {
+    // Zoom in with a tile that still spans the viewport: present it scaled now
+    // and rasterize the sharp tile only after the idle pump releases it.
+    Book::MuPdfState s;
+    Cache &c=s.current_interactive_tile;
+    c.page=0; c.zoom_index=2; c.bitmap_width=120; c.bitmap_height=180;
+    c.pixels.assign(120*180,0x1234); s.viewport.zoom_index=5;
+    requested_viewport={0.3f,0.3f,0.2f,0.2f};
+    const int before=renders;
+    ResetMuPdfDeferredCachesForSynchronousRender(&s);
+    assert(c.page==0 && s.refine_pending && !s.refine_go);
+    assert(EnsureCurrentMuPdfInteractiveTile(&s,0) && renders==before &&
+           c.zoom_index==2 && s.refine_pending && "refine must wait for the pump");
+    s.refine_go=true;
+    assert(EnsureCurrentMuPdfInteractiveTile(&s,0) && renders==before+1);
+    assert(c.zoom_index==5 && !s.refine_pending && !s.refine_go);
+    events.push_back("cancel"); fz_drop_display_list(s.ctx,s.cached_display_list);
+    // A viewport that leaves the stale tile must not be deferred.
+    Book::MuPdfState t;
+    Cache &d=t.current_interactive_tile;
+    d.page=0; d.zoom_index=2; d.bitmap_width=120; d.bitmap_height=180;
+    d.left=0.0f; d.top=0.0f; d.width=0.3f; d.height=0.3f;
+    d.pixels.assign(120*180,0x1234); t.viewport.zoom_index=5;
+    requested_viewport={0.6f,0.6f,0.2f,0.2f};
+    ResetMuPdfDeferredCachesForSynchronousRender(&t);
+    assert(d.page==-1 && !t.refine_pending && "an uncovered viewport re-rasters immediately");
+    requested_viewport={0,0,1,1};
   }
   {
     Book::MuPdfState s;
@@ -173,6 +215,84 @@ static void TestZoomRasterReuse() {
     assert(c.gpu_only && c.left==0.25f);
   }
   requested_viewport={0,0,1,1};
+  debug_runtime::sync=false;
+}
+static void TestMosaicAndKeptList() {
+  debug_runtime::sync=true;
+  {
+    // Mosaic zoom: no classic raster is prepared, and a zoom change marks the
+    // existing stand-in tiles for idle refinement.
+    mosaic_on=true;
+    Book::MuPdfState s;
+    s.viewport.zoom_index=6;
+    const int before=renders;
+    assert(EnsureCurrentMuPdfInteractiveTile(&s,0) && renders==before);
+    assert(s.current_interactive_tile.page==-1);
+    s.refine_pending=true;
+    assert(EnsureCurrentMuPdfInteractiveTile(&s,0) && s.refine_pending &&
+           "the mosaic owns the refine flags; the classic path must not clear them");
+    s.mosaic.has=false;
+    ResetMuPdfDeferredCachesForSynchronousRender(&s);
+    assert(!s.refine_pending && "nothing to refine without stand-in tiles");
+    s.mosaic.has=true;
+    ResetMuPdfDeferredCachesForSynchronousRender(&s);
+    assert(s.refine_pending && !s.refine_go);
+    {
+      // Switching into mosaic zoom keeps a classic tile that still spans the
+      // viewport as a scaled stand-in; a tile that does not is released.
+      Book::MuPdfState t;
+      Cache &c=t.current_interactive_tile;
+      c.page=0; c.zoom_index=4; c.bitmap_width=120; c.bitmap_height=180;
+      c.pixels.assign(120*180,0x1234); t.viewport.zoom_index=6;
+      requested_viewport={0.3f,0.3f,0.2f,0.2f};
+      ResetMuPdfDeferredCachesForSynchronousRender(&t);
+      assert(c.page==0 && t.refine_pending && !t.refine_go);
+      c.left=0.0f; c.top=0.0f; c.width=0.25f; c.height=0.25f;
+      ResetMuPdfDeferredCachesForSynchronousRender(&t);
+      assert(c.page==-1 && !t.refine_pending);
+      requested_viewport={0,0,1,1};
+    }
+    mosaic_on=false;
+    s.mosaic.cleared=false;
+    ResetMuPdfDeferredCachesForSynchronousRender(&s);
+    assert(s.mosaic.cleared && "leaving the mosaic zoom frees its tiles");
+  }
+  {
+    // Going back to the previous page reuses its kept display list.
+    Book::MuPdfState s;
+    s.cached_display_list=new fz_display_list{5};
+    s.cached_display_list_page=5;
+    s.kept_display_list=new fz_display_list{4};
+    s.kept_display_list_page=4;
+    s.kept_display_list_bytes=777;
+    const int builds_before=builds;
+    fz_display_list *out=nullptr;
+    events.clear();
+    assert(EnsureMuPdfDisplayListForPage(&s,4,&out));
+    assert(out && out->page==4 && s.cached_display_list==out &&
+           s.cached_display_list_page==4 && s.cached_display_list_bytes==777);
+    assert(builds==builds_before && !s.kept_display_list &&
+           "host policy has no heap figure, so the list being left is dropped");
+    events.push_back("cancel"); fz_drop_display_list(s.ctx,s.cached_display_list);
+    // An unrelated page drops the kept list instead of keeping two.
+    Book::MuPdfState t;
+    t.cached_display_list=new fz_display_list{5};
+    t.cached_display_list_page=5;
+    t.kept_display_list=new fz_display_list{3};
+    t.kept_display_list_page=3;
+    assert(EnsureMuPdfDisplayListForPage(&t,9,&out) && !out);
+    assert(!t.kept_display_list && !t.cached_display_list);
+  }
+  {
+    // The overview is deferred but the complexity gate is not.
+    Book::MuPdfState s;
+    mupdf_render_policy_utils::skip=true;
+    s.page_complexity_status.assign(4,0);
+    assert(IsMuPdfPageRenderBlocked(&s,1) && s.page_too_complex_for_device==1);
+    mupdf_render_policy_utils::skip=false;
+    s.page_complexity_status.assign(4,0);
+    assert(!IsMuPdfPageRenderBlocked(&s,1));
+  }
   debug_runtime::sync=false;
 }
 int main() {
@@ -222,5 +342,6 @@ int main() {
   assert(!EnsureCurrentMuPdfPreviewCache(nullptr, 0));
   events.push_back("cancel"); fz_drop_display_list(s.ctx, s.cached_display_list);
   TestZoomRasterReuse();
+  TestMosaicAndKeptList();
   puts("MuPDF display-list and cross-zoom raster reuse passed");
 }
