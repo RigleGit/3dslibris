@@ -163,3 +163,53 @@ def stage(destination, landscape=False, epub=True, mobi=True, long_book=False):
     if long_book:
         build_long_epub(app / "book" / "c-long.epub")
     return pathlib.Path(destination)
+
+
+def build_zoom_pdf(path, pages=6):
+    """Dense, deterministic text + vector PDF for fixed-layout zoom/pan tests.
+
+    Hand-written (no dependency): Helvetica text lines of pseudo-random words, a
+    ruled grid and filled rectangles, so a page has plenty of display-list nodes.
+    """
+    objects = []
+
+    def add(body):
+        objects.append(body)
+        return len(objects)
+
+    add(b"<< /Type /Catalog /Pages 2 0 R >>")
+    add(b"")  # Pages, patched below.
+    font = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    kids = []
+    for page in range(pages):
+        ops = ["0.9 0.92 1 rg 36 36 540 24 re f", "0 g BT /F1 14 Tf 44 44 Td (PAGE %d OF %d) Tj ET" % (page + 1, pages)]
+        for row in range(70):
+            line = _words(11, page * 100 + row + 1)
+            ops.append("BT /F1 8 Tf 36 %d Td (%s) Tj ET" % (760 - row * 10, line))
+        for i in range(0, 540, 18):
+            ops.append("0.7 G 0.3 w %d 70 m %d 760 l S" % (36 + i, 36 + i))
+        for i in range(12):
+            ops.append("%.2f %.2f %.2f rg %d %d 40 40 re f" % ((i % 3) / 2, (i % 5) / 4, (i % 4) / 3, 60 + i * 42, 700 - (i % 4) * 130))
+        stream = "\n".join(ops).encode("latin-1")
+        content = add(b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
+        kids.append(add(("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents %d 0 R "
+                         "/Resources << /Font << /F1 %d 0 R >> >> >>" % (content, font)).encode()))
+    objects[1] = ("<< /Type /Pages /Count %d /Kids [%s] >>" % (pages, " ".join("%d 0 R" % k for k in kids))).encode()
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for index, body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % index + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    pathlib.Path(path).write_bytes(bytes(out))
+
+
+def stage_pdf(destination, landscape=False, pages=6):
+    """Generated PDF + bundled fonts only; never the user's SDMC."""
+    stage(destination, landscape=landscape, epub=False, mobi=False)
+    build_zoom_pdf(pathlib.Path(destination) / BASE / "book" / "a-zoom.pdf", pages=pages)
+    return pathlib.Path(destination)
