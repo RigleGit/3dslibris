@@ -24,4 +24,7 @@ private:
   Preparation(const Preparation &);
   Preparation &operator=(const Preparation &);
 };
+// Test hook: resident text (bytes) above which a first open starts releasing
+// serialized pages. 0 restores the default (twice the residency budget).
+void SetPageReleaseThresholdForTest(size_t bytes);
 } // namespace epub_parser

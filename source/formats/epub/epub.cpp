@@ -60,6 +60,9 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 #include "formats/epub/epub_zip_utils.h"
 #include "shared/path_utils.h"
 #include "book/page.h"
+#if defined(DSLIBRIS_DEBUG) && defined(__3DS__)
+#include <malloc.h>
+#endif
 #include "shared/parser_limits.h"
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
@@ -391,10 +394,19 @@ static int ParseEpubSpineDocuments(
       }
 #ifdef DSLIBRIS_DEBUG
       if (reporter && (spine_doc_index % 20 == 0 || spine_doc_index == 1)) {
-        DBG_LOGF(reporter, "EPUB: spine progress %u/%u pages=%u mem_free=%u",
+#ifdef __3DS__
+        const struct mallinfo heap = mallinfo();
+        const unsigned heap_used = (unsigned)heap.uordblks;
+        const unsigned heap_arena = (unsigned)heap.arena;
+#else
+        const unsigned heap_used = 0, heap_arena = 0;
+#endif
+        DBG_LOGF(reporter,
+                 "EPUB: spine progress %u/%u pages=%u mem_free=%u heap_used=%u heap_arena=%u",
                  (unsigned)spine_doc_index, (unsigned)hrefs.size(),
                  (unsigned)book->GetPageCount(),
-                 (unsigned)osGetMemRegionFree(MEMREGION_ALL));
+                 (unsigned)osGetMemRegionFree(MEMREGION_ALL), heap_used,
+                 heap_arena);
         }
 #endif
         if (!resume && (spine_doc_index % 20 == 0 || spine_doc_index == 1))
@@ -702,6 +714,10 @@ int epub_extract_cover(Book *book, const std::string &epubpath) {
 }
 
 namespace epub_parser {
+namespace {
+size_t g_page_release_threshold_for_test = 0;
+} // namespace
+
 struct Preparation::State {
   Book *book;
   std::string source, path, folder;
@@ -730,6 +746,11 @@ struct Preparation::State {
   std::vector<unsigned> ranges;
   size_t range, residency_budget;
   bool resident;
+  // First open with residency: page buffers already serialized to the cache
+  // were released, so the book can only be read back from that cache.
+  bool released, reopened;
+  unsigned unreleased_from;
+  size_t written_bytes;
   u64 started, parse_ms, cache_ms;
 #ifdef DSLIBRIS_DEBUG
   u64 last_step_end_ms = 0;
@@ -739,6 +760,7 @@ struct Preparation::State {
         cached(false), metadata(false), legacy(false),
         persistence_failed(false), writer_open(false), migration(false),
         before(0), range(0), residency_budget(0), resident(false),
+        released(false), reopened(false), unreleased_from(0), written_bytes(0),
         started(osGetTime()), parse_ms(0), cache_ms(0) {}
   ~State() {
     if (book)
@@ -746,6 +768,62 @@ struct Preparation::State {
     if (zip)
       unzClose(zip);
     epub_data_delete(&data);
+  }
+  // Pages [first, end) are encoded in the cache file: free their text and
+  // search buffers so the first open of a long book needs memory for one
+  // document, not the whole book (Old 3DS ran out of heap at ~4000 pages).
+  // Small books stay fully resident (validated before any page is dropped);
+  // only once the written text exceeds twice the residency window are pages
+  // released, and from then on after every document.
+  void ReleaseWritten(unsigned first, unsigned end) {
+    if (!residency_budget || migration)
+      return;
+    for (unsigned i = first; i < end && i < book->GetPageCount(); ++i) {
+      Page *page = book->GetPage((int)i);
+      if (page)
+        written_bytes += 4 * ((size_t)std::max(0, page->GetLength()) +
+                              page->GetSearchEvents().size());
+    }
+    const size_t threshold = g_page_release_threshold_for_test
+                                 ? g_page_release_threshold_for_test
+                                 : 2 * residency_budget;
+    if (!released && written_bytes <= threshold)
+      return;
+    for (unsigned i = unreleased_from; i < end && i < book->GetPageCount();
+         ++i) {
+      Page *page = book->GetPage((int)i);
+      if (page)
+        page->FreeBuffer();
+    }
+    unreleased_from = end;
+    released = true;
+  }
+  // Read the published cache back with the residency window, exactly as a
+  // later open of an already cached book does.
+  Result ReopenFromCache() {
+    // The cached-open path may re-read the package (Package phase): start it
+    // from a closed archive and empty parse data, as a fresh Begin would.
+    book->SetInlineImageProbeZip(NULL);
+    if (zip) {
+      unzClose(zip);
+      zip = NULL;
+    }
+    epub_data_delete(&data);
+    hrefs.clear();
+    page_starts.clear();
+    const unsigned session = book->GetOpenSessionId();
+    book->Close();
+    book->SetOpenSessionId(session);
+    book->PrepareForOpen();
+    metadata = book->TryLoadMetadataFromCache();
+    if (!book->StartReflowPageCache(path, residency_budget))
+      return result = IoError;
+    resident = true;
+    reopened = true;
+    legacy = false;
+    cached = false;
+    phase = Cache;
+    return result = Pending;
   }
   bool StartWriter() {
     writer_open = writer.Begin(book, path);
@@ -778,6 +856,9 @@ Preparation::~Preparation() {
   if (state_ && state_->result == Pending)
     Cancel();
   delete state_;
+}
+void SetPageReleaseThresholdForTest(size_t bytes) {
+  g_page_release_threshold_for_test = bytes;
 }
 bool Preparation::Begin(Book *book, const std::string &source,
                         size_t residency_budget) {
@@ -918,6 +999,15 @@ Preparation::Result Preparation::Step() {
           : cache_result == reflow_block_cache::NoMemory
               ? epub_page_cache::LoadSession::NoMemory
               : epub_page_cache::LoadSession::IoError;
+      if (result < 0 && s.reopened) {
+        // The just-published cache cannot be read back and the parsed pages
+        // are gone: report it rather than re-parsing in a loop.
+        const unsigned session = s.book->GetOpenSessionId();
+        s.book->Close();
+        s.book->SetOpenSessionId(session);
+        remove(s.path.c_str());
+        return s.result = IoError;
+      }
       if (result < 0) {
         const unsigned session = s.book->GetOpenSessionId();
         s.book->Close();
@@ -1026,6 +1116,8 @@ Preparation::Result Preparation::Step() {
       s.writer.Abort();
       s.writer_open = false;
       s.persistence_failed = true;
+      if (s.released)
+        return s.result = IoError;
       if (s.migration) {
         s.phase = State::Finished;
         s.result = Complete;
@@ -1038,8 +1130,10 @@ Preparation::Result Preparation::Step() {
         s.writer.Finish();
         s.phase = State::Commit;
       }
-    } else
+    } else {
+      s.ReleaseWritten(s.before, s.book->GetPageCount());
       s.phase = s.spine.done ? State::Toc : State::Spine;
+    }
   } else if (s.phase == State::Toc) {
     if (!s.book->GetPageCount())
       return s.result = Failed;
@@ -1047,7 +1141,11 @@ Preparation::Result Preparation::Step() {
                                   s.page_starts, s.deps.reporter);
     if (s.writer_open && s.writer.Finish())
       s.phase = State::Commit;
-    else {
+    else if (s.released) {
+      s.writer.Abort();
+      s.writer_open = false;
+      return s.result = IoError;
+    } else {
       s.persistence_failed = true;
       s.phase = State::Finished;
       s.result = Complete;
@@ -1071,6 +1169,14 @@ Preparation::Result Preparation::Step() {
 #ifdef DSLIBRIS_DEBUG
     const unsigned prepared_pages = s.book->GetPageCount();
 #endif
+    if (s.released) {
+      DBG_LOGF(s.book->GetStatusReporter(),
+               "EPUB preparation released pages=%u saved=%u; reopening from cache",
+               s.book->GetPageCount(), s.persistence_failed ? 0 : 1);
+      if (s.persistence_failed)
+        return s.result = IoError;
+      return s.ReopenFromCache();
+    }
     if (s.residency_budget && !s.persistence_failed) {
       s.validator.reset(new (std::nothrow) reflow_block_cache::Reader);
       if (s.validator &&
