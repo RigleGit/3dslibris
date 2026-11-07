@@ -11,6 +11,7 @@
 #include "formats/common/fixed_layout_mosaic_config.h"
 #include "formats/common/fixed_layout_mosaic_utils.h"
 #include "shared/debug_runtime_mode.h"
+#include <cmath>
 #ifdef __3DS__
 #include <malloc.h>
 #endif

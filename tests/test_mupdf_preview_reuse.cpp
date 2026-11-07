@@ -2,6 +2,7 @@
 #include "formats/common/fixed_layout_mosaic_config.h"
 #include "formats/common/fixed_layout_mosaic_utils.h"
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 #include <cstddef>
 #include <vector>
