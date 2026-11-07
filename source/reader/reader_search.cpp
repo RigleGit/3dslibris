@@ -12,6 +12,7 @@
 #include "ui/touch_utils.h"
 #include <3ds.h>
 #include <algorithm>
+#include <cstdio>
 
 namespace {
 std::string ShortLabel(const std::string &s, size_t chars) {
@@ -82,6 +83,26 @@ void ReaderController::EditSearchText() {
   DrawSearch(); app_.PresentIfDirty();
   if (app_.ShouldAbortWork()) return;
   s.keyboard_pending = false;
+#ifdef DSLIBRIS_DEBUG
+  {
+    // Debug-only test seam: the system keyboard applet cannot be driven by
+    // automated emulator runs. A query file replaces only the text entry.
+    FILE *file = fopen("sdmc:/3ds/3dslibris/search_query.txt", "rb");
+    if (file) {
+      char text[128 * 4 + 1];
+      size_t n = fread(text, 1, sizeof(text) - 1, file);
+      fclose(file);
+      while (n && (text[n - 1] == '\n' || text[n - 1] == '\r')) --n;
+      text[n] = 0;
+      if (n) {
+        s.query = text; s.selected = 2; s.message.clear();
+        s.wait_release = s.dirty = true; s.release_ms = osGetTime();
+        app_.ts->MarkAllScreensDirty();
+        return;
+      }
+    }
+  }
+#endif
   SwkbdState keyboard;
   swkbdInit(&keyboard, SWKBD_TYPE_NORMAL, 2, 128);
   swkbdSetHintText(&keyboard, "Search in this book");
