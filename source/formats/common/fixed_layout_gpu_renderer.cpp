@@ -20,22 +20,33 @@ struct TextureCache::Impl {
   }
 };
 
+struct TileTexture::Impl {
+  C3D_Tex tex;
+  int width, height;
+  bool vram;
+};
+
 struct Renderer {
+  struct Item {
+    C3D_Tex *tex;
+    Tex3DS_SubTexture sub;
+    float x, y, w, h;
+    const void *owner;
+  };
   Text *text;
   bool initialized, init_failed, active, pending;
   C3D_RenderTarget *target;
   int physical_height, orientation, quarter_turns, bg_color, bg_orientation;
   bool bg_wide;
   TextureCache background;
-  TextureCache *owner;
-  std::vector<fixed_layout_tiles::Quad> quads;
+  std::vector<Item> items;
   framebuffer_blit_utils::PhysicalFramebufferSyncState sync;
   uint64_t generation;
   u8 *last_fb;
   Renderer()
       : text(nullptr), initialized(false), init_failed(false), active(false),
         pending(false), target(nullptr), physical_height(0), orientation(0), quarter_turns(0),
-        bg_color(-1), bg_orientation(-1), bg_wide(false), owner(nullptr),
+        bg_color(-1), bg_orientation(-1), bg_wide(false),
         generation(0), last_fb(nullptr) {}
 
   bool Ensure(Text *t) {
@@ -73,16 +84,8 @@ struct Renderer {
     }
     return target != nullptr;
   }
-  bool Enqueue(Text *t, TextureCache &cache,
-               const fixed_layout_tiles::Rect &src,
-               const fixed_layout_tiles::Rect &vp,
-               const fixed_layout_tiles::Rect &dst, int turns) {
-    if (!cache.Valid() || !Ensure(t))
-      return false;
-    if (!fixed_layout_tiles::VisibleQuads(cache.impl_->plan, cache.impl_->width,
-                                          cache.impl_->height, src, vp, dst,
-                                          &quads))
-      return false;
+  // Background = the software top-screen buffer, drawn under every frame.
+  bool PrepareBackground(Text *t) {
     const int color = t->GetColorMode(), orient = t->GetOrientation();
     const bool wide = t->IsWideTopScreenActive();
     if (!background.Valid() || color != bg_color || orient != bg_orientation ||
@@ -102,14 +105,80 @@ struct Renderer {
       bg_orientation = orient;
       bg_wide = wide;
     }
-    owner = &cache;
     orientation = orient;
-    quarter_turns = turns&3;
+    return true;
+  }
+  void Begin(Text *t, int turns) {
+    quarter_turns = turns & 3;
     active = true;
     pending = true;
     t->screenleft_dirty = false;
     t->screenleft_dirty_rect.valid = false;
+  }
+  bool Enqueue(Text *t, TextureCache &cache,
+               const fixed_layout_tiles::Rect &src,
+               const fixed_layout_tiles::Rect &vp,
+               const fixed_layout_tiles::Rect &dst, int turns) {
+    if (!cache.Valid() || !Ensure(t))
+      return false;
+    std::vector<fixed_layout_tiles::Quad> quads;
+    if (!fixed_layout_tiles::VisibleQuads(cache.impl_->plan, cache.impl_->width,
+                                          cache.impl_->height, src, vp, dst,
+                                          &quads))
+      return false;
+    if (!PrepareBackground(t))
+      return false;
+    items.clear();
+    for (size_t i = 0; i < quads.size(); ++i) {
+      const fixed_layout_tiles::Quad &q = quads[i];
+      const fixed_layout_tiles::Tile &tile = cache.impl_->plan[q.tile];
+      Item item = {&cache.impl_->textures[q.tile],
+                   {(u16)tile.width, (u16)tile.height, q.u0, q.v0, q.u1, q.v1},
+                   q.x, q.y, q.width, q.height, &cache};
+      items.push_back(item);
+    }
+    Begin(t, turns);
     return true;
+  }
+  bool EnqueueTiles(Text *t, const void *owner, const TileDraw *draws,
+                    size_t count, bool append) {
+    if (!draws || (!count && !append) || !Ensure(t) || !PrepareBackground(t))
+      return false;
+    if (append && !(active && pending))
+      append = false;
+    if (!append)
+      items.clear();
+    for (size_t i = 0; i < count; ++i) {
+      const TileDraw &d = draws[i];
+      if (!d.texture || !d.texture->Valid())
+        continue;
+      Item item = {&d.texture->impl_->tex,
+                   {(u16)d.interior_width, (u16)d.interior_height, d.u0, d.v0,
+                    d.u1, d.v1},
+                   d.x, d.y, d.width, d.height, owner};
+      items.push_back(item);
+    }
+    if (items.empty())
+      return false;
+    Begin(t, 0);
+    return true;
+  }
+  // Withdraw a not yet presented frame that references a freed texture.
+  void Drop(const void *owner, const C3D_Tex *tex) {
+    if (!pending)
+      return;
+    bool hit = false;
+    for (size_t i = 0; i < items.size() && !hit; ++i)
+      hit = (owner && items[i].owner == owner) || items[i].tex == tex;
+    if (!hit)
+      return;
+    items.clear();
+    pending = false;
+    // The completed target owns its pixels independently of the source. Keep
+    // it available for bottom-only swaps and later partial software overlays.
+    // An unpresented first frame has no retained image to preserve.
+    if (!last_fb)
+      ToSoftware(text, true);
   }
   void ViewMatrix() {
     // Unlinked targets do not get citro2d's automatic screen tilt. Use logical
@@ -129,7 +198,7 @@ struct Renderer {
   bool Draw() {
     if (!pending)
       return true;
-    if (!owner || !owner->Valid() || !C3D_FrameBegin(0))
+    if (items.empty() || !C3D_FrameBegin(0))
       return false;
     C2D_TargetClear(target, C2D_Color32(255, 255, 255, 255));
     C3D_FrameDrawOn(target);
@@ -152,13 +221,10 @@ struct Renderer {
     if(quarter_turns==1) {C2D_ViewTranslate(width,0);C2D_ViewRotateDegrees(90);}
     if(quarter_turns==2) {C2D_ViewTranslate(width,height);C2D_ViewRotateDegrees(180);}
     if(quarter_turns==3) {C2D_ViewTranslate(0,height);C2D_ViewRotateDegrees(-90);}
-    for (size_t i = 0; i < quads.size(); ++i) {
-      const fixed_layout_tiles::Quad &q = quads[i];
-      const fixed_layout_tiles::Tile &tile = owner->impl_->plan[q.tile];
-      Tex3DS_SubTexture s = {
-          (u16)tile.width, (u16)tile.height, q.u0, q.v0, q.u1, q.v1};
-      C2D_Image img = {&owner->impl_->textures[q.tile], &s};
-      C2D_DrawParams p = {{q.x, q.y, q.width, q.height}, {0, 0}, 0, 0};
+    for (size_t i = 0; i < items.size(); ++i) {
+      Item &it = items[i];
+      C2D_Image img = {&it.tex[0], &it.sub};
+      C2D_DrawParams p = {{it.x, it.y, it.w, it.h}, {0, 0}, 0, 0};
       if (!C2D_DrawImage(img, &p, nullptr))
         ok = false;
     }
@@ -177,6 +243,7 @@ struct Renderer {
             GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB8) |
             GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
     pending = false;
+    items.clear();
     last_fb = fb;
     ++generation;
     sync = framebuffer_blit_utils::PhysicalFramebufferSyncState();
@@ -208,17 +275,6 @@ struct Renderer {
                                                           generation);
     return true;
   }
-  void DropCache(TextureCache *cache) {
-    if (owner != cache)
-      return;
-    owner = nullptr;
-    pending = false;
-    // The completed target owns its pixels independently of the source. Keep
-    // it available for bottom-only swaps and later partial software overlays.
-    // An unpresented first frame has no retained image to preserve.
-    if (!last_fb)
-      ToSoftware(text, true);
-  }
   void ToSoftware(Text *t, bool discard) {
     if (!active || text != t)
       return;
@@ -234,7 +290,7 @@ struct Renderer {
     }
     active = false;
     pending = false;
-    owner = nullptr;
+    items.clear();
     last_fb = nullptr; // CPU writes can replace this physical buffer now.
     t->screenleft_hw_sync =
         framebuffer_blit_utils::PhysicalFramebufferSyncState();
@@ -254,8 +310,9 @@ TextureCache::TextureCache(TextureCache &&other) : TextureCache() {
 TextureCache &TextureCache::operator=(TextureCache &&other) {
   if (this != &other) {
     Reset();
-    if (renderer.owner == &other)
-      renderer.owner = this;
+    for (size_t i = 0; i < renderer.items.size(); ++i)
+      if (renderer.items[i].owner == &other)
+        renderer.items[i].owner = this;
     impl_ = other.impl_;
     generation_ = other.generation_;
     attempted_ = other.attempted_;
@@ -266,7 +323,7 @@ TextureCache &TextureCache::operator=(TextureCache &&other) {
 }
 void TextureCache::Reset() {
   if (impl_)
-    renderer.DropCache(this);
+    renderer.Drop(this, nullptr);
   delete impl_;
   impl_ = nullptr;
   attempted_ = false;
@@ -367,6 +424,123 @@ bool TextureCache::UploadImpl(Text *t, const uint16_t *pixels, size_t count,
   }
   impl_ = candidate;
   return true;
+}
+TileTexture::~TileTexture() {
+  Reset();
+}
+TileTexture::TileTexture(TileTexture &&other) : TileTexture() {
+  *this = std::move(other);
+}
+TileTexture &TileTexture::operator=(TileTexture &&other) {
+  if (this != &other) {
+    Reset();
+    impl_ = other.impl_;
+    other.impl_ = nullptr;
+  }
+  return *this;
+}
+void TileTexture::Reset() {
+  if (!impl_)
+    return;
+  renderer.Drop(nullptr, &impl_->tex);
+  C3D_TexDelete(&impl_->tex);
+  delete impl_;
+  impl_ = nullptr;
+}
+bool TileTexture::Create(Text *t, int width, int height) {
+  Reset();
+  if (width < 8 || height < 8 || (width & (width - 1)) ||
+      (height & (height - 1)) || !renderer.Ensure(t))
+    return false;
+  Impl *i = new (std::nothrow) Impl;
+  if (!i)
+    return false;
+  i->width = width;
+  i->height = height;
+  i->tex = C3D_Tex();
+  const size_t size = (size_t)width * height * 2;
+  i->vram = C3D_TexInitVRAM(&i->tex, width, height, GPU_RGB565);
+  if (!i->vram && (linearSpaceFree() < size + 1024u * 1024u ||
+                   !C3D_TexInit(&i->tex, width, height, GPU_RGB565))) {
+    delete i;
+    return false;
+  }
+  C3D_TexSetFilter(&i->tex, GPU_LINEAR, GPU_LINEAR);
+  C3D_TexSetWrap(&i->tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
+  impl_ = i;
+  return true;
+}
+bool TileTexture::UploadHardware(const void *linear, int width, int height) {
+  if (!impl_ || !linear || width != impl_->width || height != impl_->height ||
+      ((uintptr_t)linear & 15))
+    return false;
+  const uint64_t started = fixed_perf::Now();
+  GSPGPU_FlushDataCache(const_cast<void *>(linear), (size_t)width * height * 3);
+  // Linear RGB8 rows in, 8x8-tiled (Morton) RGB565 out: the layout the PICA
+  // texture unit samples. No vertical flip: row 0 stays texture row 0, exactly
+  // as the CPU swizzle writes it.
+  C3D_SyncDisplayTransfer(
+      (u32 *)linear, GX_BUFFER_DIM(width, height), (u32 *)impl_->tex.data,
+      GX_BUFFER_DIM(width, height),
+      GX_TRANSFER_FLIP_VERT(0) | GX_TRANSFER_OUT_TILED(1) |
+          GX_TRANSFER_RAW_COPY(0) |
+          GX_TRANSFER_IN_FORMAT(GX_TRANSFER_FMT_RGB8) |
+          GX_TRANSFER_OUT_FORMAT(GX_TRANSFER_FMT_RGB565) |
+          GX_TRANSFER_SCALING(GX_TRANSFER_SCALE_NO));
+  fixed_perf::Record(this, -1, -1, "gpu.upload_hw", fixed_perf::Now() - started,
+                     1, (size_t)width * height * 2, width, height);
+  return true;
+}
+bool TileTexture::UploadRgb8(const raster_image::Rgb8View &source) {
+  if (!impl_ || !source.Valid() || source.width != impl_->width ||
+      source.height != impl_->height)
+    return false;
+  const uint64_t started = fixed_perf::Now();
+  // The source already carries the halo: texture (x,y) = source (x,y).
+  const fixed_layout_tiles::Tile tile = {1, 1, impl_->width - 2,
+                                         impl_->height - 2, impl_->width,
+                                         impl_->height};
+  const size_t total = (size_t)impl_->width * impl_->height;
+  bool ok = true;
+  if (!impl_->vram) {
+    ok = fixed_layout_tiles::SwizzleRgb8Chunk(tile, source, 0, total,
+                                              (u16 *)impl_->tex.data);
+    if (ok)
+      C3D_TexFlush(&impl_->tex);
+  } else {
+    const size_t chunk = std::min<size_t>(total, 16u * 1024u);
+    u16 *staging = linearSpaceFree() > chunk * 2 + 1024u * 1024u
+                       ? (u16 *)linearMemAlign(chunk * 2, 128)
+                       : nullptr;
+    ok = staging != nullptr;
+    for (size_t first = 0; ok && first < total; first += chunk) {
+      const size_t n = std::min(chunk, total - first);
+      ok = fixed_layout_tiles::SwizzleRgb8Chunk(tile, source, first, n, staging);
+      if (ok) {
+        GSPGPU_FlushDataCache(staging, n * 2);
+        C3D_SyncTextureCopy((u32 *)staging, 0,
+                            (u32 *)((u16 *)impl_->tex.data + first), 0, n * 2, 8);
+      }
+    }
+    if (staging)
+      linearFree(staging);
+  }
+  fixed_perf::Record(this, -1, -1, "gpu.upload_cpu", fixed_perf::Now() - started,
+                     ok ? 1 : 0, total * 2, impl_->width, impl_->height);
+  return ok;
+}
+void *AllocLinearScratch(size_t bytes) {
+  if (linearSpaceFree() < bytes + 1024u * 1024u)
+    return nullptr;
+  return linearMemAlign(bytes, 128);
+}
+void FreeLinearScratch(void *p) {
+  if (p)
+    linearFree(p);
+}
+bool QueueTiles(Text *t, const void *owner, const TileDraw *draws, size_t count,
+                bool append) {
+  return renderer.EnqueueTiles(t, owner, draws, count, append);
 }
 bool Queue(Text *t, TextureCache &c, const fixed_layout_tiles::Rect &s,
            const fixed_layout_tiles::Rect &v,

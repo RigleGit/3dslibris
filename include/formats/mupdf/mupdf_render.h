@@ -23,6 +23,16 @@ bool RenderMuPdfBitmap(
     bool optional_output = false,
     size_t density_pixel_limit = 1024u * 1024u,
     const raster_image::Rgb8Sink *sink = NULL);
+// Builds (and returns ownership of) the page's display list; bounds optional.
+bool BuildMuPdfDisplayList(fz_context *ctx, fz_document *doc, int page_index,
+                           fz_display_list **out_list, fz_rect *out_bounds);
+// Heap growth of the most recent display-list build (0 when unknown).
+size_t LastMuPdfDisplayListBytes();
+// Rasterizes `list` through `ctm` into `bbox` over white, straight into the
+// caller's buffer (width*3 bytes per row, B,G,R when `bgr`, else R,G,B).
+bool RenderMuPdfTileToBuffer(fz_context *ctx, fz_display_list *list,
+                             fz_matrix ctm, fz_irect bbox, bool bgr,
+                             unsigned char *samples);
 void AddMuPdfOutlineEntries(Book *book, fz_context *ctx, fz_document *doc,
                             const fz_outline *entry, u8 level);
 void PopulateMuPdfMetadata(Book *book, fz_context *ctx, fz_document *doc);

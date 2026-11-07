@@ -6,6 +6,9 @@
 #include <new>
 
 #include <algorithm>
+#ifdef __3DS__
+#include <malloc.h>
+#endif
 
 #include "shared/debug_log.h"
 #include "formats/mupdf/mupdf_render_policy_utils.h"
@@ -13,6 +16,86 @@
 extern "C" {
 #include "mupdf/fitz/buffer.h"
 #include "mupdf/pdf.h"
+}
+
+// Heap growth across the most recent display-list build: a conservative
+// estimate (it also counts fonts/images the build pulled into the store).
+static size_t g_last_display_list_bytes = 0;
+static size_t HeapUsedBytes() {
+#ifdef __3DS__
+  const struct mallinfo mi = mallinfo();
+  return (size_t)mi.uordblks;
+#else
+  return 0;
+#endif
+}
+size_t LastMuPdfDisplayListBytes() { return g_last_display_list_bytes; }
+
+bool BuildMuPdfDisplayList(fz_context *ctx, fz_document *doc, int page_index,
+                           fz_display_list **out_list, fz_rect *out_bounds) {
+  if (!ctx || !doc || !out_list)
+    return false;
+  fz_page *page = NULL;
+  fz_display_list *list = NULL;
+  bool ok = false;
+  fz_var(page);
+  fz_var(list);
+  fz_try(ctx) {
+    const uint64_t started = fixed_perf::Now();
+    const size_t before = HeapUsedBytes();
+    page = fz_load_page(ctx, doc, page_index);
+    list = fz_new_display_list_from_page(ctx, page);
+    const size_t after = HeapUsedBytes();
+    g_last_display_list_bytes = after > before ? after - before : 0;
+    if (out_bounds)
+      *out_bounds = fz_bound_display_list(ctx, list);
+    fixed_perf::Record(doc, page_index, -1, "pdf.display_list",
+                       fixed_perf::Now() - started, 1,
+                       g_last_display_list_bytes);
+    ok = true;
+  }
+  fz_always(ctx) { fz_drop_page(ctx, page); }
+  fz_catch(ctx) {
+    fz_ignore_error(ctx);
+    if (list)
+      fz_drop_display_list(ctx, list);
+    list = NULL;
+    ok = false;
+  }
+  *out_list = ok ? list : NULL;
+  return ok;
+}
+
+bool RenderMuPdfTileToBuffer(fz_context *ctx, fz_display_list *list,
+                             fz_matrix ctm, fz_irect bbox, bool bgr,
+                             unsigned char *samples) {
+  if (!ctx || !list || !samples || bbox.x1 <= bbox.x0 || bbox.y1 <= bbox.y0)
+    return false;
+  fz_pixmap *pixmap = NULL;
+  fz_device *device = NULL;
+  bool ok = false;
+  fz_var(pixmap);
+  fz_var(device);
+  fz_try(ctx) {
+    // Wraps the caller's linear buffer: stride is exactly width * 3.
+    pixmap = fz_new_pixmap_with_bbox_and_data(
+        ctx, bgr ? fz_device_bgr(ctx) : fz_device_rgb(ctx), bbox, NULL, 0,
+        samples);
+    fz_clear_pixmap_with_value(ctx, pixmap, 255);
+    device = fz_new_draw_device(ctx, fz_identity, pixmap);
+    fz_run_display_list(ctx, list, device, ctm, fz_rect_from_irect(bbox), NULL);
+    fz_close_device(ctx, device);
+    ok = true;
+  }
+  fz_always(ctx) {
+    fz_drop_device(ctx, device);
+    fz_drop_pixmap(ctx, pixmap);
+  }
+  fz_catch(ctx) {
+    fz_ignore_error(ctx);
+    ok = false;
+  }
+  return ok;
 }
 
 static void ComputeBitmapContentBoundsPx(const RenderedMuPdfBitmap &bitmap,
@@ -283,7 +366,11 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
                    "MUPDF render: display-list-build-begin page=%d",
                    page_index);
       perf_phase = fixed_perf::Now();
+      const size_t heap_before = HeapUsedBytes();
       list = fz_new_display_list_from_page(ctx, page);
+      const size_t heap_after = HeapUsedBytes();
+      g_last_display_list_bytes =
+          heap_after > heap_before ? heap_after - heap_before : 0;
       fixed_perf::Record(doc, page_index, -1, "pdf.display_list", fixed_perf::Now()-perf_phase, 1);
       owns_list = true;
       DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
