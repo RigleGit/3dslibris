@@ -132,9 +132,18 @@ inline const std::string &GetCoverCacheDir() {
   return path;
 }
 
+inline const std::string &GetCoverRetentionPath() {
+  static const std::string path = GetCoverCacheDir() + "/retain-all";
+  return path;
+}
+
 inline const std::string &GetCoverCacheManifest() {
   static const std::string path = GetCoverCacheDir() + "/manifest.txt";
   return path;
+}
+
+inline std::string GetCacheIoProbePath() {
+  return GetCacheBaseDir() + "/io-probe.tmp";
 }
 
 inline const std::string &GetEpubCacheDir() {
@@ -144,6 +153,11 @@ inline const std::string &GetEpubCacheDir() {
 
 inline const std::string &GetMobiCacheDir() {
   static const std::string path = GetCacheBaseDir() + "/mobi";
+  return path;
+}
+
+inline const std::string &GetFb2CacheDir() {
+  static const std::string path = GetCacheBaseDir() + "/fb2";
   return path;
 }
 

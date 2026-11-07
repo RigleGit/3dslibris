@@ -11,6 +11,11 @@
 #include <cstring>
 #include <memory>
 
+// libctru exposes the next writable backbuffer immediately after a swap,
+// but the display releases the previous front buffer only on VBlank.
+static bool swap_pending = false;
+static void gspWaitForVBlank() { swap_pending = false; }
+
 // Recording UI sink. Integer text measurement below is the actual Text method;
 // glyph advances are fixed, and the legacy byte-width API saturates at 255.
 class Text {
@@ -61,6 +66,7 @@ public:
     printed.push_back({s, x, y});
   }
   bool BlitToFramebuffer() {
+    assert(!swap_pending && "opening progress must wait before reusing a displayed buffer");
     return true;
   }
   int GetAdvance(u32) {
@@ -119,7 +125,7 @@ struct App {
 };
 #include "opening_orientation_under_test.inc"
 void gfxFlushBuffers() {}
-void gfxSwapBuffers() {}
+void gfxSwapBuffers() { assert(!swap_pending); swap_pending = true; }
 namespace reader_internal {
 #include "opening_splash_under_test.inc"
 }
@@ -178,6 +184,30 @@ void TestLoadingForHand(u8 handedness) {
       assert(characters * 7 <= width - 24);
     }
 }
+void TestPreparationErrorFits() {
+  for (u8 hand : {u8(0), u8(1)}) {
+    App app;
+    app.portrait_orientation = hand;
+    app.book.name = "Book.epub";
+    const std::string reason = "not enough memory to paginate book; B: back";
+    reader_internal::DrawOpeningSplashImpl(&app, 0, 0, reason.c_str());
+    std::string shown;
+    int last_reason_y = 0;
+    for (const auto &line : app.ts->printed) {
+      assert(line.x + (int)line.value.size() * 7 <=
+             app.ts->LogicalWidth() - 12);
+      if (line.value == app.book.name) {
+        assert(line.y >= last_reason_y + 16);
+        continue;
+      }
+      if (!shown.empty())
+        shown += ' ';
+      shown += line.value;
+      last_reason_y = line.y;
+    }
+    assert(shown == reason);
+  }
+}
 void TestOpeningToReaderTransition() {
   for (u8 hand : {u8(0), u8(1)}) {
     App app;
@@ -200,6 +230,7 @@ int main() {
   TestLoadingForHand(0);
   TestLoadingForHand(1);
   TestOpeningToReaderTransition();
+  TestPreparationErrorFits();
   puts("PASS: opening stays portrait until reading, with bounded title measurements "
        "and valid UTF-8");
 }

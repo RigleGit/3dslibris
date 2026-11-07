@@ -66,6 +66,7 @@ public:
     if (ts->bottom[55 * ts->stride + 55] == kHudPixel) ++visible_huds;
     ts->Present();
   }
+  bool PumpReaderPageCache(const FrameInput &) { return false; }
   bool ShouldAbortWork() const { return false; }
   Book *GetCurrentBook() { return &book_; }
   // Every non-book branch must stay inactive in this focused reader scenario.
@@ -82,6 +83,8 @@ public:
   void RunBookmarksMenuFrame(const FrameInput &) { std::abort(); }
   void RunChaptersMenuFrame(const FrameInput &) { std::abort(); }
   void RunImageViewerFrame(const FrameInput &) { std::abort(); }
+  void RunLibraryPreloadFrame(const FrameInput &) { std::abort(); }
+  void RunLibrarySearchFrame(const FrameInput &) { std::abort(); }
   void RunSearchFrame(const FrameInput &) { std::abort(); }
   void RunBookInfoFrame(const FrameInput &) { std::abort(); }
   bool ShouldSkipNextBrowserPresent() const { return false; }

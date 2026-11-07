@@ -9,10 +9,15 @@ typedef uint16_t u16;
 
 #include <vector>
 #include <stddef.h>
+#include "formats/common/raster_image_source.h"
 
 class Text;
 
 namespace fixed_layout_blit_utils {
+
+// Generate the same filtered RGB565 preview directly from decoded samples.
+bool ScaleRgb8Preview(const raster_image::Rgb8View &source, int width, int height,
+                      u16 *out);
 
 // Scale into a caller-owned RGB565 surface without Text or screen state.
 void BlitRgb565SurfaceScaledCrop(
@@ -22,7 +27,8 @@ void BlitRgb565SurfaceScaledCrop(
     int crop_x, int crop_y, int crop_width, int crop_height,
     bool high_quality_filter,
     int clip_x0 = 0, int clip_y0 = 0,
-    int clip_x1 = 0x7fffffff, int clip_y1 = 0x7fffffff);
+    int clip_x1 = 0x7fffffff, int clip_y1 = 0x7fffffff,
+    int quarter_turns = 0);
 
 void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int x, int y, int draw_width,
@@ -31,7 +37,7 @@ void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int src_width, int src_height,
                                 int crop_x, int crop_y,
                                 int crop_width, int crop_height,
-                                bool high_quality_filter);
+                                bool high_quality_filter, int quarter_turns = 0);
 
 void BlitRgb565BitmapScaledCrop(Text *ts, u16 *screen, int logical_height,
                                 int x, int y, int draw_width,

@@ -1,10 +1,12 @@
 #include "book/book_parser.h"
+#include "formats/common/reflow_preparation.h"
 
 #include "book/book.h"
 #include "book/book_parse_deps.h"
 #include "formats/cbz/cbz_parser.h"
 #include "formats/common/book_error.h"
 #include "formats/common/book_meta_cache.h"
+#include "formats/common/library_metadata.h"
 #include "formats/common/xml_book_parser.h"
 #include "formats/epub/epub_parser.h"
 #include "formats/fb2/fb2_parser.h"
@@ -151,7 +153,14 @@ uint8_t OpenPrepared(Book *book) {
   DBG_LOG(book->GetStatusReporter(), logmsg);
 
   uint8_t err = 1;
-  if (book->format == FORMAT_EPUB) {
+  if (HasExtCI(book->GetFileName(), ".mobi") || HasExtCI(book->GetFileName(), ".fb2")) {
+    ReflowPreparation preparation;
+    if (!preparation.Begin(book, path)) return 1;
+    ReflowPreparation::Result result;
+    do { result=preparation.Step(); } while (result==ReflowPreparation::Pending);
+    if (result!=ReflowPreparation::Complete) {preparation.Cancel();return 1;}
+    err=0;
+  } else if (book->format == FORMAT_EPUB) {
     DBG_LOGF(book->GetStatusReporter(),
              "BOOK parser enter: backend=epub-open file=%s",
              book->GetFileName() ? book->GetFileName() : "");
@@ -208,14 +217,26 @@ uint8_t Parse(Book *book, bool fulltext) {
 }
 
 uint8_t IndexMetadata(Book *book, const char *path) {
-  if (!book || !path)
-    return 1;
-  if (book->format == FORMAT_EPUB)
-    return epub_parser::Index(book, path);
-  if (book->format == FORMAT_PDF)
-    return pdf_parser::Index(book, path);
-  if (book->format == FORMAT_CBZ)
-    return cbz_parser::Index(book, path);
+  if (!book || !path) return BOOK_ERR_CORRUPT;
+  library_metadata::Value value;
+  const auto cancelled=[](void *context) {
+    return static_cast<Book *>(context)->IsOpenAbortRequested();
+  };
+  const auto status=library_metadata::Prepare(path,&value,cancelled,book);
+  if (status==library_metadata::Status::Cancelled) return BOOK_ERR_CANCELLED;
+  if (status!=library_metadata::Status::Ready) return BOOK_ERR_CORRUPT;
+  const auto &entry=value.entry;
+  // The display may keep its filename fallback; only genuine fields were saved.
+  if (!entry.title.empty()) book->SetTitle(entry.title.c_str());
+  book->SetAuthor(entry.author);
+  book->SetSeries(entry.series);
+  book->SetLanguage(entry.language);
+  book->SetPublisher(entry.publisher);
+  book->SetPublished(entry.published);
+  book->SetSubjects(entry.subjects);
+  book->SetDescription(entry.description);
+  book->coverImagePath=entry.cover_image_path;
+  book->ClearBrowserDisplayNameCache();
   return 0;
 }
 
@@ -234,13 +255,6 @@ uint8_t Index(Book *book) {
   path.append("/");
   path.append(book->GetFileName());
 
-  struct stat st;
-  long long fsize = 0, fmtime = 0;
-  if (stat(path.c_str(), &st) == 0) {
-    fsize  = (long long)st.st_size;
-    fmtime = (long long)st.st_mtime;
-  }
-
   book->metadataIndexTried = true;
   int err = IndexMetadata(book, path.c_str());
 
@@ -252,19 +266,7 @@ uint8_t Index(Book *book) {
 
   if (!err) {
     book->metadataIndexed = true;
-    book_meta_cache::MetaEntry entry;
-    const char *t = book->GetTitle();
-    entry.title            = t ? t : "";
-    entry.author           = book->GetAuthor();
-    entry.series           = book->GetSeries();
-    entry.language         = book->GetLanguage();
-    entry.publisher        = book->GetPublisher();
-    entry.published        = book->GetPublished();
-    entry.subjects         = book->GetSubjects();
-    entry.description      = book->GetDescription();
-    entry.cover_image_path = book->coverImagePath;
-    book_meta_cache::Save(
-        book_meta_cache::BuildPath(path, fsize, fmtime), entry);
+
   }
 
   return (uint8_t)err;

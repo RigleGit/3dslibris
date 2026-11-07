@@ -15,7 +15,7 @@ def palmdoc_literals(data):
                     for i in range(0, len(data), 8))
 
 
-def build_book(compression):
+def build_book(compression, text_override=None):
     labels = ('Chapter One', 'Chapter Two', 'Chapter Three', 'Chapter Four')
     front = '<html><body><nav>' + ''.join(
         '<a filepos="0000000000">%s</a>' % label for label in labels) + '</nav>'
@@ -29,7 +29,7 @@ def build_book(compression):
     markup += '<p>café &amp; tea MOBIEND</p><script>HIDDEN-MOBI</script></body></html>'
     for offset in offsets:
         markup = markup.replace('0000000000', '%010d' % offset, 1)
-    text = markup.encode('utf-8')
+    text = markup.encode('utf-8') if text_override is None else text_override
     records = [text[i:i + 4096] for i in range(0, len(text), 4096)]
     title = 'Fixture MOBI café'.encode('utf-8')
     record0 = bytearray(248)
@@ -65,3 +65,5 @@ for compression, name in ((1, 'raw.mobi'), (2, 'palmdoc.mobi')):
     # Truncate inside the offset table, with the requested file otherwise present.
     (folder / ('truncated-' + name)).write_bytes(data[:85])
 (folder / 'cache').mkdir()
+
+(folder / 'lookahead.mobi').write_bytes(build_book(1, ('<html><body><p>' + 'lookahead ' * 6000 + '<br/>FINALLOOKAHEAD</p></body></html>').encode()))

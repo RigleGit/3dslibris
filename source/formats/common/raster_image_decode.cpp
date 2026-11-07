@@ -152,14 +152,15 @@ bool Target(int source_w, int source_h, int requested_w, int requested_h,
 
 void StorePixel(Bitmap *out,size_t index,float rgb[3],float alpha,const int bg[3]) {
   if (alpha != 255.0f)
-    for(int c=0;c<3;++c) rgb[c]+=bg[c]*(1.0-alpha/255.0);
-  out->pixels.get()[index]=RGB565FromU8(rgb[0]+0.5,rgb[1]+0.5,rgb[2]+0.5);
+    for(int c=0;c<3;++c) rgb[c]+=bg[c]*(1.0f-alpha/255.0f);
+  out->pixels.get()[index]=RGB565FromU8(rgb[0]+0.5f,rgb[1]+0.5f,rgb[2]+0.5f);
 }
 void StorePixel(ArgbBitmap *out,size_t index,float rgb[3],float alpha,const int[3]) {
   const unsigned a=std::max(0,std::min(255,(int)(alpha+0.5f)));
   uint32_t pixel=a<<24;
+  const float unpremultiply = alpha > 0 ? 255.0f / alpha : 0.0f;
   if(alpha>0) for(int c=0;c<3;++c) {
-    const float value_rgb = alpha == 255.0f ? rgb[c] : rgb[c]*255.0f/alpha;
+    const float value_rgb = rgb[c] * unpremultiply;
     const unsigned value=std::max(0,std::min(255,(int)(value_rgb+0.5f)));
     pixel|=value<<((2-c)*8);
   }
@@ -231,9 +232,9 @@ void Convert(const unsigned char *samples, int width, int height, int stride,
         const int opacity = alpha ? p[k][components - 1] : 255;
         opaque = opaque && opacity == 255;
         a += weights[k] * opacity;
+        const float factor = premultiplied ? 1.0f : opacity / 255.0f;
         for (int c = 0; c < 3; ++c)
-          rgb[c] += weights[k] * p[k][colors == 1 ? 0 : c] *
-                    (premultiplied ? 1.0 : opacity / 255.0);
+          rgb[c] += weights[k] * p[k][colors == 1 ? 0 : c] * factor;
       }
       StorePixel(out,(size_t)y*out->width+x,rgb,opaque ? 255.0f : a,bg);
     }

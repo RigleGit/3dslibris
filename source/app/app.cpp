@@ -13,6 +13,11 @@
 */
 
 #include "app/app.h"
+#include "shared/cache_io_probe.h"
+#ifdef DSLIBRIS_CACHE_IO_PROBE
+#include "reader/app_book_internal.h"
+#endif
+#include "formats/common/fixed_layout_gpu_renderer.h"
 
 #include <algorithm>
 #include <errno.h>
@@ -21,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <sys/iosupport.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -267,7 +273,7 @@ bool App::PresentIfDirty()
   const bool measure_present = fixed_perf::NeedsPresentationTiming();
   uint64_t perf_phase = measure_present ? fixed_perf::Now() : 0;
   const bool had_dirty = ts->HasDirtyScreens();
-  const bool wrote = ts->BlitToFramebuffer();
+  const bool wrote = ts->BlitToFramebuffer() || fixed_layout_gpu::NeedsPresent(ts.get());
   if (measure_present)
     fixed_perf::ViewStage("present.framebuffer_copy",
                           fixed_perf::Now() - perf_phase, wrote ? 1 : 0);
@@ -278,7 +284,14 @@ bool App::PresentIfDirty()
   {
     if (measure_present)
       perf_phase = fixed_perf::Now();
-    gfxFlushBuffers();
+    // A GPU draw ends with the SDK's full Linear flush, including CPU bottom
+    // writes. Retained-target transfers and software-only frames still need it.
+    const bool gpu_will_draw = fixed_layout_gpu::WillDraw(ts.get());
+    if (!gpu_will_draw)
+      gfxFlushBuffers();
+    const bool gpu_wrote = fixed_layout_gpu::Present(ts.get());
+    if (gpu_will_draw && !gpu_wrote)
+      gfxFlushBuffers(); // FrameBegin failure must still present coherent CPU UI.
     if (measure_present) {
       fixed_perf::ViewStage("present.flush", fixed_perf::Now() - perf_phase);
       perf_phase = fixed_perf::Now();
@@ -312,6 +325,21 @@ int App::Run(void)
     return 0;
   }
   boot_trace::Boot("app startup complete");
+#ifdef DSLIBRIS_CACHE_IO_PROBE
+  PrintStatus("CACHE IO diagnostic; B cancels; temporary data only");
+  reader_internal::DrawOpeningSplashImpl(this, 0, 0,
+                                         "CACHE IO diagnostic; B: cancel");
+  cache_io_probe::Run(
+      paths::GetCacheIoProbePath(), this,
+      [](void *userdata) -> bool {
+        App *owner = static_cast<App *>(userdata);
+        if (!aptMainLoop() || owner->ShouldAbortWork())
+          return false;
+        hidScanInput();
+        return !(hidKeysDown() & KEY_B);
+      },
+      this);
+#endif
   boot_trace::Boot("app main loop begin");
   return main_loop_controller_->RunMainLoop();
 }
@@ -430,6 +458,14 @@ void App::ApplyRenderOrientation(u8 new_orientation)
 // Initialize the top and bottom screens with double buffering and the correct pixel format, then clear the software buffers for both screens.
 void App::InitScreens()
 {
+  // The boot console keeps an RGB565 pointer even after gfx changes format.
+  // Lazy font loads and decoder warnings can still print during book opening;
+  // hand both streams to the debugger before taking over its framebuffer.
+  fflush(stdout);
+  fflush(stderr);
+  consoleDebugInit(debugDevice_SVC);
+  devoptab_list[STD_OUT] = devoptab_list[STD_ERR];
+
   // consoleInit() set the bottom screen to single-buffered and may have
   // changed the pixel format.  Take full control back before the main loop.
   gfxSetDoubleBuffering(GFX_TOP, true);

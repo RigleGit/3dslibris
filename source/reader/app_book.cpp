@@ -44,6 +44,11 @@
 #include "ui/button.h"
 #include "shared/debug_log.h"
 #include "book/layout_reflow.h"
+#include "formats/common/reflow_preparation.h"
+#include "formats/common/reflow_block_cache.h"
+#include "reader/search_session.h"
+#include "menus/bookmark_menu.h"
+#include "menus/chapter_menu.h"
 #include "parse.h"
 #include "settings/prefs.h"
 #include "shared/boot_trace.h"
@@ -90,6 +95,7 @@ void ReaderController::OnAppletSuspendRequested()
   // CPU-only viewer buffers have no worker/GPU references. Free them here
   // before aptMainLoop waits in HOME; the session rebuilds on a safe frame.
   SuspendImageViewer();
+  if (preparation_) preparation_->SignalPause();
   // Called synchronously from the APT hook: signal only for workers. In-progress reflow
   // and opening state remain owned by their workers across OS suspension.
   Book *bookcurrent_ = app_.GetCurrentBook();
@@ -108,6 +114,7 @@ void ReaderController::OnAppletSuspended()
 
 void ReaderController::OnAppletResumed()
 {
+  if (preparation_) preparation_->SignalResume();
   if (search_) search_->dirty = true;
   Book *bookcurrent_ = app_.GetCurrentBook();
   if (!bookcurrent_)
@@ -211,11 +218,131 @@ bool ReaderController::MaybeFinalizeDeferredRelayout(Book *book, int page_count)
   return true;
 }
 
+bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
+  if (!cache_preparing_)
+    return false;
+  Book *book = cache_preparing_;
+  if (input.keys_down & (app_.key.b | app_.key.start)) {
+    if (preparation_)
+      preparation_->Cancel();
+    preparation_.reset();
+    cache_preparing_ = nullptr;
+    app_.SetCurrentBook(nullptr);
+    app_.SetCurrentBookSessionId(0);
+    ResetOpeningState(&app_);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
+    return true;
+  }
+  if (app_.ShouldAbortWork())
+    return true;
+  // A fatal preparation error releases its resources but keeps this screen
+  // until acknowledgement. It must not fall through to the legacy opener.
+  if (!preparation_) {
+    if (input.timestamp_ms - cache_draw_ms_ >= 100) {
+      DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
+      cache_draw_ms_ = input.timestamp_ms;
+    }
+    return true;
+  }
+  const std::string label = preparation_->Label();
+  if (!cache_draw_ms_ || input.timestamp_ms - cache_draw_ms_ >= 100) {
+    if (label != cache_label_)
+      DBG_LOGF(&app_, "Reflow preparation stage=%s", label.c_str());
+    DrawOpeningSplashImpl(&app_, preparation_->Progress(),
+                          preparation_->Total(), label.c_str());
+    cache_draw_ms_ = input.timestamp_ms;
+    cache_label_ = label;
+  }
+  const u64 work_begin = osGetTime();
+  ReflowPreparation::Result result;
+  do {
+    result = preparation_->Step();
+  } while (result == ReflowPreparation::Pending &&
+           osGetTime() - work_begin < 30 && !app_.ShouldAbortWork());
+  if (app_.ShouldAbortWork())
+    return true;
+  if (result == ReflowPreparation::Pending || result == ReflowPreparation::Paused)
+    return true;
+  if (result != ReflowPreparation::Complete) {
+    if (result != ReflowPreparation::Cancelled) {
+      char failure_label[128];
+      snprintf(failure_label, sizeof(failure_label), "%s; B: back",
+               preparation_->Label());
+      preparation_->Cancel();
+      preparation_.reset();
+      if (app_.GetCurrentBook() == book) {
+        app_.SetCurrentBook(nullptr);
+        app_.SetCurrentBookSessionId(0);
+      }
+      cache_label_ = failure_label;
+      DBG_LOGF(&app_, "Reflow preparation failed result=%d detail=%s",
+               (int)result, cache_label_.c_str());
+      DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
+      cache_draw_ms_ = input.timestamp_ms;
+      return true;
+    }
+    preparation_->Cancel();
+    preparation_.reset();
+    cache_preparing_ = nullptr;
+    app_.SetCurrentBook(nullptr);
+    app_.SetCurrentBookSessionId(0);
+    ResetOpeningState(&app_);
+    app_.SetMode(AppMode::Browser);
+    app_.SetBrowserDirty(true);
+    return true;
+  }
+  if (preparation_->PersistenceFailed() && !(input.keys_down & app_.key.a)) {
+    if (cache_label_ != preparation_->Label()) {
+      cache_label_ = preparation_->Label();
+      DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
+    }
+    return true;
+  }
+  book->SetLayoutRevision(app_.GetLayoutRevision());
+  if (app_.IsOpeningNeedsRelayout()) {
+    const auto plan = deferred_relayout_utils::BuildOpenRelayoutPlan(
+        true, false, app_.GetOpeningOldPageCount(),
+        app_.GetOpeningOldPosition(), book->GetPageCount(),
+        app_.MutableOpeningOldBookmarks());
+    if (plan.has_remap) {
+      book->SetPosition(plan.mapped_position);
+      ApplyRemappedBookmarks(book, plan.mapped_bookmarks);
+      while (book->HasPendingReflowNavigation()) {
+        const int rc = book->AdvanceReflowPageCache();
+        if (rc > 0)
+          return true;
+        if (rc < 0) {
+          preparation_->Cancel();
+          preparation_.reset();
+          if (app_.GetCurrentBook() == book) {
+            app_.SetCurrentBook(nullptr);
+            app_.SetCurrentBookSessionId(0);
+          }
+          cache_label_ = "Page cache read failed; B: back";
+          return true;
+        }
+      }
+    }
+  }
+  ClearSavedRelayoutState(book);
+  app_.SetCurrentBook(book);
+  app_.SetCurrentBookSessionId(app_.GetOpeningSessionId());
+  preparation_.reset();
+  cache_preparing_ = nullptr;
+  ResetOpeningState(&app_);
+  app_.SetMode(AppMode::Browser);
+  OpenBook();
+  return true;
+}
+
 void ReaderController::HandleEventInOpening(const FrameInput &input)
 {
   Prefs *prefs = app_.prefs.get();
   Text *ts = app_.ts.get();
   if (app_.ShouldAbortWork())
+    return;
+  if (AdvanceCachePreparation(input))
     return;
   MaybeDrawOpeningSplashProgress(&app_);
   const u32 keys = input.keys_down;
@@ -387,9 +514,6 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
   DBG_LOGF(&app_, "recently-opened: recording t=%lu for \"%s\"",
            (unsigned long)bookcurrent_->GetLastOpenedTime(),
            bookcurrent_->GetFileName() ? bookcurrent_->GetFileName() : "?");
-  if (app_.prefs)
-    app_.prefs->Write();
-
   if (bookcurrent_->GetPosition() >= pageCount)
     bookcurrent_->SetPosition(0);
   book_nav::DrawPage(bookcurrent_, ts);
@@ -404,6 +528,124 @@ void ReaderController::HandleEventInOpening(const FrameInput &input)
   prefs->Write();
   ResetProgressAutosave(bookcurrent_);
   boot_trace::Boot("async open done");
+}
+
+void ReaderController::ReportPageCacheError() {
+  if (search_)
+    search_->engine.Cancel();
+  cache_page_error_ = true;
+  Book *book = app_.GetCurrentBook();
+  const bool oom =
+      book && book->GetReflowPageCacheResult() == reflow_block_cache::NoMemory;
+  DrawOpeningSplashImpl(&app_, 0, 0,
+                        oom ? "not enough cache memory; B: back"
+                            : "cache read failed; A: rebuild B: back");
+}
+
+bool ReaderController::PumpPageCache(const FrameInput &input) {
+  Book *book = app_.GetCurrentBook();
+  const AppMode mode = app_.GetMode();
+  if (!book || !book->HasReflowPageCache() ||
+      (mode != AppMode::Book && mode != AppMode::Search &&
+       mode != AppMode::Bookmarks && mode != AppMode::Chapters))
+    return false;
+  if (app_.ShouldAbortWork())
+    return true;
+  if (cache_page_error_) {
+    if (input.keys_down & (app_.key.b | app_.key.start)) {
+      cache_page_error_ = false;
+      book->CancelReflowPageRequest();
+      app_.ShowLibraryView();
+      return true;
+    }
+    if ((input.keys_down & app_.key.a) &&
+        book->GetReflowPageCacheResult() != reflow_block_cache::NoMemory) {
+      cache_page_error_ = false;
+      book->InvalidateReflowPageCacheFile();
+      const int position = book->GetPosition();
+      CloseBook(false);
+      book->SetPosition(position);
+      app_.SetMode(AppMode::Browser);
+      OpenBook();
+      return true;
+    }
+    return true;
+  }
+  const auto cache_result = book->GetReflowPageCacheResult();
+  if (cache_result == reflow_block_cache::NoMemory ||
+      cache_result == reflow_block_cache::IoError ||
+      cache_result == reflow_block_cache::Corrupt) {
+    ReportPageCacheError();
+    return true;
+  }
+  if (!book->HasPendingReflowPageRead()) {
+    cache_page_started_ms_ = 0;
+    return false;
+  }
+  // The search owns its CPU/I/O budget and can resume after each requested
+  // block.
+  if (mode == AppMode::Search && !book->HasPendingReflowNavigation())
+    return false;
+  if (!cache_page_started_ms_)
+    cache_page_started_ms_ = input.timestamp_ms;
+  if (mode == AppMode::Book &&
+      (input.keys_down & (app_.key.b | app_.key.start))) {
+    book->CancelReflowPageRequest();
+    cache_page_loading_ = false;
+    cache_page_started_ms_ = 0;
+    if (input.keys_down & app_.key.start)
+      app_.ShowLibraryView();
+    else {
+      book_nav::DrawPage(book, app_.ts.get());
+      app_.RequestStatusRedraw();
+    }
+    return true;
+  }
+  if (mode != AppMode::Book && input.keys_down)
+    return false; // Deliver cancellation/navigation before data I/O.
+  const int before = book->GetPosition();
+  const u64 work_begin = osGetTime();
+  int result;
+  do {
+    result = book->AdvanceReflowPageCache();
+  } while (result > 0 && osGetTime() - work_begin < 30 &&
+           !app_.ShouldAbortWork());
+  if (app_.ShouldAbortWork())
+    return true;
+  if (result < 0) {
+    ReportPageCacheError();
+    return true;
+  }
+  if (result > 0) {
+    if (mode == AppMode::Book && !cache_page_loading_ &&
+        input.timestamp_ms - cache_page_started_ms_ >= 150) {
+      app_.ts->SetScreen(app_.ts->screenright);
+      const int style = app_.ts->GetStyle();
+      app_.ts->SetStyle(TEXT_STYLE_BROWSER);
+      app_.ts->SetPen(5, app_.ts->LogicalHeight() - 6);
+      app_.ts->PrintString("loading page...");
+      app_.ts->SetStyle(style);
+      app_.ts->MarkScreenDirty(app_.ts->screenright);
+      cache_page_loading_ = true;
+    }
+    return mode == AppMode::Book;
+  }
+  if (mode == AppMode::Bookmarks)
+    app_.bookmarkmenu->dirty = true;
+  if (mode == AppMode::Chapters)
+    app_.chaptermenu->dirty = true;
+  if (mode == AppMode::Search && search_)
+    search_->dirty = true;
+  if (mode == AppMode::Book &&
+      (before != book->GetPosition() || cache_page_loading_)) {
+    book_nav::DrawPage(book, app_.ts.get());
+    app_.RequestStatusRedraw();
+    if (before != book->GetPosition())
+      MarkProgressDirty(book);
+  }
+  cache_page_loading_ = false;
+  cache_page_started_ms_ = 0;
+  return false;
 }
 
 void ReaderController::HandleEventInBook(const FrameInput &input)
@@ -502,6 +744,13 @@ void ReaderController::ToggleBookmark()
 
 void ReaderController::CloseBook(bool persist_progress)
 {
+  cache_page_error_ = cache_page_loading_ = false;
+  cache_page_started_ms_ = 0;
+  if (preparation_) {
+    preparation_->Cancel();
+    preparation_.reset();
+  }
+  cache_preparing_ = nullptr;
   InvalidateImageViewer();
   InvalidateSearch(true);
   Book *bookcurrent_ = app_.GetCurrentBook();

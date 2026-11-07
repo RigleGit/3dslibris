@@ -1,3 +1,4 @@
+#include "formats/common/epub_parse_perf.h"
 /*
     3dslibris - book_inline_image.cpp
     New module for the 3DS port by Rigle.
@@ -9,6 +10,7 @@
 */
 
 #include "book/book.h"
+#include "formats/common/reflow_block_cache.h"
 #include "shared/screen_dimensions.h"
 
 #include "book/inline_image_page_layout_utils.h"
@@ -66,6 +68,9 @@ static bool LocateBookInlineZipEntry(
     return false;
 
   if (!*index_built) {
+#ifdef DSLIBRIS_DEBUG
+    epub_parse_perf::ScopedTime perf_zip_index_ms(&epub_parse_perf::Snapshot::zip_index_ms);
+#endif
     *index_built = true;
     int rc = unzGoToFirstFile(uf);
     while (rc == UNZ_OK) {
@@ -253,6 +258,9 @@ void *Book::GetInlineImageReadZip() {
   if (inline_image_probe_uf)
     return inline_image_probe_uf;
   if (!inline_image_read_uf_) {
+#ifdef DSLIBRIS_DEBUG
+    epub_parse_perf::ScopedTime perf_zip_open_ms(&epub_parse_perf::Snapshot::zip_open_ms);
+#endif
     const std::string path = foldername + "/" + filename;
     inline_image_read_uf_ = unzOpen(path.c_str());
   }
@@ -313,9 +321,10 @@ bool Book::LoadInlineImageSource(u16 image_id, image_memory::Bytes *out,
       key.erase(0, 1);
     std::unordered_map<std::string, image_memory::Bytes>::const_iterator hit =
         fb2_inline_images.find(key);
-    if (hit == fb2_inline_images.end() || hit->second.empty())
-      return false;
-    out->Borrow(hit->second.data(),hit->second.size());
+    if (hit == fb2_inline_images.end() || hit->second.empty()) {
+      if (!reflow_cache_reader_ || reflow_cache_reader_->ReadResource(key, out) != reflow_block_cache::Ready)
+        return false;
+    } else out->Borrow(hit->second.data(),hit->second.size());
     if (resolved_path)
       *resolved_path = image_path;
     return true;
@@ -520,6 +529,9 @@ bool Book::EnsureInlineImageMetadata(u16 image_id, InlineImageMetadata *out) {
 
   InlineImageEntry &entry = inline_images[image_id];
   if (!entry.metadata_probed) {
+#ifdef DSLIBRIS_DEBUG
+    epub_parse_perf::ScopedTime perf_image_probe_ms(&epub_parse_perf::Snapshot::image_probe_ms);
+#endif
     entry.metadata_ok = false;
     entry.source_width = 0;
     entry.source_height = 0;
@@ -849,6 +861,8 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
         dst[x] = src[source_x[(size_t)x]];
     }
   }
+
+  decoded.pixels.clear();
 
   bool opaque = true;
   for (size_t i = 0; i < entry.pixels.size(); ++i) {

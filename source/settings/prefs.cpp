@@ -587,9 +587,9 @@ void Prefs::RememberSavedLastOpened(const char *folder, const char *filename,
 void Prefs::ApplySavedBookState(Book *book) const {
   if (!book)
     return;
+  const std::string book_key = MakeSavedBookKey(book->GetFolderName(), book->GetFileName());
   const auto state_it =
-      saved_state_by_book_key.find(MakeSavedBookKey(book->GetFolderName(),
-                                                    book->GetFileName()));
+      saved_state_by_book_key.find(book_key);
   if (state_it != saved_state_by_book_key.end()) {
     const SavedBookState &state = state_it->second;
     book->SetMobiLineWrapFix(state.mobi_line_wrap_fix);
@@ -610,8 +610,7 @@ void Prefs::ApplySavedBookState(Book *book) const {
   }
 
   const auto it =
-      last_opened_by_book_key.find(MakeSavedBookKey(book->GetFolderName(),
-                                                    book->GetFileName()));
+      last_opened_by_book_key.find(book_key);
   if (it != last_opened_by_book_key.end())
     book->SetLastOpenedTime(it->second);
 }
@@ -646,7 +645,10 @@ int Prefs::Write() {
     return 255;
   }
 
+  setvbuf(fp, NULL, _IOFBF, 16384);
 #ifdef DSLIBRIS_DEBUG
+  uint64_t log_ms = 0, prepare_ms = 0;
+  uint64_t prepare_begin = 0;
   const uint64_t write_open_done = osGetTime();
 #endif
   fprintf(fp, "<dslibris format=\"2\">\n");
@@ -671,6 +673,10 @@ int Prefs::Write() {
           "\t<margin top=\"%d\" left=\"%d\" bottom=\"%d\" right=\"%d\" />\n",
           ts ? ts->margin.top : 0, ts ? ts->margin.left : 0,
           ts ? ts->margin.bottom : 0, ts ? ts->margin.right : 0);
+
+#ifdef DSLIBRIS_DEBUG
+  prepare_begin = osGetTime();
+#endif
   const std::string font_regular =
       XmlEscapeAttr(ts ? ts->GetFontFile(TEXT_STYLE_REGULAR).c_str() : "");
   const std::string font_bold =
@@ -697,6 +703,10 @@ int Prefs::Write() {
       XmlEscapeAttr(ts ? ts->GetFallbackFontFile(2).c_str() : "");
   const std::string fallback4 =
       XmlEscapeAttr(ts ? ts->GetFallbackFontFile(3).c_str() : "");
+
+#ifdef DSLIBRIS_DEBUG
+  prepare_ms += osGetTime() - prepare_begin;
+#endif
 
   fprintf(fp,
           "\t<font size=\"%d\" %s=\"%s\" %s=\"%s\" %s=\"%s\" "
@@ -734,6 +744,9 @@ int Prefs::Write() {
   // Merge the visible folder into the complete state loaded from disk. Browser
   // navigation replaces app->books, so serializing that vector directly would
   // erase progress for every folder that is not currently visible.
+#ifdef DSLIBRIS_DEBUG
+  prepare_begin = osGetTime();
+#endif
   std::string current_book_key;
   for (int i = 0; i < app->BookCount(); i++) {
     Book *book = app->books[i];
@@ -763,8 +776,15 @@ int Prefs::Write() {
           MakeSavedBookKey(book->GetFolderName(), book->GetFileName());
   }
 
+#ifdef DSLIBRIS_DEBUG
+  prepare_ms += osGetTime() - prepare_begin;
+#endif
+
   for (SavedBookStateMap::const_iterator it = saved_state_by_book_key.begin();
        it != saved_state_by_book_key.end(); ++it) {
+#ifdef DSLIBRIS_DEBUG
+    prepare_begin = osGetTime();
+#endif
     std::string folder;
     std::string filename;
     if (!SplitSavedBookKey(it->first, &folder, &filename))
@@ -772,6 +792,9 @@ int Prefs::Write() {
     const SavedBookState &state = it->second;
     const std::string escaped_filename = XmlEscapeAttr(filename.c_str());
     const std::string escaped_folder = XmlEscapeAttr(folder.c_str());
+#ifdef DSLIBRIS_DEBUG
+    prepare_ms += osGetTime() - prepare_begin;
+#endif
     fprintf(fp, "\t\t<book file=\"%s\" folder=\"%s\" page=\"%d\"",
             escaped_filename.c_str(), escaped_folder.c_str(),
             state.position);
@@ -796,17 +819,25 @@ int Prefs::Write() {
     if (state.last_opened > 0) {
       fprintf(fp, " lastOpened=\"%lu\"", (unsigned long)state.last_opened);
 #if RECENT_BOOKS_TRACE
+#ifdef DSLIBRIS_DEBUG
+      const uint64_t log_begin = osGetTime();
+#endif
       DBG_LOGF(app, "recently-opened: write lastOpened=%lu for \"%s\"",
                (unsigned long)state.last_opened, filename.c_str());
+#ifdef DSLIBRIS_DEBUG
+      log_ms += osGetTime() - log_begin;
+#endif
 #endif
     }
     if (it->first == current_book_key)
       fprintf(fp, " current=\"1\"");
 #ifdef DSLIBRIS_DEBUG
     if (it->first == current_book_key) {
+      const uint64_t log_begin = osGetTime();
       DBG_LOGF(app,
                "PROGRESS write current book=%s page=%d",
                filename.c_str(), state.position);
+      log_ms += osGetTime() - log_begin;
     }
 #endif
     fprintf(fp, ">\n");
@@ -823,6 +854,7 @@ int Prefs::Write() {
   fprintf(fp, "</dslibris>\n");
   fprintf(fp, "\n");
 #ifdef DSLIBRIS_DEBUG
+  const long serialized_bytes = ftell(fp);
   const uint64_t write_body_done = osGetTime();
 #endif
   const bool ok = prefs_file_utils::Commit(fp, paths::GetPrefsFile(),
@@ -838,6 +870,15 @@ int Prefs::Write() {
            (unsigned)saved_state_by_book_key.size(),
            (unsigned long long)(write_open_done - write_start),
            (unsigned long long)(write_body_done - write_open_done),
+           (unsigned long long)(write_done - write_body_done));
+#endif
+#ifdef DSLIBRIS_DEBUG
+  DBG_LOGF(app,
+           "PREFS IO bytes=%ld prepare_ms=%llu format_stdio_ms=%llu log_ms=%llu "
+           "commit_ms=%llu buffer=16384",
+           serialized_bytes, (unsigned long long)prepare_ms,
+           (unsigned long long)(write_body_done - write_open_done - log_ms - prepare_ms),
+           (unsigned long long)log_ms,
            (unsigned long long)(write_done - write_body_done));
 #endif
   return ok ? 0 : 255;

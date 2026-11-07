@@ -1,3 +1,4 @@
+#include "allocation_counter.h"
 #include "formats/common/html_entity_utils.h"
 #include "test_assert.h"
 
@@ -75,18 +76,45 @@ void TestNormalizesNamedEntitiesAcrossChunks() {
   html_entity_utils::ChunkedEntityNormalizerState state;
   std::string out;
   html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(
-      "&ec", false, &state, &out);
+      "&ec", 3, false, &state, &out);
   html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(
-      "irc; e &nd", false, &state, &out);
+      "irc; e &nd", 10, false, &state, &out);
   html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(
-      "ash;", true, &state, &out);
+      "ash;", 4, true, &state, &out);
   test::ExpectStrEq("chunked entities normalized", out.c_str(),
                     "&#234; e &#8211;");
+}
+
+void TestEveryChunkBoundary() {
+  const std::string inputs[] = {"plain &nbsp; A&amp;B &ecirc; &unknown; tail&",
+      "&" + std::string(28, 'x') + "; &ndA &ndash;",
+      std::string("a\0b &ecirc;", 12)};
+  for (const auto &input : inputs) {
+    const auto expected = html_entity_utils::NormalizeHtmlNamedEntitiesForXml(input);
+    for (size_t a = 0; a <= input.size(); ++a)
+      for (size_t b = a; b <= input.size(); ++b) {
+        html_entity_utils::ChunkedEntityNormalizerState state;
+        std::string out;
+        html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(input.data(), a, false, &state, &out);
+        html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(input.data() + a, b-a, false, &state, &out);
+        html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(input.data() + b, input.size()-b, true, &state, &out);
+        test::ExpectTrue("all chunk boundaries preserve whole-input normalization", out == expected);
+      }
+  }
+  const std::string plain(16384, 'a');
+  html_entity_utils::ChunkedEntityNormalizerState state;
+  std::string out; out.reserve(plain.size());
+  allocation_count = 0; count_allocations = true;
+  html_entity_utils::NormalizeHtmlNamedEntitiesForXmlChunk(plain.data(), plain.size(), true, &state, &out);
+  count_allocations = false;
+  test::ExpectTrue("plain chunk bytes preserved", out == plain);
+  test::ExpectEq("plain chunks do not allocate an input copy", (int)allocation_count, 0);
 }
 
 } // namespace
 
 int main() {
+  TestEveryChunkBoundary();
   TestDecodesPortugueseNamedEntities();
   TestDecodesPunctuationEntities();
   TestDecodesNumericEntities();

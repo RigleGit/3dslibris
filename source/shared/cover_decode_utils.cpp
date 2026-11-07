@@ -17,6 +17,10 @@
 #include "shared/image_scale_utils.h"
 #include "shared/stb_image_gif_utils.h"
 #include "stb_image.h"
+#ifdef __3DS__
+#include "formats/common/raster_image_decode.h"
+#include "formats/common/fixed_layout_blit_utils.h"
+#endif
 
 namespace cover_decode_utils {
 
@@ -38,8 +42,22 @@ bool DecodeImageToCoverThumb(Book *book, const unsigned char *data,
   }
   fixed_perf::Record(book, -1, -1, "cover.header",
                      fixed_perf::Now() - header_start, 1, size, img_w, img_h);
+  const aspect_fit_utils::Placement placement =
+      aspect_fit_utils::FitInsideBox(
+          0, 0, cover_layout::kBrowserCoverThumbWidth,
+          cover_layout::kBrowserCoverThumbHeight, img_w, img_h, false);
   fixed_perf::SampleMemory(book, -1, -1, "cover.before_decode");
   fixed_perf::Timer decode_timer(book, -1, -1, "cover.decode");
+#ifdef __3DS__
+  raster_image::Bitmap bitmap;
+  const char *error = NULL;
+  const bool decoded = raster_image::Decode(
+      data, size, placement.width, placement.height, 0xffff, &bitmap, &error);
+  decode_timer.End(decoded, size, bitmap.width, bitmap.height);
+  fixed_perf::SampleMemory(book, -1, -1, "cover.after_decode");
+  if (!decoded)
+    return false;
+#else
   unsigned char *pixels = stb_image_gif_utils::LoadFromMemory(
       data, (int)size, &img_w, &img_h, &channels, 3);
   decode_timer.End(pixels != nullptr, size, img_w, img_h);
@@ -52,23 +70,33 @@ bool DecodeImageToCoverThumb(Book *book, const unsigned char *data,
     stbi_image_free(pixels);
     return false;
   }
+#endif
 
-  const aspect_fit_utils::Placement placement =
-      aspect_fit_utils::FitInsideBox(
-          0, 0, cover_layout::kBrowserCoverThumbWidth,
-          cover_layout::kBrowserCoverThumbHeight, img_w, img_h, false);
   const int final_w = placement.width;
   const int final_h = placement.height;
   if (final_w <= 0 || final_h <= 0) {
+#ifndef __3DS__
     stbi_image_free(pixels);
+#endif
     return false;
   }
   u16 *new_pixels = new (std::nothrow) u16[(std::size_t)final_w * final_h];
   if (!new_pixels) {
+#ifndef __3DS__
     stbi_image_free(pixels);
+#endif
     return false;
   }
   fixed_perf::SampleMemory(book, -1, -1, "cover.thumbnail_allocated");
+#ifdef __3DS__
+  // MuPDF decodes JPEG at reduced DCT resolution; the bounded raster decoder
+  // also composes transparency onto paper and retains only the first GIF frame.
+  // Copy/round into Book's existing new[] ownership, never retain decoder memory.
+  fixed_layout_blit_utils::BlitRgb565SurfaceScaledCrop(
+      new_pixels, final_w, final_w, final_h, 0, 0, final_w, final_h,
+      bitmap.pixels.get(), bitmap.PixelCount(), bitmap.width, bitmap.height,
+      0, 0, bitmap.width, bitmap.height, true);
+#else
   if (!image_scale_utils::ScaleRgbToRgb565Bilinear(
           pixels, img_w, img_h, final_w, final_h, new_pixels)) {
     delete[] new_pixels;
@@ -77,6 +105,7 @@ bool DecodeImageToCoverThumb(Book *book, const unsigned char *data,
   }
 
   stbi_image_free(pixels);
+#endif
 
   delete[] book->coverPixels;
   book->coverPixels = new_pixels;

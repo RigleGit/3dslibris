@@ -26,7 +26,7 @@ python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf
 for signature in 'void ResetMuPdfRenderFailureState(' 'bool HasMuPdfInteractiveRenderFailed(' 'void CancelMuPdfIncrementalRenderState(' 'bool PromoteMuPdfAdjacentSlotIfMatching(' 'bool EnsureMuPdfDisplayListForPage(' 'bool EnsureCurrentMuPdfInteractiveTile(' 'bool EnsureCurrentMuPdfPreviewCache('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_worker.cpp" "$signature" >> "$TASK_TMP/interactive_owner.inc"
 done
-for signature in 'MuPdfNavigationBounds GetMuPdfNavigationBounds(' 'static void GetMuPdfPreviewContentBounds(' 'pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport('; do
+for signature in 'bool CanReuseMuPdfInteractiveRaster(' 'MuPdfNavigationBounds GetMuPdfNavigationBounds(' 'static void GetMuPdfPreviewContentBounds(' 'pdf_view_utils::NormalizedRect ComputeCurrentMuPdfViewport('; do
   python3 "$ROOT/tests/extract_test_function.py" "$ROOT/source/formats/mupdf/mupdf_viewport.cpp" "$signature" >> "$TASK_TMP/viewport_owner.inc"
 done
 for signature in 'float ComputeFitScale(' 'float ComputeEffectiveMuPdfZoom('; do

@@ -2,8 +2,10 @@
 
 #include <stdint.h>
 #include <memory>
+#include <string>
 struct ReaderSearchSession;
 struct ReaderImageViewerSession;
+class ReflowPreparation;
 
 class App;
 struct FrameInput;
@@ -21,6 +23,7 @@ public:
   void RunSearchFrame(const FrameInput &input);
   void InvalidateSearch(bool forget_query);
 
+  bool PumpPageCache(const FrameInput &input);
   void CloseBook(bool persist_progress = true);
   int GetBookIndex(Book *book);
   void HandleEventInBook(const FrameInput &input);
@@ -32,8 +35,18 @@ public:
   void OnAppletResumed();
 
 private:
+  std::unique_ptr<ReflowPreparation> preparation_;
+  Book *cache_preparing_;
+  std::string cache_label_;
+  bool cache_page_error_ = false;
+  bool cache_page_loading_ = false;
+  uint64_t cache_draw_ms_;
+  uint64_t cache_page_started_ms_ = 0;
+  void ReportPageCacheError();
+  bool AdvanceCachePreparation(const FrameInput &input);
   void DrawImageViewer();
   bool LoadImageViewer(int zoom);
+  bool RestoreImageViewerBitmap(bool refresh = false);
   void CloseImageViewer();
   bool ImageViewerValid() const;
   std::unique_ptr<ReaderImageViewerSession> image_viewer_;

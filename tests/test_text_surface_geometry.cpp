@@ -1,4 +1,5 @@
 #include "shared/text_screen_geometry.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
 #include "ui/framebuffer_blit_utils.h"
 #include "ui/screen_layout_constants.h"
 #include "ui/text_buffer_utils.h"

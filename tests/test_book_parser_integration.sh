@@ -253,6 +253,11 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/epub/epub_toc_package_loader_utils.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_toc_title_match_utils.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_page_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/reflow_block_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/reflow_preparation.cpp" \
+  "$TEST_ROOT/source/formats/fb2/fb2_preparation.cpp" \
+  "$TEST_ROOT/source/formats/fb2/fb2_page_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/page_cache_codec.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_cache.cpp" \
   "$TEST_ROOT/source/formats/cbz/cbz_parser.cpp" \
   "$TEST_ROOT/source/formats/cbz/cbz_document.cpp" \
@@ -263,6 +268,7 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/common/pdf_view_utils.cpp" \
   "$TEST_ROOT/source/formats/common/fixed_layout_blit_utils.cpp" "$TEST_ROOT/source/formats/common/fixed_layout_surface.cpp" \
   "$TEST_ROOT/source/formats/common/fixed_layout_preview_panel.cpp" \
+  "$TEST_ROOT/source/formats/common/fixed_layout_preview_border.cpp" \
   "$TEST_ROOT/source/formats/odt/odt_parser.cpp" \
   "$TEST_ROOT/source/formats/odt/odt_loader.cpp" \
   "$TEST_ROOT/source/formats/txt/txt_parser.cpp" \
@@ -281,6 +287,8 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/common/file_read_utils.cpp" \
   "$TEST_ROOT/source/formats/common/binary_io_utils.cpp" \
   "$TEST_ROOT/source/formats/common/book_meta_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/library_metadata.cpp" \
+  "$TEST_ROOT/source/formats/common/library_metadata_mupdf.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_utils.cpp" \
   "$TEST_ROOT/source/formats/common/html_entity_utils.cpp" \
   "$TEST_ROOT/source/formats/common/href_normalization.cpp" \

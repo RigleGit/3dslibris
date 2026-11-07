@@ -13,6 +13,7 @@
 #include "app/app.h"
 
 #include <algorithm>
+#include <map>
 #include <stdio.h>
 #include <string>
 #include <vector>
@@ -29,6 +30,14 @@
 #include "formats/common/book_error.h"
 
 namespace reader_internal {
+
+namespace {
+std::map<const Book *, OpenBookRelayoutState> saved_relayout_states;
+}
+
+void ClearSavedRelayoutState(const Book *book) {
+  saved_relayout_states.erase(book);
+}
 
 const char *SafeBookName(Book *book) {
   if (!book)
@@ -167,6 +176,8 @@ bool ReuseParsedBook(App *app) {
     selected->ResetCbzFailureState();
     selected->ResetCbzTransientViewState(true);
     DBG_LOG(app, "BOOK reopen: state reset complete");
+  } else if (selected->IsFixedLayout()) {
+    selected->CancelMuPdfIncrementalRender();
   }
   app->SetCurrentBook(selected);
   if (app->GetMode() == AppMode::Browser) {
@@ -186,12 +197,18 @@ bool ReuseParsedBook(App *app) {
 
 OpenBookRelayoutState CaptureRelayoutState(Book *book, bool needs_relayout) {
   OpenBookRelayoutState state = {needs_relayout, 0, 0, std::list<int>()};
-  if (!book || !needs_relayout)
+  if (!book)
+    return state;
+  const auto saved = saved_relayout_states.find(book);
+  if (book->GetPageCount() == 0 && saved != saved_relayout_states.end())
+    return saved->second;
+  if (!needs_relayout || book->GetPageCount() == 0)
     return state;
 
   state.old_page_count = book->GetPageCount();
   state.old_position = book->GetPosition();
   state.old_bookmarks = CopyBookmarksAsInts(book->GetBookmarks());
+  saved_relayout_states[book] = state;
   book->Close();
   return state;
 }
@@ -217,8 +234,17 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
   app->ts->SetScreen(app->ts->screenright);
   app->ts->ClearScreen();
   app->DrawBottomGradientBackground();
-  app->ts->SetPen(12, 28);
-  app->ts->PrintString(label ? label : "opening book ...");
+  const int line_width =
+      std::max(1, app->ts->LogicalWidth() - 2 * kOpeningTitleMargin);
+  const std::vector<std::string> label_lines = BuildOpeningTitleLines(
+      app->ts.get(), label ? label : "opening book ...", line_width,
+      kOpeningTitleMaxLines, TEXT_STYLE_BROWSER);
+  for (size_t i = 0; i < label_lines.size(); ++i) {
+    app->ts->SetPen(12, (u16)(28 + (int)i * kOpeningTitleLineHeight));
+    app->ts->PrintString(label_lines[i].c_str());
+  }
+  const int label_extra =
+      std::max(0, (int)label_lines.size() - 1) * kOpeningTitleLineHeight;
 
   const char *name = selected->GetFileName();
   if (!name || !*name)
@@ -229,17 +255,18 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
         std::max(1, app->ts->LogicalWidth() - 2 * kOpeningTitleMargin),
         kOpeningTitleMaxLines, TEXT_STYLE_BROWSER);
     for (size_t i = 0; i < lines.size(); ++i) {
-      app->ts->SetPen(12, (u16)(50 + (int)i * kOpeningTitleLineHeight));
+      app->ts->SetPen(
+          12, (u16)(50 + label_extra + (int)i * kOpeningTitleLineHeight));
       app->ts->PrintString(lines[i].c_str());
     }
   }
 
   if (spine_total > 0) {
-    unsigned pct = spine_done * 100u / spine_total;
+    unsigned pct = (unsigned)((u64)spine_done * 100u / spine_total);
     char progress[32];
     snprintf(progress, sizeof(progress), "%u / %u  (%u%%)", spine_done,
              spine_total, pct);
-    app->ts->SetPen(12, 106);
+    app->ts->SetPen(12, (u16)(106 + label_extra));
     app->ts->PrintString(progress);
   }
 
@@ -252,6 +279,10 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
   if (app->ts->BlitToFramebuffer()) {
     gfxFlushBuffers();
     gfxSwapBuffers();
+    // Synchronous parsing may report another spine before the main loop gets
+    // its usual VBlank. Do not reuse the displayed buffer until this swap has
+    // taken effect (libctru only provides double buffering).
+    gspWaitForVBlank();
   }
 }
 

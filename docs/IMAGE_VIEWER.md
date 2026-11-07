@@ -18,15 +18,23 @@ In the image viewer:
 - `A` / `B`: zoom in / out, from fit to 4× fit, subject to memory limits.
 - Circle Pad or D-Pad: pan in the reading orientation.
 - Stylus: move the visible region using the overview on the touch screen.
-- `X`: fit and center.
+- Physical `L` / `R`: rotate the illustration 90° left / right, independently of reading orientation.
+- `X`: fit and center, keeping the rotation.
 - `Y`: return to the same page and selection.
 - `START`: return to the library.
 - `SELECT`: close the viewer and open the book settings.
 
-All six actions (zoom in/out, fit, back, library and settings) also have touch
-buttons showing their function and shortcut. The overview sits above them; only
+All eight actions (zoom in/out, fit, back, library, settings and both rotations)
+also have touch buttons, arranged in four columns and two rows. `lib` / `(ST)`
+returns to the library; `prefs` / `(SEL)` opens settings. The overview sits above them; only
 gestures started inside it move the viewport. Button skins and icons clip to the
 actual screen width, including landscape.
+
+The image starts fitted, centered and unrotated. Rotation preserves the absolute image scale and
+the source center, clamping only to the new viewport bounds. Panning and stylus
+coordinates follow the rotated image, including its overview. Closing or changing
+the image resets rotation; HOME/sleep preserves it. `X` establishes a new fit scale for the current angle. A loaded texture is reused
+when its resolution is sufficient; larger views can require a new decode.
 
 The image starts fitted and centered. When movement stops, including pad
 movement, a filtered frame replaces the fast movement frame. The viewer never

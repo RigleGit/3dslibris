@@ -1,4 +1,8 @@
+#include "shared/path_utils.h"
 #include "app/library_controller.h"
+#include "reader/app_book_internal.h"
+#include "library/library_search_session.h"
+#include "library/library_preload_session.h"
 
 #include <algorithm>
 #include <dirent.h>
@@ -94,7 +98,7 @@ static time_t BookFileMtime(Book *b) {
   path.push_back('/');
   path.append(b->GetFileName());
   struct stat st;
-  return stat(path.c_str(), &st) == 0 ? st.st_mtime : 0;
+  return paths::StatWithMtime(path.c_str(), &st) ? st.st_mtime : 0;
 }
 
 static bool BookRecentLessThan(Book *a, Book *b) {
@@ -116,12 +120,17 @@ static std::string ToLowerAscii(const std::string &s) {
 
 static bool PathIsDirectory(const std::string &path) {
   struct stat st;
-  return stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+  return paths::StatWithMtime(path.c_str(), &st) && S_ISDIR(st.st_mode);
+}
+
+// An existing user library is authoritative, even when it is empty.
+static std::string LibraryBookSource(const std::string &configured) {
+  return PathIsDirectory(configured) ? configured : paths::kRomfsBookDir;
 }
 
 static bool PathIsRegularFile(const std::string &path) {
   struct stat st;
-  return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+  return paths::StatWithMtime(path.c_str(), &st) && S_ISREG(st.st_mode);
 }
 
 static std::string BasenameFromPath(const std::string &path) {
@@ -404,6 +413,7 @@ static bool DirectoryHasDirectSupportedBook(const std::string &dir) {
 
 static void AppendFolderEntry(App *app, const std::string &source_dir,
                               const std::string &folder_name,
+                              LibraryGradientContext *gradient_ctx,
                               std::set<std::string> *seen_keys) {
   if (!app || folder_name.empty() || folder_name[0] == '.')
     return;
@@ -426,9 +436,9 @@ static void AppendFolderEntry(App *app, const std::string &source_dir,
   ctx.orientation = &app->reader_layout.orientation;
   ctx.status_reporter = app;
   ctx.draw_background = &DrawBottomGradientFromApp;
-  ctx.draw_background_user_data = app;
+  ctx.draw_background_user_data = gradient_ctx;
   ctx.draw_top_background = &DrawTopGradientFromApp;
-  ctx.draw_top_background_user_data = app;
+  ctx.draw_top_background_user_data = gradient_ctx;
   ctx.on_spine_progress = &DrawOpeningSplashWithProgress;
   ctx.on_spine_progress_user_data = app;
 
@@ -450,6 +460,7 @@ static void ClearBrowserBooksAndButtons(App *app) {
     }
   }
   for (size_t i = 0; i < app->books.size(); i++) {
+    reader_internal::ClearSavedRelayoutState(app->books[i]);
     delete app->books[i];
   }
   app->books.clear();
@@ -572,8 +583,10 @@ LibraryController::LibraryController(App &app)
       browser_assets_pending_(true) {}
 
 LibraryController::~LibraryController() {
-  for (auto book : root_books_)
+  for (auto book : root_books_) {
+    reader_internal::ClearSavedRelayoutState(book);
     delete book;
+  }
   for (auto button : root_buttons_)
     delete button;
 }
@@ -614,7 +627,7 @@ int LibraryController::FindBooks() {
         if (filename.empty())
           continue;
         if (entries[i].attributes & FS_ATTRIBUTE_DIRECTORY)
-          AppendFolderEntry(&app_, dir, filename, &seen_keys);
+          AppendFolderEntry(&app_, dir, filename, &gradient_ctx_, &seen_keys);
         else
           AppendBookFromFilename(&app_, &gradient_ctx_, dir, filename.c_str(), &seen_keys);
       }
@@ -635,7 +648,7 @@ int LibraryController::FindBooks() {
         continue;
       std::string child = dir + "/" + ent->d_name;
       if (PathIsDirectory(child))
-        AppendFolderEntry(&app_, dir, ent->d_name, &seen_keys);
+        AppendFolderEntry(&app_, dir, ent->d_name, &gradient_ctx_, &seen_keys);
       else
         AppendBookFromFilename(&app_, &gradient_ctx_, dir, ent->d_name, &seen_keys);
     }
@@ -645,9 +658,7 @@ int LibraryController::FindBooks() {
 
   bool found_any_source = false;
   std::vector<std::string> scan_dirs;
-  scan_dirs.push_back(app_.bookdir);
-  if (app_.bookdir != paths::kRomfsBookDir)
-    scan_dirs.push_back(paths::kRomfsBookDir);
+  scan_dirs.push_back(LibraryBookSource(app_.bookdir));
 
   for (size_t i = 0; i < scan_dirs.size(); i++) {
     const std::string &dir = scan_dirs[i];
@@ -879,9 +890,7 @@ Book *LibraryController::RestoreSavedBookSelection(const char *folder,
   std::string folder_path = folder ? std::string(folder) : std::string();
   if (folder_path.empty()) {
     std::vector<std::string> scan_dirs;
-    scan_dirs.push_back(app_.bookdir);
-    if (app_.bookdir != paths::kRomfsBookDir)
-      scan_dirs.push_back(paths::kRomfsBookDir);
+    scan_dirs.push_back(LibraryBookSource(app_.bookdir));
     for (size_t i = 0; i < scan_dirs.size() && folder_path.empty(); i++) {
       DIR *dp = opendir(scan_dirs[i].c_str());
       if (!dp)
@@ -902,6 +911,12 @@ Book *LibraryController::RestoreSavedBookSelection(const char *folder,
     }
   }
 
+  // Old preferences must not reopen bundled copies excluded from this library.
+  const std::string bundled = paths::kRomfsBookDir;
+  if (LibraryBookSource(app_.bookdir) != bundled &&
+      (folder_path == bundled ||
+       folder_path.compare(0, bundled.size() + 1, bundled + "/") == 0))
+    return NULL;
   if (folder_path.empty() || !PathIsDirectory(folder_path))
     return NULL;
 

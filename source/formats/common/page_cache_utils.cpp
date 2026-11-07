@@ -1,3 +1,4 @@
+#include "shared/path_utils.h"
 #include "formats/common/page_cache_utils.h"
 
 #include "formats/common/binary_io_utils.h"
@@ -26,7 +27,7 @@ PageCacheLayoutParams BuildLayoutParams(
   if (!book_path)
     return params;
   struct stat st;
-  if (stat(book_path, &st) == 0) {
+  if (paths::StatWithMtime(book_path, &st)) {
     params.file_size = (long long)st.st_size;
     params.file_mtime = (long long)st.st_mtime;
   }
@@ -50,7 +51,7 @@ std::string BuildPageCachePath(const std::string &cache_dir,
   if (cache_dir.empty() || extension.empty() || book_path.empty())
     return std::string();
 
-  std::string key(book_path);
+  std::string key = "src2|" + book_path;
   key.push_back('|');
   key += std::to_string(params.file_size);
   key.push_back('|');

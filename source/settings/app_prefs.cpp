@@ -26,6 +26,7 @@
 #include "book/book.h"
 #include "book/book_renderer.h"
 #include "library/browser_view_utils.h"
+#include "library/cover_cache.h"
 #include "ui/button.h"
 #include "ui/ui_button_skin.h"
 #include "shared/color_utils.h"
@@ -357,7 +358,7 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks",
       "reset settings",
       "clear cache",        "publisher indent", "publisher spacing",
-      "publisher sides", "search", "disable ebook images"};
+      "publisher sides", "search", "disable ebook images", "preload book data"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -887,8 +888,11 @@ void SettingsController::PrefsRefreshButton(int index) {
   Button &button = app_.prefsButtons[button_index];
   char msg[64];
   switch (index) {
+  case PREFS_BUTTON_PRELOAD:
+    button.SetLabel2("covers and metadata >");
+    break;
   case PREFS_BUTTON_SEARCH:
-    button.SetLabel2("word or phrase >");
+    button.SetLabel2(is_book_ctx ? "word or phrase >" : "name, title or author >");
     break;
   case PREFS_BUTTON_FONT_CONFIG:
     button.SetLabel2(
@@ -1120,7 +1124,7 @@ void SettingsController::ClearAllCaches() {
   }
 
   const std::string cache_dirs[] = {
-      paths::GetEpubCacheDir(), paths::GetMobiCacheDir(),
+      paths::GetEpubCacheDir(), paths::GetMobiCacheDir(), paths::GetFb2CacheDir(),
       paths::GetMobiCoverMetaCacheDir(), paths::GetMetaCacheDir(),
       paths::GetCoverCacheDir()};
   for (size_t i = 0; i < sizeof(cache_dirs) / sizeof(cache_dirs[0]); i++) {
@@ -1135,6 +1139,8 @@ void SettingsController::ClearAllCaches() {
     settings::DeleteCacheDirectoryContents(cache_dirs[i].c_str());
 #endif
   }
+
+  cover_cache::ResetMaintenance();
 
   for (int i = 0; i < app_.BookCount(); i++) {
     Book *b = app_.books[i];
@@ -1199,8 +1205,16 @@ void SettingsController::PrefsHandlePress() {
   Book *book = app_.GetCurrentBook();
   const int selected_button = EffectiveButtonForSlot(app_.GetPrefsSelectedIndex());
 
+  if (selected_button == PREFS_BUTTON_PRELOAD && !is_book_ctx) {
+    app_.OpenLibraryPreload();
+    return;
+  }
+
   if (selected_button == PREFS_BUTTON_SEARCH) {
-    app_.OpenSearch();
+    if (is_book_ctx)
+      app_.OpenSearch();
+    else
+      app_.OpenLibrarySearch();
     return;
   }
 
@@ -1364,6 +1378,10 @@ void SettingsController::PrefsHandlePress() {
     const bool can_open_current = CanOpenBookIndexInCurrentContext(book, is_book_ctx);
     const bool can_open_selected = CanOpenSelectedBookIndex(selected);
     if (can_open_current) {
+      if (app_.BookNeedsRelayout(book)) {
+        app_.ReturnFromPrefs();
+        return;
+      }
       app_.ShowChaptersView();
     } else if (can_open_selected) {
       app_.OpenBook();
@@ -1379,6 +1397,10 @@ void SettingsController::PrefsHandlePress() {
     if (is_book_ctx && book && !book->SupportsBookmarks()) {
       app_.PrintStatus("Bookmarks unavailable for PDF");
     } else if (is_book_ctx && book) {
+      if (app_.BookNeedsRelayout(book)) {
+        app_.ReturnFromPrefs();
+        return;
+      }
       app_.ShowBookmarksView();
     } else if (!is_book_ctx && app_.GetSelectedBook() &&
                !app_.GetSelectedBook()->IsBrowserFolder()) {

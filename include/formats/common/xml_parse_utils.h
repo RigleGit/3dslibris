@@ -20,7 +20,7 @@
 namespace xml_parse_utils {
 
 typedef bool (*XmlShouldStopFn)(void *user_data);
-typedef void (*XmlTransformChunkFn)(const std::string &chunk, bool final,
+typedef void (*XmlTransformChunkFn)(const char *chunk, size_t size, bool final,
                                     void *transform_ctx, std::string *out);
 
 struct XmlParserOptions {

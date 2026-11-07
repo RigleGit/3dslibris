@@ -1,3 +1,4 @@
+#include "formats/common/epub_parse_perf.h"
 #include "formats/common/xml_parse_utils.h"
 
 #include <algorithm>
@@ -180,6 +181,9 @@ XmlParseResult ParseXmlZipEntryTransformed(unzFile uf,
       memcpy(buffer.data(), prefix->data() + prefix_offset, (size_t)len);
       prefix_offset += (size_t)len;
     } else {
+#ifdef DSLIBRIS_DEBUG
+      epub_parse_perf::ScopedTime perf_zip_read_ms(&epub_parse_perf::Snapshot::zip_read_ms);
+#endif
       len = unzReadCurrentFile(uf, buffer.data(), (unsigned)buffer.size());
     }
     if (len < 0) {
@@ -192,14 +196,22 @@ XmlParseResult ParseXmlZipEntryTransformed(unzFile uf,
     const char *parse_bytes = buffer.data();
     int parse_len = len;
     if (transform_chunk) {
+#ifdef DSLIBRIS_DEBUG
+      epub_parse_perf::ScopedTime perf_transform_ms(&epub_parse_perf::Snapshot::transform_ms);
+#endif
       transformed.clear();
-      transform_chunk(std::string(buffer.data(), (size_t)std::max(len, 0)),
-                      final, transform_ctx, &transformed);
+      transform_chunk(buffer.data(), (size_t)len, final, transform_ctx, &transformed);
       parse_bytes = transformed.c_str();
       parse_len = (int)transformed.size();
     }
 
-    enum XML_Status status = XML_Parse(parser, parse_bytes, parse_len, final);
+    enum XML_Status status;
+    {
+#ifdef DSLIBRIS_DEBUG
+      epub_parse_perf::ScopedTime perf_xml_ms(&epub_parse_perf::Snapshot::xml_ms);
+#endif
+      status = XML_Parse(parser, parse_bytes, parse_len, final);
+    }
     result.bytes_consumed += (size_t)len;
     if (status == XML_STATUS_ERROR) {
       result = BuildParseError(parser, result.bytes_consumed);

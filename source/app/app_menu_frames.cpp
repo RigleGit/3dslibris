@@ -741,6 +741,9 @@ void App::RunBookInfoFrame(const FrameInput &input)
     return;
   }
 
+  if (keys == 0 && !ts->HasDirtyScreens())
+    return;
+
   const int row_h = ts->GetHeight() + 2;
   const int label_x = 8;
   const int value_x = 110;
@@ -808,9 +811,6 @@ void App::RunBookInfoFrame(const FrameInput &input)
       ts->MarkScreenDirty(ts->screenright);
     }
   }
-
-  if (keys == 0 && !ts->HasDirtyScreens())
-    return;
 
   ts->SetScreen(ts->screenright);
   ts->ClearScreen();

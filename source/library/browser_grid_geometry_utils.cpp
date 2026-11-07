@@ -21,6 +21,21 @@ bool RoundedRectContains(int x, int y, int w, int h, int radius) {
   return dx * dx + dy * dy <= r * r;
 }
 
+void RoundedRectRowSpan(int y, int w, int h, int radius, int *left, int *right) {
+  if (!left || !right)
+    return;
+  *left = *right = 0;
+  if (w <= 0 || h <= 0 || y < 0 || y >= h)
+    return;
+  int begin = 0, end = w;
+  while (begin < end && !RoundedRectContains(begin, y, w, h, radius))
+    ++begin;
+  while (end > begin && !RoundedRectContains(end - 1, y, w, h, radius))
+    --end;
+  *left = begin;
+  *right = end;
+}
+
 void FitRectPreserveAspect(int src_w, int src_h, int box_w, int box_h,
                            int *out_w, int *out_h) {
   if (!out_w || !out_h)

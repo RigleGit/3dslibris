@@ -196,41 +196,42 @@ std::string NormalizeHtmlNamedEntitiesForXml(const std::string &in) {
   return out;
 }
 
-void NormalizeHtmlNamedEntitiesForXmlChunk(const std::string &chunk, bool final,
+void NormalizeHtmlNamedEntitiesForXmlChunk(const char *chunk, size_t size, bool final,
                                            ChunkedEntityNormalizerState *state,
                                            std::string *out) {
   if (!state || !out)
     return;
 
-  std::string input;
-  input.reserve(state->carry.size() + chunk.size());
-  input += state->carry;
-  input += chunk;
-  state->carry.clear();
-
-  for (size_t i = 0; i < input.size(); ++i) {
-    if (input[i] != '&') {
-      out->push_back(input[i]);
-      continue;
-    }
-
-    const size_t semi = input.find(';', i + 1);
-    if (semi == std::string::npos) {
-      if (!final) {
-        state->carry.assign(input.data() + i, input.size() - i);
-      } else {
-        out->append(input.data() + i, input.size() - i);
-      }
+  std::string joined;
+  if (!state->carry.empty()) {
+    joined.swap(state->carry);
+    joined.append(chunk, size);
+    chunk = joined.data();
+    size = joined.size();
+  }
+  size_t i = 0;
+  while (i < size) {
+    const char *amp = static_cast<const char *>(memchr(chunk + i, '&', size - i));
+    const size_t next = amp ? (size_t)(amp - chunk) : size;
+    out->append(chunk + i, next - i);
+    if (!amp)
+      return;
+    i = next;
+    const char *semi = static_cast<const char *>(memchr(amp + 1, ';', size - i - 1));
+    if (!semi) {
+      if (final)
+        out->append(amp, size - i);
+      else
+        state->carry.assign(amp, size - i);
       return;
     }
-
-    if (semi - i > 24) {
-      out->push_back(input[i]);
+    if (semi - amp > 24) {
+      out->push_back('&');
+      ++i;
       continue;
     }
-
-    AppendNormalizedEntityToken(input.substr(i, semi - i + 1), out);
-    i = semi;
+    AppendNormalizedEntityToken(std::string(amp, (size_t)(semi - amp + 1)), out);
+    i = (size_t)(semi - chunk) + 1;
   }
 }
 

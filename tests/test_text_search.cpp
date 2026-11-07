@@ -21,7 +21,35 @@ static text_search::Status Run(text_search::Engine &e, unsigned slice = 1) {
   assert(calls < 1000000);
   return e.GetStatus();
 }
+struct DeferredPages : Pages {
+  bool ready = false;
+  static text_search::PageAvailability Prepare(void *context, uint32_t page) {
+    DeferredPages &p = *(DeferredPages *)context;
+    return page == 1 && !p.ready ? text_search::PagePending
+                                 : text_search::PageReady;
+  }
+};
 int main() {
+  {
+    DeferredPages p;
+    p.text = {{'a'}, {'b'}};
+    p.events.resize(2);
+    text_search::Engine engine;
+    assert(engine.Configure("ab", false));
+    text_search::Source source = {&p, 2, Pages::Get, DeferredPages::Prepare};
+    engine.Start(source, {}, false, true);
+    engine.Pump(1000);
+    assert(engine.GetStatus() == text_search::Searching &&
+           engine.IsWaitingForPage());
+    const auto scanned = engine.Scanned();
+    engine.Pump(1000);
+    assert(engine.Scanned() == scanned);
+    p.ready = true;
+    assert(Run(engine) == text_search::Found);
+    assert(engine.GetMatch().start == text_search::Position(0, 0));
+    assert(engine.GetMatch().end == text_search::Position(1, 1));
+  }
+
   {
     Pages large;
     large.text.assign(300,std::vector<uint32_t>(100,'x'));

@@ -1,6 +1,7 @@
 #include "library/browser_grid_view.h"
 
 #include <cstring>
+#include <algorithm>
 
 #include "book/book.h"
 #include "shared/debug_log.h"
@@ -80,15 +81,8 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
         const int src_y = py * (*ctx.books)[i]->coverHeight / draw_h;
         int left = 0;
         int right = draw_w;
-        // Rounded corners leave one contiguous span per row.
-        while (left < right &&
-               !browser_grid_geometry_utils::RoundedRectContains(
-                   left, py, draw_w, draw_h, 5))
-          ++left;
-        while (right > left &&
-               !browser_grid_geometry_utils::RoundedRectContains(
-                   right - 1, py, draw_w, draw_h, 5))
-          --right;
+        browser_grid_geometry_utils::RoundedRectRowSpan(
+            py, draw_w, draw_h, 5, &left, &right);
         if (right > 240 - cx)
           right = 240 - cx;
         const u16 *src = (*ctx.books)[i]->coverPixels +
@@ -253,11 +247,13 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
       ctx.ts->MarkScreenDirtyRect(ctx.ts->screenright, fill_x, fill_y,
                                   fill_x + fill_w, fill_y + fill_h);
       for (int py = 0; py < fill_h && (fill_y + py) < 320; py++) {
-        for (int px = 0; px < fill_w && (fill_x + px) < 240; px++) {
-          if (!browser_grid_geometry_utils::RoundedRectContains(
-                  px, py, fill_w, fill_h, 5))
-            continue;
-          ctx.ts->screenright[(fill_y + py) * stride + (fill_x + px)] = fill;
+        int left = 0, right = 0;
+        browser_grid_geometry_utils::RoundedRectRowSpan(
+            py, fill_w, fill_h, 5, &left, &right);
+        right = std::min(right, 240 - fill_x);
+        if (left < right) {
+          u16 *row = ctx.ts->screenright + (fill_y + py) * stride + fill_x;
+          std::fill(row + left, row + right, fill);
         }
       }
       browser_presentation_utils::DrawWrappedTitleInsideCover(

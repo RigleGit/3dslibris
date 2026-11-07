@@ -192,6 +192,7 @@ public:
   void CloseBook();
   int GetBookIndex(Book *);
   void HandleEventInBook(const FrameInput &input);
+  bool PumpReaderPageCache(const FrameInput &input);
   void HandleEventInOpening(const FrameInput &input);
   u8 OpenBook();
   void ToggleBookmark();
@@ -203,6 +204,10 @@ public:
   void OpenSearch();
   void RunSearchFrame(const FrameInput &input);
   void InvalidateSearch(bool forget_query);
+  void OpenLibraryPreload();
+  void RunLibraryPreloadFrame(const FrameInput &input);
+  void OpenLibrarySearch();
+  void RunLibrarySearchFrame(const FrameInput &input);
   bool IsOpeningPending() const;
   void SetOpeningPending(bool pending);
   Book *GetOpeningBook() const;

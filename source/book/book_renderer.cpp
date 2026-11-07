@@ -30,7 +30,12 @@ bool CanDrawReflow(Book *book) {
   return book && !book->IsFixedLayout() && book->GetPageCount() > 0;
 }
 
-void DrawReflow(Book *book, Text *text) { book->GetPage()->Draw(text); }
+void DrawReflow(Book *book, Text *text) {
+  if (book->IsReflowPageReady(book->GetPosition())) {
+    book->GetPage()->Draw(text);
+    book->TrimReflowPageCache();
+  }
+}
 
 static const BookRendererEntry kBookRenderers[] = {
     {"mupdf", CanDrawMuPdf, DrawMuPdf},

@@ -418,6 +418,40 @@ static int EvaluateHeadingScore(Page *page, const std::string &query) {
   return best;
 }
 
+static void EvaluateApproxPage(Book *book, u16 p, const std::string &query,
+                               u16 hint_page, int *best_score, u16 *best_page) {
+  Page *page = book->GetPage((int)p);
+  std::string text = BuildPageSearchText(page, 4096);
+  int heading_score = EvaluateHeadingScore(page, query);
+  if (text.empty() && heading_score <= 0)
+    return;
+  size_t pos = text.find(query);
+  if (pos == std::string::npos && heading_score < 90)
+    return;
+
+  // Prefer occurrences near top of page and near current mapped hint.
+  int top_bonus = 0;
+  if (heading_score >= 170) {
+    top_bonus = 180;
+  } else if (pos < 120)
+    top_bonus = 120;
+  else if (pos < 320)
+    top_bonus = 80;
+  else if (pos < 900)
+    top_bonus = 40;
+  else
+    top_bonus = 0;
+
+  int dist = (int)p - (int)hint_page;
+  if (dist < 0)
+    dist = -dist;
+  int score = 300 + top_bonus - (dist / 2) + (heading_score * 2);
+  if (score > *best_score) {
+    *best_score = score;
+    *best_page = p;
+  }
+}
+
 static bool FindApproxTitlePage(Book *book, const std::string &title,
                                 u16 hint_page, u16 *page_out) {
   if (!book || !page_out)
@@ -436,43 +470,9 @@ static bool FindApproxTitlePage(Book *book, const std::string &title,
   if (query.size() < 4)
     return false;
 
-  auto eval_range = [&](u16 p0, u16 p1, int *best_score, u16 *best_page) {
-    if (p0 >= p1 || p0 >= page_count)
-      return;
-    if (p1 > page_count)
-      p1 = page_count;
-    for (u16 p = p0; p < p1; p++) {
-      Page *page = book->GetPage((int)p);
-      std::string text = BuildPageSearchText(page, 4096);
-      int heading_score = EvaluateHeadingScore(page, query);
-      if (text.empty() && heading_score <= 0)
-        continue;
-      size_t pos = text.find(query);
-      if (pos == std::string::npos && heading_score < 90)
-        continue;
-
-      // Prefer occurrences near top of page and near current mapped hint.
-      int top_bonus = 0;
-      if (heading_score >= 170) {
-        top_bonus = 180;
-      } else if (pos < 120)
-        top_bonus = 120;
-      else if (pos < 320)
-        top_bonus = 80;
-      else if (pos < 900)
-        top_bonus = 40;
-      else
-        top_bonus = 0;
-
-      int dist = (int)p - (int)hint_page;
-      if (dist < 0)
-        dist = -dist;
-      int score = 300 + top_bonus - (dist / 2) + (heading_score * 2);
-      if (score > *best_score) {
-        *best_score = score;
-        *best_page = p;
-      }
-    }
+  auto eval_range = [&](u16 p0, u16 p1, int *score, u16 *best) {
+    for (u16 p = p0; p < p1 && p < page_count; ++p)
+      EvaluateApproxPage(book, p, query, hint_page, score, best);
   };
 
   int best_score = -100000;
@@ -501,6 +501,21 @@ ChapterMenu::ChapterMenu(App *_app) : PagedListMenu(_app, "index") {}
 
 ChapterMenu::~ChapterMenu() {}
 
+void ChapterMenu::HandleInput(const FrameInput &input) {
+  if (approx_pending_) {
+    if (input.keys_down || !current_book_ ||
+        current_book_->GetOpenSessionId() != approx_session_) {
+      if (current_book_)
+        current_book_->CancelReflowPageRequest();
+      approx_pending_ = false;
+    } else {
+      ActivateSelected();
+      return;
+    }
+  }
+  PagedListMenu::HandleInput(input);
+}
+
 void ChapterMenu::SelectChapterForPage(u16 current_page) {
   SelectItem((u16)chapter_menu_utils::FindChapterIndexForPage(entry_pages,
                                                               current_page));
@@ -509,6 +524,7 @@ void ChapterMenu::SelectChapterForPage(u16 current_page) {
 void ChapterMenu::BuildEntries(Book *book, Text *text,
                                std::vector<std::string> &labels,
                                std::vector<u16> &pages) {
+  approx_pending_ = false;
   if (!book)
     return;
 
@@ -567,11 +583,13 @@ bool ChapterMenu::ResolveTargetPage(u16 index, u16 *page_out) {
     return true;
   }
 
+  // EPUB v23 persists targets resolved during complete pagination.
+  if (book->HasReflowPageCache() && !HasExtCI(book->GetFileName(), ".mobi"))
+    return true;
   TocQuality q = book->GetTocQuality();
   if (q == TOC_QUALITY_UNKNOWN) {
     DBG_LOGF(status_reporter, "INDEX resolve toc unknown idx=%u page=%u",
-             (unsigned)index,
-             (unsigned)*page_out);
+             (unsigned)index, (unsigned)*page_out);
     return true;
   }
 
@@ -592,9 +610,65 @@ bool ChapterMenu::ResolveTargetPage(u16 index, u16 *page_out) {
   if (approx_page_cache[index] == -2)
     return true;
 
+  bool resident_match = false;
+  if (book->HasReflowPageCache()) {
+    if (!approx_pending_ || approx_index_ != index ||
+        approx_session_ != book->GetOpenSessionId()) {
+      approx_pending_ = true;
+      approx_index_ = index;
+      approx_session_ = book->GetOpenSessionId();
+      approx_query_ = NormalizeSearchText(entry_titles[index]);
+      approx_best_score_ = -100000;
+      approx_best_page_ = entry_pages[index];
+      approx_phase_ = 0;
+      approx_cursor_ = entry_pages[index] > 24 ? entry_pages[index] - 24 : 0;
+      approx_end_ =
+          std::min<unsigned>(book->GetPageCount(), entry_pages[index] + 80);
+    }
+    const u64 begin = osGetTime();
+    while (approx_query_.size() >= 4 && approx_phase_ < 2 &&
+           osGetTime() - begin < 30) {
+      if (approx_cursor_ == approx_end_) {
+        if ((approx_phase_ == 0 && approx_best_score_ >= 260) ||
+            approx_phase_ == 1) {
+          approx_phase_ = 2;
+          break;
+        }
+        approx_phase_ = 1;
+        approx_cursor_ = 0;
+        approx_end_ = book->GetPageCount();
+        continue;
+      }
+      if (!book->IsReflowPageReady(approx_cursor_)) {
+        if (!book->RequestReflowPage(approx_cursor_))
+          return false;
+        if (book->AdvanceReflowPageCache() < 0) {
+          approx_pending_ = false;
+          return false;
+        }
+        if (!book->IsReflowPageReady(approx_cursor_))
+          continue;
+      }
+      EvaluateApproxPage(book, approx_cursor_, approx_query_,
+                         entry_pages[index], &approx_best_score_,
+                         &approx_best_page_);
+      ++approx_cursor_;
+      book->TrimReflowPageCache();
+    }
+    if (approx_query_.size() >= 4 && approx_phase_ < 2)
+      return false;
+    approx_pending_ = false;
+    resident_match =
+        approx_best_score_ >=
+        (approx_phase_ == 2 && approx_cursor_ != approx_end_ ? 260 : 220);
+  }
   u16 resolved = *page_out;
-  if (FindApproxTitlePage(book, entry_titles[index], entry_pages[index],
-                          &resolved)) {
+  if (book->HasReflowPageCache()
+          ? resident_match
+          : FindApproxTitlePage(book, entry_titles[index], entry_pages[index],
+                                &resolved)) {
+    if (book->HasReflowPageCache())
+      resolved = approx_best_page_;
     bool accept = true;
     const int from = (int)entry_pages[index];
     const int to = (int)resolved;

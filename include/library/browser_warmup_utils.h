@@ -101,6 +101,12 @@ inline bool IsPermanentCoverFailure(int rc) {
   return rc == 3 || rc == 8;
 }
 
+// fb2_extract_cover: 3 = no cover id in the document, 5 = its binary is
+// missing. Both are properties of the file; other codes may be transient.
+inline bool IsDefinitiveFb2NoCover(int rc) {
+  return rc == 3 || rc == 5;
+}
+
 inline uint64_t CoverRetryDelayMs(bool is_new_3ds, bool is_selected_book,
                                   int rc, bool has_pixels) {
   if (is_new_3ds)

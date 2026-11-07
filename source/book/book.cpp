@@ -12,6 +12,7 @@
 */
 
 #include "book/book.h"
+#include "shared/string_utils.h"
 
 #include "book/book_context.h"
 #include "formats/cbz/cbz_state.h"
@@ -21,6 +22,7 @@
 #include "formats/common/href_normalization.h"
 #include "formats/epub/epub.h"
 #include "formats/epub/epub_page_cache.h"
+#include "formats/common/reflow_block_cache.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "shared/main.h"
 #include "book/page.h"
@@ -92,6 +94,8 @@ static int RemainingMinutesFromMsPerPage(int remaining_pages,
 
 Book::Book(const BookContext &c) : ctx(c) {
   epub_cache_save_writer_ = NULL;
+  reflow_cache_reader_ = NULL;
+  reflow_pending_position_ = -1;
   // State / Formats
   mupdf_state = NULL;
   cbz_state = NULL;
@@ -738,7 +742,19 @@ void Book::SetPage(u16 index) {
 void Book::SetPosition(int pos) {
   const int prev = position;
   const int next = ClampPositionToPageCount(pos, GetPageCount());
+  if (reflow_cache_reader_ && reflow_cache_reader_->HasIndex() &&
+      !reflow_cache_reader_->IsReady((unsigned)next)) {
+    position = ClampPositionToPageCount(position, GetPageCount());
+    reflow_pending_position_ = next;
+    reflow_cache_reader_->Pin(position);
+    reflow_cache_reader_->Request(next);
+    if (!reflow_cache_reader_->IsReady((unsigned)next))
+      return;
+  }
   position = next;
+  reflow_pending_position_ = -1;
+  if (reflow_cache_reader_)
+    reflow_cache_reader_->Pin(next);
 
   const int delta = next - prev;
   const int abs_delta = delta >= 0 ? delta : -delta;
@@ -838,6 +854,93 @@ void Book::ReservePageCapacity(size_t incoming_pages) {
     pages.reserve(required_capacity);
 }
 
+bool Book::StartReflowPageCache(const std::string &path, size_t budget) {
+  if (GetPageCount())
+    return false;
+  delete reflow_cache_reader_;
+  reflow_cache_reader_ = new (std::nothrow) reflow_block_cache::Reader;
+  reflow_pending_position_ = -1;
+  if (!reflow_cache_reader_)
+    return false;
+  if (reflow_cache_reader_->Begin(this, path, budget, false,
+          HasExtCI(GetFileName(), ".mobi") ? reflow_block_cache::Mobi :
+          HasExtCI(GetFileName(), ".fb2") ? reflow_block_cache::Fb2 : reflow_block_cache::Epub) !=
+      reflow_block_cache::Pending) {
+    delete reflow_cache_reader_;
+    reflow_cache_reader_ = NULL;
+    return false;
+  }
+  return true;
+}
+bool Book::AdoptPreparedReflowPageCache(reflow_block_cache::Reader *reader) {
+  if (!reader || reflow_cache_reader_ || !reader->HasIndex())
+    return false;
+  reflow_cache_reader_ = reader;
+  reflow_pending_position_ = -1;
+  return true;
+}
+reflow_block_cache::Result Book::GetReflowPageCacheResult() const {
+  return reflow_cache_reader_ ? reflow_cache_reader_->GetResult()
+                            : reflow_block_cache::Missing;
+}
+bool Book::HasReflowPageCache() const {
+  return reflow_cache_reader_ != NULL;
+}
+bool Book::IsReflowPageReady(unsigned page) const {
+  return !reflow_cache_reader_ || reflow_cache_reader_->IsReady(page);
+}
+bool Book::RequestReflowPage(unsigned page) {
+  if (!reflow_cache_reader_)
+    return page < GetPageCount();
+  if (reflow_pending_position_ >= 0 && page != (unsigned)reflow_pending_position_)
+    return false;
+  return reflow_cache_reader_->Request(page);
+}
+void Book::CancelReflowPageRequest() {
+  reflow_pending_position_ = -1;
+  if (reflow_cache_reader_ && reflow_cache_reader_->IsReady(position))
+    reflow_cache_reader_->Request(position);
+}
+bool Book::HasPendingReflowNavigation() const {
+  return reflow_pending_position_ >= 0;
+}
+bool Book::HasPendingReflowPageRead() const {
+  return reflow_cache_reader_ &&
+         reflow_cache_reader_->GetResult() == reflow_block_cache::Pending;
+}
+bool Book::IsReflowPageCacheCorrupt() const {
+  return reflow_cache_reader_ &&
+         reflow_cache_reader_->GetResult() == reflow_block_cache::Corrupt;
+}
+void Book::InvalidateReflowPageCacheFile() {
+  if (reflow_cache_reader_)
+    reflow_cache_reader_->InvalidateFile();
+}
+unsigned Book::ReflowPageLinkCount(unsigned page) {
+  return reflow_cache_reader_      ? reflow_cache_reader_->Links(page)
+         : page < GetPageCount() ? GetPage(page)->GetSelectableCount()
+                                 : 0;
+}
+void Book::TrimReflowPageCache() {
+  if (reflow_cache_reader_)
+    reflow_cache_reader_->FrameEnd();
+}
+int Book::AdvanceReflowPageCache() {
+  if (!reflow_cache_reader_)
+    return 0;
+  const auto result = reflow_cache_reader_->Step();
+  if (result == reflow_block_cache::Pending)
+    return 1;
+  if (result != reflow_block_cache::Complete)
+    return -1;
+  if (reflow_pending_position_ >= 0) {
+    const int target = reflow_pending_position_;
+    reflow_pending_position_ = -1;
+    SetPosition(target);
+  }
+  return 0;
+}
+
 void Book::PumpPendingEpubPageCacheSave() {
   if (!HasPendingEpubPageCacheSave() || IsAsyncReflowOpenPending())
     return;
@@ -866,7 +969,7 @@ void Book::PumpPendingEpubPageCacheSave() {
       return;
     }
   }
-  if (epub_cache_save_writer_->Step(this, 16384, 8) !=
+  if (epub_cache_save_writer_->Step(this, 65536, 50) !=
       epub_page_cache::StreamWriter::Pending)
     CancelPendingEpubPageCacheSave();
 }
@@ -877,59 +980,16 @@ void Book::CancelPendingEpubPageCacheSave() {
   epub_page_cache_save_pending = false;
 }
 
-void Book::FinishPendingEpubPageCacheSave() {
-  if (epub_cache_save_writer_) {
-    epub_cache_save_writer_->Step(this, 0, 0, true);
-    CancelPendingEpubPageCacheSave();
-  } else {
-    epub_page_cache::SavePending(this, true);
-  }
-}
-
 void Book::FlushPendingCacheSaves() {
-  IStatusReporter *r = GetStatusReporter();
-  const bool flush_epub =
-      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
-          epub_page_cache_save_pending, IsAsyncReflowOpenPending(),
-          (unsigned int)GetPageCount());
-  const bool flush_mobi =
-      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
-          mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
-          (unsigned int)GetPageCount());
-  if (flush_epub) {
-    DBG_LOGF(r, "BOOK flush-cache: save-epub begin pages=%d book=%s",
-             (int)pages.size(), filename.c_str());
-    HomeButtonGuard home_guard;
-    FinishPendingEpubPageCacheSave();
-    DBG_LOGF(r, "BOOK flush-cache: save-epub done book=%s", filename.c_str());
-  }
-  if (flush_mobi) {
-    DBG_LOGF(r, "BOOK flush-cache: save-mobi begin pages=%d book=%s",
-             (int)pages.size(), filename.c_str());
-    HomeButtonGuard home_guard;
-    mobi_page_cache::SavePending(this);
-    DBG_LOGF(r, "BOOK flush-cache: save-mobi done book=%s", filename.c_str());
-  }
+  // Page persistence belongs to visible preparation, never to reading/closing.
+  mobi_page_cache_save_pending = false;
 }
 
 void Book::Close() {
-  const bool flush_pending_epub_cache =
-      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
-          epub_page_cache_save_pending, IsAsyncReflowOpenPending(),
-          (unsigned int)GetPageCount());
-  const bool flush_pending_mobi_cache =
-      reflow_cache_save_utils::ShouldFlushDeferredCacheSaveOnClose(
-          mobi_page_cache_save_pending, IsAsyncReflowOpenPending(),
-          (unsigned int)GetPageCount());
+  delete reflow_cache_reader_;
+  reflow_cache_reader_ = NULL;
+  reflow_pending_position_ = -1;
   CancelAsyncReflowOpen();
-  if (flush_pending_epub_cache) {
-    HomeButtonGuard home_guard;
-    FinishPendingEpubPageCacheSave();
-  }
-  if (flush_pending_mobi_cache) {
-    HomeButtonGuard home_guard;
-    mobi_page_cache::SavePending(this);
-  }
   CancelPendingEpubPageCacheSave();
   mobi_page_cache_save_pending = false;
   std::vector<Page *>::iterator it = pages.begin();
@@ -963,6 +1023,7 @@ void Book::ResetCbzFailureState() {
   cbz_state->failed_page = -1;
   cbz_state->logged_failed_page = -1;
   cbz_state->last_error.clear();
+  cbz_state->gpu_draw_failed = false;
 }
 
 bool Book::IsMobiFile() const {

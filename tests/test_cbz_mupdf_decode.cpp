@@ -7,6 +7,7 @@ extern "C" {
 }
 
 #include <fstream>
+#include <cassert>
 #include <iterator>
 #include <vector>
 
@@ -92,6 +93,12 @@ extern "C" void TestMuPdfDropContext(fz_context *ctx) {
   fz_drop_context(ctx);
 }
 
+static bool AcceptDecodedSamples(void *opaque, const raster_image::Rgb8View &s,
+                                  float w, float h) {
+  assert(s.Valid() && s.width == 8 && s.height == 8 && w == 8 && h == 8);
+  assert(s.Pixel(0, 0) == 20 && s.Pixel(7, 7) == ((28 << 11) | (56 << 5) | 20));
+  return *static_cast<bool *>(opaque);
+}
 int main(int argc, char **argv) {
   test::ExpectEq("PNG and JPEG fixture paths supplied", argc, 3);
   std::vector<unsigned char> png = ReadFile(argv[1]);
@@ -137,6 +144,14 @@ int main(int argc, char **argv) {
         !DecodeCbzPageImageWithContext(corrupt, 5, 240, 400, &page, &context));
     test::ExpectEqU("reader does not destroy its context between pages", context_drop_calls, 0);
   }
+  bool accept = true;
+  const raster_image::Rgb8Sink sink = {&accept, AcceptDecodedSamples};
+  assert(DecodeCbzPageImageWithContext(png, 5, 240, 400, &page, &context, &sink));
+  assert(page.source_bitmap.width == 8 && page.source_bitmap.height == 8);
+  assert(page.source_bitmap.pixels.empty() && "accepted GPU source needs no full RGB565 bitmap");
+  accept = false;
+  assert(DecodeCbzPageImageWithContext(png, 5, 240, 400, &page, &context, &sink));
+  assert(page.source_bitmap.pixels.size() == 64 && "rejected upload converts the still-live pixmap");
   ResetCbzDecodeContext(&context);
   test::ExpectTrue("reader clears its context on close", !context);
   test::ExpectEqU("reader destroys the context once on close", context_drop_calls, 1);

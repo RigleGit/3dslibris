@@ -119,7 +119,7 @@ private:
   std::map<FT_Face, std::unordered_map<u32, u8>> advanceCache;
 #ifdef DSLIBRIS_DEBUG
   struct AdvancePerf {
-    uint64_t calls = 0, hits = 0, misses = 0, loads = 0;
+    uint64_t calls = 0, hits = 0, misses = 0, loads = 0, load_ms = 0;
     uint64_t fallback_searches = 0, fallback_hits = 0, unresolved = 0;
   } advance_perf_;
   void LogAdvancePerf();
@@ -143,6 +143,7 @@ private:
 
   FT_Face FindFallbackFace(u32 ucs);
   void EnsureFacePixelSize(FT_Face face);
+  void SetFacePixelSize(FT_Face face, unsigned size);
   Cache *GetFaceCache(FT_Face face);
   FT_Error CreateConfiguredFace(int style);
 

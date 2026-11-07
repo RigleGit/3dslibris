@@ -67,35 +67,28 @@ namespace xml {
 namespace book {
 namespace metadata {
 
-std::string title;
-
 void start(void *userdata, const char *el, const char **attr) {
-  //! Expat callback, when entering an element.
-  //! For finding book title only.
-
-  if (!strcmp(el, "title")) {
-    parse_push((parsedata_t *)userdata, TAG_TITLE);
-  }
+  (void)attr;
+  parsedata_t *data = static_cast<parsedata_t *>(userdata);
+  const bool title = !strcmp(el, "title");
+  if (title)
+    data->book->SetTitle("");
+  parse_push(data, title ? TAG_TITLE : TAG_UNKNOWN);
 }
 
 void chardata(void *userdata, const char *txt, int txtlen) {
-  //! Expat callback, when in char data for element.
-  //! For finding book title only.
-
-  if (!parse_in((parsedata_t *)userdata, TAG_TITLE))
+  parsedata_t *data = static_cast<parsedata_t *>(userdata);
+  if (!parse_in(data, TAG_TITLE) || txtlen <= 0)
     return;
-  title = txt;
+  std::string title = data->book->GetTitle();
+  title.append(txt, (size_t)txtlen);
+  data->book->SetTitle(title.c_str());
 }
 
 void end(void *userdata, const char *el) {
-  //! Expat callback, when exiting an element.
-  //! For finding book title only.
-
-  parsedata_t *data = (parsedata_t *)userdata;
-  if (!strcmp(el, "title"))
-    data->book->SetTitle(title.c_str());
+  parsedata_t *data = static_cast<parsedata_t *>(userdata);
   if (!strcmp(el, "head"))
-    data->status = 1; // done.
+    data->status = 1;
   parse_pop(data);
 }
 

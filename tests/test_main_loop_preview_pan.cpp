@@ -27,9 +27,9 @@ int main() {
   idle.simulate_pan = false;
   MainLoopController idle_loop(idle);
   idle_loop.RunMainLoop();
-  // Interactions at 100 and 1500ms; save only at 1100..1400 and 2500..3600.
-  if (idle.GetCurrentBook()->cache_pumps != 16) {
-    std::fprintf(stderr, "FAIL: expected 16 idle save opportunities, got %u\n",
+  // Reading never starts or advances EPUB page-cache persistence, even when idle.
+  if (idle.GetCurrentBook()->cache_pumps != 0) {
+    std::fprintf(stderr, "FAIL: expected no idle cache writes, got %u\n",
                  idle.GetCurrentBook()->cache_pumps);
     return 1;
   }

@@ -406,12 +406,8 @@ void PagedListMenu::ActivateSelected() {
 
   u16 target_page = target_pages[selected];
   const bool resolved = ResolveTargetPage(selected, &target_page);
-  if (!resolved) {
-    DBG_LOGF(status_reporter, "LIST resolve failed title=%s sel=%u targets=%u",
-             header_title.c_str(), (unsigned)selected,
-             (unsigned)target_pages.size());
-    return;
-  }
+  if (!resolved)
+    return; // A cooperative target resolver may still be reading its pages.
 
   DBG_LOGF(status_reporter, "LIST activate title=%s sel=%u target=%u cur=%u",
            header_title.c_str(), (unsigned)selected, (unsigned)target_page,
@@ -487,6 +483,8 @@ void PagedListMenu::SelectItem(u16 index) {
 }
 
 void PagedListMenu::Back() {
+  if (current_book_)
+    current_book_->CancelReflowPageRequest();
   const bool from_book_settings = context_.IsBookSettingsContext();
   DBG_LOGF(status_reporter, "LIST back title=%s from_book_ctx=%d",
            header_title.c_str(), from_book_settings ? 1 : 0);

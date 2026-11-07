@@ -22,7 +22,7 @@ enum {
   KEY_DRIGHT = 128,
   KEY_DUP = 256,
   KEY_DDOWN = 512,
-  KEY_TOUCH = 1024
+  KEY_TOUCH = 1024, KEY_L = 2048, KEY_R = 4096
 };
 struct circlePosition {
   int dx = 0, dy = 0;
@@ -51,17 +51,34 @@ void UiButtonSkin_Draw(u16 *, int, int, int, int x, int y, int w, int h,
 }
 void UiButtonSkin_DrawIcon(u16 *, int, int, int, int, int, int, int,
                            UiButtonIconId, bool) {}
+static unsigned viewer_decodes = 0, viewer_reads = 0;
+static bool viewer_decode_ok = true;
 namespace raster_image {
+bool Bitmap::Allocate(int w, int h) {
+  pixels.reset(new u16[(size_t)w*h]()); width=w; height=h; return true;
+}
+bool Decode(const unsigned char *, size_t, int w, int h, u16, Bitmap *out, const char **error) {
+  ++viewer_decodes;
+  if (!viewer_decode_ok) { if (error) *error = "Decode failed"; return false; }
+  out->Allocate(w,h); out->original_width=out->original_height=1000;
+  if (error) *error=nullptr;
+  return true;
+}
 void FreePixels::operator()(uint16_t *p) const {
   delete[] p;
 }
 } // namespace raster_image
 static std::vector<bool> qualities;
+static size_t bottom_blit_pixels = 0;
+unsigned viewer_gpu_upload_attempts = 0, viewer_gpu_resets = 0;
+bool viewer_gpu_available = false, viewer_gpu_queue_ok = true;
+fixed_layout_tiles::Rect viewer_gpu_viewport;
 namespace fixed_layout_blit_utils {
-void BlitRgb565BitmapScaledCrop(Text *, u16 *, int, int, int, int, int,
+void BlitRgb565BitmapScaledCrop(Text *text, u16 *screen, int, int, int, int w, int h,
                                 const u16 *, size_t, int, int, int, int, int,
-                                int, bool quality) {
+                                int, bool quality, int) {
   qualities.push_back(quality);
+  if (screen == text->screenright) bottom_blit_pixels += (size_t)w*h;
 }
 } // namespace fixed_layout_blit_utils
 struct Page {
@@ -76,7 +93,12 @@ struct Page {
     return items;
   }
 };
+struct InlineImageMetadata { int width=0, height=0; };
 struct Book {
+  bool ReadInlineImageSource(u16, image_memory::Bytes *source) {
+    ++viewer_reads; return source->resize(16);
+  }
+  bool GetInlineImageMetadata(u16, InlineImageMetadata *) { return false; }
   Page page;
   const char *GetFileName() {
     return "book.epub";
@@ -132,6 +154,7 @@ struct App {
     ts->orientation = value;
     ts->landscape = value == 2;
   }
+  bool PresentIfDirty() { return true; }
   void ResetPageRepeat() {}
   void SetMode(AppMode value) {
     mode = value;
@@ -159,10 +182,8 @@ struct ReaderController {
     image_viewer_.reset();
     app_.mode = AppMode::Book;
   }
-  bool LoadImageViewer(int zoom) {
-    image_viewer_->viewport.zoom_index = zoom;
-    return true;
-  }
+  bool LoadImageViewer(int zoom);
+  bool RestoreImageViewerBitmap(bool refresh = false);
   void OpenImageViewer();
   void DrawImageViewer();
   void RunImageViewerFrame(const FrameInput &);
@@ -173,14 +194,14 @@ struct ReaderController {
 struct Fixture {
   App app;
   ReaderController reader{app};
-  explicit Fixture(unsigned char orientation) {
+  explicit Fixture(unsigned char orientation,int width=1000,int height=1000) {
     app.reader_layout.orientation = orientation;
     reader.OpenImageViewer();
     auto &s = *reader.image_viewer_;
     s.loading = s.wait_release = false;
-    s.image.width = s.image.height = s.image.original_width =
-        s.image.original_height = 1000;
-    s.image.pixels.reset(new u16[1000 * 1000]());
+    s.image.width=s.image.original_width=width;
+    s.image.height=s.image.original_height=height;
+    s.image.pixels.reset(new u16[(size_t)width*height]());
     Draw();
   }
   void Draw() {
@@ -202,6 +223,8 @@ struct Fixture {
       rx = y;
       ry = 239 - x;
     }
+    if(reader.image_viewer_ && reader.image_viewer_->preview_viewport_valid)
+      app.ts->screenright_cache_generation=reader.image_viewer_->preview_expected_generation;
     reader.RunImageViewerFrame(
         FrameInput(down, held, (held & KEY_TOUCH) != 0, rx, ry, 0));
   }
@@ -233,12 +256,12 @@ void TestLayout() {
       f.Draw();
       const int width = orientation == 2 ? 320 : 240,
                 height = orientation == 2 ? 240 : 320;
-      assert(skins.size() == 6);
+      assert(skins.size() == 8);
       for (const char *label :
-           {"zoom +", "zoom -", "fit", "back", "library", "settings"})
+           {"zoom+", "zoom-", "fit", "back", "lib", "prefs", "rot <", "rot >"})
         f.Control(label);
       for (const char *key :
-           {"(A)", "(B)", "(X)", "(Y)", "(START)", "(SELECT)"}) {
+           {"(A)", "(B)", "(X)", "(Y)", "(ST)", "(SEL)", "(L)", "(R)"}) {
         bool found = false;
         for (const auto &p : f.app.ts->printed)
           found |= p.text == key;
@@ -281,25 +304,25 @@ void TestActions() {
           f.Input(key, key);
         f.Input(0);
       };
-      action("zoom +", KEY_A);
+      action("zoom+", KEY_A);
       assert(s.viewport.zoom_index == 3);
       assert(s.viewport.center_x == 0.5f && s.viewport.center_y == 0.5f);
-      action("zoom -", KEY_B);
+      action("zoom-", KEY_B);
       assert(s.viewport.zoom_index == 2);
       s.viewport.zoom_index = 4;
       s.viewport.center_x = 0.8f;
       action("fit", KEY_X);
       assert(s.viewport.zoom_index == 2 && s.viewport.center_x == 0.5f);
       for (int i = 0; i < 8; ++i)
-        action("zoom +", KEY_A);
+        action("zoom+", KEY_A);
       assert(s.viewport.zoom_index == 6);
       for (int i = 0; i < 8; ++i)
-        action("zoom -", KEY_B);
+        action("zoom-", KEY_B);
       assert(s.viewport.zoom_index == 2);
       action("back", KEY_Y);
       assert(f.app.mode == AppMode::Book && !f.reader.image_viewer_);
       for (const auto &target : std::vector<std::pair<const char *, u32>>{
-               {"library", KEY_START}, {"settings", KEY_SELECT}}) {
+               {"lib", KEY_START}, {"prefs", KEY_SELECT}}) {
         Fixture other(orientation);
         if (touch)
           other.Tap(other.Control(target.first));
@@ -314,13 +337,13 @@ void TestActions() {
 }
 void TestUnavailableControls() {
   for (unsigned char orientation : {0, 1, 2}) {
-    for (const char *destination : {"back", "library", "settings"}) {
+    for (const char *destination : {"back", "lib", "prefs"}) {
       Fixture f(orientation);
       auto &s = *f.reader.image_viewer_;
       s.image = raster_image::Bitmap();
       s.message = "Image unavailable";
       f.Draw();
-      for (const char *label : {"zoom +", "zoom -", "fit"}) {
+      for (const char *label : {"zoom+", "zoom-", "fit"}) {
         const Skin b = f.Control(label);
         assert(b.state == UI_BUTTON_STATE_DISABLED);
         f.Tap(b);
@@ -330,7 +353,7 @@ void TestUnavailableControls() {
       f.Tap(f.Control(destination));
       assert(!f.reader.image_viewer_);
       assert(f.app.mode == (strcmp(destination, "back") == 0 ? AppMode::Book
-                            : strcmp(destination, "library") == 0
+                            : strcmp(destination, "lib") == 0
                                 ? AppMode::Browser
                                 : AppMode::Prefs));
     }
@@ -390,14 +413,130 @@ void TestPanRetainsControlsUntilStatusChanges() {
     assert(skins.empty() && f.app.ts->printed.empty());
     s.message = "Image load failed";
     f.Input(KEY_DLEFT, KEY_DLEFT);
-    assert(skins.size() == 6);
+    assert(skins.size() == 8);
     bool showed_error = false;
     for (const auto &p : f.app.ts->printed)
       showed_error |= p.text == "Image load failed";
     assert(showed_error);
   }
 }
+static void TestGpuOnlyViewer() {
+  viewer_gpu_available = viewer_gpu_queue_ok = viewer_decode_ok = true;
+  {
+    Fixture f(0);
+    auto &s = *f.reader.image_viewer_;
+    s.viewport.zoom_index = 4;
+    s.preview.Allocate(s.overview.width, s.overview.height);
+    s.preview_ready = true;
+    f.Draw();
+    assert(!s.image.pixels && s.gpu.Matches(s.image_generation));
+    const unsigned uploads = viewer_gpu_upload_attempts;
+    viewer_decodes = viewer_reads = 0;
+    f.Input(KEY_DRIGHT, KEY_DRIGHT);
+    f.Input(KEY_B, KEY_B);
+    assert(s.viewport.zoom_index == 3 && s.viewport.interaction_active == false);
+    assert(!s.image.pixels && viewer_decodes == 0 && viewer_reads == 0);
+    assert(viewer_gpu_upload_attempts == uploads);
+    // Failure to decode a larger source must preserve the usable GPU image.
+    viewer_decode_ok = false;
+    assert(!f.reader.LoadImageViewer(5));
+    assert(s.gpu.Matches(s.image_generation) && !s.image.pixels);
+    viewer_decode_ok = true;
+    // A rejected queue reconstructs once, then stays on CPU during panning.
+    viewer_gpu_queue_ok = false;
+    viewer_decodes = 0;
+    f.Input(KEY_DLEFT, KEY_DLEFT);
+    assert(s.image.pixels && viewer_decodes == 1);
+    f.Input(KEY_DRIGHT, KEY_DRIGHT);
+    assert(s.image.pixels && viewer_decodes == 1);
+  }
+  viewer_gpu_queue_ok = true;
+  {
+    Fixture f(0);
+    auto &s = *f.reader.image_viewer_;
+    s.preview.Allocate(s.overview.width, s.overview.height);
+    s.preview_ready = true;
+    f.Draw();
+    assert(!s.image.pixels);
+    viewer_gpu_queue_ok = viewer_decode_ok = false;
+    viewer_decodes = 0;
+    f.Input(KEY_DRIGHT, KEY_DRIGHT);
+    f.Input(KEY_DLEFT, KEY_DLEFT);
+    assert(viewer_decodes == 1 && !s.image.pixels);
+    assert(f.app.mode == AppMode::ImageViewer);
+    f.Input(KEY_Y, KEY_Y);
+    assert(f.app.mode == AppMode::Book);
+  }
+  viewer_gpu_queue_ok = viewer_decode_ok = true;
+  {
+    Fixture f(0);
+    const unsigned resets = viewer_gpu_resets;
+    f.reader.SuspendImageViewer();
+    assert(viewer_gpu_resets == resets && "APT hook defers GPU destruction");
+    f.reader.DrawImageViewer();
+    assert(viewer_gpu_resets == resets + 1);
+  }
+  viewer_gpu_available = false;
+}
+void TestRotation() {
+  for(unsigned char orientation:{0,1,2}) for(bool touch:{false,true}) {
+    Fixture f(orientation);auto &s=*f.reader.image_viewer_;
+    s.viewport.zoom_index=6;s.viewport.center_x=.4f;s.viewport.center_y=.6f;
+    viewer_decodes=0;
+    for(int turn=1;turn<=4;++turn) {
+      if(touch) f.Tap(f.Control("rot >"));else f.Input(KEY_R,KEY_R);
+      f.Input(0);f.Draw();
+      assert(s.quarter_turns==(turn%4) && s.viewport.zoom_index==6);
+      assert(std::abs(s.viewport.center_x-.4f)<1e-6f && std::abs(s.viewport.center_y-.6f)<1e-6f);
+    }
+    assert(viewer_decodes==0);
+    if(touch) f.Tap(f.Control("rot <"));else f.Input(KEY_L,KEY_L);
+    f.Input(0);assert(s.quarter_turns==3);
+    f.Input(KEY_X,KEY_X);assert(s.quarter_turns==3 && s.viewport.zoom_index==2);
+    const auto angle=s.quarter_turns;f.reader.SuspendImageViewer();assert(s.quarter_turns==angle);
+  }
+}
+void TestRectangularRotationScale() {
+  viewer_gpu_available=true;
+  Fixture f(2,1000,1500);auto &s=*f.reader.image_viewer_;
+  s.viewport.zoom_index=4;f.Draw();
+  assert(std::abs(viewer_gpu_viewport.height-.5f)<1e-5f);
+  const unsigned uploads=viewer_gpu_upload_attempts;
+  viewer_decodes=0;f.Input(KEY_R,KEY_R);
+  assert(std::abs(viewer_gpu_viewport.width-.75f)<1e-5f);
+  assert(std::abs(viewer_gpu_viewport.height-5.f/6.f)<1e-5f);
+  assert(viewer_decodes==0 && viewer_gpu_upload_attempts==uploads);
+  f.Input(KEY_X,KEY_X);
+  assert(s.quarter_turns==1 && viewer_gpu_viewport.width==1 && viewer_gpu_viewport.height==1);
+  f.Input(KEY_R,KEY_R);
+  assert(std::abs(viewer_gpu_viewport.width-1.f)<1e-5f);
+  assert(std::abs(viewer_gpu_viewport.height-2.f/3.f)<1e-5f);
+  viewer_gpu_available=false;
+}
 int main(int argc, char **argv) {
+  TestRectangularRotationScale();
+  TestRotation();
+  TestGpuOnlyViewer();
+  {
+    Fixture f(0);
+    f.reader.image_viewer_->loading=true;
+    viewer_gpu_upload_attempts=0;
+    f.reader.DrawImageViewer();
+    assert(viewer_gpu_upload_attempts==0 && "loading must not re-upload the previous image before replacement decode");
+  }
+  {
+    Fixture f(0);
+    auto &s=*f.reader.image_viewer_;
+    s.viewport.zoom_index=4;
+    s.preview.width=s.overview.width; s.preview.height=s.overview.height;
+    s.preview.pixels.reset(new u16[(size_t)s.preview.width*s.preview.height]());
+    s.preview_ready=true;
+    f.Draw();
+    f.app.ts->screenright_cache_generation=s.preview_expected_generation;
+    bottom_blit_pixels=0;
+    f.Input(KEY_DRIGHT,KEY_DRIGHT);
+    assert(bottom_blit_pixels==0 && "resident pan must restore border strips, not blit the full preview");
+  }
   if (argc == 1 || strcmp(argv[1], "layout") == 0)
     TestLayout();
   if (argc == 1 || strcmp(argv[1], "actions") == 0)

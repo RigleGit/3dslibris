@@ -103,6 +103,8 @@ float ComputeEffectiveMuPdfZoom(app_flow_utils::MuPdfDocumentKind kind,
 inline void ResetBitmapCache(Book::MuPdfState::BitmapCache *cache) {
   if (!cache)
     return;
+  cache->gpu.Reset();
+  ++cache->generation;
   cache->page = -1;
   cache->zoom_index = -1;
   cache->left = 0.0f;
@@ -111,7 +113,7 @@ inline void ResetBitmapCache(Book::MuPdfState::BitmapCache *cache) {
   cache->height = 1.0f;
   cache->bitmap_width = 0;
   cache->bitmap_height = 0;
-  cache->pixels.clear();
+  std::vector<u16>().swap(cache->pixels);
   cache->native_pixels.reset();
 }
 
@@ -133,6 +135,8 @@ inline void StoreBitmapCache(Book::MuPdfState::BitmapCache *cache, int page,
                              RenderedMuPdfBitmap *rendered) {
   if (!cache || !rendered)
     return;
+  cache->gpu.Reset();
+  ++cache->generation;
   cache->page = page;
   cache->zoom_index = zoom_index;
   cache->left = left;
@@ -148,5 +152,6 @@ inline void StoreBitmapCache(Book::MuPdfState::BitmapCache *cache, int page,
 inline bool BitmapCacheValid(const Book::MuPdfState::BitmapCache &cache,
                              int page) {
   return cache.page == page && cache.bitmap_width > 0 &&
-         cache.bitmap_height > 0 && cache.PixelData() && cache.PixelCount() > 0;
+         cache.bitmap_height > 0 && ((cache.PixelData() && cache.PixelCount() > 0) ||
+             cache.gpu.Matches(cache.generation));
 }

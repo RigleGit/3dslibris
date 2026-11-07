@@ -10,7 +10,7 @@ for mode in release debug; do
 
 "${CXX:-c++}" -std=c++11 \
   ${CXXFLAGS:-} \
-  -DDSLIBRIS_HOST_TEST -Dfflush=ObserveCacheFlush \
+  -DDSLIBRIS_HOST_TEST -Dfflush=ObserveCacheFlush -Dfwrite=ObserveCacheWrite -Dread=ObserveBlockRead -Dwrite=ObserveBlockWrite -Duncompress=ObserveUncompress \
   ${flags[@]+"${flags[@]}"} \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \
@@ -32,6 +32,8 @@ for mode in release debug; do
   "$TEST_ROOT/source/book/heading_layout.cpp" \
   "$TEST_ROOT/source/book/inline_image_layout.cpp" \
   "$TEST_ROOT/source/formats/epub/epub_page_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/reflow_block_cache.cpp" \
+  "$TEST_ROOT/source/formats/common/page_cache_codec.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_heading_markers.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_utils.cpp" \
   "$TEST_ROOT/source/formats/common/binary_io_utils.cpp" \

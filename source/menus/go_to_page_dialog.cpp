@@ -101,6 +101,21 @@ bool GoToPageDialog::Confirm() {
   if (book->IsFixedLayout())
     book_renderer::ResetFixedLayoutViewportForNavigation(book);
 
+  if (app_.BookNeedsRelayout(book)) {
+    // CaptureRelayoutState must see the selected page, not the previous
+    // resident page retained while lazy navigation is pending.
+    while (book->HasPendingReflowNavigation()) {
+      if (app_.ShouldAbortWork())
+        return false;
+      if (book->AdvanceReflowPageCache() < 0) {
+        app_.PrintStatus("Page cache read failed");
+        return false;
+      }
+    }
+    open_ = false;
+    app_.ReturnFromPrefs();
+    return true;
+  }
   app_.ShowCurrentBookView();
   book_renderer::DrawCurrentView(book, app_.ts.get());
   app_.SetPdfDeferredReadyAtMs(

@@ -1,12 +1,14 @@
 #include "app/reader_controller.h"
 #include "reader/search_session.h"
 #include "reader/image_viewer_session.h"
+#include "formats/common/reflow_preparation.h"
 
 #include "app/app.h"
 
 ReaderController::ReaderController(App &app)
-    : app_(app), progress_autosave_book_(nullptr),
-      progress_autosave_dirty_(false), last_progress_persist_ms_(0) {}
+    : cache_preparing_(nullptr), cache_draw_ms_(0), app_(app),
+      progress_autosave_book_(nullptr), progress_autosave_dirty_(false),
+      last_progress_persist_ms_(0) {}
 
 ReaderController::~ReaderController() {}
 
@@ -41,3 +43,7 @@ void App::OnReaderAppletSuspendRequested() {
 void App::OnReaderAppletSuspended() { reader_controller_->OnAppletSuspended(); }
 
 void App::OnReaderAppletResumed() { reader_controller_->OnAppletResumed(); }
+
+bool App::PumpReaderPageCache(const FrameInput &input) {
+  return reader_controller_->PumpPageCache(input);
+}

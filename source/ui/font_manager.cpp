@@ -27,10 +27,18 @@
 namespace {
 
 // Rendered bitmaps share one bounded LRU across sizes. Use the face's actual
-// size because the browser face stays at 12px and fallbacks have their own size.
+// size because the browser face stays at 12px and fallbacks follow the requester.
 static u32 GlyphCacheKey(u32 ucs, FT_Face face) {
   const u32 height = face && face->size ? face->size->metrics.y_ppem : 0;
   return (height << 24) | (ucs & 0x00FFFFFFu);
+}
+
+// Empty outlines are normal for spaces. Only Arabic presentation forms are
+// known to contain mapped, advancing glyphs that need a fallback for ink.
+static bool IsGhostGlyph(u32 ucs, FT_GlyphSlot glyph) {
+  return ucs >= 0xFE70u && ucs <= 0xFEFFu && glyph->advance.x != 0 &&
+         glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
+         glyph->outline.n_contours == 0;
 }
 
 static bool FileReadable(const char *path) {
@@ -149,13 +157,18 @@ FT_Face FontManager::GetFace(u8 style) {
 void FontManager::EnsureFacePixelSize(FT_Face face) {
   if (ftc || !face)
     return;
-  // Fallbacks retain their own active size, as before the lazy primary-face
-  // update. Do not resize them to a temporary browser/reader request.
+  // Fallback sizes are selected from the requesting face before CacheGlyph.
+  // Preserve that selection when CacheGlyph ensures the resolved face again.
   for (int i = 0; i < fallback_count_; ++i) {
     if (fallback_faces_[i] == face)
       return;
   }
-  const int size = faces[TEXT_STYLE_BROWSER] == face ? 12 : pixelsize;
+  SetFacePixelSize(face, faces[TEXT_STYLE_BROWSER] == face ? 12 : pixelsize);
+}
+
+void FontManager::SetFacePixelSize(FT_Face face, unsigned size) {
+  if (!face)
+    return;
   if (face->size && face->size->metrics.y_ppem == size)
     return;
   Cache *face_cache = GetFaceCache(face);
@@ -436,15 +449,14 @@ FT_GlyphSlot FontManager::GetGlyph(u32 ucs, int flags, FT_Face face) {
     bool needs_fallback = !FT_Get_Char_Index(face, ucs);
     if (!needs_fallback && ucs >= 0xFE70u && ucs <= 0xFEFFu) {
       FT_Error load_err = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
-      if (!load_err && face->glyph->advance.x != 0 &&
-          face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
-          face->glyph->outline.n_contours == 0) {
+      if (!load_err && IsGhostGlyph(ucs, face->glyph)) {
         needs_fallback = true;
       }
     }
     if (needs_fallback) {
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
+        SetFacePixelSize(fb, face->size->metrics.y_ppem);
         face = fb;
       }
     }
@@ -484,11 +496,12 @@ void FontManager::LogAdvancePerf() {
   if (!reporter || !DBG_SHOULD_LOG(DBG_LEVEL_INFO, DBG_CAT_PERF))
     return;
   DBG_LOGF_CAT(reporter, DBG_LEVEL_INFO, DBG_CAT_PERF,
-               "ADVANCE calls=%llu hits=%llu misses=%llu loads=%llu",
+               "ADVANCE calls=%llu hits=%llu misses=%llu loads=%llu load_ms=%llu",
                (unsigned long long)advance_perf_.calls,
                (unsigned long long)advance_perf_.hits,
                (unsigned long long)advance_perf_.misses,
-               (unsigned long long)advance_perf_.loads);
+               (unsigned long long)advance_perf_.loads,
+               (unsigned long long)advance_perf_.load_ms);
   DBG_LOGF_CAT(reporter, DBG_LEVEL_INFO, DBG_CAT_PERF,
                "ADVANCE fallback searches=%llu hits=%llu unresolved=%llu ftc=%d",
                (unsigned long long)advance_perf_.fallback_searches,
@@ -568,6 +581,8 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       return (glyph->advance).x;
   } else {
     bool needs_fallback = false;
+    bool primary_loaded = false;
+    u8 primary_advance = 0;
 #ifdef ADVANCE_NO_CACHE
     FONT_ADVANCE_COUNT(misses);
     auto gindex = FT_Get_Char_Index(face, ucs);
@@ -575,18 +590,24 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       needs_fallback = true;
     } else {
       FONT_ADVANCE_COUNT(loads);
+#ifdef DSLIBRIS_DEBUG
+      const u64 advance_load_begin = osGetTime();
+#endif
       error = FT_Load_Glyph(face, gindex, FT_LOAD_DEFAULT);
+#ifdef DSLIBRIS_DEBUG
+      advance_perf_.load_ms += osGetTime() - advance_load_begin;
+#endif
       if (!error) {
-        bool ghost = face->glyph->advance.x != 0 &&
-                     face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
-                     face->glyph->outline.n_contours == 0;
+        primary_loaded = true;
+        primary_advance = face->glyph->advance.x >> 6;
+        bool ghost = IsGhostGlyph(ucs, face->glyph);
         if (!ghost)
           return face->glyph->advance.x >> 6;
         needs_fallback = true;
       }
     }
 #else
-    const u32 cache_key = ((u32)pixelsize << 24) | (ucs & 0x00FFFFFFu);
+    const u32 cache_key = GlyphCacheKey(ucs, face);
     auto &faceAdvanceCache = advanceCache[face];
     auto iter = faceAdvanceCache.find(cache_key);
     if (iter != faceAdvanceCache.end()) {
@@ -599,11 +620,17 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       needs_fallback = true;
     } else {
       FONT_ADVANCE_COUNT(loads);
+#ifdef DSLIBRIS_DEBUG
+      const u64 advance_load_begin = osGetTime();
+#endif
       error = FT_Load_Char(face, ucs, FT_LOAD_DEFAULT);
+#ifdef DSLIBRIS_DEBUG
+      advance_perf_.load_ms += osGetTime() - advance_load_begin;
+#endif
       if (!error) {
-        bool ghost = face->glyph->advance.x != 0 &&
-                     face->glyph->format == FT_GLYPH_FORMAT_OUTLINE &&
-                     face->glyph->outline.n_contours == 0;
+        primary_loaded = true;
+        primary_advance = face->glyph->advance.x >> 6;
+        bool ghost = IsGhostGlyph(ucs, face->glyph);
         if (!ghost) {
           u8 advance = face->glyph->advance.x >> 6;
           faceAdvanceCache.insert(std::make_pair(cache_key, advance));
@@ -618,30 +645,55 @@ u8 FontManager::GetAdvance(u32 ucs, FT_Face face) {
       FONT_ADVANCE_COUNT(fallback_searches);
       FT_Face fb = FindFallbackFace(ucs);
       if (fb) {
+        SetFacePixelSize(fb, face->size->metrics.y_ppem);
 #ifdef ADVANCE_NO_CACHE
         FONT_ADVANCE_COUNT(loads);
+#ifdef DSLIBRIS_DEBUG
+      const u64 advance_load_begin = osGetTime();
+#endif
+
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
+#ifdef DSLIBRIS_DEBUG
+      advance_perf_.load_ms += osGetTime() - advance_load_begin;
+#endif
         if (!error)
           return fb->glyph->advance.x >> 6;
 #else
+        const u32 fb_cache_key = GlyphCacheKey(ucs, fb);
         auto &fbAdvanceCache = advanceCache[fb];
-        auto fb_iter = fbAdvanceCache.find(cache_key);
+        auto fb_iter = fbAdvanceCache.find(fb_cache_key);
         if (fb_iter != fbAdvanceCache.end()) {
           FONT_ADVANCE_COUNT(fallback_hits);
-          faceAdvanceCache.insert(std::make_pair(cache_key, fb_iter->second));
+          if (fb_cache_key == cache_key)
+            faceAdvanceCache.insert(std::make_pair(cache_key, fb_iter->second));
           return fb_iter->second;
         }
 
         FONT_ADVANCE_COUNT(loads);
+#ifdef DSLIBRIS_DEBUG
+      const u64 advance_load_begin = osGetTime();
+#endif
+
         error = FT_Load_Char(fb, ucs, FT_LOAD_DEFAULT);
+#ifdef DSLIBRIS_DEBUG
+      advance_perf_.load_ms += osGetTime() - advance_load_begin;
+#endif
         if (!error) {
           u8 advance = fb->glyph->advance.x >> 6;
-          fbAdvanceCache.insert(std::make_pair(cache_key, advance));
-          faceAdvanceCache.insert(std::make_pair(cache_key, advance));
+          fbAdvanceCache.insert(std::make_pair(fb_cache_key, advance));
+          if (fb_cache_key == cache_key)
+            faceAdvanceCache.insert(std::make_pair(cache_key, advance));
           return advance;
         }
 #endif
       }
+    }
+    // A mapped ghost without a usable fallback still renders on the primary.
+    if (primary_loaded) {
+#ifndef ADVANCE_NO_CACHE
+      faceAdvanceCache.insert(std::make_pair(cache_key, primary_advance));
+#endif
+      return primary_advance;
     }
   }
 

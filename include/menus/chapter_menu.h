@@ -19,6 +19,7 @@ public:
   ChapterMenu(class App *app);
   ~ChapterMenu();
   void SelectChapterForPage(u16 current_page);
+  void HandleInput(const FrameInput &input) override;
 
 private:
   void BuildEntries(class Book *book, class Text *text,
@@ -26,6 +27,12 @@ private:
                     std::vector<u16> &pages) override;
   bool ResolveTargetPage(u16 index, u16 *page_out) override;
 
+  bool approx_pending_ = false;
+  unsigned approx_index_ = 0, approx_cursor_ = 0, approx_end_ = 0, approx_phase_ = 0;
+  unsigned approx_session_ = 0;
+  int approx_best_score_ = -100000;
+  u16 approx_best_page_ = 0;
+  std::string approx_query_;
   std::vector<std::string> entry_titles;
   std::vector<u16> entry_pages;
   std::vector<int> approx_page_cache;

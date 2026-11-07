@@ -188,7 +188,8 @@ bool ResampleRgb8ToBitmap(const unsigned char *src, int src_width,
 bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
                                   int max_zoom_index, int target_width,
                                   int target_height, CbzDecodedPage *out,
-                                  fz_context **context) {
+                                  fz_context **context,
+                                  const raster_image::Rgb8Sink *sink) {
   if (!out || !context || bytes.empty()) {
     ClearDecodedPage(out);
     SetLastCbzDecodeError("invalid mupdf image decode parameters");
@@ -275,29 +276,36 @@ bool DecodeImageToBitmapWithMuPdf(const std::vector<unsigned char> &bytes,
     const uint64_t rgb_start = fixed_perf::Now();
     out->source_bitmap.width = pix_w;
     out->source_bitmap.height = pix_h;
-    out->source_bitmap.pixels.resize((size_t)pix_w * (size_t)pix_h);
+    const raster_image::Rgb8View source = {
+        samples, (size_t)stride * pix_h, pix_w, pix_h, stride, comps};
+    const bool uploaded = sink && sink->consume &&
+        sink->consume(sink->user, source, out->original_width, out->original_height);
+    if (!uploaded) {
+      out->source_bitmap.pixels.resize((size_t)pix_w * (size_t)pix_h);
 
-    uint16_t *dst = out->source_bitmap.pixels.data();
+      uint16_t *dst = out->source_bitmap.pixels.data();
 
-    if (comps == 1 || comps == 2) {
-      for (int y = 0; y < pix_h; y++) {
-        const unsigned char *src = samples + (size_t)y * (size_t)stride;
-        for (int x = 0; x < pix_w; x++) {
-          *dst++ = RGB565FromRgb8(src[0], src[0], src[0]);
-          src += comps;
+      if (comps == 1 || comps == 2) {
+        for (int y = 0; y < pix_h; y++) {
+          const unsigned char *src = samples + (size_t)y * (size_t)stride;
+          for (int x = 0; x < pix_w; x++) {
+            *dst++ = RGB565FromRgb8(src[0], src[0], src[0]);
+            src += comps;
+          }
         }
-      }
-    } else {
-      for (int y = 0; y < pix_h; y++) {
-        const unsigned char *src = samples + (size_t)y * (size_t)stride;
-        for (int x = 0; x < pix_w; x++) {
-          *dst++ = RGB565FromRgb8(src[0], src[1], src[2]);
-          src += comps;
+      } else {
+        for (int y = 0; y < pix_h; y++) {
+          const unsigned char *src = samples + (size_t)y * (size_t)stride;
+          for (int x = 0; x < pix_w; x++) {
+            *dst++ = RGB565FromRgb8(src[0], src[1], src[2]);
+            src += comps;
+          }
         }
       }
     }
 
-    fixed_perf::Record(&bytes, -1, max_zoom_index, "cbz.decode_rgb565",
+    fixed_perf::Record(&bytes, -1, max_zoom_index,
+                       uploaded ? "cbz.decode_gpu_source" : "cbz.decode_rgb565",
                        fixed_perf::Now() - rgb_start, 1,
                        out->source_bitmap.pixels.size() * sizeof(uint16_t),
                        pix_w, pix_h);
@@ -378,7 +386,8 @@ bool DecodeCbzPageImage(const std::vector<unsigned char> &bytes,
 bool DecodeCbzPageImageWithContext(const std::vector<unsigned char> &bytes,
                                   int max_zoom_index, int target_width,
                                   int target_height, CbzDecodedPage *out,
-                                  fz_context **context) {
+                                  fz_context **context,
+                                  const raster_image::Rgb8Sink *sink) {
   if (!out || !context)
     return false;
 
@@ -392,8 +401,9 @@ bool DecodeCbzPageImageWithContext(const std::vector<unsigned char> &bytes,
 
 #ifdef __3DS__
   return DecodeImageToBitmapWithMuPdf(bytes, max_zoom_index, target_width,
-                                      target_height, out, context);
+                                      target_height, out, context, sink);
 #else
+  (void)sink; // Host reference path keeps its existing resampled bitmap.
   int src_width = 0;
   int src_height = 0;
   int src_components = 0;

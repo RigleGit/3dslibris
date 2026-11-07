@@ -1,7 +1,10 @@
+#include <algorithm>
+#include "formats/epub/epub_package_toc_utils.h"
 #include "book/book.h"
 #include "book/book_context.h"
 #include "book/page.h"
 #include "formats/epub/epub_parser.h"
+#include "formats/epub/epub_preparation.h"
 #include "expat.h"
 #include "formats/epub/epub_page_cache.h"
 #include "formats/common/page_text_extract_utils.h"
@@ -17,6 +20,16 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <vector>
+#include <zlib.h>
+
+#undef unzLocateFile
+extern "C" int unzLocateFile(unzFile, const char *, int);
+static bool observe_toc_locates = false;
+static unsigned toc_locates = 0;
+extern "C" int ObserveTocLocate(unzFile file, const char *name, int cases) {
+  if (observe_toc_locates) ++toc_locates;
+  return unzLocateFile(file, name, cases);
+}
 
 #ifndef TEST_FIXTURES_DIR
 #define TEST_FIXTURES_DIR "tests/fixtures"
@@ -561,6 +574,7 @@ void TestEpubContentAllocationFailureAndRecovery() {
   tc.ctx.on_spine_progress_user_data = &fail_after_first_document;
   Book book(tc.ctx);
   book.SetFolderName(TEST_FIXTURES_DIR "/books");
+  epub_parser::SetPageReleaseThresholdForTest(0);
   book.SetFileName("basic.epub");
   book.format = FORMAT_EPUB;
   const std::string path = TEST_FIXTURES_DIR "/books/basic.epub";
@@ -584,11 +598,31 @@ void TestEpubContentAllocationFailureAndRecovery() {
               book.HasPendingEpubPageCacheSave());
   book.Close();
 
+  {
+    epub_parser::Preparation prep;
+    ExpectTrue("begin visible preparation after allocation failure",
+               prep.Begin(&book, path));
+    while (prep.GetResult() == epub_parser::Preparation::Pending &&
+           !book.GetPageCount())
+      prep.Step();
+    ExpectTrue("visible preparation reaches content", book.GetPageCount() > 0);
+    g_reject_nothrow_allocations = true;
+    while (prep.Step() == epub_parser::Preparation::Pending) {
+    }
+    g_reject_nothrow_allocations = false;
+    ExpectTrue("pagination allocation failure remains explicit",
+               prep.GetResult() == epub_parser::Preparation::NoMemory);
+    ExpectTrue("pagination OOM message identifies pagination",
+               std::string(prep.Label()).find("paginate") != std::string::npos);
+    prep.Cancel();
+  }
   fail_after_first_document = false;
   ExpectTrue("same EPUB recovers after allocation failure", EpubOpen(&book) == 0);
   ExpectTrue("recovery parses both chapter targets", book.GetChapters().size() == 2);
   ExpectTrue("recovery preserves chapter titles",
              book.GetChapters()[0].title == "Chapter One");
+  while (book.HasPendingEpubPageCacheSave())
+    book.PumpPendingEpubPageCacheSave();
   book.Close();
   const std::string cache_file = CacheFilePath(cache_dir);
   ExpectTrue("remove recovery cache", remove(cache_file.c_str()) == 0);
@@ -621,7 +655,303 @@ void TestOptionalCacheAllocationFailureKeepsReading() {
 
 } // namespace
 
+void TestCooperativePreparation() {
+  char dir[] = "/tmp/3dslibris-preparation-XXXXXX";
+  ExpectTrue("preparation directory", mkdtemp(dir) != nullptr);
+  epub_page_cache::SetCacheDirForTest(dir);
+  TestCtx ctx;
+  Book book(ctx.ctx);
+  book.format = FORMAT_EPUB;
+  book.SetFolderName(TEST_FIXTURES_DIR "/books");
+  book.SetFileName("basic.epub");
+  epub_parser::Preparation prep;
+  ExpectTrue("begin preparation",
+             prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub"));
+  unsigned steps = 0;
+  while (prep.Step() == epub_parser::Preparation::Pending)
+    ++steps;
+  ExpectTrue("preparation completes",
+             prep.GetResult() == epub_parser::Preparation::Complete);
+  ExpectTrue("preparation yields", steps >= 5);
+  ExpectTrue("preparation preserves chapter targets",
+             book.GetChapters().size() == 2);
+  const unsigned pages = book.GetPageCount();
+  const std::string file = CacheFilePath(dir);
+  book.Close();
+  ExpectTrue(
+      "start warm preparation",
+      prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 128 * 1024));
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("warm preparation matches",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 book.GetPageCount() == pages);
+  ExpectTrue("warm preparation attaches residency",
+             book.HasReflowPageCache() &&
+                 book.IsReflowPageReady(book.GetPosition()));
+  book.Close();
+  book.SetOpenSessionId(82);
+  ExpectTrue("begin memory-limited resident load",
+             prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 1));
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("resident OOM is distinct from I/O error",
+             prep.GetResult() == epub_parser::Preparation::NoMemory);
+  ExpectTrue("OOM preserves valid cache and opening session",
+             access(file.c_str(), R_OK) == 0 && book.GetOpenSessionId() == 82);
+  book.Close();
+  FILE *corrupt = fopen(file.c_str(), "r+b");
+  fseek(corrupt, 28, SEEK_SET);
+  const int saved = fgetc(corrupt);
+  fseek(corrupt, 28, SEEK_SET);
+  fputc(saved ^ 1, corrupt);
+  fclose(corrupt);
+  book.SetOpenSessionId(83);
+  prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 128 * 1024);
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("corrupt resident cache reparses without losing session",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 book.GetOpenSessionId() == 83 && book.HasReflowPageCache());
+  book.Close();
+  remove(file.c_str());
+  book.SetOpenSessionId(81);
+  prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub", 128 * 1024);
+  bool damaged_index = false;
+  unsigned prepared_pages = 0;
+  for (unsigned i = 0;
+       i < 10000 && prep.GetResult() == epub_parser::Preparation::Pending;
+       ++i) {
+    if (!damaged_index &&
+        std::string(prep.Label()) == "checking cache... B: cancel") {
+      prepared_pages = book.GetPageCount();
+      FILE *fp = fopen(file.c_str(), "r+b");
+      ExpectTrue("published cache exists before dropping pages", fp != nullptr);
+      fseek(fp, 28, SEEK_SET);
+      const int byte = fgetc(fp);
+      fseek(fp, 28, SEEK_SET);
+      fputc(byte ^ 1, fp);
+      fclose(fp);
+      damaged_index = true;
+    }
+    prep.Step();
+  }
+  ExpectTrue("cold open validates published index before releasing pages",
+             damaged_index);
+  ExpectTrue("cache validation failure retains complete readable book",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 prep.PersistenceFailed() && prepared_pages == pages &&
+                 book.GetPageCount() == pages && !book.HasReflowPageCache() &&
+                 book.GetPage(0)->GetBuffer() != nullptr &&
+                 book.GetOpenSessionId() == 81);
+  book.Close();
+  remove(file.c_str());
+  prep.Begin(&book, TEST_FIXTURES_DIR "/books/basic.epub");
+  for (unsigned i = 0; i < 4; ++i)
+    prep.Step();
+  prep.Cancel();
+  ExpectTrue("cancel discards partial pages", book.GetPageCount() == 0);
+  DIR *d = opendir(dir);
+  unsigned files = 0;
+  while (dirent *e = readdir(d))
+    if (e->d_name[0] != '.')
+      ++files;
+  closedir(d);
+  ExpectTrue("cancel removes temporary", files == 0);
+
+  // Long first open: once the written text exceeds twice the residency
+  // window, serialized pages are released and the book is read back from the
+  // published cache (Old 3DS heap cannot hold a whole long book).
+  // Longest available fixture: needs several pages beyond twice a window
+  // that still holds its largest page.
+  const char *long_fixture = TEST_FIXTURES_DIR "/books/embedded-styles.epub";
+  book.SetFileName("embedded-styles.epub");
+  prep.Begin(&book, long_fixture);
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  size_t total = 0, largest = 0;
+  for (unsigned i = 0; i < book.GetPageCount(); ++i) {
+    const size_t b = 4 * ((size_t)book.GetPage(i)->GetLength() +
+                          book.GetPage(i)->GetSearchEvents().size());
+    total += b;
+    largest = std::max(largest, b);
+  }
+  std::vector<std::vector<u32>> expected;
+  for (unsigned i = 0; i < book.GetPageCount(); ++i)
+    expected.push_back(std::vector<u32>(
+        book.GetPage(i)->GetBuffer(),
+        book.GetPage(i)->GetBuffer() + book.GetPage(i)->GetLength()));
+  const size_t chapters = book.GetChapters().size();
+  const std::string long_file = CacheFilePath(dir);
+  book.Close();
+  remove(long_file.c_str());
+  const size_t window = 512 * 1024;
+  epub_parser::SetPageReleaseThresholdForTest(1);
+  ExpectTrue("fixture has several pages to release",
+             expected.size() >= 4 && total > largest);
+  book.SetOpenSessionId(84);
+  prep.Begin(&book, long_fixture, window);
+  bool saw_reload = false;
+  for (unsigned i = 0;
+       i < 10000 && prep.GetResult() == epub_parser::Preparation::Pending;
+       ++i) {
+    if (std::string(prep.Label()) == "loading cache...")
+      saw_reload = true;
+    prep.Step();
+  }
+  ExpectTrue("long cold open reloads from the published cache", saw_reload);
+  ExpectTrue("long cold open completes with residency",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 !prep.PersistenceFailed() && book.HasReflowPageCache() &&
+                 book.GetPageCount() == expected.size() &&
+                 book.GetOpenSessionId() == 84 &&
+                 book.GetChapters().size() == chapters);
+  bool same = true;
+  for (unsigned i = 0; i < expected.size() && same; ++i) {
+    for (unsigned k = 0; k < 64 && !book.IsReflowPageReady(i); ++k) {
+      book.RequestReflowPage(i);
+      book.AdvanceReflowPageCache();
+    }
+    Page *page = book.GetPage(i);
+    same = book.IsReflowPageReady(i) && page &&
+           page->GetLength() == (int)expected[i].size() &&
+           (expected[i].empty() ||
+            std::equal(expected[i].begin(), expected[i].end(),
+                       page->GetBuffer()));
+  }
+  ExpectTrue("released pages read back identical from the cache", same);
+  book.Close();
+
+  // A published cache that cannot be read back after release must fail
+  // cleanly, never leave an incomplete book or re-parse in a loop.
+  remove(long_file.c_str());
+  book.SetOpenSessionId(85);
+  prep.Begin(&book, long_fixture, window);
+  bool damaged = false;
+  for (unsigned i = 0;
+       i < 10000 && prep.GetResult() == epub_parser::Preparation::Pending;
+       ++i) {
+    if (!damaged && std::string(prep.Label()) == "loading cache...") {
+      FILE *fp = fopen(long_file.c_str(), "r+b");
+      if (fp) {
+        fseek(fp, 28, SEEK_SET);
+        const int byte = fgetc(fp);
+        fseek(fp, 28, SEEK_SET);
+        fputc(byte ^ 1, fp);
+        fclose(fp);
+        damaged = true;
+      }
+    }
+    prep.Step();
+  }
+  ExpectTrue("damaged reload was exercised", damaged);
+  ExpectTrue("damaged reload after release reports an I/O error",
+             prep.GetResult() == epub_parser::Preparation::IoError &&
+                 book.GetPageCount() == 0 && book.GetOpenSessionId() == 85);
+  book.Close();
+  remove(long_file.c_str());
+
+  book.SetFileName("basic.epub");
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  rmdir(dir);
+}
+
+static uLong PreparationHash(Book &book) {
+  uLong hash = 0;
+  for (unsigned i = 0; i < book.GetPageCount(); ++i) {
+    Page *page = book.GetPage(i);
+    const u32 count = page->GetLength();
+    hash = crc32(hash, (const Bytef *)&count, 4);
+    hash = crc32(hash, (const Bytef *)page->GetBuffer(), count * 4);
+    const auto &events = page->GetSearchEvents();
+    const u32 n = events.size();
+    hash = crc32(hash, (const Bytef *)&n, 4);
+    hash = crc32(hash, (const Bytef *)events.data(), n * 4);
+  }
+  return hash;
+}
+void TestRealPreparationFromEnv() {
+  const char *source = getenv("REAL_EPUB_PREPARATION_PATH");
+  if (!source)
+    return;
+  char dir[] = "/tmp/3dslibris-real-preparation-XXXXXX";
+  ExpectTrue("real preparation directory", mkdtemp(dir) != nullptr);
+  epub_page_cache::SetCacheDirForTest(dir);
+  const std::string path = source;
+  const size_t slash = path.find_last_of('/');
+  TestCtx context;
+  Book book(context.ctx);
+  book.format = FORMAT_EPUB;
+  book.SetFolderName(
+      slash == std::string::npos ? "." : path.substr(0, slash).c_str());
+  book.SetFileName(slash == std::string::npos ? source
+                                              : path.substr(slash + 1).c_str());
+  epub_parser::Preparation prep;
+  ExpectTrue("real cold begin", prep.Begin(&book, path));
+  unsigned steps = 0;
+  while (prep.Step() == epub_parser::Preparation::Pending &&
+         ++steps < 1000000) {
+  }
+  ExpectTrue("real cold cache published",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 !prep.PersistenceFailed());
+  const unsigned pages = book.GetPageCount();
+  const uLong hash = PreparationHash(book);
+  const unsigned target = pages / 2;
+  Page *page = book.GetPage(target);
+  const uLong target_hash =
+      crc32(0, (const Bytef *)page->GetBuffer(), page->GetLength() * 4);
+  const unsigned target_length = page->GetLength();
+  book.Close();
+  prep.Begin(&book, path);
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("real complete warm content matches",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 book.GetPageCount() == pages && PreparationHash(book) == hash);
+  book.Close();
+  book.SetPosition(target);
+  prep.Begin(&book, path, 512 * 1024);
+  while (prep.Step() == epub_parser::Preparation::Pending) {
+  }
+  ExpectTrue("real partial warm complete",
+             prep.GetResult() == epub_parser::Preparation::Complete &&
+                 book.HasReflowPageCache() && book.GetPosition() == (int)target);
+  page = book.GetPage(target);
+  ExpectTrue("real partial page bytes match",
+             page->GetLength() == (int)target_length &&
+                 crc32(0, (const Bytef *)page->GetBuffer(),
+                       target_length * 4) == target_hash);
+  fprintf(stderr,
+          "REAL EPUB preparation pages=%u cold_steps=%u token_crc=%lu "
+          "saved_page=%u\n",
+          pages, steps, hash, target + 1);
+  book.Close();
+  const std::string file = CacheFilePath(dir);
+  remove(file.c_str());
+  epub_page_cache::SetCacheDirForTest(nullptr);
+  rmdir(dir);
+}
+
+void TestTocReadLocatesOnce() {
+  unzFile file = unzOpen(TEST_FIXTURES_DIR "/books/basic.epub");
+  ExpectTrue("TOC archive opens", file != nullptr);
+  std::string text;
+  toc_locates = 0; observe_toc_locates = true;
+  const bool ok = epub_package_toc_utils::ReadZipEntryText(
+      file, "META-INF/container.xml", text, nullptr, "test", nullptr);
+  observe_toc_locates = false;
+  ExpectTrue("TOC read keeps content", ok && text.find("container") != std::string::npos);
+  ExpectTrue("TOC read locates exactly once", toc_locates == 1);
+  ExpectTrue("missing TOC entry fails", !epub_package_toc_utils::ReadZipEntryText(
+      file, "missing.xml", text, nullptr, "test", nullptr) && text.empty());
+  unzClose(file);
+}
+
 int main() {
+  TestTocReadLocatesOnce();
+  TestRealPreparationFromEnv();
+  TestCooperativePreparation();
   TestOptionalCacheAllocationFailureKeepsReading();
   TestEpubContentAllocationFailureAndRecovery();
   TestEmbeddedStylesFromReportedEpub();

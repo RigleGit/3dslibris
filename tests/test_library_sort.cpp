@@ -32,6 +32,8 @@ struct Book {
 };
 struct Prefs { LibrarySortMode library_sort_mode = LIBRARY_SORT_DATE_MODIFIED; };
 struct App { Prefs settings; Prefs *prefs = &settings; std::vector<Book *> books; };
+struct LibrarySearchSession {};
+struct LibraryPreloadSession {}; // Unused session owner at this collaborator boundary.
 LibraryController::LibraryController(App &app) : app_(app), inside_folder_(false) {}
 LibraryController::~LibraryController() = default;
 namespace app_flow_utils {
@@ -53,6 +55,7 @@ static void Expect(bool condition, const char *message) {
   if (!condition) { fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
 }
 // Interpose only the syscall boundary, retaining its actual result.
+namespace paths { inline bool StatWithMtime(const char *name, struct stat *info) { return CountedStat(name, info) == 0; } }
 #define stat(...) CountedStat(__VA_ARGS__)
 #include "library_sort.inc"
 #undef stat

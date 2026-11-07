@@ -1,5 +1,5 @@
-#include "reader/reader_layout_state.h"
 #pragma once
+#include "reader/reader_layout_state.h"
 #include "shared/fixed_layout_perf.h"
 // Platform/UI substitutes only. Directory I/O, job admission, disk cache,
 // thumbnail decode and resampling below are production implementations.
@@ -36,6 +36,7 @@
 #include "library/browser_warmup_utils.h"
 #include "library/cover_override_utils.h"
 #include "library/cover_cache.h"
+#include "library/cover_preparation.h"
 #include "library/library_job.h"
 #include "library/library_sort_mode.h"
 #include "book/cover_layout_constants.h"
@@ -128,8 +129,10 @@ inline format_t DetectBookFormat(const char *name) { return HasExtCI(name,".epub
 inline bool SupportsMetadataIndexing(format_t type) { return type==FORMAT_EPUB; }
 }
 namespace paths {
+inline bool StatWithMtime(const char *name,struct stat *info) { return ::stat(name,info)==0; }
 inline const std::string &GetCacheBaseDir() { static const std::string path=std::string(std::getenv("FOLDER_COVER_TEST_ROOT"))+"/cache"; return path; }
 inline const std::string &GetCoverCacheDir() { static const std::string path=GetCacheBaseDir()+"/cover"; return path; }
+inline const std::string &GetCoverRetentionPath() { static const std::string path=GetCoverCacheDir()+"/retain-all";return path; }
 inline const std::string &GetCoverCacheManifest() { static const std::string path=GetCacheBaseDir()+"/manifest.txt"; return path; }
 }
 inline std::string BasenamePath(const std::string &path) { const size_t slash=path.find_last_of('/'); return slash==std::string::npos ? path : path.substr(slash+1); }

@@ -194,6 +194,47 @@ void TestRubyAnnotationEmitsBrackets() {
   ExpectTrue("ruby: font-size token emitted", BufContains(buf, len, TEXT_FONT_SIZE));
 }
 
+void TestNestedTablePreservesOuterCells() {
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  const std::string html =
+      "<html><body><table><tr><td>OUTERBEFORE"
+      "<table><tr><td>INNERONE<script>SCRIPTLEAK</script>"
+      "<style>STYLELEAK</style></td><td>INNERTWO</td></tr></table>"
+      "OUTERAFTER</td><td>SIBLING</td></tr></table><p>TAIL</p>"
+      "</body></html>";
+  const auto result = xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p));
+  ExpectTrue("nested table parses", result.ok);
+  const std::string text = ExtractVisibleAsciiFromPages(book);
+  size_t cursor = 0;
+  for (const char *word : {"OUTERBEFORE", "INNERONE", "INNERTWO",
+                           "OUTERAFTER", "SIBLING", "TAIL"}) {
+    cursor = text.find(word, cursor);
+    ExpectTrue("nested table retains outer and inner text in order",
+               cursor != std::string::npos);
+    cursor += strlen(word);
+  }
+  ExpectTrue("nested scripts remain hidden", text.find("SCRIPTLEAK") == std::string::npos);
+  ExpectTrue("nested styles remain hidden", text.find("STYLELEAK") == std::string::npos);
+}
+
+void TestMetadataCallbacksPreserveTitleAndStack() {
+  TestCtx tc;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  auto opts = MakeXmlOpts(&p);
+  opts.start_element = xml::book::metadata::start;
+  opts.end_element = xml::book::metadata::end;
+  opts.character_data = xml::book::metadata::chardata;
+  const auto result = xml_parse_utils::ParseXmlString(
+      "<html><head><meta/><title>Alpha&amp;Beta</title></head><body/></html>", opts);
+  ExpectTrue("metadata XML parses", result.ok);
+  ExpectTrue("metadata title accumulates split bounded callbacks",
+             std::string(book.GetTitle()) == "Alpha&Beta");
+  ExpectIntEq("metadata stack is balanced", p.stacksize, 0);
+}
+
 void TestTableImgSuppressed() {
   // Before the fix, <img> inside <td> appended "[image]" to the cell text
   // buffer, which then appeared as literal text in the page output. After the
@@ -1249,6 +1290,8 @@ int main() {
   TestXmlPageRenderingContinuity();
   TestHrAtPageEdgeKeepsFollowingHeading();
   TestRubyAnnotationEmitsBrackets();
+  TestNestedTablePreservesOuterCells();
+  TestMetadataCallbacksPreserveTitleAndStack();
   TestTableImgSuppressed();
   TestHiddenElementsDoNotEmitLayoutTokens();
   TestSemanticPageBreakVisibility();

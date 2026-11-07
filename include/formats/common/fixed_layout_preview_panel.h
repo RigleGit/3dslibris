@@ -27,6 +27,7 @@ struct ContentKey {
   int screen_width, screen_height, stride;
   bool wide_top;
   Rect layout;
+  int quarter_turns; // Zero when omitted from aggregate initialization.
 
   bool operator==(const ContentKey &other) const;
 };
@@ -40,6 +41,11 @@ struct State {
 
   State() : valid(false), content(), viewport(), expected_generation(0) {}
 };
+
+// Shared pixel restoration; callers keep ownership of backgrounds and controls.
+void RestoreRect(Text *text, const ContentKey &content,
+                 int x0, int y0, int x1, int y1);
+void RestoreBorder(Text *text, const ContentKey &content, const Rect &old);
 
 void Draw(Book *book, Text *text, State *state,
           const u16 *pixels, size_t pixel_count, int bitmap_width,

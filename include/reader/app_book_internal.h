@@ -40,6 +40,7 @@ std::vector<std::string> BuildOpeningTitleLines(Text *ts, const char *name,
 void ResetBookRenderState(App *app, bool clear_glyph_cache, const char *reason);
 bool ReuseParsedBook(App *app);
 OpenBookRelayoutState CaptureRelayoutState(Book *book, bool needs_relayout);
+void ClearSavedRelayoutState(const Book *book);
 
 void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
                            const char *label = "opening book ...");

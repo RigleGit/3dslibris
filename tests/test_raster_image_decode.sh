@@ -16,10 +16,16 @@ def chunk(tag, data):
     return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag+data)&0xffffffff)
 def png(w,h,rows):
     return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',w,h,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b'')
+rows=bytearray()
+for y in range(3):
+    rows.append(0)
+    for x in range(4):
+        rows.extend(((x*63+y*19)%256,(x*11+y*101)%256,(x*79+y*37)%256,(x*53+y*71)%256))
+(out/'resample.png').write_bytes(png(4,3,rows))
 (out/'alpha.png').write_bytes(png(2,1,bytes([0,0,0,0,128,0,0,255,0])))
 (out/'huge.png').write_bytes(png(3000,3000,bytes(3000*(1+3000*4))))
 frame = b'\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02'
 (out/'first.gif').write_bytes(b'GIF89a\x01\x00\x01\x00\x80\x00\x00' +
     b'\xff\x00\x00\x00\x00\xff' + frame + b'\x44\x01\x00' + frame + b'\x4c\x01\x00\x3b')
 PY
-"$OUTDIR/test" "$OUTDIR/alpha.png" "$OUTDIR/huge.png" "$OUTDIR/first.gif"
+"$OUTDIR/test" "$OUTDIR/alpha.png" "$OUTDIR/huge.png" "$OUTDIR/first.gif" "$OUTDIR/resample.png"

@@ -12,6 +12,7 @@
     No behavior change — pure code motion.
 */
 
+#include "shared/path_utils.h"
 #include "formats/mobi/mobi.h"
 
 #include "book/cover_layout_constants.h"
@@ -163,7 +164,7 @@ static bool BuildMobiCoverMetaCachePath(const std::string &mobipath,
   if (!out || mobipath.empty())
     return false;
   struct stat st;
-  if (stat(mobipath.c_str(), &st) != 0)
+  if (!paths::StatWithMtime(mobipath.c_str(), &st))
     return false;
   EnsureMobiCoverMetaCacheDirs();
   *out = mobi_cover_meta_cache::BuildPath(

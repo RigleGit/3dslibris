@@ -10,6 +10,7 @@
 
 #include "app/app.h"
 #include "app/reader_controller.h"
+#include "app/library_controller.h"
 #include "settings/prefs.h"
 
 #include <3ds.h>
@@ -147,6 +148,8 @@ void App::HandleAppletResume()
     ts->MarkAllScreensDirty();
   RequestStatusRedraw();
   OnReaderAppletResumed();
+  library_controller_->ResumeLibrarySearch();
+  library_controller_->ResumeLibraryPreload();
 #ifdef DSLIBRIS_DEBUG
   DBG_LOGF(this, "APPLET resumed mode=%d current_session=%u opening_session=%u",
            (int)nav_.mode, reader_state_.current_book_session_id,

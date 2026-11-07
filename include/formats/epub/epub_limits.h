@@ -19,6 +19,9 @@ static const size_t kCoverMaxNonJpegBytes = 2 * 1024 * 1024;
 static const size_t kCoverMaxDecodedRgbBytes = 16 * 1024 * 1024;
 static const size_t kSvgWrapperMaxBytes = 512 * 1024;
 static const int kCoverMaxDimension = 4096;
+// JPEG thumbnails use reduced DCT decoding under the shared decoder's RAM
+// budget on 3DS, so camera-sized covers need not fit a full RGB allocation.
+static const int kCoverMaxJpegDimension = 8192;
 
 static const bool kEnableRealTocResolve = true;
 

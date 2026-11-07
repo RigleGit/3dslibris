@@ -7,6 +7,7 @@ mkdir -p "$OUTDIR"
   "$ROOT/tests/test_main_loop_preview_pan.cpp" \
   "$ROOT/source/app/main_loop_controller.cpp" \
   "$ROOT/source/formats/common/fixed_layout_preview_panel.cpp" \
+  "$ROOT/source/formats/common/fixed_layout_preview_border.cpp" \
   "$ROOT/source/formats/common/fixed_layout_surface.cpp" \
   -I"$ROOT/tests/main_loop_preview_stubs" \
   -I"$ROOT/tests/preview_panel_stubs" -I"$ROOT/include" \

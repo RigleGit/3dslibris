@@ -36,6 +36,11 @@ struct fz_document;
 struct fz_display_list;
 struct fz_outline;
 namespace epub_page_cache { class StreamWriter; }
+namespace reflow_block_cache {
+enum Result : int;
+class Reader;
+class Writer;
+}
 namespace book_meta_cache { class Index; }
 
 struct ChapterEntry
@@ -94,8 +99,11 @@ public:
   };
 
 private:
+  friend class reflow_block_cache::Writer;
+  friend class reflow_block_cache::Reader;
   epub_page_cache::StreamWriter *epub_cache_save_writer_;
-  void FinishPendingEpubPageCacheSave();
+  reflow_block_cache::Reader *reflow_cache_reader_;
+  int reflow_pending_position_;
   std::string filename;
   std::string foldername;
   std::string title;
@@ -459,6 +467,21 @@ public:
   void SignalReflowWorkerShutdown();
   void FinishShutdownReflowWorker();
   void FlushPendingCacheSaves();
+  bool StartReflowPageCache(const std::string &path, size_t budget);
+  bool AdoptPreparedReflowPageCache(reflow_block_cache::Reader *reader);
+  reflow_block_cache::Result GetReflowPageCacheResult() const;
+  void TrimReflowPageCache();
+  int AdvanceReflowPageCache(); // 1 pending, 0 ready, -1 failed; main thread
+                              // only.
+  bool HasReflowPageCache() const;
+  bool IsReflowPageReady(unsigned page) const;
+  bool RequestReflowPage(unsigned page);
+  void CancelReflowPageRequest();
+  bool HasPendingReflowNavigation() const;
+  bool HasPendingReflowPageRead() const;
+  bool IsReflowPageCacheCorrupt() const;
+  void InvalidateReflowPageCacheFile();
+  unsigned ReflowPageLinkCount(unsigned page);
   void PumpPendingEpubPageCacheSave();
   void CancelPendingEpubPageCacheSave();
   bool HasPendingEpubPageCacheSave() const;

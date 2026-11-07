@@ -34,6 +34,21 @@ uint32_t GetVarLenFromEnd(const uint8_t *data, size_t len);
 std::string RemoveTrailingEntries(const uint8_t *data, size_t len,
                                   uint32_t trailing_flags);
 
+class MergeSession {
+public:
+  MergeSession();
+  ~MergeSession();
+  bool Begin(const std::string *raw, const std::vector<uint32_t> *offsets,
+             const MobiRecord0Header &header, std::string *merged);
+  int Step(); // 1 pending, 0 complete, -1 invalid, -2 out of memory
+  unsigned Progress() const;
+private:
+  struct State;
+  State *state_;
+  MergeSession(const MergeSession &);
+  MergeSession &operator=(const MergeSession &);
+};
+
 bool BuildMergedText(const std::string &raw, const std::vector<uint32_t> &offsets,
                      const MobiRecord0Header &header, std::string *merged);
 

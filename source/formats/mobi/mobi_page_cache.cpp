@@ -1,3 +1,4 @@
+#include "book/book_parse_deps.h"
 #include "formats/common/book_search_cache.h"
 #include "formats/mobi/mobi_page_cache.h"
 
@@ -10,6 +11,10 @@
 #include "shared/path_constants.h"
 
 #include <3ds.h>
+#include <new>
+#include <memory>
+#include <cerrno>
+#include "formats/common/cache_memory_utils.h"
 #include <string.h>
 #include <sys/stat.h>
 #include <string>
@@ -19,7 +24,8 @@ namespace mobi_page_cache {
 namespace {
 
 static const u32 kMobiPageCacheMagic = 0x4D504347U; // "MPCG"
-static const u16 kMobiPageCacheVersion = 26;
+// Skip the old indexed v27 as well: both layouts used incorrect font metrics.
+static const u16 kMobiPageCacheVersion = 28;
 static const size_t kPageCacheIoBufferBytes = 262144;
 // Bulk reads avoid per-record SD overhead for small books. Stream larger
 // caches so the full serialized file does not coexist with decoded pages.
@@ -96,6 +102,7 @@ static std::string BuildCachePath(Book *book, const char *book_path,
   if (book && !book->GetEbookImagesEnabled())
     params.variant_token += ":no-images";
 
+  params.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);
   return page_cache_utils::BuildPageCachePath(
       GetEffectiveCacheDir(), ".mpc", book_path, params);
 }
@@ -207,6 +214,90 @@ static void AppendCachedChapters(
 }
 
 } // namespace
+
+std::string CachePath(Book *book,const char *source,const page_cache_utils::PageCacheLayoutParams &params) {
+  auto p=params;
+  p.variant_token=book && book->GetMobiLineWrapFix() ? "1" : "0";
+  if (book && !book->GetEbookImagesEnabled()) p.variant_token+=":no-images";
+  p.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);
+  return page_cache_utils::BuildPageCachePath(GetEffectiveCacheDir(),".mpc",source,p);
+}
+struct LegacyLoader::State {
+  Book *book=NULL;
+  FILE *fp=NULL;
+  std::unique_ptr<char[]> buffer;
+  MobiPageCacheHeader header;
+  enum Phase { Header,Title,Pages,Search,Chapters,Images,Done } phase=Header;
+  unsigned next=0;
+  reflow_block_cache::Result result=reflow_block_cache::Pending;
+  ~State() {if(fp) fclose(fp);}
+  void Advance() {phase=(Phase)(phase+1);next=0;}
+};
+LegacyLoader::LegacyLoader():state_(NULL) {}
+LegacyLoader::~LegacyLoader(){delete state_;}
+reflow_block_cache::Result LegacyLoader::Begin(Book *book,const std::string &path) {
+  delete state_;state_=new(std::nothrow) State;
+  if(!state_) return reflow_block_cache::NoMemory;
+  State &s=*state_;s.book=book;s.fp=fopen(path.c_str(),"rb");
+  if(!s.fp) return s.result=errno==ENOENT ? reflow_block_cache::Missing : reflow_block_cache::IoError;
+  size_t n=65536;s.buffer.reset(new(std::nothrow) char[n]);
+  if(!s.buffer){n=16384;s.buffer.reset(new(std::nothrow) char[n]);}
+  if(!s.buffer) return s.result=reflow_block_cache::NoMemory;
+  if(setvbuf(s.fp,s.buffer.get(),_IOFBF,n)!=0) return s.result=reflow_block_cache::IoError;
+  return s.result;
+}
+unsigned LegacyLoader::Progress() const {return state_ && state_->phase>=State::Pages ? state_->next : 0;}
+unsigned LegacyLoader::Total() const {return state_ && state_->phase>=State::Pages ? state_->header.page_count : 0;}
+reflow_block_cache::Result LegacyLoader::Step() {
+  using namespace reflow_block_cache;
+  if(!state_) return NoMemory;
+  State &s=*state_;
+  if(s.result!=Pending) return s.result;
+  const u64 begin=osGetTime();
+  unsigned operations=0;
+  do {
+    bool ok=true;
+    if(s.phase==State::Header) {
+      ok=fread(&s.header,1,sizeof(s.header),s.fp)==sizeof(s.header) && IsValidHeader(s.header);
+      if(ok) {
+        if(!cache_memory::HasHeadroom((size_t)s.header.page_count*sizeof(Page),512*1024)) return s.result=NoMemory;
+        s.book->ReservePageCapacity(s.header.page_count);s.Advance();
+      }
+    } else if(s.phase==State::Title) {
+      std::string title;ok=page_cache_utils::ReadRawString(s.fp,s.header.title_len,&title);
+      if(ok){s.book->SetTitle(title.c_str());s.Advance();}
+    } else if(s.phase==State::Pages || s.phase==State::Search) {
+      if(s.next==s.header.page_count){s.Advance();continue;}
+      u16 count=0;ok=fread(&count,1,2,s.fp)==2;
+      const unsigned limit=s.phase==State::Pages ? 4096 : s.book->GetPage(s.next)->GetLength()+1;
+      if(!ok || count>limit) return s.result=ferror(s.fp) ? IoError : Corrupt;
+      if(!cache_memory::HasHeadroom(count*4,512*1024)) return s.result=NoMemory;
+      std::vector<u32> words(count);ok=!count || fread(words.data(),4,count,s.fp)==count;
+      if(ok && s.phase==State::Search && !page_search::Valid(words,s.book->GetPage(s.next)->GetLength())) ok=false;
+      if(ok) {
+        if(s.phase==State::Pages) {auto owned=page_buffer_utils::AdoptPageBuffer(&words);s.book->AppendPage()->AdoptBuffer(&owned);}
+        else s.book->GetPage(s.next)->SetSearchEvents(words);
+        ++s.next;
+      }
+    } else if(s.phase==State::Chapters) {
+      if(s.next==s.header.chapter_count){s.Advance();continue;}
+      u16 page=0;u8 level=0;std::string title;
+      ok=fread(&page,1,2,s.fp)==2 && fread(&level,1,1,s.fp)==1 && page_cache_utils::ReadLengthPrefixedString16(s.fp,2048,true,&title) && page<s.header.page_count;
+      if(ok){s.book->AddChapter(page,title,level);++s.next;}
+    } else if(s.phase==State::Images) {
+      if(s.next==s.header.image_count){s.Advance();continue;}
+      std::string path;u8 follow=0;
+      ok=page_cache_utils::ReadLengthPrefixedString16(s.fp,2048,false,&path) && fread(&follow,1,1,s.fp)==1;
+      if(ok){const u16 id=s.book->RegisterInlineImage(path);s.book->SetInlineImageFollowTextLines(id,follow);++s.next;}
+    } else {
+      s.book->SetTocConfidence(s.header.toc_quality<=TOC_QUALITY_HEURISTIC ? (TocQuality)s.header.toc_quality : TOC_QUALITY_UNKNOWN,s.header.toc_direct,s.header.toc_heuristic,s.header.toc_unresolved);
+      s.book->MarkMobiRenderSettingsApplied(s.book->GetMobiLineWrapFix());
+      fclose(s.fp);s.fp=NULL;return s.result=Complete;
+    }
+    if(!ok) return s.result=ferror(s.fp) ? IoError : Corrupt;
+  } while(++operations<32 && osGetTime()-begin<20);
+  return Pending;
+}
 
 bool TryLoad(Book *book, const char *book_path,
              int pixel_size, int line_spacing,

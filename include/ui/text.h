@@ -93,6 +93,8 @@ public:
   // Fixed-layout blits keep logical coordinates; only this packed surface has
   // twice the sample density along the panel's horizontal axis.
   u16 *BeginWideTopBlit(int x, int y, int width, int height);
+  // Transition-only snapshot of a GPU-produced physical framebuffer.
+  void RestoreGpuTop(const u8 *framebuffer, int physical_height, u8 orientation);
 
   void SetReporter(IStatusReporter *reporter);
   IStatusReporter *GetReporter() const;

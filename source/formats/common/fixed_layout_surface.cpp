@@ -19,7 +19,17 @@ static inline u16 InterpolateRgb565(u16 first, u16 second, int t) {
   return (u16)(((r >> 11) << 11) | ((g >> 10) << 5) | (b >> 11));
 }
 
-void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int logical_height,
+template <bool Rgb, int Turn = 0>
+static inline u16 ReadPixel(const u16 *pixels, const raster_image::Rgb8View *rgb,
+                            int width, int height, int x, int y) {
+  if (Turn==1) return pixels[(size_t)(width-1-x)*height+y];
+  if (Turn==2) return pixels[(size_t)(height-1-y)*width+width-1-x];
+  if (Turn==3) return pixels[(size_t)x*height+height-1-y];
+  return Rgb ? rgb->Pixel(x, y) : pixels[(size_t)y * width + x];
+}
+
+template <bool Rgb, int Turn = 0>
+static void BlitSurfaceScaledCrop(u16 *screen, int stride, int logical_width, int logical_height,
                                 int x, int y, int draw_width,
                                 int draw_height,
                                 const u16 *pixels, size_t pixel_count,
@@ -28,8 +38,9 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
                                 int crop_width, int crop_height,
                                 bool high_quality_filter,
                                 int clip_x0, int clip_y0,
-                                int clip_x1, int clip_y1) {
-  if (!screen || !pixels || draw_width <= 0 || draw_height <= 0 ||
+                                int clip_x1, int clip_y1,
+                                const raster_image::Rgb8View *rgb = nullptr) {
+  if (!screen || (!pixels && !rgb) || draw_width <= 0 || draw_height <= 0 ||
       src_width <= 0 || src_height <= 0 || crop_width <= 0 ||
       crop_height <= 0) {
     return;
@@ -65,9 +76,13 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
       const int src_y = crop_y + row;
       const int src_x = crop_x + col0;
       const int dx = x + col0;
-      memcpy(&screen[(size_t)dy * (size_t)stride + (size_t)dx],
-             &pixels[(size_t)src_y * (size_t)src_width + (size_t)src_x],
-             copy_bytes);
+      u16 *dst = &screen[(size_t)dy * stride + dx];
+      if (Rgb || Turn) {
+        for (int col = 0; col < col1 - col0; ++col)
+          dst[col] = ReadPixel<Rgb,Turn>(pixels,rgb,src_width,src_height,src_x+col,src_y);
+      } else {
+        memcpy(dst, &pixels[(size_t)src_y * src_width + src_x], copy_bytes);
+      }
     }
     return;
   }
@@ -106,8 +121,7 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
       const int src_y = crop_y + ((row * crop_height) / draw_height);
       for (int col = col0; col < col1; col++) {
         screen[(size_t)dy * (size_t)stride + (size_t)(x + col)] =
-            pixels[(size_t)src_y * (size_t)src_width +
-                   (size_t)columns[(size_t)(col - col0)].x0];
+            ReadPixel<Rgb,Turn>(pixels, rgb, src_width, src_height, columns[(size_t)(col - col0)].x0, src_y);
       }
       continue;
     }
@@ -124,8 +138,8 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
       const int x0 = sample.x0;
       const int x1 = sample.x1;
       const int tx = sample.t;
-      const u16 p00 = pixels[(size_t)y0 * (size_t)src_width + (size_t)x0];
-      const u16 p10 = pixels[(size_t)y0 * (size_t)src_width + (size_t)x1];
+      const u16 p00 = ReadPixel<Rgb,Turn>(pixels, rgb, src_width, src_height, x0, y0);
+      const u16 p10 = ReadPixel<Rgb,Turn>(pixels, rgb, src_width, src_height, x1, y0);
       // Identity rows need only horizontal interpolation. Rounded PDF bounds
       // often add one column to an otherwise native-size raster.
       if (ty == 0) {
@@ -133,8 +147,8 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
             InterpolateRgb565(p00, p10, tx);
         continue;
       }
-      const u16 p01 = pixels[(size_t)y1 * (size_t)src_width + (size_t)x0];
-      const u16 p11 = pixels[(size_t)y1 * (size_t)src_width + (size_t)x1];
+      const u16 p01 = ReadPixel<Rgb,Turn>(pixels, rgb, src_width, src_height, x0, y1);
+      const u16 p11 = ReadPixel<Rgb,Turn>(pixels, rgb, src_width, src_height, x1, y1);
       if (p00 == p10 && p00 == p01 && p00 == p11) {
         screen[(size_t)dy * (size_t)stride + (size_t)dx] = p00;
         continue;
@@ -167,6 +181,47 @@ void BlitRgb565SurfaceScaledCrop(u16 *screen, int stride, int logical_width, int
           (u16)(((r >> 19) << 11) | ((g >> 18) << 5) | (b >> 19));
     }
   }
+}
+
+void BlitRgb565SurfaceScaledCrop(
+    u16 *surface, int stride, int logical_width, int logical_height,
+    int x, int y, int draw_width, int draw_height,
+    const u16 *pixels, size_t pixel_count, int src_width, int src_height,
+    int crop_x, int crop_y, int crop_width, int crop_height,
+    bool high_quality_filter, int clip_x0, int clip_y0, int clip_x1, int clip_y1,
+    int quarter_turns) {
+  const int turn=quarter_turns&3;
+  if(turn) {
+    // Rotate the sampling view, never the source allocation. Crops stay in
+    // canonical source coordinates at the API boundary.
+    crop_x=std::max(0,std::min(src_width-1,crop_x));
+    crop_y=std::max(0,std::min(src_height-1,crop_y));
+    crop_width=std::min(crop_width,src_width-crop_x);
+    crop_height=std::min(crop_height,src_height-crop_y);
+    const int cx=crop_x,cy=crop_y,cw=crop_width,ch=crop_height;
+    if(turn==1) {crop_x=src_height-cy-ch;crop_y=cx;}
+    if(turn==2) {crop_x=src_width-cx-cw;crop_y=src_height-cy-ch;}
+    if(turn==3) {crop_x=cy;crop_y=src_width-cx-cw;}
+    if(turn&1) {std::swap(src_width,src_height);std::swap(crop_width,crop_height);}
+    if(turn==1) BlitSurfaceScaledCrop<false,1>(surface,stride,logical_width,logical_height,x,y,draw_width,draw_height,pixels,pixel_count,src_width,src_height,crop_x,crop_y,crop_width,crop_height,high_quality_filter,clip_x0,clip_y0,clip_x1,clip_y1);
+    if(turn==2) BlitSurfaceScaledCrop<false,2>(surface,stride,logical_width,logical_height,x,y,draw_width,draw_height,pixels,pixel_count,src_width,src_height,crop_x,crop_y,crop_width,crop_height,high_quality_filter,clip_x0,clip_y0,clip_x1,clip_y1);
+    if(turn==3) BlitSurfaceScaledCrop<false,3>(surface,stride,logical_width,logical_height,x,y,draw_width,draw_height,pixels,pixel_count,src_width,src_height,crop_x,crop_y,crop_width,crop_height,high_quality_filter,clip_x0,clip_y0,clip_x1,clip_y1);
+    return;
+  }
+  BlitSurfaceScaledCrop<false>(surface, stride, logical_width, logical_height, x, y,
+      draw_width, draw_height, pixels, pixel_count, src_width, src_height,
+      crop_x, crop_y, crop_width, crop_height, high_quality_filter,
+      clip_x0, clip_y0, clip_x1, clip_y1);
+}
+
+bool ScaleRgb8Preview(const raster_image::Rgb8View &source, int width, int height,
+                      u16 *out) {
+  if (!source.Valid() || !out || width <= 0 || height <= 0)
+    return false;
+  BlitSurfaceScaledCrop<true>(out, width, width, height, 0, 0, width, height, nullptr,
+      (size_t)source.width * source.height, source.width, source.height,
+      0, 0, source.width, source.height, true, 0, 0, width, height, &source);
+  return true;
 }
 
 } // namespace fixed_layout_blit_utils

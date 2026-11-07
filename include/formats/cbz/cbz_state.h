@@ -2,6 +2,7 @@
 
 #include "book/book.h"
 #include "formats/common/fixed_layout_bitmap_cache.h"
+#include "formats/common/fixed_layout_gpu_renderer.h"
 #include "formats/common/fixed_layout_preview_panel.h"
 #include "formats/common/fixed_layout_viewport_utils.h"
 #include "formats/cbz/cbz_types.h"
@@ -21,13 +22,16 @@ struct Book::CbzState {
   struct PageBitmap {
     int page;
     int zoom_index;
+    int requested_zoom_index;
     int original_width;
     int original_height;
     CbzBitmap bitmap;
+    uint64_t generation;
+    fixed_layout_gpu::TextureCache gpu;
 
     PageBitmap()
-        : page(-1), zoom_index(-1), original_width(0), original_height(0),
-          bitmap() {}
+        : page(-1), zoom_index(-1), requested_zoom_index(-1), original_width(0),
+          original_height(0), bitmap(), generation(0), gpu() {}
   };
 
   struct AdjacentSlot {
@@ -90,6 +94,8 @@ struct Book::CbzState {
   int failed_page;
   int logged_failed_page;
   std::string last_error;
+  bool gpu_draw_failed = false;
+  bool wide_top_screen = false;
 
   CbzState()
       : decode_context(NULL), archive_path(), target_top_width(240), target_top_height(400),
@@ -109,7 +115,7 @@ inline void ResetCbzBitmapCache(Book::CbzState::BitmapCache *cache) {
   cache->zoom_index = -1;
   cache->bitmap_width = 0;
   cache->bitmap_height = 0;
-  cache->pixels.clear();
+  std::vector<u16>().swap(cache->pixels);
 }
 
 inline bool CbzBitmapCacheValid(const Book::CbzState::BitmapCache &cache,

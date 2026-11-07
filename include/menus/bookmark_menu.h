@@ -20,8 +20,11 @@ class BookmarkMenu : public PagedListMenu {
 public:
   BookmarkMenu(class App *app);
   ~BookmarkMenu();
+  void Draw() override;
 
 private:
+  std::vector<u16> preview_pages_;
+  std::vector<bool> preview_ready_;
   void BuildEntries(class Book *book, class Text *text,
                     std::vector<std::string> &labels,
                     std::vector<u16> &pages) override;

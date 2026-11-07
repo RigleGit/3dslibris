@@ -9,10 +9,9 @@
 // Keyed by book path + file size + mtime so stale entries are ignored
 // automatically when the source file changes.
 //
-// Format: 6-byte header (magic + version) followed by three
-// length-prefixed UTF-8 strings in this order:
-// title, author, publisher, published, subjects, description,
-// cover_image_path.
+// Version 3 remains readable for library display; version 4 certifies genuine
+// title and author preparation (including empty fields). The native header is
+// followed by nine length-prefixed UTF-8 fields in MetaEntry order.
 // An empty string is stored as a 4-byte zero length.
 
 namespace book_meta_cache {
@@ -36,10 +35,12 @@ std::string BuildPath(const std::string &book_path, long long file_size,
                       long long file_mtime);
 
 // Writes a MetaEntry to disk. Returns true on success.
-bool Save(const std::string &cache_path, const MetaEntry &entry);
+bool Save(const std::string &cache_path, const MetaEntry &entry,
+          bool prepared = false);
 
 // Reads a MetaEntry from disk. Returns true on success.
-bool Load(const std::string &cache_path, MetaEntry *out);
+bool Load(const std::string &cache_path, MetaEntry *out,
+          bool *prepared = nullptr);
 
 // Creates the cache directory if it does not already exist.
 void EnsureDir();

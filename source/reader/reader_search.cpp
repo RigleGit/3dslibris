@@ -12,6 +12,7 @@
 #include "ui/touch_utils.h"
 #include <3ds.h>
 #include <algorithm>
+#include <cstdio>
 
 namespace {
 std::string ShortLabel(const std::string &s, size_t chars) {
@@ -38,6 +39,8 @@ void ReaderController::InvalidateSearch(bool forget_query) {
   if (search_->engine.GetStatus() == text_search::Searching)
     LogSearch(app_, *search_, "cancel");
   search_->engine.Cancel();
+  if (search_->book)
+    search_->book->CancelReflowPageRequest();
   search_->active = search_->has_match = false;
   search_->book = nullptr;
   if (forget_query) search_.reset();
@@ -80,6 +83,26 @@ void ReaderController::EditSearchText() {
   DrawSearch(); app_.PresentIfDirty();
   if (app_.ShouldAbortWork()) return;
   s.keyboard_pending = false;
+#ifdef DSLIBRIS_DEBUG
+  {
+    // Debug-only test seam: the system keyboard applet cannot be driven by
+    // automated emulator runs. A query file replaces only the text entry.
+    FILE *file = fopen("sdmc:/3ds/3dslibris/search_query.txt", "rb");
+    if (file) {
+      char text[128 * 4 + 1];
+      size_t n = fread(text, 1, sizeof(text) - 1, file);
+      fclose(file);
+      while (n && (text[n - 1] == '\n' || text[n - 1] == '\r')) --n;
+      text[n] = 0;
+      if (n) {
+        s.query = text; s.selected = 2; s.message.clear();
+        s.wait_release = s.dirty = true; s.release_ms = osGetTime();
+        app_.ts->MarkAllScreensDirty();
+        return;
+      }
+    }
+  }
+#endif
   SwkbdState keyboard;
   swkbdInit(&keyboard, SWKBD_TYPE_NORMAL, 2, 128);
   swkbdSetHintText(&keyboard, "Search in this book");
@@ -106,6 +129,7 @@ void ReaderController::StartSearch(bool backwards, bool first) {
   if (s.engine.GetStatus() == text_search::Searching)
     LogSearch(app_, s, "cancel");
   s.engine.Cancel();
+  s.book->CancelReflowPageRequest();
   if (!s.engine.Configure(s.query, s.whole_words)) {
     s.message = s.engine.GetError(); s.editor = s.dirty = true; return;
   }
@@ -158,6 +182,7 @@ void ReaderController::DrawSearch() {
       highlight.end = current == s.match.end.page ? s.match.end.token : page->GetLength();
     }
     page->Draw(ts, on_match ? &highlight : nullptr);
+    s.book->TrimReflowPageCache();
     const bool landscape = orientation_utils::IsLandscape(s.book->GetOrientation());
     ts->SetScreen(landscape ? ts->screenright : ts->screenleft);
     const int height = ts->LogicalHeight();
@@ -217,7 +242,11 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
     }
   } else {
     if ((keys & app_.key.b) && s.engine.GetStatus() == text_search::Searching) {
-      LogSearch(app_, s, "cancel"); s.engine.Cancel(); s.message = "Search cancelled"; s.dirty = true;
+      LogSearch(app_, s, "cancel");
+      s.engine.Cancel();
+      book->CancelReflowPageRequest();
+      s.message = "Search cancelled";
+      s.dirty = true;
     } else if (keys & (app_.key.a | app_.key.b)) {
       InvalidateSearch(false); app_.ShowCurrentBookView(); book_nav::DrawPage(book, app_.ts.get()); return;
     } else if (keys & app_.key.x) {
@@ -246,11 +275,19 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
       }
     }
     if (s.engine.GetStatus() == text_search::Searching) {
-      const uint64_t kSearchSliceMs = 12;
+      const uint64_t kSearchSliceMs = 30;
       const uint64_t started = osGetTime();
-      do { s.engine.Pump(32); }
-      while (s.engine.GetStatus() == text_search::Searching &&
-             osGetTime() - started < kSearchSliceMs && !app_.ShouldAbortWork());
+      do {
+        s.engine.Pump(32);
+        if (s.engine.IsWaitingForPage() && book->HasPendingReflowPageRead()) {
+          if (book->AdvanceReflowPageCache() < 0) {
+            ReportPageCacheError();
+            return;
+          }
+        }
+      } while (s.engine.GetStatus() == text_search::Searching &&
+               osGetTime() - started < kSearchSliceMs &&
+               !app_.ShouldAbortWork());
       const uint64_t elapsed = osGetTime() - started;
       s.scan_ms += elapsed; s.max_slice_ms = std::max(s.max_slice_ms, elapsed);
       if (s.engine.GetStatus() != text_search::Searching) {

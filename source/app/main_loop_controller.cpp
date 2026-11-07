@@ -24,6 +24,7 @@
 #include "shared/debug_log.h"
 #include "library/browser_warmup_utils.h"
 #include "shared/debug_runtime_mode.h"
+#include "shared/mcp_input_mailbox.h"
 #include "settings/prefs.h"
 
 MainLoopController::MainLoopController(App &app) : app_(app) {}
@@ -38,7 +39,6 @@ int MainLoopController::RunMainLoop()
   int heap_log_countdown = 0;
   int lifecycle_log_budget = 32;
 #endif
-  u64 reader_last_interaction_ms = osGetTime();
   auto handle_lifecycle_pause = [&]() -> bool {
     boot_trace::FlushAptHooks();
     if (app_.IsAppletExitRequested())
@@ -60,7 +60,6 @@ int MainLoopController::RunMainLoop()
         lifecycle_log_budget--;
       }
 #endif
-      reader_last_interaction_ms = osGetTime();
       app_.HandleAppletSuspend();
       boot_trace::Boot("main loop suspend handled");
       svcSleepThread(1000000LL); // 1ms yield: aptMainLoop() may return briefly while HOME transitions
@@ -116,8 +115,12 @@ int MainLoopController::RunMainLoop()
     hidScanInput(); // Update input state for this frame, must be called before reading keys.
     touchPosition raw_touch = {};
     hidTouchRead(&raw_touch);
-    const u32 frame_keys_down = hidKeysDown();
-    const u32 frame_keys_held = hidKeysHeld();
+    u32 frame_keys_down = hidKeysDown();
+    u32 frame_keys_held = hidKeysHeld();
+#ifdef DSLIBRIS_DEBUG
+    mcp_input::SetUserValue(0, (u32)app_.GetMode());
+    mcp_input::Apply(frame_keys_down, frame_keys_held, raw_touch);
+#endif
     const FrameInput input(frame_keys_down, frame_keys_held,
                            (frame_keys_held & KEY_TOUCH) != 0,
                            (int)raw_touch.px, (int)raw_touch.py, osGetTime());
@@ -152,13 +155,15 @@ int MainLoopController::RunMainLoop()
 #endif
     // Dispatch frame processing based on the current app mode, handling input and updates for each mode. After processing, present the frame if it was marked dirty.
     const AppMode input_mode = app_.GetMode();
-    if (input_mode != AppMode::Book || input.keys_down || input.keys_held)
-      reader_last_interaction_ms = input.timestamp_ms;
 #ifdef DSLIBRIS_DEBUG
     const uint64_t input_started_ms = osGetTime();
     uint64_t browser_input_ms = 0;
     uint64_t browser_warmup_ms = 0;
 #endif
+    if(app_.PumpReaderPageCache(input)) {
+      app_.PresentIfDirty();
+      continue;
+    }
     switch (app_.GetMode())
     {
     case AppMode::Book:
@@ -244,6 +249,14 @@ int MainLoopController::RunMainLoop()
       app_.RunSearchFrame(input);
       break;
 
+    case AppMode::LibraryPreload:
+      app_.RunLibraryPreloadFrame(input);
+      break;
+
+    case AppMode::LibrarySearch:
+      app_.RunLibrarySearchFrame(input);
+      break;
+
     case AppMode::BookInfo:
       app_.RunBookInfoFrame(input);
       break;
@@ -298,15 +311,6 @@ int MainLoopController::RunMainLoop()
             osGetTime(), app_.GetBrowserLastInteractionMs(),
             app_.IsBrowserWaitingInputRelease()))
       app_.ProcessJobs(3);
-    if (!wrote_prefs && app_.GetMode() == AppMode::Book &&
-        input.keys_down == 0 && input.keys_held == 0 &&
-        input.timestamp_ms >= reader_last_interaction_ms &&
-        input.timestamp_ms - reader_last_interaction_ms >= 1000 &&
-        !app_.ShouldAbortWork() && aptIsActive()) {
-      Book *book = app_.GetCurrentBook();
-      if (book)
-        book->PumpPendingEpubPageCacheSave();
-    }
     fixed_perf::Flush(&app_);
   }
   fixed_perf::Flush(&app_);

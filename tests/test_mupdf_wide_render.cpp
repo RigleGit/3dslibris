@@ -1,3 +1,4 @@
+#include "formats/common/fixed_layout_gpu_upload.h"
 #include "formats/mupdf/mupdf_render.h"
 #include "formats/mupdf/mupdf_worker.h"
 #include "formats/mupdf/mupdf_render_policy_utils.h"
@@ -492,6 +493,13 @@ static void TestNew3dsHighZoomPanRetainsSharpDetail(const char *path) {
   }
 }
 
+static bool AcceptDecodedSamples(void *opaque, const raster_image::Rgb8View &s,
+                                  float w, float h) {
+  assert(s.Valid() && s.width == 240 && s.height == 800 && w == 240 && h == 400);
+  for (int y = 0; y < 800; ++y)
+    assert(s.Pixel(120, y) == (y & 1 ? 0 : 0xffff));
+  return *static_cast<bool *>(opaque);
+}
 int main(int argc, char **argv) {
   assert(argc == 2);
   TestDisplayListRenderDoesNotReloadPage(argv[1]);
@@ -513,6 +521,16 @@ int main(int argc, char **argv) {
   assert(native.width == 240 && native.height == 800 && native.native_pixels);
   for (int y = 0; y < 800; ++y)
     assert(native.PixelData()[y * 240 + 120] == (y & 1 ? 0 : 0xFFFF));
+  bool accept = true;
+  const raster_image::Rgb8Sink sink = {&accept, AcceptDecodedSamples};
+  RenderedMuPdfBitmap direct;
+  assert(RenderMuPdfBitmap(ctx, doc, 0, 1, &direct, &width, &height,
+      NULL, NULL, NULL, NULL, NULL, 1, 2, false, 1024u * 1024u, &sink));
+  assert(direct.width == 240 && direct.height == 800 && direct.PixelCount() == 0);
+  accept = false;
+  assert(RenderMuPdfBitmap(ctx, doc, 0, 1, &direct, &width, &height,
+      NULL, NULL, NULL, NULL, NULL, 1, 2, false, 1024u * 1024u, &sink));
+  assert(direct.PixelCount() == 240u * 800u);
   // Transfer ownership to the real cache without another allocation/copy.
   Book::MuPdfState::BitmapCache cache;
   const u16 *address = native.PixelData();

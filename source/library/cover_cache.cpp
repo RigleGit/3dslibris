@@ -49,6 +49,7 @@ namespace {
 static const std::string &kCoverCacheBaseDir = paths::GetCacheBaseDir();
 static const std::string &kCoverCacheDir = paths::GetCoverCacheDir();
 static const char *kCoverCacheMagic = "CVR4";
+static const char *kCoverAbsentMagic = "CVN4";
 static const size_t kCoverCacheMaxFiles = 512;
 static const size_t kCoverCacheMaxBytes = 16 * 1024 * 1024;
 
@@ -67,6 +68,13 @@ static bool CoverCacheEntryOlderFirst(const CoverCacheEntry &a,
 
 static std::list<CoverCacheEntry> g_cache_entries;
 static size_t g_cache_bytes = 0;
+static bool g_dirs_initialized = false, g_full_retention = false;
+static bool FullRetentionStored() {
+  FILE *fp=fopen(paths::GetCoverRetentionPath().c_str(),"rb");
+  if(!fp) return false;
+  char marker[16]={};const bool ok=fgets(marker,sizeof(marker),fp)!=nullptr && !strcmp(marker,"keep-all-v1\n");
+  fclose(fp);return ok;
+}
 
 static void LoadCoverCacheIndex() {
   DIR *dp = opendir(kCoverCacheDir.c_str());
@@ -83,7 +91,7 @@ static void LoadCoverCacheIndex() {
     char full[512];
     snprintf(full, sizeof(full), "%s/%s", kCoverCacheDir.c_str(), ent->d_name);
     struct stat st;
-    if (stat(full, &st) != 0 || !S_ISREG(st.st_mode))
+    if (!paths::StatWithMtime(full, &st) || !S_ISREG(st.st_mode))
       continue;
 
     CoverCacheEntry ce;
@@ -171,8 +179,7 @@ static void PruneCoverCache() {
 }
 
 static void EnsureCoverCacheDirs() {
-  static bool initialized = false;
-  if (initialized)
+  if (g_dirs_initialized)
     return;
   mkdir(kCoverCacheBaseDir.c_str(), 0777);
   mkdir(kCoverCacheDir.c_str(), 0777);
@@ -200,9 +207,12 @@ static void EnsureCoverCacheDirs() {
     closedir(legacy_dp);
   }
 
-  LoadCoverCacheIndex();
-  PruneCoverCache();
-  initialized = true;
+  g_full_retention=FullRetentionStored();
+  if(!g_full_retention) {
+    LoadCoverCacheIndex();
+    PruneCoverCache();
+  }
+  g_dirs_initialized = true;
 }
 
 struct CoverSourcePaths {
@@ -221,12 +231,12 @@ static CoverSourcePaths ResolveCoverSourcePaths(Book *book,
   struct stat st;
   long long fsize = 0;
   long long fmtime = 0;
-  if (stat(book_path.c_str(), &st) == 0) {
+  if (paths::StatWithMtime(book_path.c_str(), &st)) {
     fsize = (long long)st.st_size;
     fmtime = (long long)st.st_mtime;
   }
 
-  std::string key = book_path;
+  std::string key = "src2|" + book_path;
   key.push_back('|');
   key += std::to_string(fsize);
   key.push_back('|');
@@ -240,7 +250,7 @@ static CoverSourcePaths ResolveCoverSourcePaths(Book *book,
     const std::vector<std::string> candidates =
         cover_override_utils::BuildBookCandidates(book_path);
     for (size_t i = 0; i < candidates.size(); ++i) {
-      if (stat(candidates[i].c_str(), &cover_st) == 0 &&
+      if (paths::StatWithMtime(candidates[i].c_str(), &cover_st) &&
           S_ISREG(cover_st.st_mode)) {
         paths.adjacent_path = candidates[i];
         break;
@@ -297,7 +307,27 @@ static const CoverSourcePaths &GetCoverSourcePaths(
 namespace cover_cache {
 
 void ClearPathCache() { g_source_paths.clear(); }
+void ResetMaintenance() {
+  g_dirs_initialized=false;g_full_retention=false;
+  g_cache_entries.clear();g_cache_bytes=0;ClearPathCache();
+}
+bool EnableFullRetention() {
+  mkdir(kCoverCacheBaseDir.c_str(),0777);mkdir(kCoverCacheDir.c_str(),0777);
+  if(!FullRetentionStored()) {
+    const std::string temporary=paths::GetCoverRetentionPath()+".tmp";
+    FILE *fp=fopen(temporary.c_str(),"wb");if(!fp) return false;
+    const bool written=fputs("keep-all-v1\n",fp)>=0;
+    const bool closed=fclose(fp)==0;
+    if(!written || !closed || rename(temporary.c_str(),paths::GetCoverRetentionPath().c_str())) {
+      remove(temporary.c_str());return false;
+    }
+  }
+  ResetMaintenance();return true;
+}
 
+bool HasAdjacentOverride(Book *book,const std::string &path) {
+  return book && !path.empty() && !GetCoverSourcePaths(book,path).adjacent_path.empty();
+}
 bool TryLoadAdjacentOverride(Book *book, const std::string &book_path) {
   if (!book || book_path.empty())
     return false;
@@ -355,7 +385,9 @@ bool Save(Book *book, const std::string &book_path) {
   if (ok) {
     ok = fwrite(book->coverPixels, sizeof(u16), count, fp) == count;
   }
-  fclose(fp);
+  const bool closed=fclose(fp)==0;
+  ok=ok && closed;
+  if (!ok) remove(cache_path.c_str());
   if (ok) {
     FILE *mf = fopen(paths::GetCoverCacheManifest().c_str(), "a");
     if (mf) {
@@ -366,8 +398,10 @@ bool Save(Book *book, const std::string &book_path) {
       fprintf(mf, "%s\t%s\t%s\n", cache_base.c_str(), display, book_path.c_str());
       fclose(mf);
     }
-    RecordCoverCacheSave(cache_path, sizeof(header) + count * sizeof(u16));
-    PruneCoverCache();
+    if(!g_full_retention) {
+      RecordCoverCacheSave(cache_path, sizeof(header) + count * sizeof(u16));
+      PruneCoverCache();
+    }
   }
 #if defined(DSLIBRIS_DEBUG) && BROWSER_COVER_TRACE
   if (book->GetStatusReporter()) {
@@ -381,7 +415,45 @@ bool Save(Book *book, const std::string &book_path) {
   return ok;
 }
 
-bool TryLoad(Book *book, const std::string &book_path) {
+bool MarkAbsent(Book *book, const std::string &book_path) {
+  if (!book || book_path.empty())
+    return false;
+  EnsureCoverCacheDirs();
+  const std::string cache_path = GetCoverSourcePaths(book, book_path).cache_path;
+  u8 header[8] = {};
+  memcpy(header, kCoverAbsentMagic, 4);
+  FILE *fp = fopen(cache_path.c_str(), "wb");
+  if (!fp)
+    return false;
+  bool ok = fwrite(header, 1, sizeof(header), fp) == sizeof(header);
+  ok = (fclose(fp) == 0) && ok;
+  if (!ok) {
+    remove(cache_path.c_str());
+    return false;
+  }
+  if (!g_full_retention) {
+    RecordCoverCacheSave(cache_path, sizeof(header));
+    PruneCoverCache();
+  }
+  return true;
+}
+
+bool IsMarkedAbsent(Book *book, const std::string &book_path) {
+  if (!book || book_path.empty())
+    return false;
+  EnsureCoverCacheDirs();
+  FILE *fp = fopen(GetCoverSourcePaths(book, book_path).cache_path.c_str(), "rb");
+  if (!fp)
+    return false;
+  u8 header[8];
+  const bool ok = fread(header, 1, sizeof(header), fp) == sizeof(header) &&
+                  memcmp(header, kCoverAbsentMagic, 4) == 0 &&
+                  !header[4] && !header[5] && !header[6] && !header[7];
+  fclose(fp);
+  return ok;
+}
+
+static bool Load(Book *book, const std::string &book_path, bool allow_fallback) {
   if (!book)
     return false;
   EnsureCoverCacheDirs();
@@ -399,7 +471,7 @@ bool TryLoad(Book *book, const std::string &book_path) {
 #endif
     if (book->IsBrowserFolder())
       return false;
-    if (debug_runtime::BackgroundWorkersDisabled() &&
+    if (allow_fallback && debug_runtime::BackgroundWorkersDisabled() &&
         debug_runtime::BrowserWarmupDisabled() && !book_path.empty() &&
         !book->coverPixels && book->coverAttempts < kMaxAttempts) {
       if (TryLoadAdjacentOverride(book, book_path)) {
@@ -509,5 +581,8 @@ bool TryLoad(Book *book, const std::string &book_path) {
 #endif
   return true;
 }
+
+bool TryLoad(Book *book,const std::string &path) {return Load(book,path,true);}
+bool TryLoadCachedOnly(Book *book,const std::string &path) {return Load(book,path,false);}
 
 } // namespace cover_cache

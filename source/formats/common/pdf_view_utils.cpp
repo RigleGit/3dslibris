@@ -3,6 +3,7 @@
 #include "formats/common/pdf_view_utils.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 
 namespace pdf_view_utils {
@@ -154,6 +155,32 @@ bool TouchMovementExceedsThreshold(int prev_x, int prev_y, int next_x,
   const int dx = std::abs(next_x - prev_x);
   const int dy = std::abs(next_y - prev_y);
   return std::max(dx, dy) >= min_delta;
+}
+
+NormalizedRect GrowViewportTileRegion(const NormalizedRect &viewport,
+                                      double full_pixels, double pixel_budget,
+                                      double min_scale) {
+  const double vw = std::max(0.0001, (double)viewport.width);
+  const double vh = std::max(0.0001, (double)viewport.height);
+  double rw = std::min(1.0, vw * min_scale);
+  double rh = std::min(1.0, vh * min_scale);
+  if (full_pixels > 0.0 && pixel_budget > 0.0) {
+    const double fraction = std::min(1.0, pixel_budget / full_pixels);
+    // Uniform growth first, then hand any width/height clamped away to the
+    // other axis so a thin viewport still uses the whole budget.
+    const double k = std::sqrt(fraction / (vw * vh));
+    rw = std::max(rw, std::min(1.0, vw * k));
+    rh = std::max(rh, std::min(1.0, fraction / rw));
+    rw = std::max(rw, std::min(1.0, fraction / rh));
+  }
+  NormalizedRect out;
+  out.width = (float)rw;
+  out.height = (float)rh;
+  out.left = std::max(0.0f, std::min(1.0f - out.width,
+      viewport.left - (out.width - viewport.width) * 0.5f));
+  out.top = std::max(0.0f, std::min(1.0f - out.height,
+      viewport.top - (out.height - viewport.height) * 0.5f));
+  return out;
 }
 
 } // namespace pdf_view_utils

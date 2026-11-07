@@ -19,10 +19,13 @@
 
 #include <stdio.h>
 #include <time.h>
+#include <new>
 
 #include <3ds.h>
 
 #include "book/book.h"
+#include "shared/string_utils.h"
+#include "formats/common/reflow_preparation.h"
 #include "book/book_renderer.h"
 #include "formats/common/book_error.h"
 #include "reader/app_book_internal.h"
@@ -107,6 +110,9 @@ u8 ReaderController::OpenBook()
 
   // Switching books closes the previous one in DetachCurrentBookForSwitch().
   // Persist first so Close() cannot reset/write it back as page 1.
+  if (progress_autosave_dirty_ && progress_autosave_book_ &&
+      progress_autosave_book_ != selected_book)
+    TryPersistProgress(progress_autosave_book_, true);
   if (switching_books) {
     TryPersistProgress(bookcurrent_, true);
   }
@@ -127,6 +133,8 @@ u8 ReaderController::OpenBook()
     app_.RequestStatusRedraw();
     app_.SetPrefsLayoutNoticePending(false);
     prefs->Write();
+    ClearSavedRelayoutState(selected_book);
+    ResetProgressAutosave(selected_book);
     boot_trace::Boot("open book reuse done");
     return 0;
   }
@@ -151,6 +159,42 @@ u8 ReaderController::OpenBook()
     app_.SetMode(AppMode::Browser);
     app_.SetBrowserDirty(true);
     return BOOK_ERR_CANCELLED;
+  }
+
+  if (selected_book->format == FORMAT_EPUB || HasExtCI(selected_book->GetFileName(), ".mobi") ||
+      HasExtCI(selected_book->GetFileName(), ".fb2")) {
+    app_.PauseBrowserJobs();
+    DetachCurrentBookForSwitch(&app_, selected_book, session_id,
+                               "reflow-preparation");
+    selected_book->SetOpenSessionId(session_id);
+    preparation_.reset(new (std::nothrow) ReflowPreparation);
+    const std::string source = std::string(selected_book->GetFolderName()) +
+                               "/" + selected_book->GetFileName();
+    cache_label_.clear();
+    if (!preparation_ ||
+        !preparation_->Begin(selected_book, source,
+                             debug_runtime::DisableReflowPageResidency() ? 0
+                             : app_.IsNew3dsDevice() ? 2u * 1024u * 1024u
+                                                     : 512u * 1024u)) {
+      cache_label_ = preparation_ ? preparation_->Label() : "not enough memory to prepare book";
+      cache_label_ += "; B: back";
+      if (preparation_) preparation_->Cancel();
+      preparation_.reset();
+      selected_book->Close();
+      app_.SetCurrentBook(nullptr);
+      DrawOpeningSplashImpl(&app_, 0, 0, cache_label_.c_str());
+    }
+    cache_preparing_ = selected_book;
+    cache_draw_ms_ = 0;
+    app_.SetOpeningPending(true);
+    app_.SetOpeningBook(selected_book);
+    app_.SetOpeningSessionId(session_id);
+    app_.SetOpeningNeedsRelayout(relayout_state.needs_relayout);
+    app_.SetOpeningOldPageCount(relayout_state.old_page_count);
+    app_.SetOpeningOldPosition(relayout_state.old_position);
+    app_.MutableOpeningOldBookmarks() = relayout_state.old_bookmarks;
+    app_.SetMode(AppMode::Opening);
+    return 0;
   }
 
   if (use_async_reflow)
@@ -306,6 +350,8 @@ u8 ReaderController::OpenBook()
   app_.RequestStatusRedraw();
   app_.SetPrefsLayoutNoticePending(false);
   prefs->Write();
+  ClearSavedRelayoutState(bookcurrent_);
+  ResetProgressAutosave(bookcurrent_);
   boot_trace::Boot("open book done");
   return 0;
 }
