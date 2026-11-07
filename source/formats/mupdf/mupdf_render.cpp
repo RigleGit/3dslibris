@@ -328,7 +328,10 @@ bool RenderMuPdfBitmap(fz_context *ctx, fz_document *doc, int page_index,
     } else {
       DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                    "MUPDF render: run-list-begin page=%d", page_index);
-      fz_run_display_list(ctx, list, device, ctm, fz_infinite_rect, NULL);
+      // Scissor to the pixmap: MuPDF skips list nodes outside it, so a zoomed
+      // tile no longer walks every glyph/path/image on the page.
+      fz_run_display_list(ctx, list, device, ctm, fz_rect_from_irect(bbox),
+                          NULL);
       fz_close_device(ctx, device);
       DBG_LOGF_CAT(reporter, DBG_LEVEL_TRACE, DBG_CAT_RENDER,
                    "MUPDF render: run-list-done page=%d", page_index);
