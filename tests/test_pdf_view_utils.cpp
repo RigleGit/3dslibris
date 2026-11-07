@@ -187,9 +187,49 @@ void TestViewportStateFeedsGeometry() {
   ExpectNear("pan clamps visible bottom edge", rect.top + rect.height, 1);
   ExpectTrue("further movement at boundary is idle", !PanViewport(&state, 1, 1));
 }
+
+void TestGrowViewportTileRegion() {
+  const pdf_view_utils::NormalizedRect vp = {0.40f, 0.40f, 0.10f, 0.05f};
+  // Budget for ~16% of a page: far more than the old 1.5x.
+  pdf_view_utils::NormalizedRect r =
+      pdf_view_utils::GrowViewportTileRegion(vp, 5.0e6, 0.9e6);
+  ExpectTrue("grown tile contains viewport",
+             r.left <= vp.left + 1e-5f && r.top <= vp.top + 1e-5f &&
+             r.left + r.width >= vp.left + vp.width - 1e-5f &&
+             r.top + r.height >= vp.top + vp.height - 1e-5f);
+  ExpectTrue("grown tile exceeds old 1.5x",
+             r.width > vp.width * 1.5f + 0.01f &&
+             r.height > vp.height * 1.5f + 0.01f);
+  ExpectTrue("grown tile respects pixel budget",
+             (double)r.width * r.height * 5.0e6 <= 0.9e6 * 1.01);
+  // Budget below the old growth never shrinks below 1.5x.
+  r = pdf_view_utils::GrowViewportTileRegion(vp, 5.0e6, 1.0e3);
+  ExpectNear("floor keeps 1.5x width", r.width, vp.width * 1.5f);
+  ExpectNear("floor keeps 1.5x height", r.height, vp.height * 1.5f);
+  // Corner viewport stays inside the page.
+  const pdf_view_utils::NormalizedRect corner = {0.0f, 0.0f, 0.1f, 0.1f};
+  r = pdf_view_utils::GrowViewportTileRegion(corner, 5.0e6, 0.9e6);
+  ExpectNear("corner tile left clamps", r.left, 0.0f);
+  ExpectNear("corner tile top clamps", r.top, 0.0f);
+  ExpectTrue("corner tile stays in page",
+             r.left + r.width <= 1.0001f && r.top + r.height <= 1.0001f);
+  // Thin full-width viewport hands the spare budget to the other axis.
+  const pdf_view_utils::NormalizedRect strip = {0.0f, 0.5f, 1.0f, 0.05f};
+  r = pdf_view_utils::GrowViewportTileRegion(strip, 2.0e6, 0.9e6);
+  ExpectNear("full-width strip stays full width", r.width, 1.0f);
+  ExpectTrue("strip grows vertically", r.height > 0.3f);
+  // Whole page fitting the budget yields the whole page.
+  r = pdf_view_utils::GrowViewportTileRegion(vp, 5.0e6, 1.0e3, 1.3);
+  ExpectTrue("min_scale sets the floor",
+             r.width > vp.width * 1.29f && r.width < vp.width * 1.31f);
+  r = pdf_view_utils::GrowViewportTileRegion(vp, 0.5e6, 0.9e6);
+  ExpectNear("small page grows to full width", r.width, 1.0f);
+  ExpectNear("small page grows to full height", r.height, 1.0f);
+}
 } // namespace
 
 int main() {
+  TestGrowViewportTileRegion();
   TestViewportStateFeedsGeometry();
   TestZoomPresets();
   TestDevicePolicies();

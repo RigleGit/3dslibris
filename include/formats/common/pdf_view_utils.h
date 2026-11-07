@@ -56,4 +56,14 @@ NormalizedPoint RecenterViewportFromPreview(const PreviewLayout &preview,
 bool TouchMovementExceedsThreshold(int prev_x, int prev_y, int next_x,
                                    int next_y, int min_delta);
 
+// Grows a visible viewport into a larger raster region so panning crosses tile
+// borders less often. `full_pixels` is the pixel count of the whole page at the
+// render scale (including native density) and `pixel_budget` the most samples
+// the region may hold. The result contains the viewport, keeps at least the
+// historic 1.5x growth (clamped to the page) and is centred then clamped to the
+// unit square.
+NormalizedRect GrowViewportTileRegion(const NormalizedRect &viewport,
+                                      double full_pixels, double pixel_budget,
+                                      double min_scale = 1.5);
+
 } // namespace pdf_view_utils
