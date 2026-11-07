@@ -74,6 +74,11 @@ struct Engine::State {
   bool whole = false, backwards = false, include = false, wrapped = false;
   bool excluded = false, annotated = false, raw_end = false, in_rtl = false;
   bool have_pending = false, have_candidate = false, previous_word = false, previous_space = false;
+  // Page view resolved once per Pump. Page/event pointers are borrowed, so the
+  // cache is dropped whenever control returns to the caller.
+  static const unsigned kNoPage = 0xffffffffu;
+  unsigned view_page = kNoPage;
+  PageView view{};
 
   void Fail(const char *message) { error = message; status = Failed; }
   void ResetUnit() {
@@ -120,21 +125,29 @@ struct Engine::State {
   // One call handles at most one token or annotation. Payloads have fixed size.
   int Raw(Character *out) {
     if (cursor.page >= source.pages) return -1;
-    if (source.prepare) {
-      const PageAvailability available =
-          source.prepare(source.context, cursor.page);
-      if (available == PagePending) {
-        waiting = true;
-        return 0;
+    if (view_page != cursor.page) {
+      if (source.prepare) {
+        const PageAvailability available =
+            source.prepare(source.context, cursor.page);
+        if (available == PagePending) {
+          waiting = true;
+          return 0;
+        }
+        if (available == PageError) {
+          Fail("Cannot load page data");
+          return -1;
+        }
       }
-      if (available == PageError) {
-        Fail("Cannot load page data");
-        return -1;
+      PageView loaded{};
+      if (!source.page(source.context, cursor.page, &loaded) ||
+          (loaded.length && !loaded.text) || !loaded.events) {
+        Fail("Invalid page data"); return -1;
       }
+      view = loaded;
+      view_page = cursor.page;
     }
-    PageView page{};
-    if (!source.page(source.context, cursor.page, &page) ||
-        (page.length && !page.text) || !page.events || cursor.token > page.length) {
+    const PageView &page = view;
+    if (cursor.token > page.length) {
       Fail("Invalid page data"); return -1;
     }
     // Tokens and their sparse annotations advance together within a page.
@@ -193,17 +206,20 @@ struct Engine::State {
     c.word_before = previous_word;
     previous_word = Word(c.cp);
     ring[ring_next] = c;
-    ring_next = (ring_next + 1) % ring.size();
+    if (++ring_next == ring.size()) ring_next = 0;
     if (ring_count < ring.size()) ++ring_count;
     while (matched && query[matched] != c.cp) matched = prefix[matched - 1];
     if (query[matched] == c.cp) ++matched;
     if (matched == query.size()) {
-      const Character &first = ring[(ring_next + ring.size() - query.size()) % ring.size()];
+      // ring.size() == query.size(), so the oldest entry is at ring_next.
+      const Character &first = ring[ring_next];
       if ((!whole || !first.word_before) && Eligible(first.start)) {
         pending.start = first.start; pending.end = c.end;
         // Canonical mark ordering can reorder source coordinates.
         for (size_t j = 0; j < query.size(); ++j) {
-          const Character &part = ring[(ring_next + j) % ring.size()];
+          size_t at = ring_next + j;
+          if (at >= ring.size()) at -= ring.size();
+          const Character &part = ring[at];
           if (part.start < pending.start) pending.start = part.start;
           if (pending.end < part.end) pending.end = part.end;
         }
@@ -329,11 +345,14 @@ void Engine::Start(const Source &source, Position anchor, bool backwards, bool i
 }
 Status Engine::Pump(unsigned steps) {
   state_->waiting = false;
+  state_->view_page = State::kNoPage;
   while (steps-- && state_->status == Searching && !state_->waiting)
     state_->Step();
   return state_->status;
 }
-void Engine::Cancel() { state_->status = Idle; state_->source = Source{}; }
+void Engine::Cancel() {
+  state_->status = Idle; state_->source = Source{}; state_->view_page = State::kNoPage;
+}
 Status Engine::GetStatus() const { return state_->status; }
 bool Engine::IsWaitingForPage() const {
   return state_->waiting;
