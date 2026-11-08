@@ -45,3 +45,10 @@ CLAUDE.md
 /.vscode
 AGENTS.md
 *.su
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Local MCP configuration
+.mcp.json
