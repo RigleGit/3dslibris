@@ -148,3 +148,32 @@ It compares page count, chapters, page hashes, cache files, MOBI results,
 search positions/status/tokens and screenshot pixels, and prints `scan_ms`
 for both. Azahar timings are indicative only; they say nothing about physical
 Old/New 3DS speed, memory or SD latency.
+
+# Reader input regression (#177, #178, #181, #182)
+
+`reader_input_regression.py` checks reader and Settings input on the debug
+3dsx. Same requirements as `changes_regression.py`; it is manual and opt-in.
+
+```sh
+MCP_REPO=/path/to/azahar-mcp
+"$MCP_REPO/.venv/bin/python" tests/azahar/reader_input_regression.py \
+  --mcp-repo "$MCP_REPO" --rom 3dslibris-debug.3dsx \
+  --output .private/azahar-reader-input-run-01
+```
+
+`--scenarios` selects any of `178`, `182`, `177`, `181` (default: all).
+The book is `tests/fixtures/epub-render-test/`, zipped into a copied SDMC.
+State comes from live memory (`Book` position and bookmarks, link focus,
+Settings page and selection) plus screenshots:
+
+- `178`: landscape D-pad UP/DOWN only jump between bookmarks; held LEFT/RIGHT
+  repeat page turns; Circle Pad with `circlePadPageTurn="0"` turns one page.
+- `182`: held D-pad keeps moving link/image focus, with Y still held and
+  after releasing it, across pages, in landscape and portrait.
+- `177`: landscape HUD shows `N/M*` on bookmarked pages; portrait keeps `< N* >`.
+- `181`: Settings paging in both handedness modes with D-pad and L/R; going
+  back lands on the previous page's last slot; UP/DOWN still change values.
+
+Overlapping holds are written straight to the input mailbox because
+`azahar_press_buttons` blocks until each command ends. Azahar input timing is
+not hardware-accurate.
