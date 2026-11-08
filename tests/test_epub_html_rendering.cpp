@@ -1277,7 +1277,57 @@ void TestLargeFontPaginationDoesNotDropTextAcrossPages() {
 
 #include "xml_page_rendering_cases.h"
 
+
+// Issue #180: author classes on <b> and <br> must behave like the bare tags.
+// <br> always yields exactly one linefeed, even with display:block.
+std::string ParseToTokenText(const char *css, const char *body_html) {
+  TestCtx tc;
+  tc.paragraph_spacing = 0;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  epub_css_class_map::ParseCssIntoClassMap(css, strlen(css), &p.css_class_map);
+  const std::string html = std::string("<html><body>") + body_html + "</body></html>";
+  xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p));
+  std::string out;
+  for (int pi = 0; pi < book.GetPageCount(); ++pi) {
+    const u32 *b = book.GetPage(pi)->GetBuffer();
+    const int n = book.GetPage(pi)->GetLength();
+    for (int i = 0; i < n; ++i) {
+      if (b[i] == TEXT_BOLD_ON) out += "<B>";
+      else if (b[i] == TEXT_BOLD_OFF) out += "</B>";
+      else if (b[i] == '\n') out += "|";
+      else if (b[i] >= 32 && b[i] < 127) out.push_back((char)b[i]);
+    }
+  }
+  return out;
+}
+
+void TestClassedBoldAndDisplayBlockBr() {
+  const char *css = ".bold {\n  font-weight: bold;\n}\n.block {\n  display: block;\n}";
+  ExpectTrue("class-bold: b.bold matches bare b",
+             ParseToTokenText(css, "<p>a <b class=\"bold\">x</b> y</p>") ==
+             ParseToTokenText(css, "<p>a <b>x</b> y</p>"));
+  ExpectTrue("class-bold: b.other matches bare b",
+             ParseToTokenText(css, "<p>a <b class=\"other\">x</b> y</p>") ==
+             ParseToTokenText(css, "<p>a <b>x</b> y</p>"));
+  ExpectTrue("class-bold: span.bold bolds only the span",
+             ParseToTokenText(css, "<p>a <span class=\"bold\">x</span> y</p>") ==
+             "a <B>x</B> y");
+  const char *brs[] = {"<div>one<br class=\"block\"/>two</div>",
+                       "<div><span>one</span><br class=\"block\"/><span>two</span></div>",
+                       "<div><b>one</b><br class=\"block\"/>two</div>",
+                       "<p>one<br class=\"block\"/>two</p>"};
+  const char *plain[] = {"<div>one<br/>two</div>",
+                         "<div><span>one</span><br/><span>two</span></div>",
+                         "<div><b>one</b><br/>two</div>",
+                         "<p>one<br/>two</p>"};
+  for (int i = 0; i < 4; ++i)
+    ExpectTrue("br-block: display:block br emits one linefeed like bare br",
+               ParseToTokenText(css, brs[i]) == ParseToTokenText(css, plain[i]));
+}
+
 int main() {
+  TestClassedBoldAndDisplayBlockBr();
   TestEmbeddedCssParagraphSpacing();
   TestAdjacentDivsStartSeparateLines();
   TestAdjacentDivsAfterBandImageStartSeparateLines();

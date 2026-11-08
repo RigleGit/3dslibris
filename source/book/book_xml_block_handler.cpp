@@ -863,6 +863,10 @@ void ApplyDisplayBlockPromotion(
     return;
   if (IsBlockLevelElement(el))
     return;
+  // <br> is a single forced linefeed (emitted by its end handler); promoting
+  // it to a block would add a second one when the author sets display:block.
+  if (!strcmp(el, "br"))
+    return;
   if (p->in_paragraph)
     return;
   if (!elem_css.is_display_block)
