@@ -202,8 +202,8 @@ void TestPreviousLayoutCacheIsRejected() {
   Fixture fixture;
   fixture.AddPages(1);
   fixture.Save();
-  Check(fixture.CacheFile() == fixture.directory + "/cceb7bc8682ae1ee.epc",
-        "EPUB layout cache identity (includes the text alignment mode)");
+  Check(fixture.CacheFile() == fixture.directory + "/769f8093c62c4147.epc",
+        "EPUB layout cache identity (includes table emphasis layout)");
   for (u16 version : {21,22,23}) {
     fixture.Save();
     fixture.PatchPageIndex(sizeof(u32), version);

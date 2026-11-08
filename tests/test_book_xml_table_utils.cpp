@@ -103,9 +103,48 @@ void TestBuildTableLinesFallsBackToSimpleJoinWithoutHeaders() {
 void TestNormalizeTableCellTextCollapsesWhitespace() {
   test::ExpectStrEq("collapse whitespace",
                     book_xml_table_utils::NormalizeTableCellText(
-                        "  Field \n\t Name   ")
+                        "  Field \t Name   ")
                         .c_str(),
                     "Field Name");
+}
+
+void TestNormalizeKeepsHardBreaksAndEmphasis() {
+  using book_xml_table_utils::NormalizeTableCellText;
+  using book_xml_table_utils::SplitCellLines;
+  const char B = (char)TEXT_BOLD_ON, b = (char)TEXT_BOLD_OFF;
+  const std::string raw = std::string(" ") + B + "Name:" + b + " Celio. \n " + B +
+                          "Age:" + b + " 19. \n\n ";
+  const std::string norm = NormalizeTableCellText(raw);
+  test::ExpectStrEq("breaks and emphasis kept", norm.c_str(),
+                    (std::string(1, B) + "Name:" + b + " Celio.\n" + B + "Age:" +
+                     b + " 19.").c_str());
+  const std::vector<std::string> lines = SplitCellLines(norm);
+  test::ExpectEq("two lines", (int)lines.size(), 2);
+  test::ExpectStrEq("second line", lines[1].c_str(),
+                    (std::string(1, B) + "Age:" + b + " 19.").c_str());
+  test::ExpectStrEq("emphasis-only cell is empty",
+                    NormalizeTableCellText(std::string(1, B) + " " + b).c_str(),
+                    "");
+  // Emphasis spanning a break is closed and reopened per line.
+  const std::vector<std::string> span =
+      SplitCellLines(std::string(1, B) + "a\nb" + b);
+  test::ExpectEq("span lines", (int)span.size(), 2);
+  test::ExpectStrEq("span line 1", span[0].c_str(),
+                    (std::string(1, B) + "a" + b).c_str());
+  test::ExpectStrEq("span line 2", span[1].c_str(),
+                    (std::string(1, B) + "b" + b).c_str());
+}
+
+void TestBuildTableLinesSplitsBreaks() {
+  using namespace book_xml_table_utils;
+  TableRow row;
+  TableCell cell;
+  cell.text = "Name: Celio.\nAge: 19.";
+  row.cells.push_back(cell);
+  const std::vector<std::string> lines =
+      BuildTableLines("", NULL, std::vector<TableRow>(1, row));
+  test::ExpectEq("break becomes two lines", (int)lines.size(), 2);
+  test::ExpectStrEq("line 2", lines[1].c_str(), "Age: 19.");
 }
 
 } // namespace
@@ -115,5 +154,7 @@ int main() {
   TestBuildTableLinesUsesRowHeaderWhenPresent();
   TestBuildTableLinesFallsBackToSimpleJoinWithoutHeaders();
   TestNormalizeTableCellTextCollapsesWhitespace();
+  TestNormalizeKeepsHardBreaksAndEmphasis();
+  TestBuildTableLinesSplitsBreaks();
   return 0;
 }

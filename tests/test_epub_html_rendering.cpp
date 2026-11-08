@@ -1328,6 +1328,33 @@ void TestClassedBoldAndDisplayBlockBr() {
                ParseToTokenText(css, brs[i]) == ParseToTokenText(css, plain[i]));
 }
 
+// Issue #180 inside tables: <br> and bold survive cell capture.
+void TestTableCellKeepsBreaksAndBold() {
+  const char *css = ".test1 { display: block; }\n.test8 { font-weight: bold; }\n"
+                    ".ital { font-style: italic; }";
+  const std::string out = ParseToTokenText(
+      css,
+      "<table class=\"table_\"><tbody><tr><td><p class=\"block_11\">"
+      "<b class=\"test8\">Name:</b> Celio. <br class=\"test1\"/> "
+      "<span class=\"test8\">Age:</span> 19. <br class=\"test1\"/> "
+      "<strong>Sex:</strong> <em>M</em> <span class=\"ital\">x</span>"
+      "</p></td></tr></tbody></table><p>tail</p>");
+  ExpectTrue("table-br: bold name label", out.find("<B>Name:</B> Celio.|") != std::string::npos);
+  ExpectTrue("table-br: class bold age label on its own line",
+             out.find("|<B>Age:</B> 19.|") != std::string::npos);
+  ExpectTrue("table-br: strong and em markers",
+             out.find("<B>Sex:</B>") != std::string::npos);
+  ExpectTrue("table-br: nested bold does not double markers",
+             ParseToTokenText(css, "<table><tr><td><b>a<b>b</b></b></td></tr></table>")
+                 .find("<B>ab</B>") != std::string::npos);
+  ExpectTrue("table-br: cell with only empty emphasis stays empty",
+             ParseToTokenText(css, "<table><tr><td><b> </b></td></tr></table><p>z</p>")
+                 .find("<B>") == std::string::npos);
+  ExpectTrue("table-br: source newline is a space, not a break",
+             ParseToTokenText(css, "<table><tr><td>one\ntwo</td></tr></table>")
+                 .find("one two") != std::string::npos);
+}
+
 // Issue #138: tokens that carry paragraph alignment as letters (J/L/C/R), a
 // soft wrap as '~' and linefeeds as '|'. Text is reduced to its first letter
 // of each word so wrapped lines stay short.
@@ -1444,6 +1471,7 @@ int main() {
   TestForcedModesKeepAuthorCenterAndRight();
   TestForcedJustifyHeadingsAndBr();
   TestClassedBoldAndDisplayBlockBr();
+  TestTableCellKeepsBreaksAndBold();
   TestEmbeddedCssParagraphSpacing();
   TestAdjacentDivsStartSeparateLines();
   TestAdjacentDivsAfterBandImageStartSeparateLines();

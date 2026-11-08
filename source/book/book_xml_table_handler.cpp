@@ -12,6 +12,7 @@
 #include "book/book_xml_css_resolver.h"
 #include "book/book_xml_table_utils.h"
 #include "parse.h"
+#include "shared/text_token_constants.h"
 #include "ui/text.h"
 
 #include <string.h>
@@ -189,6 +190,59 @@ static void EmitCapturedTable(parsedata_t *p, Text *ts,
   }
 }
 
+
+// Emphasis inside captured cells is carried as inline marker bytes. The
+// style stacks only record that this element opened a marker so its end tag
+// can close it; nested emphasis does not emit a second marker.
+static bool CapturedEmphasisActive(const parsedata_t *p, bool italic) {
+  unsigned from = 0;
+  for (unsigned i = 0; i < p->stacksize; ++i)
+    if (p->stack[i] == TAG_TABLE) from = i;
+  const bool *stack = italic ? p->style_italic_stack : p->style_bold_stack;
+  for (unsigned i = from; i + 1 < p->stacksize; ++i)
+    if (stack[i]) return true;
+  return false;
+}
+
+static void OpenCapturedEmphasis(parsedata_t *p, const char *el,
+                                 const char **attr,
+                                 const epub_css_class_map::CssClassMargins &css) {
+  if (!p || p->stacksize == 0) return;
+  std::string *buffer = GetActiveCapturedTableText(p);
+  if (!buffer) return;
+  bool bold = false, italic = false;
+  bool u = false, o = false, st = false, sup = false, sub = false, nu = false;
+  bool reset_bold = false, reset_italic = false;
+  uint8_t us = 0;
+  book_xml_css_resolver::ParseElementStyleFlags(
+      attr, &bold, &italic, &u, &us, &o, &st, &sup, &sub, &nu, &reset_bold,
+      &reset_italic);
+  if (!strcmp(el, "b") || !strcmp(el, "strong")) bold = true;
+  if (!strcmp(el, "i") || !strcmp(el, "em") || !strcmp(el, "cite")) italic = true;
+  if (css.force_bold) bold = true;
+  if (css.force_italic) italic = true;
+  if (reset_bold || css.reset_bold) bold = false;
+  if (reset_italic || css.reset_italic) italic = false;
+  const unsigned top = p->stacksize - 1;
+  if (bold && !CapturedEmphasisActive(p, false)) {
+    buffer->push_back((char)TEXT_BOLD_ON);
+    p->style_bold_stack[top] = true;
+  }
+  if (italic && !CapturedEmphasisActive(p, true)) {
+    buffer->push_back((char)TEXT_ITALIC_ON);
+    p->style_italic_stack[top] = true;
+  }
+}
+
+static void CloseCapturedEmphasis(parsedata_t *p) {
+  if (!p || p->stacksize == 0) return;
+  std::string *buffer = GetActiveCapturedTableText(p);
+  if (!buffer) return;
+  const unsigned top = p->stacksize - 1;
+  if (p->style_italic_stack[top]) buffer->push_back((char)TEXT_ITALIC_OFF);
+  if (p->style_bold_stack[top]) buffer->push_back((char)TEXT_BOLD_OFF);
+}
+
 } // namespace
 
 std::string *GetActiveCapturedTableText(parsedata_t *p) {
@@ -199,7 +253,9 @@ std::string *GetActiveCapturedTableText(parsedata_t *p) {
 }
 
 bool HandleTableStart(parsedata_t *p, Text *ts, const char *el,
-                      const char **attr, const TableHandlerFns &fns) {
+                      const char **attr,
+                      const epub_css_class_map::CssClassMargins &elem_css,
+                      const TableHandlerFns &fns) {
   if (!p || !el) return false;
   const bool entering_table = !strcmp(el, "table");
   const bool inside_table = parse_in(p, TAG_TABLE);
@@ -220,7 +276,10 @@ bool HandleTableStart(parsedata_t *p, Text *ts, const char *el,
         !strcmp(el, "style") ? TAG_STYLE : TAG_UNKNOWN;
     parse_push(p, tag);
     HideCurrentStack(p, hidden);
-    if (!hidden) AppendCapturedTableSeparator(p, ' ');
+    if (!hidden) {
+      AppendCapturedTableSeparator(p, ' ');
+      if (tag == TAG_UNKNOWN) OpenCapturedEmphasis(p, el, attr, elem_css);
+    }
     return true;
   }
 
@@ -289,7 +348,10 @@ bool HandleTableStart(parsedata_t *p, Text *ts, const char *el,
       !strcmp(el, "ul") || !strcmp(el, "ol") || !strcmp(el, "blockquote")) {
     parse_push(p, TAG_UNKNOWN);
     HideCurrentStack(p, hidden);
-    if (!hidden) AppendCapturedTableSeparator(p, ' ');
+    if (!hidden) {
+      AppendCapturedTableSeparator(p, ' ');
+      OpenCapturedEmphasis(p, el, attr, elem_css);
+    }
     return true;
   }
   if (XmlEq(el, "img") || XmlEq(el, "image")) {
@@ -313,6 +375,7 @@ bool HandleTableStart(parsedata_t *p, Text *ts, const char *el,
 
   parse_push(p, TAG_UNKNOWN);
   HideCurrentStack(p, hidden);
+  if (!hidden) OpenCapturedEmphasis(p, el, attr, elem_css);
   return true;
 }
 
@@ -325,6 +388,7 @@ bool HandleTableEnd(parsedata_t *p, Text *ts, const char *el,
     if (p->stack[i] == TAG_TABLE)
       ++table_depth;
   if (table_depth > 1) {
+    CloseCapturedEmphasis(p);
     AppendCapturedTableSeparator(p, ' ');
     parse_pop(p);
     return true;
@@ -369,6 +433,7 @@ bool HandleTableEnd(parsedata_t *p, Text *ts, const char *el,
     return true;
   }
 
+  CloseCapturedEmphasis(p);
   parse_pop(p);
   return true;
 }

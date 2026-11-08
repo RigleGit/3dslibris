@@ -18,6 +18,9 @@ struct TableRow {
 };
 
 std::string NormalizeTableCellText(const std::string &text);
+// Splits normalized cell text on hard line breaks, keeping bold/italic
+// markers balanced within each returned line.
+std::vector<std::string> SplitCellLines(const std::string &text);
 std::vector<std::string> BuildTableLines(const std::string &caption,
                                          const TableRow *header_row,
                                          const std::vector<TableRow> &rows);

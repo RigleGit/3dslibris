@@ -344,7 +344,7 @@ void start(void *data, const char *el, const char **attr) {
       return;
   }
 
-  if (HandleTableStart(p, ts, el, attr, MakeTableHandlerFns()))
+  if (HandleTableStart(p, ts, el, attr, elem_css, MakeTableHandlerFns()))
     return;
 
   if (BehavesAsBlock(el, elem_css)) {
@@ -436,8 +436,13 @@ void chardata(void *data, const XML_Char *txt, int txtlen) {
     return;
   if (parse_in(p, TAG_TABLE)) {
     std::string *buffer = GetActiveCapturedTableText(p);
-    if (buffer)
-      buffer->append((const char *)txt, (size_t)txtlen);
+    if (buffer) {
+      // Source newlines are plain whitespace; only <br> yields a line break.
+      for (int i = 0; i < txtlen; i++) {
+        const char c = (char)txt[i];
+        buffer->push_back((c == '\n' || c == '\r') ? ' ' : c);
+      }
+    }
     return;
   }
   if (!p->doc_heading_complete &&

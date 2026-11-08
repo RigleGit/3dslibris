@@ -10,6 +10,8 @@
 
 #include <string>
 
+#include "book/epub_css_class_map.h"
+
 struct parsedata_t;
 class Text;
 
@@ -26,7 +28,9 @@ std::string *GetActiveCapturedTableText(parsedata_t *p);
 
 // Returns true and handles the element if inside (or entering) a table.
 bool HandleTableStart(parsedata_t *p, Text *ts, const char *el,
-                      const char **attr, const TableHandlerFns &fns);
+                      const char **attr,
+                      const epub_css_class_map::CssClassMargins &elem_css,
+                      const TableHandlerFns &fns);
 
 // Returns true and handles the element if inside a table.
 bool HandleTableEnd(parsedata_t *p, Text *ts, const char *el,

@@ -76,7 +76,7 @@ static std::string BuildCachePath(Book *book, const char *book_path,
   if (!book_path)
     return std::string();
   page_cache_utils::PageCacheLayoutParams layout_params = params;
-  layout_params.variant_token = "pub3:";
+  layout_params.variant_token = "pub4:";
   layout_params.variant_token +=
       book && book->GetPublisherTextIndentEnabled() ? "i1" : "i0";
   layout_params.variant_token +=
