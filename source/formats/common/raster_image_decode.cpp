@@ -6,31 +6,66 @@
 #include <cstdlib>
 #include <cstring>
 
+#ifdef __3DS__
+#include <3ds.h>
+#endif
+
 #define RASTER_STR2(x) #x
 #define RASTER_STR(x) RASTER_STR2(x)
 #define RASTER_DECODER_LIMIT_MIB_STR RASTER_STR(RASTER_DECODER_LIMIT_MIB)
 namespace {
-// Header preserves the alignment required by MuPDF and records realloc sizes.
-union AllocationHeader {
-  size_t size;
-  long double alignment;
-  void *pointer;
+// Header preserves the alignment required by MuPDF and records realloc sizes
+// plus which pool owns the block (newlib heap or, on 3DS, linear memory).
+struct AllocationHeader {
+  union {
+    size_t size;
+    long double alignment;
+    void *pointer;
+  };
+  bool linear;
 };
 struct Budget {
   size_t used = 0, peak = 0;
-  bool exhausted = false;
+  bool limit_hit = false;     // 32 MiB decoder budget exceeded
+  bool out_of_memory = false; // no pool could satisfy the request
 };
+// Newlib's heap is small and fragments over a long session (Old 3DS), so a
+// decode that no longer fits there falls back to the unused linear pool.
+AllocationHeader *RawAlloc(Budget &b, size_t bytes) {
+  AllocationHeader *p = static_cast<AllocationHeader *>(std::malloc(bytes));
+  if (p) {
+    p->linear = false;
+    return p;
+  }
+#ifdef __3DS__
+  p = static_cast<AllocationHeader *>(linearAlloc(bytes));
+  if (p) {
+    p->linear = true;
+  }
+#else
+  (void)b;
+#endif
+  return p;
+}
+void RawFree(AllocationHeader *p) {
+#ifdef __3DS__
+  if (p->linear) {
+    linearFree(p);
+    return;
+  }
+#endif
+  std::free(p);
+}
 void *Allocate(void *opaque, size_t size) {
   Budget &b = *static_cast<Budget *>(opaque);
   if (size > raster_image::kDecoderLimit - sizeof(AllocationHeader) ||
       b.used > raster_image::kDecoderLimit - size - sizeof(AllocationHeader)) {
-    b.exhausted = true;
+    b.limit_hit = true;
     return NULL;
   }
-  AllocationHeader *p =
-      static_cast<AllocationHeader *>(std::malloc(sizeof(*p) + size));
+  AllocationHeader *p = RawAlloc(b, sizeof(*p) + size);
   if (!p) {
-    b.exhausted = true;
+    b.out_of_memory = true;
     return NULL;
   }
   p->size = size + sizeof(*p);
@@ -43,7 +78,7 @@ void Release(void *opaque, void *ptr) {
     return;
   AllocationHeader *p = static_cast<AllocationHeader *>(ptr) - 1;
   static_cast<Budget *>(opaque)->used -= p->size;
-  std::free(p);
+  RawFree(p);
 }
 void *Resize(void *opaque, void *ptr, size_t size) {
   if (!ptr)
@@ -57,18 +92,30 @@ void *Resize(void *opaque, void *ptr, size_t size) {
   const size_t old = p->size;
   if (size > raster_image::kDecoderLimit - sizeof(*p) ||
       b.used - old > raster_image::kDecoderLimit - size - sizeof(*p)) {
-    b.exhausted = true;
+    b.limit_hit = true;
     return NULL;
   }
-  p = static_cast<AllocationHeader *>(std::realloc(p, size + sizeof(*p)));
-  if (!p) {
-    b.exhausted = true;
-    return NULL;
+  AllocationHeader *q = NULL;
+  if (!p->linear)
+    q = static_cast<AllocationHeader *>(std::realloc(p, size + sizeof(*p)));
+  if (q) {
+    q->linear = false;
+  } else if (p->linear || size + sizeof(*p) > old) {
+    // Heap realloc failed (p is still valid) or the block is linear: move.
+    q = RawAlloc(b, size + sizeof(*p));
+    if (!q) {
+      b.out_of_memory = true;
+      return NULL;
+    }
+    std::memcpy(q + 1, p + 1, std::min(old - sizeof(*p), size));
+    RawFree(p);
+  } else {
+    q = p; // shrinking a linear block in place
   }
-  p->size = size + sizeof(*p);
-  b.used = b.used - old + p->size;
+  q->size = size + sizeof(*p);
+  b.used = b.used - old + q->size;
   b.peak = std::max(b.peak, b.used);
-  return p + 1;
+  return q + 1;
 }
 } // namespace
 
@@ -129,6 +176,7 @@ bool Bitmap::Allocate(int w, int h) {
   if (!header)
     return false;
   header->size = bytes;
+  header->linear = false;
   bitmap_bytes += bytes;
   pixels.reset(reinterpret_cast<uint16_t *>(header + 1));
   width = w;
@@ -334,7 +382,7 @@ bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
       // MuPDF treats a decoder error (e.g. a progressive JPEG whose coefficient
       // buffers exceed the budget) as end of data and returns a zero-filled
       // pixmap. Refuse that pixmap instead of presenting it as a black image.
-      if (budget.exhausted)
+      if (budget.limit_hit || budget.out_of_memory)
         fz_throw(ctx, FZ_ERROR_LIMIT, "Decoder memory limit");
       Convert(fz_pixmap_samples(ctx, pixmap), fz_pixmap_width(ctx, pixmap),
               fz_pixmap_height(ctx, pixmap), fz_pixmap_stride(ctx, pixmap),
@@ -355,8 +403,10 @@ bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
 #endif
   if (!ok) {
     if (error)
-      *error = budget.exhausted ? "Decoder memory limit (" RASTER_DECODER_LIMIT_MIB_STR " MiB)"
-                                : "Image corrupt or bitmap limit";
+      *error = budget.limit_hit
+                   ? "Decoder memory limit (" RASTER_DECODER_LIMIT_MIB_STR " MiB)"
+                   : budget.out_of_memory ? "Decoder out of memory"
+                                          : "Image corrupt or bitmap limit";
     return false;
   }
   next.decoder_peak = budget.peak;
