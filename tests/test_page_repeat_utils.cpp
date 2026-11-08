@@ -62,10 +62,62 @@ static void TestResetWhileHeldDoesNotFireImmediately() {
                                    true, 1100, 400, 150));
 }
 
+static void TestResolveDirectionalRepeat() {
+  const uint32_t N = 1, P = 2, X = 4;
+  using reader::ResolveDirectionalRepeat;
+  {
+    reader::PageRepeatState st;
+    test::ExpectEq("press next fires next",
+                   (int)ResolveDirectionalRepeat(&st, N, N, N, P, 1000, 400, 150),
+                   (int)reader::PAGE_REPEAT_NEXT);
+    test::ExpectEq("held next repeats after delay",
+                   (int)ResolveDirectionalRepeat(&st, 0, N, N, P, 1400, 400, 150),
+                   (int)reader::PAGE_REPEAT_NEXT);
+    test::ExpectEq("held next waits for interval",
+                   (int)ResolveDirectionalRepeat(&st, 0, N, N, P, 1490, 400, 150),
+                   (int)reader::PAGE_REPEAT_NONE);
+    test::ExpectEq("held next repeats after interval",
+                   (int)ResolveDirectionalRepeat(&st, 0, N, N, P, 1550, 400, 150),
+                   (int)reader::PAGE_REPEAT_NEXT);
+  }
+  {
+    reader::PageRepeatState st;
+    test::ExpectEq("press prev fires previous",
+                   (int)ResolveDirectionalRepeat(&st, P, P, N, P, 1000, 400, 150),
+                   (int)reader::PAGE_REPEAT_PREVIOUS);
+  }
+  {
+    reader::PageRepeatState st;
+    ResolveDirectionalRepeat(&st, N, N, N, P, 1000, 400, 150);
+    test::ExpectEq("other held key cancels repeat",
+                   (int)ResolveDirectionalRepeat(&st, 0, N | X, N, P, 1400, 400, 150),
+                   (int)reader::PAGE_REPEAT_NONE);
+    test::ExpectEq("other held key resets state", (int)st.action,
+                   (int)reader::PAGE_REPEAT_NONE);
+  }
+  {
+    reader::PageRepeatState st;
+    test::ExpectEq("key outside both masks does not fire",
+                   (int)ResolveDirectionalRepeat(&st, X, X, N, P, 1000, 400, 150),
+                   (int)reader::PAGE_REPEAT_NONE);
+  }
+  {
+    reader::PageRepeatState st;
+    ResolveDirectionalRepeat(&st, N, N, N, P, 1000, 400, 150);
+    test::ExpectEq("release resets",
+                   (int)ResolveDirectionalRepeat(&st, 0, 0, N, P, 1100, 400, 150),
+                   (int)reader::PAGE_REPEAT_NONE);
+    test::ExpectEq("new hold does not fire immediately",
+                   (int)ResolveDirectionalRepeat(&st, 0, N, N, P, 1500, 400, 150),
+                   (int)reader::PAGE_REPEAT_NONE);
+  }
+}
+
 int main() {
   TestImmediatePressFiresOnce();
   TestHoldRepeatsAfterDelayAndInterval();
   TestReleaseAndDirectionChangeReset();
   TestResetWhileHeldDoesNotFireImmediately();
+  TestResolveDirectionalRepeat();
   return 0;
 }

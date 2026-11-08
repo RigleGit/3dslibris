@@ -26,4 +26,15 @@ bool ShouldFirePageRepeat(PageRepeatState *state, PageRepeatAction action,
                           uint64_t initial_delay_ms,
                           uint64_t repeat_interval_ms);
 
+// Resolves which repeat action (if any) fires this frame for a pair of
+// direction masks. Any held or newly pressed key outside next|prev cancels
+// repeat. Returns PAGE_REPEAT_NONE when nothing fires.
+PageRepeatAction ResolveDirectionalRepeat(PageRepeatState *state,
+                                          uint32_t keys_down,
+                                          uint32_t keys_held,
+                                          uint32_t next_keys,
+                                          uint32_t prev_keys, uint64_t now_ms,
+                                          uint64_t initial_delay_ms,
+                                          uint64_t repeat_interval_ms);
+
 } // namespace reader

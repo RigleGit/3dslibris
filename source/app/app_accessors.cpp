@@ -392,12 +392,11 @@ void App::ResetPageRepeat()
   reader::ResetPageRepeat(&reader_state_.page_repeat);
 }
 
-bool App::ShouldFirePageRepeat(reader::PageRepeatAction action, bool down_now,
-                               bool held_now, u64 now_ms,
-                               u64 initial_delay_ms,
-                               u64 repeat_interval_ms)
+reader::PageRepeatAction App::ResolvePageRepeat(
+    u32 keys_down, u32 keys_held, u32 next_keys, u32 prev_keys, u64 now_ms,
+    u64 initial_delay_ms, u64 repeat_interval_ms)
 {
-  return reader::ShouldFirePageRepeat(&reader_state_.page_repeat, action,
-                                      down_now, held_now, now_ms,
-                                      initial_delay_ms, repeat_interval_ms);
+  return reader::ResolveDirectionalRepeat(
+      &reader_state_.page_repeat, keys_down, keys_held, next_keys, prev_keys,
+      now_ms, initial_delay_ms, repeat_interval_ms);
 }

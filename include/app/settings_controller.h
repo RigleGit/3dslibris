@@ -39,5 +39,5 @@ private:
   void ClearAllCaches();
   int EffectiveVisibleCount() const;
   int EffectiveButtonForSlot(int slot) const;
-  void GoToPrefsPage(int page);
+  void GoToPrefsPage(int page, bool select_last = false);
 };

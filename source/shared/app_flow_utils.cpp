@@ -5,6 +5,16 @@
 
 namespace app_flow_utils {
 
+bool IsPageBookmarked(const std::list<unsigned short> &bookmarks,
+                      unsigned short page) {
+  for (std::list<unsigned short>::const_iterator it = bookmarks.begin();
+       it != bookmarks.end(); ++it) {
+    if (*it == page)
+      return true;
+  }
+  return false;
+}
+
 format_t DetectBookFormat(const char *filename) {
   if (!filename)
     return FORMAT_UNDEF;

@@ -51,4 +51,33 @@ bool ShouldFirePageRepeat(PageRepeatState *state, PageRepeatAction action,
   return true;
 }
 
+PageRepeatAction ResolveDirectionalRepeat(PageRepeatState *state,
+                                          uint32_t keys_down,
+                                          uint32_t keys_held,
+                                          uint32_t next_keys,
+                                          uint32_t prev_keys, uint64_t now_ms,
+                                          uint64_t initial_delay_ms,
+                                          uint64_t repeat_interval_ms) {
+  const uint32_t repeat_keys = next_keys | prev_keys;
+  const uint32_t other_held = keys_held & ~repeat_keys;
+  const uint32_t other_down = keys_down & ~repeat_keys;
+  if (other_held == 0 && other_down == 0 && (keys_held & next_keys)) {
+    return ShouldFirePageRepeat(state, PAGE_REPEAT_NEXT,
+                                (keys_down & next_keys) != 0, true, now_ms,
+                                initial_delay_ms, repeat_interval_ms)
+               ? PAGE_REPEAT_NEXT
+               : PAGE_REPEAT_NONE;
+  }
+  if (other_held == 0 && other_down == 0 && (keys_held & prev_keys)) {
+    return ShouldFirePageRepeat(state, PAGE_REPEAT_PREVIOUS,
+                                (keys_down & prev_keys) != 0, true, now_ms,
+                                initial_delay_ms, repeat_interval_ms)
+               ? PAGE_REPEAT_PREVIOUS
+               : PAGE_REPEAT_NONE;
+  }
+  if ((keys_held & repeat_keys) == 0 || other_held != 0)
+    ResetPageRepeat(state);
+  return PAGE_REPEAT_NONE;
+}
+
 } // namespace reader

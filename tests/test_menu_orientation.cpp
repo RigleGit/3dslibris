@@ -100,7 +100,10 @@ struct SettingsController {
   u8 PrefsVisibleButtonCount() const { return 3; }
   int EffectiveButtonForSlot(int) const { return selected_button; }
   void PrefsHandleEvent(const FrameInput &input);
-  void GoToPrefsPage(int value) { prefs_general_page_ = value; }
+  void GoToPrefsPage(int value, bool select_last = false) {
+    prefs_general_page_ = value;
+    app_.SetPrefsSelectedIndex(select_last ? (int)PrefsVisibleButtonCount() - 1 : 0);
+  }
   void PrefsDraw() {}
   void PrefsHandlePress() {}
   void PrefsHandleTouch(const FrameInput &) {}
@@ -192,6 +195,23 @@ int main() {
       settings.PrefsHandleEvent(FrameInput(previous, 0, false, 0, 0, 1000));
       test::ExpectEq("settings selection moves up", settings.app_.selected, 0);
     }
+    for (u32 next : {right ? key.right : key.left,
+                     right ? key.dright : key.dleft, settings.app_.key.r}) {
+      settings.prefs_general_page_ = 0;
+      settings.app_.selected = 2;
+      settings.PrefsHandleEvent(FrameInput(next, 0, false, 0, 0, 1000));
+      test::ExpectEq("last slot + next goes to page 2", settings.prefs_general_page_, 2);
+      test::ExpectEq("last slot + next selects slot 0", settings.app_.selected, 0);
+    }
+    for (u32 previous : {right ? key.left : key.right,
+                         right ? key.dleft : key.dright, settings.app_.key.l}) {
+      settings.prefs_general_page_ = 2;
+      settings.app_.selected = 0;
+      settings.PrefsHandleEvent(FrameInput(previous, 0, false, 0, 0, 1000));
+      test::ExpectEq("first slot + prev goes to page 0", settings.prefs_general_page_, 0);
+      test::ExpectEq("first slot + prev lands on last slot", settings.app_.selected, 2);
+    }
+    settings.prefs_general_page_ = 0;
     for (int button : {PREFS_BUTTON_FONTSIZE, PREFS_BUTTON_LINE_SPACING,
                         PREFS_BUTTON_PARASPACING}) {
       settings.selected_button = button;

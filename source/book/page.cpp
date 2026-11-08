@@ -34,6 +34,7 @@
 #include "book/book_xml_css_style_utils.h"
 #include "book/page_buffer_utils.h"
 #include "shared/debug_log.h"
+#include "shared/app_flow_utils.h"
 #include "shared/orientation_utils.h"
 #include "shared/text_render_layout_utils.h"
 #include <algorithm>
@@ -1187,7 +1188,9 @@ void Page::Draw(Text *ts, const Highlight *highlight) {
   ts->ClearTextColorOverride();
   draw.DrawHighlights();
   ts->SetPixelSize(draw.saved_pixel_size);
-  DrawNumber(ts, draw.second_screen);
+  // Landscape shows the page number in the status HUD instead.
+  if (!orientation_utils::IsLandscape(draw.orientation))
+    DrawNumber(ts, draw.second_screen);
 #ifdef OFFSCREEN
   ts->SetScreen(draw.second_screen);
   ts->CopyScreen(ts->offscreen, ts->screen);
@@ -1204,17 +1207,10 @@ void Page::DrawNumber(Text *ts, u16 *number_screen) {
   char msg[64];
 
   // Find out if the page is bookmarked or not
-  bool isBookmark = false;
   u16 pagecurrent = book->GetPosition();
   u16 pagecount = book->GetPageCount();
-  std::list<u16> &bookmarks = book->GetBookmarks();
-  for (std::list<u16>::iterator i = bookmarks.begin(); i != bookmarks.end();
-       i++) {
-    if (*i == pagecurrent) {
-      isBookmark = true;
-      break;
-    }
-  }
+  const bool isBookmark =
+      app_flow_utils::IsPageBookmarked(book->GetBookmarks(), pagecurrent);
   if (isBookmark) {
     if (pagecount == 1)
       snprintf((char *)msg, sizeof(msg), "[ %d* ]", pagecurrent + 1);

@@ -341,7 +341,19 @@ void TestComputeStatusSnapshot() {
 
 } // namespace
 
+static void TestIsPageBookmarked() {
+  std::list<unsigned short> none;
+  ExpectFalse("empty list", app_flow_utils::IsPageBookmarked(none, 5));
+  std::list<unsigned short> marks;
+  marks.push_back(2);
+  marks.push_back(5);
+  marks.push_back(9);
+  ExpectTrue("bookmarked", app_flow_utils::IsPageBookmarked(marks, 5));
+  ExpectFalse("other page", app_flow_utils::IsPageBookmarked(marks, 4));
+}
+
 int main() {
+  TestIsPageBookmarked();
   TestDetectBookFormat();
   TestMuPdfDocumentKindHelpers();
   TestShouldIndexBookFilename();

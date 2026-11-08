@@ -15,6 +15,10 @@ typedef enum {
 
 namespace app_flow_utils {
 
+// True when `page` appears in the bookmark list.
+bool IsPageBookmarked(const std::list<unsigned short> &bookmarks,
+                      unsigned short page);
+
 enum class MuPdfDocumentKind {
   Unknown = 0,
   Pdf = 1,

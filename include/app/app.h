@@ -267,9 +267,10 @@ public:
   bool IsAppletExitRequested() const;
   bool ShouldAbortWork() const override;
   void ResetPageRepeat();
-  bool ShouldFirePageRepeat(reader::PageRepeatAction action, bool down_now,
-                            bool held_now, u64 now_ms,
-                            u64 initial_delay_ms, u64 repeat_interval_ms);
+  reader::PageRepeatAction ResolvePageRepeat(u32 keys_down, u32 keys_held,
+                                             u32 next_keys, u32 prev_keys,
+                                             u64 now_ms, u64 initial_delay_ms,
+                                             u64 repeat_interval_ms);
   void PrepareForShutdown();
   void HandleAppletSuspend();
   void HandleAppletResume();

@@ -15,4 +15,43 @@ bool ShouldRedrawPrefsAfterOverlayInput(bool prefs_dirty,
   return prefs_dirty && prefs_mode_active;
 }
 
+PrefsNavStep StepPrefsSelection(int page, int selected, int visible_count,
+                                bool book_ctx, bool has_submenu, int direction) {
+  PrefsNavStep step;
+  step.page = page;
+  step.selected = selected;
+  step.select_last = false;
+  step.changed = false;
+  if (direction > 0) {
+    if (selected < visible_count - 1) {
+      step.selected = selected + 1;
+      step.changed = true;
+    } else if (!book_ctx && page == 0) {
+      step.page = 2;
+      step.selected = 0;
+      step.changed = true;
+    } else if (book_ctx && page == 0 && has_submenu) {
+      step.page = 1;
+      step.selected = 0;
+      step.changed = true;
+    }
+  } else {
+    if (selected > 0) {
+      step.selected = selected - 1;
+      step.changed = true;
+    } else if (!book_ctx && page == 2) {
+      step.page = 0;
+      step.select_last = true;
+      step.changed = true;
+    } else if (page == 1 && has_submenu) {
+      // Page 1 is reachable from both contexts (book submenu, or the
+      // library "style customization" button).
+      step.page = 0;
+      step.select_last = true;
+      step.changed = true;
+    }
+  }
+  return step;
+}
+
 } // namespace prefs_input_utils

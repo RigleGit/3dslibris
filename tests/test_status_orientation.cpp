@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <list>
 #include <ctime>
 #include <memory>
 #include <string>
@@ -26,6 +27,8 @@ struct Book {
   bool fixed = false;
   u8 orientation = orientation_utils::ORIENT_LANDSCAPE;
   Page page;
+  std::list<unsigned short> bookmarks;
+  std::list<unsigned short> &GetBookmarks() { return bookmarks; }
   bool IsPdf() const { return fixed; }
   bool IsCbz() const { return false; }
   bool IsFixedLayout() const { return fixed; }
@@ -186,6 +189,22 @@ int main() {
   test::ExpectEq("fixed-layout book retains clock and page HUD", app.ts->cleared.size(), 2);
   test::ExpectStrEq("fixed-layout book retains page counter",
                      app.ts->printed.back().value.c_str(), "3/10");
+  {
+    App reflow_app;
+    Book reflow;
+    reflow.fixed = false;
+    reflow_app.book = &reflow;
+    reflow_app.mode = AppMode::Book;
+    StatusController hud(reflow_app);
+    hud.UpdateStatus();
+    test::ExpectStrEq("landscape reflow HUD without bookmark",
+                      reflow_app.ts->printed.back().value.c_str(), "3/10");
+    reflow.bookmarks.push_back(2);
+    hud.RequestStatusRedraw();
+    hud.UpdateStatus();
+    test::ExpectStrEq("landscape reflow HUD marks bookmark",
+                      reflow_app.ts->printed.back().value.c_str(), "3/10*");
+  }
   CheckBatteryRefreshBudget();
   return 0;
 }

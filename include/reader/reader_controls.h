@@ -14,6 +14,11 @@ struct ReaderControls
   // Reflowable page navigation
   uint32_t page_next;
   uint32_t page_prev;
+  // Keys that auto-repeat page turns (subset of page_next/page_prev)
+  uint32_t page_repeat_next_dpad;
+  uint32_t page_repeat_prev_dpad;
+  uint32_t page_repeat_next_circle;
+  uint32_t page_repeat_prev_circle;
   // Bookmark navigation
   uint32_t bookmark_next;
   uint32_t bookmark_prev;
@@ -41,6 +46,10 @@ inline ReaderControls BuildPortraitControls(const KeyMap &key)
       key.a, key.r, key.down, key.ddown, key.zl);
   c.page_prev = reader_input_utils::ReflowablePrevPageKeys(
       key.b, key.l, key.up, key.dup, key.zr);
+  c.page_repeat_next_dpad = key.ddown;
+  c.page_repeat_prev_dpad = key.dup;
+  c.page_repeat_next_circle = key.down;
+  c.page_repeat_prev_circle = key.up;
   c.bookmark_next = reader_input_utils::ReflowableBookmarkNextKeys(
       key.left, key.dleft);
   c.bookmark_prev = reader_input_utils::ReflowableBookmarkPrevKeys(
@@ -65,6 +74,10 @@ inline ReaderControls BuildLandscapeControls(const KeyMap &key)
   ReaderControls c;
   c.page_next = key.a | key.r | key.right | key.dright | key.zl;
   c.page_prev = key.b | key.l | key.left | key.dleft | key.zr;
+  c.page_repeat_next_dpad = key.dright;
+  c.page_repeat_prev_dpad = key.dleft;
+  c.page_repeat_next_circle = key.right;
+  c.page_repeat_prev_circle = key.left;
   c.bookmark_next = key.down | key.ddown;
   c.bookmark_prev = key.up | key.dup;
   c.link_next = key.down | key.ddown;

@@ -55,6 +55,8 @@ static void ExitInlineLinkFocus(App *app, Book *book) {
     book->ClearFocusedInlineLink();
   if (app)
     app->SetInlineLinkFocusActive(false);
+  if (app)
+    app->ResetPageRepeat();
 }
 
 static bool EnterInlineLinkFocus(App *app, Book *book, Text *ts) {
@@ -69,6 +71,7 @@ static bool EnterInlineLinkFocus(App *app, Book *book, Text *ts) {
     focus_index = 0;
   book->SetFocusedInlineLinkIndex(focus_index);
   app->SetInlineLinkFocusActive(true);
+  app->ResetPageRepeat();
   book_nav::DrawPage(book, ts);
   return true;
 }
@@ -229,6 +232,19 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
   }
 
   if (app.IsInlineLinkFocusActive()) {
+    // Link focus moves repeat while a direction is held. Y is still held when
+    // focus was entered by long-press, so it must not cancel the repeat.
+    // Circle Pad repeat stays opt-in (analog drift protection).
+    const uint32_t circle_bits =
+        app.key.up | app.key.down | app.key.left | app.key.right;
+    const bool circle_link_repeat =
+        app.prefs.get() && app.prefs->circle_pad_page_turn;
+    const uint32_t link_repeat_mask =
+        circle_link_repeat ? ~0u : ~circle_bits;
+    const reader::PageRepeatAction link_repeat = app.ResolvePageRepeat(
+        keys, held & ~app.key.y, ctrl.link_next & link_repeat_mask,
+        ctrl.link_prev & link_repeat_mask, now_ms, kPageRepeatInitialDelayMs,
+        kPageRepeatIntervalMs);
     if (keys & (app.key.b | app.key.y)) {
       ExitInlineLinkFocus(&app, book);
       book_nav::DrawPage(book, ts);
@@ -255,10 +271,12 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
           (*targets)[selected].kind == Page::IMAGE && FollowFocusedInlineLink(book, ts)) {
         app.SetInlineLinkFocusActive(false); status_dirty = true;
       }
-    } else if (keys & ctrl.link_next) {
+    } else if ((keys & ctrl.link_next) ||
+               link_repeat == reader::PAGE_REPEAT_NEXT) {
       if (MoveInlineLinkFocusSequential(book, ts, 1))
         status_dirty = true;
-    } else if (keys & ctrl.link_prev) {
+    } else if ((keys & ctrl.link_prev) ||
+               link_repeat == reader::PAGE_REPEAT_PREVIOUS) {
       if (MoveInlineLinkFocusSequential(book, ts, -1))
         status_dirty = true;
     } else if (keys & ctrl.back_to_library) {
@@ -270,36 +288,23 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
       app.prefs->Write();
     }
   } else {
-    // D-pad up/down support page repeat. Circle Pad repeat is opt-in because
+    // Page keys support repeat (orientation-aware). Circle Pad repeat is opt-in because
     // analog drift can otherwise trigger fast accidental page turns.
     const bool circle_repeat_enabled =
         app.prefs.get() && app.prefs->circle_pad_page_turn;
     const uint32_t repeat_next_keys =
         reader_input_utils::ReflowablePageRepeatKeys(
-            app.key.down, app.key.ddown, circle_repeat_enabled);
+            ctrl.page_repeat_next_circle, ctrl.page_repeat_next_dpad,
+            circle_repeat_enabled);
     const uint32_t repeat_prev_keys =
         reader_input_utils::ReflowablePageRepeatKeys(
-            app.key.up, app.key.dup, circle_repeat_enabled);
-    const uint32_t repeat_keys = repeat_next_keys | repeat_prev_keys;
-    const uint32_t non_repeat_held = held & ~repeat_keys;
-    const uint32_t non_repeat_keys = keys & ~repeat_keys;
-    bool repeat_next = false;
-    bool repeat_prev = false;
-    if (non_repeat_held == 0 && non_repeat_keys == 0 &&
-        (held & repeat_next_keys)) {
-      repeat_next = app.ShouldFirePageRepeat(
-          reader::PAGE_REPEAT_NEXT, (keys & repeat_next_keys) != 0,
-          (held & repeat_next_keys) != 0, now_ms,
-          kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
-    } else if (non_repeat_held == 0 && non_repeat_keys == 0 &&
-               (held & repeat_prev_keys)) {
-      repeat_prev = app.ShouldFirePageRepeat(
-          reader::PAGE_REPEAT_PREVIOUS, (keys & repeat_prev_keys) != 0,
-          (held & repeat_prev_keys) != 0, now_ms,
-          kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
-    } else if ((held & repeat_keys) == 0 || non_repeat_held != 0) {
-      app.ResetPageRepeat();
-    }
+            ctrl.page_repeat_prev_circle, ctrl.page_repeat_prev_dpad,
+            circle_repeat_enabled);
+    const reader::PageRepeatAction repeat_action = app.ResolvePageRepeat(
+        keys, held, repeat_next_keys, repeat_prev_keys, now_ms,
+        kPageRepeatInitialDelayMs, kPageRepeatIntervalMs);
+    const bool repeat_next = repeat_action == reader::PAGE_REPEAT_NEXT;
+    const bool repeat_prev = repeat_action == reader::PAGE_REPEAT_PREVIOUS;
 
     if ((keys & ctrl.page_next) || repeat_next) {
       if (!book_nav::AdvancePage(book, ts, pagecurrent, pagecount, &status_dirty))

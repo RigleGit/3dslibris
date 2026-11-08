@@ -301,9 +301,15 @@ int SettingsController::EffectiveButtonForSlot(int slot) const {
   return settings::PrefsPageButtonForSlot(context, (u8)slot);
 }
 
-void SettingsController::GoToPrefsPage(int page) {
+void SettingsController::GoToPrefsPage(int page, bool select_last) {
   prefs_general_page_ = page;
-  app_.SetPrefsSelectedIndex(0);
+  int selected = 0;
+  if (select_last) {
+    selected = (int)PrefsVisibleButtonCount() - 1;
+    if (selected < 0)
+      selected = 0;
+  }
+  app_.SetPrefsSelectedIndex(selected);
   app_.MarkPrefsDirty();
 }
 
@@ -565,23 +571,17 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
   } else if (prefs_input_utils::ShouldReturnFromPrefs(
                  keys, book_ctx, KEY_B, KEY_SELECT, KEY_Y, KEY_START)) {
     app_.ReturnFromPrefs();
-  } else if (keys & (left_keys | app_.key.l)) {
-    if (app_.GetPrefsSelectedIndex() > 0) {
-      app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() - 1);
+  } else if (keys & (left_keys | app_.key.l | right_keys | app_.key.r)) {
+    const int direction = (keys & (left_keys | app_.key.l)) ? -1 : 1;
+    const prefs_input_utils::PrefsNavStep step =
+        prefs_input_utils::StepPrefsSelection(
+            prefs_general_page_, app_.GetPrefsSelectedIndex(), visibleCount,
+            book_ctx, has_submenu, direction);
+    if (step.page != prefs_general_page_) {
+      GoToPrefsPage(step.page, step.select_last);
+    } else if (step.changed) {
+      app_.SetPrefsSelectedIndex(step.selected);
       app_.MarkPrefsDirty();
-    } else if (!book_ctx && prefs_general_page_ == 2) {
-      GoToPrefsPage(0);
-    } else if (prefs_general_page_ == 1 && has_submenu) {
-      GoToPrefsPage(0);
-    }
-  } else if (keys & (right_keys | app_.key.r)) {
-    if (app_.GetPrefsSelectedIndex() < visibleCount - 1) {
-      app_.SetPrefsSelectedIndex(app_.GetPrefsSelectedIndex() + 1);
-      app_.MarkPrefsDirty();
-    } else if (!book_ctx && prefs_general_page_ == 0) {
-      GoToPrefsPage(2);
-    } else if (book_ctx && prefs_general_page_ == 0 && has_submenu) {
-      GoToPrefsPage(1);
     }
   } else if (selected_button == PREFS_BUTTON_FONTSIZE &&
              (keys & up_keys)) {

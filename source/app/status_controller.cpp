@@ -194,9 +194,11 @@ void StatusController::UpdateStatus()
 
     char page_msg[32] = {};
     if (current_book && current_book->GetPageCount() > 0) {
-      snprintf(page_msg, sizeof(page_msg), "%d/%d",
+      const bool bookmarked = app_flow_utils::IsPageBookmarked(
+          current_book->GetBookmarks(), (unsigned short)current_book->GetPosition());
+      snprintf(page_msg, sizeof(page_msg), "%d/%d%s",
                (int)current_book->GetPosition() + 1,
-               (int)current_book->GetPageCount());
+               (int)current_book->GetPageCount(), bookmarked ? "*" : "");
     } else if (mode == AppMode::Opening) {
       snprintf(page_msg, sizeof(page_msg), "%s", kOpeningStatusLabel);
     }
