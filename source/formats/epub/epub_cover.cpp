@@ -486,7 +486,7 @@ int Extract(Book *book, const std::string &epubpath) {
     if (jpeg_cover) {
 #ifdef __3DS__
       // Never fall through to an unbounded decoder for a large JPEG. The
-      // shared path subsamples during decoding and caps allocations at 16 MiB.
+      // shared path subsamples during decoding and caps allocations at the decoder budget.
       return cover_decode_utils::DecodeImageToCoverThumb(
                  book, decodebuf.data(), decodebuf.size(), max_dimension)
                  ? 0 : 4;

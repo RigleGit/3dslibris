@@ -6,6 +6,9 @@
 #include <cstdlib>
 #include <cstring>
 
+#define RASTER_STR2(x) #x
+#define RASTER_STR(x) RASTER_STR2(x)
+#define RASTER_DECODER_LIMIT_MIB_STR RASTER_STR(RASTER_DECODER_LIMIT_MIB)
 namespace {
 // Header preserves the alignment required by MuPDF and records realloc sizes.
 union AllocationHeader {
@@ -352,7 +355,7 @@ bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
 #endif
   if (!ok) {
     if (error)
-      *error = budget.exhausted ? "Decoder memory limit (16 MiB)"
+      *error = budget.exhausted ? "Decoder memory limit (" RASTER_DECODER_LIMIT_MIB_STR " MiB)"
                                 : "Image corrupt or bitmap limit";
     return false;
   }

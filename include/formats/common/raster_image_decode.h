@@ -8,7 +8,8 @@
 
 namespace raster_image {
 static const size_t kBitmapLimit = 4u * 1024u * 1024u;
-static const size_t kDecoderLimit = 16u * 1024u * 1024u;
+#define RASTER_DECODER_LIMIT_MIB 32
+static const size_t kDecoderLimit = RASTER_DECODER_LIMIT_MIB * 1024u * 1024u;
 
 struct FreePixels {
   void operator()(uint16_t *p) const;
