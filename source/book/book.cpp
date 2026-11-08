@@ -133,6 +133,7 @@ Book::Book(const BookContext &c) : ctx(c) {
   style_publisher_text_indent_override = -1;
   style_publisher_block_margins_override = -1;
   style_publisher_horizontal_margins_override = -1;
+  style_text_align_override = -1;
   browser_display_name_cached = false;
   browser_folder_entry = false;
   inline_image_zip_index_built = false;
@@ -216,6 +217,21 @@ bool Book::GetPublisherHorizontalMarginsEnabled() const {
   return ctx.publisher_horizontal_margins
              ? *ctx.publisher_horizontal_margins
              : true;
+}
+
+int Book::GetTextAlignMode() const {
+  int mode = style_text_align_override >= 0
+                 ? style_text_align_override
+                 : (ctx.text_align_mode ? *ctx.text_align_mode : 0);
+  return (mode >= 0 && mode <= 2) ? mode : 0;
+}
+
+int Book::GetStyleTextAlignOverride() const {
+  return style_text_align_override;
+}
+
+void Book::SetStyleTextAlignOverride(int value) {
+  style_text_align_override = (value >= 0 && value <= 2) ? value : -1;
 }
 
 bool Book::GetEbookImagesEnabled() const {

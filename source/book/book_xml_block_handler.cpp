@@ -33,14 +33,33 @@
 
 namespace {
 
+// Applies the reader's text alignment mode to a body-text block: Left forces
+// the book's justify to left, Justify turns left/unspecified into justify.
+// Center and Right chosen by the book are kept in both modes.
+static book_xml_css_style_utils::TextAlign ApplyTextAlignMode(
+    const parsedata_t *p, book_xml_css_style_utils::TextAlign align) {
+  using TA = book_xml_css_style_utils::TextAlign;
+  const int mode = (p && p->book) ? p->book->GetTextAlignMode() : 0;
+  if (mode == 1 && align == TA::Justify)
+    return TA::Left;
+  if (mode == 2 && align == TA::Left)
+    return TA::Justify;
+  return align;
+}
+
 static void AppendParagraphAlignMarker(
-    parsedata_t *p, book_xml_css_style_utils::TextAlign align) {
+    parsedata_t *p, book_xml_css_style_utils::TextAlign align,
+    bool allow_justify = true) {
   if (!p)
     return;
+  if (!allow_justify && align == book_xml_css_style_utils::TextAlign::Justify)
+    align = book_xml_css_style_utils::TextAlign::Left;
   if (align == book_xml_css_style_utils::TextAlign::Center)
     parse_append_page_byte(p, TEXT_PARAGRAPH_CENTER);
   else if (align == book_xml_css_style_utils::TextAlign::Right)
     parse_append_page_byte(p, TEXT_PARAGRAPH_RIGHT);
+  else if (align == book_xml_css_style_utils::TextAlign::Justify)
+    parse_append_page_byte(p, TEXT_PARAGRAPH_JUSTIFY);
   else
     parse_append_page_byte(p, TEXT_PARAGRAPH_LEFT);
 }
@@ -303,7 +322,8 @@ bool HandleBlockElementStart(
         p, book_xml_css_resolver::ResolveElementTextAlignWithClass(
                p->last_h_style, p->last_h_class,
                p->block_text_align_stack, p->block_text_align_value_stack,
-               p->stacksize, p->css_class_map, "h4"));
+               p->stacksize, p->css_class_map, "h4"),
+        false);
     parse_append_page_byte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
@@ -333,7 +353,8 @@ bool HandleBlockElementStart(
         p, book_xml_css_resolver::ResolveElementTextAlignWithClass(
                p->last_h_style, p->last_h_class,
                p->block_text_align_stack, p->block_text_align_value_stack,
-               p->stacksize, p->css_class_map, "h5"));
+               p->stacksize, p->css_class_map, "h5"),
+        false);
     parse_append_page_byte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
@@ -363,7 +384,8 @@ bool HandleBlockElementStart(
         p, book_xml_css_resolver::ResolveElementTextAlignWithClass(
                p->last_h_style, p->last_h_class,
                p->block_text_align_stack, p->block_text_align_value_stack,
-               p->stacksize, p->css_class_map, "h6"));
+               p->stacksize, p->css_class_map, "h6"),
+        false);
     parse_append_page_byte(p, TEXT_BOLD_ON);
     p->pos++;
     p->bold = true;
@@ -410,7 +432,7 @@ bool HandleBlockElementStart(
             p->last_p_style, p->last_p_class,
             p->block_text_align_stack, p->block_text_align_value_stack,
             p->stacksize, p->css_class_map, "p");
-    AppendParagraphAlignMarker(p, align);
+    AppendParagraphAlignMarker(p, ApplyTextAlignMode(p, align));
     const bool tight_list_paragraph =
         book_xml_list_utils::HasPendingListItemContent(p);
     const bool tight_block_paragraph = ParseInAnyEasyParagraphTightBlock(p);

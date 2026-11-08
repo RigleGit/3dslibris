@@ -14,6 +14,10 @@ int ClampLineSpacingSetting(int value) {
   return value;
 }
 
+int ClampTextAlignMode(int value) {
+  return (value >= 1 && value <= 2) ? value : 0;
+}
+
 int ReadPublisherHorizontalMargins(const char *const *attributes,
                                    int legacy_margins) {
   if (attributes) {
@@ -43,6 +47,8 @@ ParagraphPreferences ParseParagraphPreferences(
       current.publisher_text_indent = atoi(attributes[i + 1]) != 0;
     if (!strcmp(attributes[i], "publisherBlockMargins"))
       current.publisher_block_margins = atoi(attributes[i + 1]) != 0;
+    if (!strcmp(attributes[i], "textAlign"))
+      current.text_align_mode = ClampTextAlignMode(atoi(attributes[i + 1]));
   }
   // Old configs used block margins for both axes. Explicit -1 continues to
   // convert to true for the global boolean, as the existing reader did.
@@ -112,6 +118,19 @@ std::string PublisherSettingValueLabel(bool from_book, bool uses_text_layout,
                           : std::string("inherit off");
   const bool enabled = from_book ? effective_enabled : global_enabled;
   return enabled ? std::string("on") : std::string("off");
+}
+
+std::string TextAlignValueLabel(bool from_book, bool uses_text_layout,
+                                int override_value, int global_mode) {
+  static const char *const names[] = {"editorial", "left", "justify"};
+  const bool inherit = from_book && uses_text_layout && override_value < 0;
+  int mode = (from_book && uses_text_layout && override_value >= 0)
+                 ? override_value
+                 : global_mode;
+  if (mode < 0 || mode > 2)
+    mode = 0;
+  return inherit ? std::string("inherit ") + names[mode]
+                 : std::string(names[mode]);
 }
 
 } // namespace settings

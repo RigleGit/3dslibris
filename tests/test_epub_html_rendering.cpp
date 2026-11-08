@@ -126,6 +126,7 @@ struct TestCtx {
   bool publisher_text_indent;
   bool publisher_block_margins;
   bool publisher_horizontal_margins;
+  int text_align_mode = 0;
 
   TestCtx() {
     ctx.text = &text;
@@ -141,6 +142,7 @@ struct TestCtx {
     ctx.publisher_text_indent = &publisher_text_indent;
     ctx.publisher_block_margins = &publisher_block_margins;
     ctx.publisher_horizontal_margins = &publisher_horizontal_margins;
+    ctx.text_align_mode = &text_align_mode;
     ctx.orientation = nullptr;
     ctx.draw_background = nullptr;
     ctx.draw_background_user_data = nullptr;
@@ -1326,7 +1328,121 @@ void TestClassedBoldAndDisplayBlockBr() {
                ParseToTokenText(css, brs[i]) == ParseToTokenText(css, plain[i]));
 }
 
+// Issue #138: tokens that carry paragraph alignment as letters (J/L/C/R), a
+// soft wrap as '~' and linefeeds as '|'. Text is reduced to its first letter
+// of each word so wrapped lines stay short.
+std::string AlignTokens(const char *css, const char *body_html, int mode) {
+  TestCtx tc;
+  tc.paragraph_spacing = 0;
+  tc.text_align_mode = mode;
+  Book book(tc.ctx);
+  parsedata_t p = MakeParseData(tc, book);
+  epub_css_class_map::ParseCssIntoClassMap(css, strlen(css), &p.css_class_map);
+  const std::string html = std::string("<html><body>") + body_html + "</body></html>";
+  xml_parse_utils::ParseXmlString(html, MakeXmlOpts(&p));
+  std::string out;
+  for (int pi = 0; pi < book.GetPageCount(); ++pi) {
+    const u32 *b = book.GetPage(pi)->GetBuffer();
+    const int n = book.GetPage(pi)->GetLength();
+    for (int i = 0; i < n; ++i) {
+      switch (b[i]) {
+      case TEXT_PARAGRAPH_JUSTIFY: out += "J"; break;
+      case TEXT_PARAGRAPH_LEFT: out += "L"; break;
+      case TEXT_PARAGRAPH_CENTER: out += "C"; break;
+      case TEXT_PARAGRAPH_RIGHT: out += "R"; break;
+      case TEXT_SOFT_WRAP: out += "~"; break;
+      case '\n': out += "|"; break;
+      default:
+        if (b[i] >= 'a' && b[i] <= 'z') out.push_back((char)b[i]);
+      }
+    }
+  }
+  return out;
+}
+
+static std::string LongText() {
+  std::string t;
+  for (int i = 0; i < 40; ++i)
+    t += "word ";
+  return t;
+}
+
+static int Count(const std::string &s, char c) {
+  int n = 0;
+  for (char x : s) n += (x == c);
+  return n;
+}
+
+void TestJustifyMarkersAndSoftWraps() {
+  const char *css = "p { text-align: justify; } .c { text-align: center; }";
+  const std::string para = "<p>" + LongText() + "</p>";
+  const std::string editorial = AlignTokens(css, para.c_str(), 0);
+  ExpectTrue("justify css emits the justify marker in editorial mode",
+             editorial.find('J') != std::string::npos);
+  ExpectTrue("justified paragraph wraps onto several lines", Count(editorial, '~') >= 2);
+  // Every soft wrap is directly followed by its linefeed.
+  bool paired = true;
+  for (size_t i = 0; i < editorial.size(); ++i)
+    if (editorial[i] == '~' && (i + 1 >= editorial.size() || editorial[i + 1] != '|'))
+      paired = false;
+  ExpectTrue("soft wrap marker sits right before its linefeed", paired);
+  // The final line of the paragraph ends in a hard linefeed, not a soft wrap.
+  ExpectTrue("last line is not marked as soft wrapped",
+             editorial.rfind('~') < editorial.rfind("word") &&
+                 editorial.find('|', editorial.rfind('~') + 2) == std::string::npos);
+
+  const std::string left = AlignTokens(css, para.c_str(), 1);
+  ExpectTrue("forced left removes justify marker and soft wraps",
+             left.find('J') == std::string::npos && left.find('~') == std::string::npos);
+
+  const std::string plain_css = "";
+  const std::string plain_left = AlignTokens(plain_css.c_str(), para.c_str(), 1);
+  ExpectTrue("forced left on an unaligned book has no soft wraps",
+             plain_left.find('~') == std::string::npos);
+  const std::string plain_editorial = AlignTokens(plain_css.c_str(), para.c_str(), 0);
+  ExpectTrue("editorial mode leaves unaligned text unjustified",
+             plain_editorial.find('J') == std::string::npos &&
+                 plain_editorial.find('~') == std::string::npos);
+  const std::string forced = AlignTokens(plain_css.c_str(), para.c_str(), 2);
+  ExpectTrue("forced justify justifies unaligned body text",
+             forced.find('J') != std::string::npos && Count(forced, '~') >= 2);
+}
+
+void TestForcedModesKeepAuthorCenterAndRight() {
+  const char *css = ".c { text-align: center; } .r { text-align: right; }";
+  const std::string html = "<p class=\"c\">" + LongText() + "</p><p class=\"r\">" + LongText() + "</p>";
+  for (int mode = 1; mode <= 2; ++mode) {
+    const std::string out = AlignTokens(css, html.c_str(), mode);
+    ExpectTrue("author center survives a forced mode", out.find('C') != std::string::npos);
+    ExpectTrue("author right survives a forced mode", out.find('R') != std::string::npos);
+    ExpectTrue("centered/right blocks are never soft wrapped for justification",
+               mode == 1 || out.find('~') == std::string::npos);
+  }
+}
+
+void TestForcedJustifyHeadingsAndBr() {
+  const std::string html = "<h2>" + LongText() + "</h2><p>one<br/>two</p>";
+  const std::string out = AlignTokens("", html.c_str(), 2);
+  ExpectTrue("forced justify leaves a heading left aligned",
+             out.find("Lword") != std::string::npos);
+  const std::string heading_html = "<h2>" + LongText() + "</h2>";
+  const std::string css_heading = AlignTokens(
+      "h2 { text-align: justify; }", heading_html.c_str(), 0);
+  ExpectTrue("editorial keeps an author's justified heading",
+             css_heading.find('J') != std::string::npos);
+  const std::string left_heading = AlignTokens(
+      "h2 { text-align: justify; }", heading_html.c_str(), 1);
+  ExpectTrue("forced left removes an author's justified heading",
+             left_heading.find('J') == std::string::npos &&
+                 left_heading.find('~') == std::string::npos);
+  const std::string para = AlignTokens("", "<p>one<br/>two</p>", 2);
+  ExpectTrue("a <br> linefeed is hard: no soft wrap before it", para.find('~') == std::string::npos);
+}
+
 int main() {
+  TestJustifyMarkersAndSoftWraps();
+  TestForcedModesKeepAuthorCenterAndRight();
+  TestForcedJustifyHeadingsAndBr();
   TestClassedBoldAndDisplayBlockBr();
   TestEmbeddedCssParagraphSpacing();
   TestAdjacentDivsStartSeparateLines();

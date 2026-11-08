@@ -2063,7 +2063,9 @@ static void TestSharedReflowPreparation() {
       test::ExpectTrue("FB2 vertical-margin policy has a separate persistent cache key",fb2_page_cache::CachePath(&book,source.c_str(),params)!=initial);
       book.SetStylePublisherBlockMarginsOverride(-1);book.SetStylePublisherHorizontalMarginsOverride(0);
       test::ExpectTrue("FB2 horizontal-margin policy has a separate persistent cache key",fb2_page_cache::CachePath(&book,source.c_str(),params)!=initial);
-      book.SetStylePublisherHorizontalMarginsOverride(-1);
+      book.SetStylePublisherHorizontalMarginsOverride(-1);book.SetStyleTextAlignOverride(2);
+      test::ExpectTrue("FB2 text alignment mode has a separate persistent cache key",fb2_page_cache::CachePath(&book,source.c_str(),params)!=initial);
+      book.SetStyleTextAlignOverride(-1);
       Book reference(ctx);reference.SetFolderName(folder);reference.SetFileName(name);
       reference.PrepareForOpen();reference.CaptureEbookImageSetting();
       test::ExpectEq("legacy XML parser remains a reference",fb2_parser::Parse(&reference,source.c_str(),true,BuildBookParseDeps(&reference)),0);
@@ -2215,6 +2217,7 @@ int main(int argc, char **argv) {
     else if(std::string(argv[1])=="page-alignment") {
       TestPageAlignmentRedrawMeasurements();
       TestPageAlignmentCacheInvalidation();
+      TestPageJustifyRendering();
     }
     else return 2;
     return 0;
@@ -2226,6 +2229,7 @@ int main(int argc, char **argv) {
   TestOpaqueInlineCacheBudget();
   TestPageAlignmentRedrawMeasurements();
   TestPageAlignmentCacheInvalidation();
+  TestPageJustifyRendering();
   TestRepeatedInlineImageWidthsAndCachedDraw();
   TestCoverHeaderPreflight();
   TestOdtAndPlainAllocationRecovery();

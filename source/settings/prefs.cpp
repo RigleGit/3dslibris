@@ -57,6 +57,7 @@ static void ApplyParagraphPreferences(
   app->reader_layout.publisher_text_indent = values.publisher_text_indent;
   app->reader_layout.publisher_block_margins = values.publisher_block_margins;
   app->reader_layout.publisher_horizontal_margins = values.publisher_horizontal_margins;
+  app->reader_layout.text_align_mode = values.text_align_mode;
 }
 
 }
@@ -126,7 +127,8 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     const settings::ParagraphPreferences current = {
         app->reader_layout.paragraph_spacing, app->reader_layout.paragraph_indent, app->reader_layout.line_spacing,
         app->reader_layout.publisher_text_indent, app->reader_layout.publisher_block_margins,
-        app->reader_layout.publisher_horizontal_margins, false};
+        app->reader_layout.publisher_horizontal_margins, false,
+        app->reader_layout.text_align_mode};
     const settings::ParagraphPreferences values =
         settings::ParseParagraphPreferences(attr, current);
     ApplyParagraphPreferences(app, ts, values);
@@ -192,6 +194,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
     int style_publisher_text_indent = -1;
     int style_publisher_block_margins = -1;
     int style_publisher_horizontal_margins = -1;
+    int style_text_align = -1;
     uint32_t last_opened = 0;
     for (i = 0; attr[i]; i += 2) {
       if (!strcmp(attr[i], "file"))
@@ -212,6 +215,10 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
         style_publisher_text_indent = atoi(attr[i + 1]) != 0 ? 1 : 0;
       if (!strcmp(attr[i], "publisherBlockMargins"))
         style_publisher_block_margins = atoi(attr[i + 1]) != 0 ? 1 : 0;
+      if (!strcmp(attr[i], "textAlign")) {
+        const int v = atoi(attr[i + 1]);
+        style_text_align = (v >= 0 && v <= 2) ? v : -1;
+      }
       if (!strcmp(attr[i], "lastOpened"))
         last_opened = (uint32_t)atol(attr[i + 1]);
       if (!strcmp(attr[i], "current")) {
@@ -234,7 +241,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
           style_font_size, style_line_spacing,
           style_paragraph_spacing, style_publisher_text_indent,
           style_publisher_block_margins,
-          style_publisher_horizontal_margins, last_opened);
+          style_publisher_horizontal_margins, last_opened, style_text_align);
       p->prefs->BeginSavedBookBookmarks(folder, filename);
     }
 
@@ -247,7 +254,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
           style_font_size, style_line_spacing,
           style_paragraph_spacing, style_publisher_text_indent,
           style_publisher_block_margins,
-          style_publisher_horizontal_margins);
+          style_publisher_horizontal_margins, style_text_align);
     } else {
       std::vector<Book *>::iterator it;
       for (it = app->books.begin(); it < app->books.end(); it++) {
@@ -272,6 +279,7 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       matched->SetStylePublisherBlockMarginsOverride(style_publisher_block_margins);
       matched->SetStylePublisherHorizontalMarginsOverride(
           style_publisher_horizontal_margins);
+      matched->SetStyleTextAlignOverride(style_text_align);
       if (last_opened > 0)
         matched->SetLastOpenedTime(last_opened);
 #if RECENT_BOOKS_TRACE
@@ -471,6 +479,7 @@ void Prefs::ClearPendingCurrentBookRestore() {
   pending_current_style_publisher_text_indent = -1;
   pending_current_style_publisher_block_margins = -1;
   pending_current_style_publisher_horizontal_margins = -1;
+  pending_current_style_text_align = -1;
   pending_current_bookmarks.clear();
 }
 
@@ -479,7 +488,7 @@ void Prefs::SetPendingCurrentBookRestore(
     bool mobi_line_wrap_fix, int style_font_size, int style_line_spacing,
     int style_paragraph_spacing,
     int style_publisher_text_indent, int style_publisher_block_margins,
-    int style_publisher_horizontal_margins) {
+    int style_publisher_horizontal_margins, int style_text_align) {
   pending_current_book_restore = filename && filename[0];
   collecting_pending_current_book = pending_current_book_restore;
   pending_current_folder = folder ? folder : "";
@@ -494,6 +503,7 @@ void Prefs::SetPendingCurrentBookRestore(
       style_publisher_block_margins;
   pending_current_style_publisher_horizontal_margins =
       style_publisher_horizontal_margins;
+  pending_current_style_text_align = style_text_align;
   pending_current_bookmarks.clear();
 }
 
@@ -528,6 +538,7 @@ bool Prefs::ApplyPendingCurrentBookRestore() {
       pending_current_style_publisher_block_margins);
   matched->SetStylePublisherHorizontalMarginsOverride(
       pending_current_style_publisher_horizontal_margins);
+  matched->SetStyleTextAlignOverride(pending_current_style_text_align);
   if (pending_current_position)
     matched->SetPosition(pending_current_position - 1);
   // Discovery may already have applied the saved-state map to this Book.
@@ -547,7 +558,8 @@ void Prefs::RememberSavedBookState(
     bool mobi_line_wrap_fix, int style_font_size, int style_line_spacing,
     int style_paragraph_spacing, int style_publisher_text_indent,
     int style_publisher_block_margins,
-    int style_publisher_horizontal_margins, uint32_t last_opened) {
+    int style_publisher_horizontal_margins, uint32_t last_opened,
+    int style_text_align) {
   if (!filename || !filename[0])
     return;
   SavedBookState state;
@@ -560,6 +572,7 @@ void Prefs::RememberSavedBookState(
   state.style_publisher_block_margins = style_publisher_block_margins;
   state.style_publisher_horizontal_margins =
       style_publisher_horizontal_margins;
+  state.style_text_align = style_text_align;
   state.last_opened = last_opened;
   ::RememberSavedBookState(&saved_state_by_book_key, folder, filename, state);
 }
@@ -601,6 +614,7 @@ void Prefs::ApplySavedBookState(Book *book) const {
         state.style_publisher_block_margins);
     book->SetStylePublisherHorizontalMarginsOverride(
         state.style_publisher_horizontal_margins);
+    book->SetStyleTextAlignOverride(state.style_text_align);
     if (state.position > 0)
       book->SetPosition(state.position - 1);
     if (state.last_opened > 0)
@@ -734,11 +748,12 @@ int Prefs::Write() {
           font_mono_bolditalic.c_str(), fallback1.c_str(), fallback2.c_str(),
           fallback3.c_str(), fallback4.c_str());
   fprintf(fp,
-          "\t<paragraph indent=\"%d\" spacing=\"%d\" lineSpacing=\"%d\" publisherTextIndent=\"%d\" publisherBlockMargins=\"%d\" publisherHorizontalMargins=\"%d\" />\n",
+          "\t<paragraph indent=\"%d\" spacing=\"%d\" lineSpacing=\"%d\" publisherTextIndent=\"%d\" publisherBlockMargins=\"%d\" publisherHorizontalMargins=\"%d\" textAlign=\"%d\" />\n",
           app->reader_layout.paragraph_indent, app->reader_layout.paragraph_spacing, app->reader_layout.line_spacing,
           app->reader_layout.publisher_text_indent ? 1 : 0,
           app->reader_layout.publisher_block_margins ? 1 : 0,
-          app->reader_layout.publisher_horizontal_margins ? 1 : 0);
+          app->reader_layout.publisher_horizontal_margins ? 1 : 0,
+          app->reader_layout.text_align_mode);
   fprintf(fp, "\t<books reopen=\"%d\">\n", app->reopen);
 
   // Merge the visible folder into the complete state loaded from disk. Browser
@@ -764,6 +779,7 @@ int Prefs::Write() {
         book->GetStylePublisherBlockMarginsOverride();
     state.style_publisher_horizontal_margins =
         book->GetStylePublisherHorizontalMarginsOverride();
+    state.style_text_align = book->GetStyleTextAlignOverride();
     state.last_opened = book->GetLastOpenedTime();
     const std::list<u16> &bookmarks = book->GetBookmarks();
     for (std::list<u16>::const_iterator j = bookmarks.begin();
@@ -816,6 +832,8 @@ int Prefs::Write() {
     // Persist inherit (-1) too: absence means an old combined-margin setting.
     fprintf(fp, " publisherHorizontalMargins=\"%d\"",
             state.style_publisher_horizontal_margins);
+    if (state.style_text_align >= 0)
+      fprintf(fp, " textAlign=\"%d\"", state.style_text_align);
     if (state.last_opened > 0) {
       fprintf(fp, " lastOpened=\"%lu\"", (unsigned long)state.last_opened);
 #if RECENT_BOOKS_TRACE

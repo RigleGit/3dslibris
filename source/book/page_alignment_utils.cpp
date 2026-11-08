@@ -94,6 +94,7 @@ int MeasureAlignedLineWidth(const uint32_t *buf, size_t length, size_t start,
     case TEXT_PARAGRAPH_LEFT:
     case TEXT_PARAGRAPH_CENTER:
     case TEXT_PARAGRAPH_RIGHT:
+    case TEXT_PARAGRAPH_JUSTIFY:
     case TEXT_PARAGRAPH_LTR:
     case TEXT_PARAGRAPH_RTL:
       return line_width;
@@ -111,6 +112,7 @@ int MeasureAlignedLineWidth(const uint32_t *buf, size_t length, size_t start,
       ++scan;
       continue;
     case TEXT_LINK_END:
+    case TEXT_SOFT_WRAP:
       continue;
     default:
       if (sc < 32)
@@ -181,6 +183,7 @@ int MeasureFirstVisualLineWidth(const uint32_t *buf, size_t length, size_t start
     case TEXT_PARAGRAPH_LEFT:
     case TEXT_PARAGRAPH_CENTER:
     case TEXT_PARAGRAPH_RIGHT:
+    case TEXT_PARAGRAPH_JUSTIFY:
     case TEXT_PARAGRAPH_LTR:
     case TEXT_PARAGRAPH_RTL:
       return line_width;
@@ -198,6 +201,7 @@ int MeasureFirstVisualLineWidth(const uint32_t *buf, size_t length, size_t start
       ++scan;
       continue;
     case TEXT_LINK_END:
+    case TEXT_SOFT_WRAP:
       continue;
     default:
       if (sc < 32)
@@ -230,6 +234,96 @@ int MeasureFirstVisualLineWidth(const uint32_t *buf, size_t length, size_t start
   }
 
   return line_width;
+}
+
+JustifyLineScan ScanJustifyLine(const uint32_t *buf, size_t length,
+                                size_t start, bool bold, bool italic,
+                                bool mono, MeasureGlyphFn measure, void *ctx) {
+  JustifyLineScan scan = {0, 0, false};
+  if (!buf || !measure || start >= length)
+    return scan;
+
+  bool scan_bold = bold;
+  bool scan_italic = italic;
+  bool scan_mono = mono;
+  bool seen_glyph = false;
+  bool soft_wrap = false;
+  int trailing_space = 0;
+  int trailing_gaps = 0;
+
+  for (size_t i = start; i < length; ++i) {
+    const uint32_t c = buf[i];
+    if (c == '\n') {
+      scan.justifiable = soft_wrap && seen_glyph && scan.gaps > 0;
+      return scan;
+    }
+    switch (c) {
+    case TEXT_BOLD_ON: scan_bold = true; continue;
+    case TEXT_BOLD_OFF: scan_bold = false; continue;
+    case TEXT_ITALIC_ON: scan_italic = true; continue;
+    case TEXT_ITALIC_OFF: scan_italic = false; continue;
+    case TEXT_MONO_ON: scan_mono = true; continue;
+    case TEXT_MONO_OFF: scan_mono = false; continue;
+    case TEXT_UNDERLINE_ON:
+    case TEXT_UNDERLINE_OFF:
+    case TEXT_STRIKETHROUGH_ON:
+    case TEXT_STRIKETHROUGH_OFF:
+    case TEXT_SUPERSCRIPT_ON:
+    case TEXT_SUPERSCRIPT_OFF:
+    case TEXT_SUBSCRIPT_ON:
+    case TEXT_SUBSCRIPT_OFF:
+    case TEXT_OVERLINE_ON:
+    case TEXT_OVERLINE_OFF:
+    case TEXT_LINK_END:
+    case TEXT_IMAGE_CONTEXT_DEFAULT:
+      continue;
+    case TEXT_UNDERLINE_STYLE:
+    case TEXT_LINK_START:
+      ++i;
+      continue;
+    case TEXT_SOFT_WRAP:
+      soft_wrap = true;
+      continue;
+    default:
+      break;
+    }
+    // Anything else that is not a plain glyph (image, rule, pre, font size or
+    // pen changes, RTL, paragraph markers) makes the line unsafe to stretch.
+    if (c < 32 || c >= 0x110000)
+      return scan;
+    soft_wrap = false;
+    const int advance =
+        measure(c, ResolveTextStyle(scan_bold, scan_italic, scan_mono), ctx);
+    if (c == ' ') {
+      if (seen_glyph) {
+        trailing_space += advance;
+        ++trailing_gaps;
+      }
+      continue;
+    }
+    scan.width += trailing_space + advance;
+    scan.gaps += trailing_gaps;
+    trailing_space = 0;
+    trailing_gaps = 0;
+    seen_glyph = true;
+  }
+  return scan;
+}
+
+bool ComputeJustifySpacing(int line_width, int available, int gaps,
+                           int max_extra_per_gap, int *base, int *remainder) {
+  if (base)
+    *base = 0;
+  if (remainder)
+    *remainder = 0;
+  if (!base || !remainder || gaps <= 0 || available <= line_width)
+    return false;
+  const int extra = available - line_width;
+  if (max_extra_per_gap > 0 && extra > gaps * max_extra_per_gap)
+    return false;
+  *base = extra / gaps;
+  *remainder = extra % gaps;
+  return true;
 }
 
 int ComputeAlignedLineStartX(int base_margin_left, int base_margin_right,

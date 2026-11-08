@@ -44,7 +44,8 @@
     <item id="ch25" href="text/chapter-25-headings.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch26" href="text/chapter-26-hr-styling.xhtml" media-type="application/xhtml+xml"/>
     <item id="ch27" href="text/chapter-27-cache-toggle.xhtml" media-type="application/xhtml+xml"/>
-    <item id="ch28" href="text/chapter-28-stress-test.xhtml" media-type="application/xhtml+xml"/>  </manifest>
+    <item id="ch28" href="text/chapter-28-stress-test.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch29" href="text/chapter-29-justify.xhtml" media-type="application/xhtml+xml"/>  </manifest>
 
   <spine toc="ncx">
     <itemref idref="nav"/>
@@ -77,7 +78,8 @@
     <itemref idref="ch25"/>
     <itemref idref="ch26"/>
     <itemref idref="ch27"/>
-    <itemref idref="ch28"/>  </spine>
+    <itemref idref="ch28"/>
+    <itemref idref="ch29"/>  </spine>
 
   <guide>
     <reference type="toc" title="Índice" href="nav.xhtml"/>

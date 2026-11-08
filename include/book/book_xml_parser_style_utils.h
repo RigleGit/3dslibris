@@ -144,6 +144,8 @@ inline void RestoreParsedParagraphAlignmentMarker(parsedata_t *p) {
     parse_append_page_byte(p, TEXT_PARAGRAPH_CENTER);
   } else if (align == book_xml_css_style_utils::TextAlign::Right) {
     parse_append_page_byte(p, TEXT_PARAGRAPH_RIGHT);
+  } else if (align == book_xml_css_style_utils::TextAlign::Justify) {
+    parse_append_page_byte(p, TEXT_PARAGRAPH_JUSTIFY);
   } else {
     parse_append_page_byte(p, TEXT_PARAGRAPH_LEFT);
   }

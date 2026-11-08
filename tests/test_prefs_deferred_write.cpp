@@ -64,7 +64,7 @@ struct Book {
   int position=0; bool browser_folder=false, wrap=false;
   uint32_t last_opened=0;
   int FontSize=-1, LineSpacing=-1, ParagraphSpacing=-1;
-  int PublisherTextIndent=-1, PublisherBlockMargins=-1, PublisherHorizontalMargins=-1;
+  int PublisherTextIndent=-1, PublisherBlockMargins=-1, PublisherHorizontalMargins=-1, TextAlign=-1;
   std::list<u16> bookmarks;
   bool IsBrowserFolder() const { return browser_folder; }
   int GetPosition() const { return position; }
@@ -80,6 +80,7 @@ struct Book {
   STYLE_STORAGE(PublisherTextIndent)
   STYLE_STORAGE(PublisherBlockMargins)
   STYLE_STORAGE(PublisherHorizontalMargins)
+  STYLE_STORAGE(TextAlign)
 #undef STYLE_STORAGE
   uint32_t GetLastOpenedTime() const { return last_opened; }
   void SetLastOpenedTime(uint32_t value) { last_opened=value; }
@@ -303,6 +304,24 @@ static void TestParagraphPreferenceContracts() {
   WriteXml("<dslibris><paragraph spacing=\"9\" lineSpacing=\"8\"/><broken></dslibris>");
   assert(prefs.Read() != 0 && app.reader_layout.paragraph_spacing == 9);
   assert(app.reader_layout.line_spacing == 8 && app.ts->linespacing == 8);
+  // Global alignment mode: 0 editorial, 1 left, 2 justify; junk means editorial.
+  for (int mode = 0; mode < 3; ++mode) {
+    WriteXml(std::string("<dslibris><paragraph textAlign=\"") + std::to_string(mode) + "\"/></dslibris>");
+    App aligned; aligned.ts.reset(new Text()); Prefs aligned_prefs(&aligned);
+    assert(aligned_prefs.Read() == 0 && aligned.reader_layout.text_align_mode == mode);
+    assert(aligned_prefs.Write() == 0);
+    App again; again.ts.reset(new Text()); Prefs again_prefs(&again);
+    assert(again_prefs.Read() == 0 && again.reader_layout.text_align_mode == mode);
+  }
+  for (const char *junk : {"7", "-1", "x"}) {
+    WriteXml(std::string("<dslibris><paragraph textAlign=\"") + junk + "\"/></dslibris>");
+    App aligned; aligned.ts.reset(new Text()); aligned.reader_layout.text_align_mode = 2;
+    Prefs aligned_prefs(&aligned);
+    assert(aligned_prefs.Read() == 0 && aligned.reader_layout.text_align_mode == 0);
+  }
+  WriteXml("<dslibris><paragraph spacing=\"1\"/></dslibris>");
+  App legacy; legacy.ts.reset(new Text()); Prefs legacy_prefs(&legacy);
+  assert(legacy_prefs.Read() == 0 && legacy.reader_layout.text_align_mode == 0);
   puts("PASS: paragraph defaults, byte conversion, limits, legacy migration and save/read");
 }
 
@@ -362,10 +381,11 @@ int main() {
   nested.position=79; nested.bookmarks.push_back(12);
   nested.FontSize=18; nested.LineSpacing=5; nested.ParagraphSpacing=2;
   nested.PublisherTextIndent=1; nested.PublisherBlockMargins=0;
-  nested.PublisherHorizontalMargins=1; nested.wrap=true; nested.last_opened=1234;
+  nested.PublisherHorizontalMargins=1; nested.TextAlign=2; nested.wrap=true; nested.last_opened=1234;
   owner.ts.reset(new Text()); owner.ts->margin.bottom=24;
   owner.reader_layout.font_size=16; owner.ts->SetPixelSize(16);
   owner.reader_layout.line_spacing=3; owner.ts->linespacing=3;
+  owner.reader_layout.text_align_mode=1;
   p.browser_view_mode=BROWSER_VIEW_LIST; p.fixed_layout_rtl=true;
   p.circle_pad_page_turn=false; p.library_sort_mode=LIBRARY_SORT_RECENT;
   assert(!p.fixed_layout_wide_top_screen);
@@ -373,7 +393,7 @@ int main() {
   owner.books={&nested}; owner.current=&nested;
   assert(p.Write() == 0);
   Book root_book; root_book.folder="books"; root_book.filename="other.epub";
-  root_book.position=3; owner.books={&root_book}; owner.current=&root_book;
+  root_book.position=3; root_book.TextAlign=1; owner.books={&root_book}; owner.current=&root_book;
   assert(p.Write() == 0);
   const std::string folders=ReadCurrent();
   PersistedBooks saved;
@@ -409,10 +429,12 @@ int main() {
   assert(loaded_nested.ParagraphSpacing == 2 && loaded_nested.PublisherTextIndent == 1);
   assert(loaded_nested.PublisherBlockMargins == 0 && loaded_nested.PublisherHorizontalMargins == 1);
   assert(loaded_nested.wrap && loaded_nested.last_opened == 1234);
+  assert(restarted.reader_layout.text_align_mode == 1 && loaded_nested.TextAlign == 2);
   assert(restored.ApplyPendingCurrentBookRestore());
   assert(restarted.current == &loaded_root && restarted.selected == &loaded_root);
   assert(restarted.requested_folder == "books" && restarted.requested_file == "other.epub");
   assert(loaded_root.position == 3 && loaded_root.FontSize == -1);
+  assert(loaded_root.TextAlign == 1);
   assert(!restored.ApplyPendingCurrentBookRestore());
   Book later_nested; later_nested.folder=nested.folder; later_nested.filename=nested.filename;
   restored.ApplySavedBookState(&later_nested);

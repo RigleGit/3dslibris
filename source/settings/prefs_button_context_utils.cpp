@@ -4,7 +4,7 @@ namespace settings {
 
 int PrefsRowPitch(unsigned char visible_count) {
   // Eight per-book style rows must clear the footer, including touch slack.
-  return visible_count > 7 ? 35 : 38;
+  return visible_count > 8 ? 32 : visible_count > 7 ? 35 : 38;
 }
 
 int PrefsButtonIndexForAction(int action) {
@@ -36,6 +36,7 @@ static const int kGeneralExtraButtons[] = {
     PREFS_BUTTON_HANDEDNESS,
     PREFS_BUTTON_REOPEN_LAST_BOOK,
     PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN,
+    PREFS_BUTTON_TEXT_ALIGN,
     PREFS_BUTTON_RESET_DEFAULTS,
     PREFS_BUTTON_CLEAR_CACHE,
 };
@@ -59,6 +60,7 @@ static const int kBookPrefsButtons[] = {
     PREFS_BUTTON_BOOK_INFO,
     PREFS_BUTTON_INDEX,
     PREFS_BUTTON_BOOKMARKS,
+    PREFS_BUTTON_TEXT_ALIGN,
 };
 
 static const int kBookPrefsButtonsWithBookOption[] = {
@@ -70,6 +72,7 @@ static const int kBookPrefsButtonsWithBookOption[] = {
     PREFS_BUTTON_BOOK_INFO,
     PREFS_BUTTON_INDEX,
     PREFS_BUTTON_BOOKMARKS,
+    PREFS_BUTTON_TEXT_ALIGN,
 };
 
 static const int kReflowBookPrefsPage2Buttons[] = {
@@ -103,7 +106,7 @@ unsigned char PrefsPageButtonCount(const PrefsPageContext &context) {
            (context.fixed_layout && context.wide_top_capable ? 1 : 0);
   return VisiblePrefsButtonCount(context.from_book,
                                  context.include_line_wrap_fix) -
-         (context.from_book && context.fixed_layout ? 1 : 0);
+         (context.from_book && context.fixed_layout ? 2 : 0);
 }
 
 static int PageActionForSlot(const PrefsPageContext &context,
@@ -123,7 +126,7 @@ static int PageActionForSlot(const PrefsPageContext &context,
     const unsigned count=VisiblePrefsButtonCount(true,context.include_line_wrap_fix);
     for (unsigned i = 0, visible = 0; i<count; ++i) {
       const int id = PrefsButtonForVisibleSlot(true, context.include_line_wrap_fix, i);
-      if (id == PREFS_BUTTON_SEARCH) continue;
+      if (id == PREFS_BUTTON_SEARCH || id == PREFS_BUTTON_TEXT_ALIGN) continue;
       if (visible++ == slot) return id;
     }
     return -1;

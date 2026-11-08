@@ -325,6 +325,13 @@ struct Page::DrawState {
       book_xml_css_style_utils::TextAlign::Left;
   // Alignment resets on newlines without suppressing consecutive blank lines.
   bool line_alignment_pending = true;
+  // Justification of the line being drawn: extra pixels added to each of its
+  // inter-word spaces (first `justify_remainder` spaces get one more).
+  bool justify_line_active = false;
+  int justify_gaps = 0;
+  int justify_base = 0;
+  int justify_remainder = 0;
+  int justify_gap_index = 0;
 
 #if defined(DSLIBRIS_DEBUG) && PAGE_RENDER_TRACE
   std::string render_line_text;
@@ -362,6 +369,7 @@ struct Page::DrawState {
   void DrawScreenBreak();
   bool DrawInlineImage();
   void AlignGlyph();
+  void PrepareJustifiedLine();
   int MeasureAlignedWidth();
   void DrawGlyph(u32 c);
   void DrawHighlights();
@@ -550,6 +558,13 @@ void Page::DrawState::DrawTokens() {
       continue;
     } else if (c == TEXT_PARAGRAPH_RIGHT) {
       paragraph_align = book_xml_css_style_utils::TextAlign::Right;
+      i++;
+      continue;
+    } else if (c == TEXT_PARAGRAPH_JUSTIFY) {
+      paragraph_align = book_xml_css_style_utils::TextAlign::Justify;
+      i++;
+      continue;
+    } else if (c == TEXT_SOFT_WRAP) {
       i++;
       continue;
     } else if (c == TEXT_LINK_START) {
@@ -1002,7 +1017,36 @@ int Page::DrawState::MeasureAlignedWidth() {
   return width;
 }
 
+void Page::DrawState::PrepareJustifiedLine() {
+  auto measure_fn = [](u32 codepoint, unsigned char glyph_style,
+                       void *ctx) -> int {
+    return ((Text *)ctx)->GetAdvance(codepoint, glyph_style);
+  };
+  const page_alignment_utils::JustifyLineScan scan =
+      page_alignment_utils::ScanJustifyLine(buf, length, (size_t)(i - 1),
+                                            ts->bold, ts->italic, mono,
+                                            measure_fn, ts);
+  if (!scan.justifiable)
+    return;
+  // Same right edge the parser wraps at (2px guard), measured from the pen so
+  // indented first lines are justified from their own start.
+  const int available =
+      ts->LogicalWidth() - ts->margin.right - 2 - (int)ts->GetPenX();
+  const int space_px = std::max(1, (int)ts->GetAdvance(' '));
+  int base = 0, remainder = 0;
+  if (!page_alignment_utils::ComputeJustifySpacing(
+          scan.width, available, scan.gaps, 2 * space_px, &base, &remainder))
+    return;
+  justify_line_active = true;
+  justify_gaps = scan.gaps;
+  justify_base = base;
+  justify_remainder = remainder;
+  justify_gap_index = 0;
+}
+
 void Page::DrawState::AlignGlyph() {
+  if (!ts->linebegan || line_alignment_pending)
+    justify_line_active = false;
   if (rtl_paragraph && !ts->linebegan) {
     int line_width;
     if (rtl_line_px > 0) {
@@ -1049,6 +1093,10 @@ void Page::DrawState::AlignGlyph() {
                    ts->LogicalWidth(), line_width,
                    (int)paragraph_align),
                ts->GetPenY());
+  } else if ((!ts->linebegan || line_alignment_pending) &&
+             paragraph_align == book_xml_css_style_utils::TextAlign::Justify &&
+             !rtl_paragraph && !in_preformatted_block) {
+    PrepareJustifiedLine();
   }
 }
 
@@ -1076,6 +1124,13 @@ void Page::DrawState::DrawGlyph(u32 c) {
     ts->SetPen((u16)glyph_x0, (u16)shifted_y);
   }
   PrintStyledGlyph(ts, c, mono);
+  if (justify_line_active && c == ' ' && justify_gap_index < justify_gaps) {
+    const int extra =
+        justify_base + (justify_gap_index < justify_remainder ? 1 : 0);
+    ++justify_gap_index;
+    if (extra > 0)
+      ts->SetPen((u16)((int)ts->GetPenX() + extra), ts->GetPenY());
+  }
 
   const int glyph_x1 = (int)ts->GetPenX();
   if (highlight && (uint32_t)(i - 1) >= highlight->begin &&

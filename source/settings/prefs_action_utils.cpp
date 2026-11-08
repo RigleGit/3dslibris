@@ -18,4 +18,12 @@ int NextTriStateOverride(int current) {
   return -1;
 }
 
+int NextTextAlignMode(int current, bool allow_inherit) {
+  if (current < 0 || current > 2)
+    return 0;
+  if (current == 2)
+    return allow_inherit ? -1 : 0;
+  return current + 1;
+}
+
 } // namespace settings

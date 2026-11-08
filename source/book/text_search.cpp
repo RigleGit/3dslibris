@@ -180,12 +180,15 @@ struct Engine::State {
     if (in_rtl || (flags & page_search::Skip)) return 0;
     // Optional hyphenation has no textual width; real hyphens remain significant.
     if (cp == 0x00ad) return 0;
+    // Layout-only marker; the '\n' that follows already separates the words.
+    if (cp == TEXT_SOFT_WRAP) return 0;
     if (cp == TEXT_IMAGE || cp == TEXT_HR || cp == TEXT_HR_BOUNDS || Rtl(cp)) {
       if (Rtl(cp)) excluded = true;
       *out = Character(0, start, cursor); return 1;
     }
     if (cp == '\n' || cp == '\r' || cp == '\t' || cp == TEXT_PARAGRAPH_LEFT ||
-        cp == TEXT_PARAGRAPH_CENTER || cp == TEXT_PARAGRAPH_RIGHT) {
+        cp == TEXT_PARAGRAPH_CENTER || cp == TEXT_PARAGRAPH_RIGHT ||
+        cp == TEXT_PARAGRAPH_JUSTIFY) {
       *out = Character(' ', start, cursor); return 1;
     }
     if (payload || cp < 32 || cp > 0x10ffff) return 0;

@@ -266,6 +266,21 @@ static void TogglePublisherHorizontalMarginsSetting(App *app, Book *book,
     app->prefs->RequestWrite();
 }
 
+static void CycleTextAlignSetting(App *app, Book *book, bool is_book_ctx) {
+  if (!app)
+    return;
+  if (is_book_ctx && book && book->UsesTextLayoutSettings()) {
+    book->SetStyleTextAlignOverride(settings::NextTextAlignMode(
+        book->GetStyleTextAlignOverride(), true));
+  } else {
+    app->reader_layout.text_align_mode = settings::NextTextAlignMode(
+        app->reader_layout.text_align_mode, false);
+  }
+  app->MarkBookLayoutDirty();
+  if (app->prefs)
+    app->prefs->RequestWrite();
+}
+
 SettingsController::SettingsController(App &app)
     : app_(app), go_to_page_dialog_(app), prefs_general_page_(0) {}
 
@@ -364,7 +379,8 @@ void SettingsController::PrefsInit() {
       "circle pad pages", "library sort", "book information", "index", "bookmarks",
       "reset settings",
       "clear cache",        "publisher indent", "publisher spacing",
-      "publisher sides", "search", "disable ebook images", "preload book data"};
+      "publisher sides", "search", "disable ebook images", "preload book data",
+      "text alignment"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -1099,6 +1115,13 @@ void SettingsController::PrefsRefreshButton(int index) {
             book ? book->GetPublisherBlockMarginsEnabled()
                  : app_.reader_layout.publisher_block_margins));
     break;
+  case PREFS_BUTTON_TEXT_ALIGN:
+    button.SetLabel1(std::string("text alignment"));
+    button.SetLabel2(settings::TextAlignValueLabel(
+        is_book_ctx && book, !book || book->UsesTextLayoutSettings(),
+        book ? book->GetStyleTextAlignOverride() : -1,
+        app_.reader_layout.text_align_mode));
+    break;
   case PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS:
     button.SetLabel1(
         std::string("publisher sides"));
@@ -1178,6 +1201,7 @@ void SettingsController::ResetToDefaults() {
   app_.reader_layout.publisher_text_indent = true;
   app_.reader_layout.publisher_block_margins = true;
   app_.reader_layout.publisher_horizontal_margins = true;
+  app_.reader_layout.text_align_mode = 0;
   if (app_.reader_layout.orientation != orientation_utils::ORIENT_TURNED_LEFT)
     app_.SetOrientation(orientation_utils::ORIENT_TURNED_LEFT);
   app_.ts->SetColorMode(0);
@@ -1349,6 +1373,13 @@ void SettingsController::PrefsHandlePress() {
       PrefsRefreshButton(PREFS_BUTTON_BOOK_INFO);
       app_.MarkPrefsDirty();
     }
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_TEXT_ALIGN) {
+    CycleTextAlignSetting(&app_, book, is_book_ctx);
+    PrefsRefreshButton(PREFS_BUTTON_TEXT_ALIGN);
+    app_.MarkPrefsDirty();
     return;
   }
 

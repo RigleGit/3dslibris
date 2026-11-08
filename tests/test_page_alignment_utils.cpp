@@ -201,9 +201,101 @@ void TestCenterAlignIgnoresPublisherMarginStart() {
                  100);
 }
 
+using page_alignment_utils::JustifyLineScan;
+
+JustifyLineScan Scan(const uint32_t *buf, size_t n, bool bold = false) {
+  return page_alignment_utils::ScanJustifyLine(buf, n, 0, bold, false, false,
+                                               MeasureGlyph, NULL);
+}
+
+void TestJustifyScanCountsGapsAndIgnoresTrailingSpace() {
+  // "ab cd " + soft wrap: two words, one gap, trailing space not counted.
+  const uint32_t buf[] = {'a', 'b', ' ', 'c', 'd', ' ', TEXT_SOFT_WRAP, '\n'};
+  const JustifyLineScan scan = Scan(buf, sizeof(buf) / sizeof(buf[0]));
+  test::ExpectTrue("soft wrapped line is justifiable", scan.justifiable);
+  test::ExpectEq("width excludes trailing space", scan.width, 5);
+  test::ExpectEq("one inter-word gap", scan.gaps, 1);
+}
+
+void TestJustifyScanSkipsLastLineAndBr() {
+  const uint32_t last[] = {'a', ' ', 'b', '\n'};
+  test::ExpectFalse("hard newline (last line or <br>) is not justified",
+                    Scan(last, sizeof(last) / sizeof(last[0])).justifiable);
+  const uint32_t end_of_buffer[] = {'a', ' ', 'b', TEXT_SOFT_WRAP};
+  test::ExpectFalse("line without its newline is not justified",
+                    Scan(end_of_buffer, 4).justifiable);
+  const uint32_t one_word[] = {'a', 'b', TEXT_SOFT_WRAP, '\n'};
+  test::ExpectFalse("a single word has no gap to widen",
+                    Scan(one_word, 4).justifiable);
+}
+
+void TestJustifyScanRejectsUnsafeLines() {
+  const uint32_t image[] = {'a', ' ', TEXT_IMAGE, 7, ' ', 'b', TEXT_SOFT_WRAP, '\n'};
+  test::ExpectFalse("inline image disables justification",
+                    Scan(image, sizeof(image) / sizeof(image[0])).justifiable);
+  const uint32_t font[] = {'a', ' ', TEXT_FONT_SIZE, 20, 'b', TEXT_SOFT_WRAP, '\n'};
+  test::ExpectFalse("font size change disables justification",
+                    Scan(font, sizeof(font) / sizeof(font[0])).justifiable);
+  const uint32_t pre[] = {'a', ' ', TEXT_PRE_ON, 'b', TEXT_SOFT_WRAP, '\n'};
+  test::ExpectFalse("preformatted text disables justification",
+                    Scan(pre, sizeof(pre) / sizeof(pre[0])).justifiable);
+  const uint32_t rtl[] = {TEXT_RTL_LINE_PX, 9, 'a', ' ', 'b', TEXT_SOFT_WRAP, '\n'};
+  test::ExpectFalse("RTL line disables justification",
+                    Scan(rtl, sizeof(rtl) / sizeof(rtl[0])).justifiable);
+}
+
+void TestJustifyScanTracksStyleAndLinks() {
+  const uint32_t buf[] = {TEXT_LINK_START, 5, 'a', TEXT_LINK_END, ' ',
+                          TEXT_BOLD_ON, 'b', TEXT_BOLD_OFF, TEXT_SOFT_WRAP, '\n'};
+  const JustifyLineScan scan = Scan(buf, sizeof(buf) / sizeof(buf[0]));
+  test::ExpectTrue("links and styles keep the line justifiable", scan.justifiable);
+  test::ExpectEq("bold glyph counted at its own width", scan.width, 1 + 1 + 2);
+}
+
+void TestJustifySpacingDistribution() {
+  int base = -1, rem = -1;
+  test::ExpectTrue("extra pixels are distributed",
+                   page_alignment_utils::ComputeJustifySpacing(100, 108, 3, 0, &base, &rem));
+  test::ExpectEq("base per gap", base, 2);
+  test::ExpectEq("remainder goes to the first gaps", rem, 2);
+  test::ExpectFalse("exact fit changes nothing",
+                    page_alignment_utils::ComputeJustifySpacing(100, 100, 3, 0, &base, &rem));
+  test::ExpectEq("no base when unchanged", base, 0);
+  test::ExpectFalse("overflowing line is left alone",
+                    page_alignment_utils::ComputeJustifySpacing(110, 100, 3, 0, &base, &rem));
+  test::ExpectFalse("zero gaps cannot be distributed",
+                    page_alignment_utils::ComputeJustifySpacing(50, 100, 0, 0, &base, &rem));
+  test::ExpectFalse("a stretch above the cap is refused",
+                    page_alignment_utils::ComputeJustifySpacing(50, 100, 2, 10, &base, &rem));
+  test::ExpectTrue("a stretch at the cap is allowed",
+                   page_alignment_utils::ComputeJustifySpacing(50, 70, 2, 10, &base, &rem));
+  test::ExpectEq("cap boundary base", base, 10);
+}
+
+void TestMeasureStopsAtJustifyMarker() {
+  const uint32_t buf[] = {'A', 'A', TEXT_PARAGRAPH_JUSTIFY, 'B', '\n'};
+  test::ExpectEq("justify marker is a paragraph boundary",
+                 page_alignment_utils::MeasureAlignedLineWidth(
+                     buf, sizeof(buf) / sizeof(buf[0]), 0, false, false, false,
+                     MeasureGlyph, NULL),
+                 2);
+  const uint32_t soft[] = {'A', ' ', 'B', TEXT_SOFT_WRAP, '\n'};
+  test::ExpectEq("soft wrap marker has no width",
+                 page_alignment_utils::MeasureAlignedLineWidth(
+                     soft, sizeof(soft) / sizeof(soft[0]), 0, false, false, false,
+                     MeasureGlyph, NULL),
+                 3);
+}
+
 } // namespace
 
 int main() {
+  TestJustifyScanCountsGapsAndIgnoresTrailingSpace();
+  TestJustifyScanSkipsLastLineAndBr();
+  TestJustifyScanRejectsUnsafeLines();
+  TestJustifyScanTracksStyleAndLinks();
+  TestJustifySpacingDistribution();
+  TestMeasureStopsAtJustifyMarker();
   TestIgnoresControlTokensAndPayloads();
   TestTracksStyleChangesWhileMeasuring();
   TestStopsAtBlockTokens();

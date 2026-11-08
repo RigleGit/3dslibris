@@ -177,6 +177,8 @@ void AppendParagraphAlignMarker(parsedata_t *p,
     AppendParsedByte(p, TEXT_PARAGRAPH_CENTER);
   } else if (align == book_xml_css_style_utils::TextAlign::Right) {
     AppendParsedByte(p, TEXT_PARAGRAPH_RIGHT);
+  } else if (align == book_xml_css_style_utils::TextAlign::Justify) {
+    AppendParsedByte(p, TEXT_PARAGRAPH_JUSTIFY);
   } else {
     AppendParsedByte(p, TEXT_PARAGRAPH_LEFT);
   }

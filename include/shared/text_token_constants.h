@@ -40,6 +40,13 @@
 #define TEXT_PARAGRAPH_LEFT 0x110002
 #define TEXT_PARAGRAPH_CENTER 0x110003
 #define TEXT_PARAGRAPH_RIGHT 0x110004
+// Justified paragraph; lines are stretched by the renderer. Old pages without
+// the marker draw left aligned.
+#define TEXT_PARAGRAPH_JUSTIFY 0x11000D
+// Placed directly before a '\n' that only wraps a long paragraph line. A line
+// closed by a hard '\n' (end of block, <br>) never carries it and is not
+// stretched.
+#define TEXT_SOFT_WRAP 0x11000E
 #define TEXT_PRE_ON 0x110000
 #define TEXT_PRE_OFF 0x110001
 

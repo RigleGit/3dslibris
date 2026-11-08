@@ -14,6 +14,7 @@ struct SavedBookState {
   int style_publisher_text_indent;
   int style_publisher_block_margins;
   int style_publisher_horizontal_margins;
+  int style_text_align;
   uint32_t last_opened;
   std::vector<uint16_t> bookmarks;
 
@@ -21,7 +22,8 @@ struct SavedBookState {
       : position(0), mobi_line_wrap_fix(false), style_font_size(-1),
         style_line_spacing(-1), style_paragraph_spacing(-1),
         style_publisher_text_indent(-1), style_publisher_block_margins(-1),
-        style_publisher_horizontal_margins(-1), last_opened(0), bookmarks() {}
+        style_publisher_horizontal_margins(-1), style_text_align(-1),
+        last_opened(0), bookmarks() {}
 };
 
 typedef std::unordered_map<std::string, SavedBookState> SavedBookStateMap;

@@ -160,6 +160,10 @@
     <navPoint id="nav-32" playOrder="32">
       <navLabel><text>Large Opening Stress Chapter</text></navLabel>
       <content src="text/chapter-28-stress-test.xhtml#qa-stress"/>
+    </navPoint>
+    <navPoint id="nav-33" playOrder="33">
+      <navLabel><text>Text alignment modes</text></navLabel>
+      <content src="text/chapter-29-justify.xhtml#qa-justify"/>
     </navPoint>    <navPoint id="nav-24" playOrder="24">
       <navLabel><text>Capítulo 20: Listas anidadas</text></navLabel>
       <content src="text/chapter-20-nested-lists.xhtml#capitulo-20"/>

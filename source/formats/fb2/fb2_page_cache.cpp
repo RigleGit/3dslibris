@@ -18,6 +18,8 @@ std::string CachePath(Book *book, const char *source,
       book && book->GetPublisherBlockMarginsEnabled() ? ":m1" : ":m0";
   p.variant_token +=
       book && book->GetPublisherHorizontalMarginsEnabled() ? ":h1" : ":h0";
+  p.variant_token +=
+      std::string(":a") + (char)('0' + (book ? book->GetTextAlignMode() : 0));
   if (book && !book->GetEbookImagesEnabled())
     p.variant_token += ":no-images";
   p.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);

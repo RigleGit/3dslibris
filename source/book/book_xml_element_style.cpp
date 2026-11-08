@@ -59,6 +59,8 @@ static void AppendParagraphAlignMarker(
     parse_append_page_byte(p, TEXT_PARAGRAPH_CENTER);
   } else if (align == book_xml_css_style_utils::TextAlign::Right) {
     parse_append_page_byte(p, TEXT_PARAGRAPH_RIGHT);
+  } else if (align == book_xml_css_style_utils::TextAlign::Justify) {
+    parse_append_page_byte(p, TEXT_PARAGRAPH_JUSTIFY);
   } else {
     parse_append_page_byte(p, TEXT_PARAGRAPH_LEFT);
   }
@@ -213,6 +215,32 @@ void ConfigureBlockTextAlign(
   if (!has_align && elem_css.has_text_align) {
     has_align = true;
     align = elem_css.text_align;
+  }
+  const int mode = p->book ? p->book->GetTextAlignMode() : 0;
+  if (mode == 1) {
+    // Forced left: the book's justify becomes left. Center/Right stay.
+    if (has_align && align == book_xml_css_style_utils::TextAlign::Justify)
+      align = book_xml_css_style_utils::TextAlign::Left;
+  } else if (mode == 2 && !(el[0] == 'h' && el[1] >= '1' && el[1] <= '6' && !el[2])) {
+    // Headings keep the book's own alignment even when justify is forced.
+    if (!has_align) {
+      // No alignment of its own: keep a centered/right ancestor, otherwise
+      // the block is body text.
+      for (int i = (int)p->stacksize - 2; i >= 0; --i) {
+        if (!p->block_text_align_stack[i])
+          continue;
+        const book_xml_css_style_utils::TextAlign inherited =
+            (book_xml_css_style_utils::TextAlign)p->block_text_align_value_stack[i];
+        if (inherited == book_xml_css_style_utils::TextAlign::Center ||
+            inherited == book_xml_css_style_utils::TextAlign::Right)
+          return;
+        break;
+      }
+      has_align = true;
+      align = book_xml_css_style_utils::TextAlign::Justify;
+    } else if (align == book_xml_css_style_utils::TextAlign::Left) {
+      align = book_xml_css_style_utils::TextAlign::Justify;
+    }
   }
   if (!has_align)
     return;

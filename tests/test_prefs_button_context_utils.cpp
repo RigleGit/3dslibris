@@ -3,6 +3,7 @@
 #include "test_assert.h"
 #include "settings/prefs_action_utils.h"
 #include "settings/prefs_input_utils.h"
+#include "settings/prefs_style_value_utils.h"
 #include <cassert>
 #define DBG_LOGF(...) ((void)0)
 struct Prefs {
@@ -21,11 +22,13 @@ struct App {
   void MarkBookLayoutDirty() { ++layout_dirty; }
 };
 struct Book {
-  bool reflowable=true; int indent=-1, block=-1, horizontal=-1;
+  bool reflowable=true; int indent=-1, block=-1, horizontal=-1, text_align=-1;
   bool UsesTextLayoutSettings() const { return reflowable; }
   int GetStylePublisherTextIndentOverride() const { return indent; }
   int GetStylePublisherBlockMarginsOverride() const { return block; }
   int GetStylePublisherHorizontalMarginsOverride() const { return horizontal; }
+  int GetStyleTextAlignOverride() const { return text_align; }
+  void SetStyleTextAlignOverride(int v) { text_align=v; }
   void SetStylePublisherTextIndentOverride(int v) { indent=v; }
   void SetStylePublisherBlockMarginsOverride(int v) { block=v; }
   void SetStylePublisherHorizontalMarginsOverride(int v) { horizontal=v; }
@@ -47,7 +50,7 @@ bool HasButton(const settings::PrefsPageContext &page, int button) {
 
 void CheckDrawablePage(const settings::PrefsPageContext &page) {
   const unsigned char count = settings::PrefsPageButtonCount(page);
-  test::ExpectTrue("page has between one and eight rows", count > 0 && count <= 8);
+  test::ExpectTrue("page has between one and nine rows", count > 0 && count <= 9);
   const int pitch = settings::PrefsRowPitch(count);
   // The footer is at y=296 with eight pixels of upward touch slack.
   test::ExpectTrue("last row clears footer touch region",
@@ -107,6 +110,32 @@ static void TestSettingsActions() {
         : action == TogglePublisherBlockMarginsSetting ? app.reader_layout.publisher_block_margins : app.reader_layout.publisher_horizontal_margins;
     assert(enabled);
   }
+  // Text alignment cycles Editorial > Left > Justify; a book adds "inherit".
+  app.reader_layout.text_align_mode=0; book.reflowable=true; book.text_align=-1;
+  for (int expected : {1, 2, 0, 1}) {
+    const int writes_before=prefs.writes, dirty_before=app.layout_dirty;
+    CycleTextAlignSetting(&app, &book, false);
+    assert(app.reader_layout.text_align_mode == expected && book.text_align == -1);
+    assert(prefs.writes == writes_before + 1 && app.layout_dirty == dirty_before + 1);
+  }
+  app.reader_layout.text_align_mode=1;
+  for (int expected : {0, 1, 2, -1, 0}) {
+    const int writes_before=prefs.writes, dirty_before=app.layout_dirty;
+    CycleTextAlignSetting(&app, &book, true);
+    assert(book.text_align == expected && app.reader_layout.text_align_mode == 1);
+    assert(prefs.writes == writes_before + 1 && app.layout_dirty == dirty_before + 1);
+  }
+  book.reflowable=false; book.text_align=-1; app.reader_layout.text_align_mode=0;
+  CycleTextAlignSetting(&app, &book, true);
+  assert(book.text_align == -1 && app.reader_layout.text_align_mode == 1);
+  book.reflowable=true;
+  CycleTextAlignSetting(nullptr, &book, true);
+  assert(settings::NextTextAlignMode(-1, true) == 0 && settings::NextTextAlignMode(5, false) == 0);
+  assert(settings::TextAlignValueLabel(false, true, -1, 2) == "justify");
+  assert(settings::TextAlignValueLabel(true, true, -1, 1) == "inherit left");
+  assert(settings::TextAlignValueLabel(true, true, 2, 1) == "justify");
+  assert(settings::TextAlignValueLabel(true, false, 2, 0) == "editorial");
+  assert(settings::TextAlignValueLabel(false, true, 9, 9) == "editorial");
   const int image_writes=prefs.writes, image_dirty=app.layout_dirty;
   ToggleEbookImagesSetting(&app);
   assert(prefs.disable_ebook_images && prefs.writes==image_writes+1 && app.layout_dirty==image_dirty+1);
@@ -180,6 +209,8 @@ int main() {
     test::ExpectTrue("global style controls keep side margins",
                      HasButton(page, PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS));
     page.page = 2;
+    test::ExpectTrue("text alignment is a global option",
+                     HasButton(page, PREFS_BUTTON_TEXT_ALIGN));
     test::ExpectTrue("global options keep reopen-last-book",
                      HasButton(page, PREFS_BUTTON_REOPEN_LAST_BOOK));
     test::ExpectTrue("Circle Pad remains a global option",
@@ -207,6 +238,8 @@ int main() {
                        HasButton(page, PREFS_BUTTON_BOOKMARKS));
       test::ExpectFalse("book page excludes global Circle Pad setting",
                         HasButton(page, PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN));
+      test::ExpectTrue("per-book text alignment belongs to reflow books",
+                       HasButton(page, PREFS_BUTTON_TEXT_ALIGN) == (fixed == 0));
       test::ExpectTrue("optional line-wrap slot is present only when requested",
                        HasButton(page, PREFS_ACTION_MOBI_LINE_WRAP_FIX) == (wrap != 0));
       test::ExpectFalse("book controls do not expose the library-view action",

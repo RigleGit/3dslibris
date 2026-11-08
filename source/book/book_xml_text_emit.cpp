@@ -16,6 +16,30 @@
 #define EPUB_LINE_TRACE 0
 #endif
 
+namespace {
+
+// True when the paragraph being emitted is justified. Mirrors the marker the
+// parser last emitted: the nearest enclosing block with an explicit alignment.
+bool ActiveBlockIsJustified(const parsedata_t *p) {
+  for (int i = (int)p->stacksize - 1; i >= 0; --i) {
+    if (!p->block_text_align_stack[i])
+      continue;
+    return p->block_text_align_value_stack[i] ==
+           (u8)book_xml_css_style_utils::TextAlign::Justify;
+  }
+  return false;
+}
+
+// A layout wrap inside a justified paragraph: mark it so the renderer knows
+// this line is not the last one. Emitted before the search annotation so the
+// annotation stays attached to the '\n'.
+void AppendSoftWrapMarker(parsedata_t *p) {
+  if (ActiveBlockIsJustified(p))
+    parse_append_page_byte(p, TEXT_SOFT_WRAP);
+}
+
+} // namespace
+
 namespace book_xml_text_emit {
 
 namespace {
@@ -469,6 +493,7 @@ void EmitFlowedShapedText(
         const int pen_y_before_nbsp = p->pen.y;
         bool nbsp_did_wrap = false;
         if ((p->pen.x + unit_advance) >= limits.right_edge) {
+          AppendSoftWrapMarker(p);
           parse_append_page_byte(p, '\n');
           p->pen.x = metrics.margin_left;
           p->linebegan = false;
@@ -527,6 +552,7 @@ void EmitFlowedShapedText(
     const int segment_x_before = p->pen.x;
 #endif
     if (need_wrap) {
+      AppendSoftWrapMarker(p);
       // A layout newline inside a word is not a searchable space.
       if (unit_index == 0 || !run[unit_index - 1].text.whitespace)
         page_search::Annotate(p->search_events, p->buflen, page_search::Skip);

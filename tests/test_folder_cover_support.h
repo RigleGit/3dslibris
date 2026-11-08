@@ -56,6 +56,7 @@ struct BookContext {
   Text *text=nullptr; Prefs *prefs=nullptr; bool *disable_ebook_images=nullptr;
   const unsigned char *paragraph_spacing=nullptr, *paragraph_indent=nullptr;
   bool *publisher_text_indent=nullptr, *publisher_block_margins=nullptr, *publisher_horizontal_margins=nullptr;
+  int *text_align_mode=nullptr;
   const unsigned char *orientation=nullptr; void *status_reporter=nullptr;
   void (*draw_background)(void *)=nullptr; void *draw_background_user_data=nullptr;
   void (*draw_top_background)(void *)=nullptr; void *draw_top_background_user_data=nullptr;

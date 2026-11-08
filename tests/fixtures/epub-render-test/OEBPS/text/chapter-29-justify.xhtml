@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <title>Text alignment modes</title>
+  <link rel="stylesheet" type="text/css" href="../styles/stylesheet.css"/>
+  <style type="text/css">
+    .just { text-align: justify; }
+    .bold { font-weight: bold; }
+    .block { display: block; }
+  </style>
+</head>
+<body>
+  <h1 id="qa-justify">Text alignment modes</h1>
+
+  <p>JU-A. Editorial shows the book as authored; Left forces ragged text; Justify forces both edges flush. The last line of a paragraph and the lines before a line break are never stretched.</p>
+
+  <p class="just">JU-B. This paragraph asks for justified text in its stylesheet, so Editorial must stretch every wrapped line to both edges while the final line stays short, like a printed book would do it.</p>
+
+  <p class="just">JU-C. Line break test: the first line of this paragraph is long enough to wrap onto a second line before the break,<br/>and this short line after the break must stay at its natural spacing.</p>
+
+  <p style="text-align:center">JU-D. This centered paragraph must stay centered in every mode, including Justify, even when it needs several lines on screen.</p>
+
+  <p>JU-E. Bold and block break checks follow: <b class="bold">class bold</b> and a display block break<br class="block"/>after this text.</p>
+</body>
+</html>

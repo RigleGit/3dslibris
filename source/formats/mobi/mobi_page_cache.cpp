@@ -99,6 +99,8 @@ static std::string BuildCachePath(Book *book, const char *book_path,
           paragraph_indent, orientation, margin_left, margin_right, margin_top,
           margin_bottom, regular_font);
   params.variant_token = line_wrap_fix_enabled ? "1" : "0";
+  params.variant_token +=
+      std::string(":a") + (char)('0' + (book ? book->GetTextAlignMode() : 0));
   if (book && !book->GetEbookImagesEnabled())
     params.variant_token += ":no-images";
 
@@ -218,6 +220,7 @@ static void AppendCachedChapters(
 std::string CachePath(Book *book,const char *source,const page_cache_utils::PageCacheLayoutParams &params) {
   auto p=params;
   p.variant_token=book && book->GetMobiLineWrapFix() ? "1" : "0";
+  p.variant_token += std::string(":a") + (char)('0' + (book ? book->GetTextAlignMode() : 0));
   if (book && !book->GetEbookImagesEnabled()) p.variant_token+=":no-images";
   p.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);
   return page_cache_utils::BuildPageCachePath(GetEffectiveCacheDir(),".mpc",source,p);

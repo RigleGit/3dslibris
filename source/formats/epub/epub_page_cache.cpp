@@ -83,6 +83,8 @@ static std::string BuildCachePath(Book *book, const char *book_path,
       book && book->GetPublisherBlockMarginsEnabled() ? ":m1" : ":m0";
   layout_params.variant_token +=
       book && book->GetPublisherHorizontalMarginsEnabled() ? ":h1" : ":h0";
+  layout_params.variant_token +=
+      std::string(":a") + (char)('0' + (book ? book->GetTextAlignMode() : 0));
   if (book && !book->GetEbookImagesEnabled())
     layout_params.variant_token += ":no-images";
   layout_params.variant_token += CapturePageCacheFontIdentity(book ? book->GetText() : NULL);

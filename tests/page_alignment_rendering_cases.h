@@ -127,3 +127,58 @@ void TestPageAlignmentCacheInvalidation() {
   test::ExpectEqU("returning from another page remeasures evicted widths",
                   text.advance_calls - warm_calls, 2);
 }
+
+void TestPageJustifyRendering() {
+  Text text;
+  text.capture_rendered_text = true;
+  text.display.width = 240;
+  std::vector<u16> left(400 * 400), right(400 * 400);
+  text.screenleft = left.data();
+  text.screenright = right.data();
+  text.margin.left = 10;
+  text.margin.right = 10;
+  BookContext ctx;
+  ctx.text = &text;
+  Book book(ctx);
+
+  // Four 6-letter words and three spaces measure 216px (8px per glyph). The
+  // parser's right edge is 228, so two pixels go to the first two gaps.
+  const u32 line[] = {'a','a','a','a','a','a',' ','b','b','b','b','b','b',' ',
+                      'c','c','c','c','c','c',' ','d','d','d','d','d','d'};
+  auto draw = [&](u32 marker, bool soft_wrap, bool second_line) {
+    std::vector<u32> tokens;
+    tokens.push_back(marker);
+    tokens.insert(tokens.end(), line, line + sizeof(line) / sizeof(line[0]));
+    if (soft_wrap)
+      tokens.push_back(TEXT_SOFT_WRAP);
+    tokens.push_back('\n');
+    if (second_line) {
+      const u32 tail[] = {'e', 'e', ' ', 'f', 'f', '\n'};
+      tokens.insert(tokens.end(), tail, tail + 6);
+    }
+    Page page(&book);
+    page.SetBuffer(tokens.data(), tokens.size());
+    text.rendered_glyphs.clear();
+    page.Draw(&text);
+  };
+  auto x_of = [&](size_t glyph) { return text.rendered_glyphs[glyph].x; };
+
+  draw(TEXT_PARAGRAPH_JUSTIFY, true, true);
+  test::ExpectEq("justified line starts at the margin", x_of(0), 10);
+  test::ExpectEq("first gap grows by the remainder pixel", x_of(7), 10 + 56 + 1);
+  test::ExpectEq("second gap grows by the remainder pixel", x_of(14), 10 + 112 + 2);
+  test::ExpectEq("third gap keeps its natural width", x_of(21), 10 + 168 + 2);
+  test::ExpectEq("last glyph reaches the right edge exactly",
+                 x_of(26) + 8, 240 - 10 - 2);
+  // The line after the soft wrap ends the paragraph: natural spacing.
+  test::ExpectEq("last line of a paragraph is not stretched", x_of(27), 10);
+  test::ExpectEq("last line word spacing is natural", x_of(30), 10 + 24 + 0);
+
+  draw(TEXT_PARAGRAPH_JUSTIFY, false, false);
+  test::ExpectEq("a line closed by a hard linefeed is not stretched", x_of(7), 10 + 56);
+  draw(TEXT_PARAGRAPH_LEFT, true, false);
+  test::ExpectEq("left aligned paragraphs ignore the soft wrap marker", x_of(7), 10 + 56);
+  draw(TEXT_PARAGRAPH_CENTER, true, false);
+  test::ExpectEq("centered paragraphs ignore the soft wrap marker",
+                 x_of(0), 10 + (240 - 20 - 216) / 2);
+}

@@ -235,6 +235,7 @@ public:
   int style_publisher_text_indent_override;
   int style_publisher_block_margins_override;
   int style_publisher_horizontal_margins_override;
+  int style_text_align_override;
 
   Book(const BookContext &ctx);
   ~Book();
@@ -253,6 +254,10 @@ public:
   bool GetPublisherTextIndentEnabled() const;
   bool GetPublisherBlockMarginsEnabled() const;
   bool GetPublisherHorizontalMarginsEnabled() const;
+  //! Effective alignment mode: 0 editorial, 1 left, 2 justify.
+  int GetTextAlignMode() const;
+  int GetStyleTextAlignOverride() const;
+  void SetStyleTextAlignOverride(int value);
   bool GetEbookImagesEnabled() const;
   void CaptureEbookImageSetting();
   int GetStyleParagraphSpacingOverride() const;

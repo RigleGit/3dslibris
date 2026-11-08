@@ -202,8 +202,8 @@ void TestPreviousLayoutCacheIsRejected() {
   Fixture fixture;
   fixture.AddPages(1);
   fixture.Save();
-  Check(fixture.CacheFile() == fixture.directory + "/eabacb38b0cce68f.epc",
-        "existing EPUB layout keeps its persistent cache identity");
+  Check(fixture.CacheFile() == fixture.directory + "/cceb7bc8682ae1ee.epc",
+        "EPUB layout cache identity (includes the text alignment mode)");
   for (u16 version : {21,22,23}) {
     fixture.Save();
     fixture.PatchPageIndex(sizeof(u32), version);
@@ -1064,7 +1064,33 @@ static void TestEveryEffectiveFontInvalidates() {
   }
 }
 
+static void TestTextAlignModeInvalidates() {
+  Text text;
+  int global_mode = 0;
+  BookContext context; context.text = &text; context.text_align_mode = &global_mode;
+  Book book(context);
+  const auto params = page_cache_utils::BuildLayoutParams(kBookPath,14,2,0,0,0,12,12,10,36,"");
+  const std::string editorial = epub_page_cache::CachePath(&book,kBookPath,params);
+  global_mode = 1;
+  const std::string left = epub_page_cache::CachePath(&book,kBookPath,params);
+  global_mode = 2;
+  const std::string justify = epub_page_cache::CachePath(&book,kBookPath,params);
+  Check(editorial != left && left != justify && editorial != justify,
+        "global text alignment mode selects a separate persistent layout");
+  book.SetStyleTextAlignOverride(0);
+  Check(epub_page_cache::CachePath(&book,kBookPath,params) == editorial,
+        "a per-book override wins over the global mode in the cache key");
+  book.SetStyleTextAlignOverride(-1);
+  Check(epub_page_cache::CachePath(&book,kBookPath,params) == justify,
+        "clearing the override returns to the global mode");
+  global_mode = 9;
+  Check(book.GetTextAlignMode() == 0, "out of range modes behave as editorial");
+  book.SetStyleTextAlignOverride(7);
+  Check(book.GetStyleTextAlignOverride() == -1, "invalid override is dropped");
+}
+
 int main(int argc, char **argv) {
+  TestTextAlignModeInvalidates();
   const std::string selected = argc > 1 ? argv[1] : "all";
   if (argc > 2 || (selected != "all" && selected != "maps" &&
       selected != "maps-load" && selected != "maps-save" &&
