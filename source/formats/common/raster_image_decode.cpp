@@ -328,6 +328,11 @@ bool DecodeImage(const unsigned char *bytes,size_t length,int target_width,
         components = fz_pixmap_components(ctx, pixmap);
         alpha = fz_pixmap_alpha(ctx, pixmap) != 0;
       }
+      // MuPDF treats a decoder error (e.g. a progressive JPEG whose coefficient
+      // buffers exceed the budget) as end of data and returns a zero-filled
+      // pixmap. Refuse that pixmap instead of presenting it as a black image.
+      if (budget.exhausted)
+        fz_throw(ctx, FZ_ERROR_LIMIT, "Decoder memory limit");
       Convert(fz_pixmap_samples(ctx, pixmap), fz_pixmap_width(ctx, pixmap),
               fz_pixmap_height(ctx, pixmap), fz_pixmap_stride(ctx, pixmap),
               components, alpha, true, background, &next);

@@ -823,8 +823,16 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
   }
 
   image_memory::Bytes compressed;
-  if (!LoadInlineImageSource(image_id, &compressed, NULL) || compressed.empty())
+  if (!LoadInlineImageSource(image_id, &compressed, NULL) || compressed.empty()) {
+    if (IStatusReporter *reporter = GetStatusReporter()) {
+      char msg[192];
+      snprintf(msg, sizeof(msg), "IMAGE: source load failed id=%u %s",
+               (unsigned)image_id, image_id < inline_images.size()
+                                       ? inline_images[image_id].path.c_str() : "?");
+      DBG_LOG(reporter, msg);
+    }
     return false;
+  }
 
   raster_image::ArgbBitmap decoded;
   const char *error=NULL;
@@ -832,7 +840,18 @@ bool Book::DrawInlineImage(Text *ts, u16 image_id,
       !(need_page_recompute && page_imgW == 0 && page_imgH == 0);
   if(!raster_image::DecodeArgb(compressed.data(),compressed.size(),
       draw_w>0 ? draw_w : screen_w,draw_h>0 ? draw_h : screen_h,
-      &decoded,&error,exact_size)) return false;
+      &decoded,&error,exact_size)) {
+    if (IStatusReporter *reporter = GetStatusReporter()) {
+      char msg[224];
+      snprintf(msg, sizeof(msg),
+               "IMAGE: decode failed id=%u bytes=%u target=%dx%d reason=%s",
+               (unsigned)image_id, (unsigned)compressed.size(),
+               draw_w > 0 ? draw_w : screen_w, draw_h > 0 ? draw_h : screen_h,
+               error ? error : "unknown");
+      DBG_LOG(reporter, msg);
+    }
+    return false;
+  }
   if(need_page_recompute && page_imgW==0 && page_imgH==0) {
     const auto placement=ResolveInlineImagePagePlacement(
         screen_w,screen_h,0,0,0,draw_screen_layout.current_margin_bottom,
