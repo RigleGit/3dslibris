@@ -39,16 +39,20 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
         browser_presentation_utils::BuildBrowserDisplayName((*ctx.books)[i]);
     const int progress_x = row_x + kRowW - 44;
     const int title_width = progress_x - row_x - 6;
-    const int title_height =
-        browser_view_utils::ListTitleBoxHeight(ctx.ts->GetHeight());
+    // The wrapped title fills the row; lines beyond what fits are read by
+    // selecting the row (it then scrolls).
+    const int title_height = kRowH;
+    int title_lines = (title_height - 2 * kTitlePadY) /
+                      (ctx.ts->GetHeight() > 1 ? ctx.ts->GetHeight() : 1);
+    if (title_lines > browser_view_utils::ListTitleMaxLines())
+      title_lines = browser_view_utils::ListTitleMaxLines();
     const unsigned char title_style = (unsigned char)ctx.ts->GetStyle();
     // Only the selected row scrolls, and only when the wrapped name needs more
     // lines than the row has. Other rows wrap inside their box as before.
     const bool scrolls =
         selected &&
         browser_presentation_utils::CountWrappedTitleLines(
-            ctx.ts, display_name, title_width, title_style) >
-            browser_view_utils::ListTitleMaxLines();
+            ctx.ts, display_name, title_width, title_style) > title_lines;
     if (scrolls) {
       marquee.painted_offset = -1;
       const int color_mode = ctx.ts->GetColorMode();
@@ -67,7 +71,7 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
         marquee.Reset();
       browser_presentation_utils::DrawWrappedTitleInsideCover(
           ctx.ts, display_name, row_x, row_y, title_width, title_height,
-          title_style, 6);
+          title_style, kTitlePadY);
     }
 
     if (!(*ctx.books)[i]->IsBrowserFolder()) {

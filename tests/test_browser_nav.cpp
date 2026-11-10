@@ -144,14 +144,15 @@ static void TestBrowserPagesLoadOnlyVisibleCovers() {
   assert(app.page_start == 4 && app.selected == &storage[7]);
   assert(!storage[8].coverPixels && !storage[9].coverPixels);
   controller.browser_prevpage(); assert(app.page_start == 0);
+  app.books[5]=&storage[5]; // the null slot only exercised gallery loading
   app.settings.browser_view_mode=BROWSER_VIEW_LIST;
   loaded.clear(); controller.LoadVisibleBrowserCoverCaches();
   assert(loaded.empty());
   for (auto &book : storage) assert(!book.coverPixels);
   controller.browser_nextpage();
-  assert(app.page_start == 7 && app.selected == &storage[7] && loaded.empty());
+  assert(app.page_start == 6 && app.selected == &storage[6] && loaded.empty());
   controller.browser_prevpage();
-  assert(app.page_start == 0 && app.selected == &storage[6]);
+  assert(app.page_start == 0 && app.selected == &storage[5]);
   app.books.clear(); controller.LoadVisibleBrowserCoverCaches();
   controller.browser_nextpage(); controller.browser_prevpage();
 }
@@ -170,6 +171,7 @@ static void TestBrowserButtonsStayBounded() {
     assert(app.page_start==(count ? (count-1)/APP_BROWSER_BUTTON_COUNT*APP_BROWSER_BUTTON_COUNT : 0));
   }
   const auto slots=app.buttons;
+  app.books[5]=&storage[5]; // the null slot only exercised gallery loading
   app.settings.browser_view_mode=BROWSER_VIEW_LIST;
   controller.browser_init();
   assert(app.page_start==294 && app.selected==&storage[299] && app.buttons==slots);
@@ -208,7 +210,7 @@ static void TestBrowserPresentationAndStoredPolicy() {
   assert(std::string(browser_view_utils::ToPrefValue(BROWSER_VIEW_GALLERY)) == "gallery");
   assert(std::string(browser_view_utils::Label(BROWSER_VIEW_GALLERY)) == "Gallery");
   assert(std::string(browser_view_utils::Label(BROWSER_VIEW_LIST)) == "List");
-  assert(browser_view_utils::ListTitleMaxLines() == 2 && browser_view_utils::ListTitleBoxHeight(10) == 32);
+  assert(browser_view_utils::ListTitleMaxLines() == 3 && browser_view_utils::ListTitleBoxHeight(10) == 40);
   for (int color=0; color<6; ++color) {
     const auto selected=browser_view_utils::PaletteForListRow(true, color);
     const auto normal=browser_view_utils::PaletteForListRow(false, color);

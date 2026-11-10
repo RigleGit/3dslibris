@@ -9,6 +9,7 @@
 #include "app/app.h"
 
 #include <3ds.h>
+#include <algorithm>
 #include <ctype.h>
 #include <stdio.h>
 #include <time.h>
@@ -22,6 +23,7 @@
 #include "shared/string_utils.h"
 #include "shared/orientation_utils.h"
 #include "shared/text_unicode_utils.h"
+#include "shared/text_wrap_utils.h"
 #include "settings/font.h"
 #include "shared/debug_log.h"
 #include "ui/screen_layout_constants.h"
@@ -774,7 +776,70 @@ void App::RunBookInfoFrame(const FrameInput &input)
       description_pages = 1;
   }
 
-  const int kBookInfoPageCount = 2 + description_pages;
+  // Book facts are wrapped in full and paginated by lines; a value longer than
+  // a page continues on the next page, so nothing is cut off.
+  struct InfoItem {
+    const char *label;
+    std::vector<std::string> lines;
+  };
+  std::vector<InfoItem> info_groups[2];
+  std::vector<int> info_starts[2];
+  int info_page_lines = (footer_y - body_start_y) / row_h;
+  if (info_page_lines < 1)
+    info_page_lines = 1;
+  if (book) {
+    char pages[32];
+    snprintf(pages, sizeof(pages), "%u", (unsigned)book->GetPageCount());
+    char chapters[32];
+    snprintf(chapters, sizeof(chapters), "%u",
+             (unsigned)book->GetChapters().size());
+    char pos[32];
+    snprintf(pos, sizeof(pos), "%d", (int)book->GetPosition() + 1);
+    struct InfoLine {
+      const char *label;
+      std::string value;
+    };
+    const std::string title =
+        (book->GetTitle() && book->GetTitle()[0]) ? book->GetTitle() : "(untitled)";
+    const std::string author =
+        (!book->GetAuthor().empty()) ? book->GetAuthor() : "(unknown)";
+    const InfoLine group_lines[2][9] = {
+        {{"title", title},
+         {"author", author},
+         {"series", book->GetSeries()},
+         {"language", book->GetLanguage()},
+         {"format", FormatLabel(book->format)},
+         {"page", pos},
+         {"pages", pages},
+         {"chapters", chapters},
+         {"last read", FormatTimestampLabel(book->GetLastOpenedTime())}},
+        {{"publisher", book->GetPublisher()},
+         {"published", book->GetPublished()},
+         {"subjects", book->GetSubjects()},
+         {NULL, ""}}};
+    for (int g = 0; g < 2; g++) {
+      for (int i = 0; i < 9 && group_lines[g][i].label; i++) {
+        std::vector<std::string> wrapped =
+            WrapToWidth(ts.get(), DisplayOrDash(group_lines[g][i].value),
+                        value_w, 4096);
+        for (size_t k = 0; k < wrapped.size(); k += (size_t)info_page_lines) {
+          InfoItem item;
+          item.label = k == 0 ? group_lines[g][i].label : "";
+          const size_t end = std::min(wrapped.size(), k + (size_t)info_page_lines);
+          item.lines.assign(wrapped.begin() + k, wrapped.begin() + end);
+          info_groups[g].push_back(item);
+        }
+      }
+      std::vector<int> heights;
+      for (size_t i = 0; i < info_groups[g].size(); i++)
+        heights.push_back((int)info_groups[g][i].lines.size());
+      text_wrap_utils::PageStarts(heights.data(), (int)heights.size(),
+                                  info_page_lines, 0, &info_starts[g]);
+    }
+  }
+  const int info_pages[2] = {book ? (int)info_starts[0].size() : 1,
+                             book ? (int)info_starts[1].size() : 1};
+  const int kBookInfoPageCount = info_pages[0] + info_pages[1] + description_pages;
   if (nav_.book_info_page >= (u8)kBookInfoPageCount)
     nav_.book_info_page = (u8)(kBookInfoPageCount - 1);
 
@@ -832,80 +897,30 @@ void App::RunBookInfoFrame(const FrameInput &input)
   }
   else
   {
-    const std::string title =
-        (book->GetTitle() && book->GetTitle()[0]) ? book->GetTitle() : "(untitled)";
-    const std::string author =
-        (!book->GetAuthor().empty()) ? book->GetAuthor() : "(unknown)";
-    const std::string format = FormatLabel(book->format);
-    const std::string series = book->GetSeries();
-    const std::string language = book->GetLanguage();
-
-    char pages[32];
-    snprintf(pages, sizeof(pages), "%u", (unsigned)book->GetPageCount());
-    char chapters[32];
-    snprintf(chapters, sizeof(chapters), "%u",
-             (unsigned)book->GetChapters().size());
-    char pos[32];
-    snprintf(pos, sizeof(pos), "%d", (int)book->GetPosition() + 1);
-
-    const std::string last_read =
-        FormatTimestampLabel(book->GetLastOpenedTime());
-
-    const std::string publisher = book->GetPublisher();
-    const std::string published = book->GetPublished();
-    const std::string subjects = book->GetSubjects();
-
-    struct InfoLine {
-      const char *label;
-      std::string value;
-      int max_lines;
-    };
-
-    const InfoLine page0_lines[] = {
-      {"title", title, 2},
-      {"author", author, 2},
-      {"series", series, 2},
-      {"language", language, 1},
-      {"format", format, 1},
-      {"page", pos, 1},
-      {"pages", pages, 1},
-      {"chapters", chapters, 1},
-      {"last read", last_read, 1},
-    };
-
-    const InfoLine page1_lines[] = {
-      {"publisher", publisher, 4},
-      {"published", published, 2},
-      {"subjects", subjects, 4},
-    };
-
-    if (nav_.book_info_page == 0 || nav_.book_info_page == 1) {
-      const InfoLine *lines = nav_.book_info_page == 0 ? page0_lines : page1_lines;
-      const size_t line_count =
-          nav_.book_info_page == 0 ? sizeof(page0_lines) / sizeof(page0_lines[0])
-                                   : sizeof(page1_lines) / sizeof(page1_lines[0]);
-
-      for (size_t i = 0; i < line_count; i++)
+    const int info_page = (int)nav_.book_info_page;
+    if (info_page < info_pages[0] + info_pages[1]) {
+      const int g = info_page < info_pages[0] ? 0 : 1;
+      const int local = g == 0 ? info_page : info_page - info_pages[0];
+      const std::vector<int> &starts = info_starts[g];
+      const size_t first = (size_t)starts[local];
+      const size_t last = (size_t)local + 1 < starts.size()
+                              ? (size_t)starts[local + 1]
+                              : info_groups[g].size();
+      for (size_t i = first; i < last; i++)
       {
-        if (y >= footer_y)
-          break;
-        std::vector<std::string> wrapped =
-            WrapToWidth(ts.get(), DisplayOrDash(lines[i].value), value_w,
-                        lines[i].max_lines);
-        for (size_t j = 0; j < wrapped.size(); j++) {
-          if (y >= footer_y)
-            break;
-          if (j == 0) {
+        const InfoItem &item = info_groups[g][i];
+        for (size_t j = 0; j < item.lines.size(); j++) {
+          if (j == 0 && item.label[0]) {
             ts->SetPen(label_x, y);
-            ts->PrintString(lines[i].label);
+            ts->PrintString(item.label);
           }
           ts->SetPen(value_x, y);
-          ts->PrintString(wrapped[j].c_str());
+          ts->PrintString(item.lines[j].c_str());
           y += row_h;
         }
       }
     } else {
-      const int desc_page_index = (int)nav_.book_info_page - 2;
+      const int desc_page_index = (int)nav_.book_info_page - info_pages[0] - info_pages[1];
       const size_t start_line = (size_t)desc_page_index * (size_t)description_page_lines;
       size_t end_line = start_line + (size_t)description_page_lines;
       if (end_line > wrapped_desc_lines.size())

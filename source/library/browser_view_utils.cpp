@@ -27,19 +27,19 @@ static unsigned short Rgb565FromU8(float r, float g, float b) {
 } // namespace
 
 int PageSize(BrowserViewMode mode) {
-  return mode == BROWSER_VIEW_LIST ? 7 : 4;
+  return mode == BROWSER_VIEW_LIST ? 6 : 4;
 }
 
 int ColumnCount(BrowserViewMode mode) {
   return mode == BROWSER_VIEW_LIST ? 1 : 2;
 }
 
-int ListTitleMaxLines() { return 2; }
+int ListTitleMaxLines() { return 3; }
 
 int ListTitleBoxHeight(int line_height) {
   if (line_height < 1)
     line_height = 1;
-  return ListTitleMaxLines() * line_height + 12;
+  return ListTitleMaxLines() * line_height + 10;
 }
 
 bool ShouldLoadCovers(BrowserViewMode mode) {
