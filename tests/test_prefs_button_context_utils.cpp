@@ -209,23 +209,29 @@ int main() {
     test::ExpectTrue("global style controls keep side margins",
                      HasButton(page, PREFS_BUTTON_PUBLISHER_HORIZONTAL_MARGINS));
     page.page = 2;
-    test::ExpectTrue("text alignment is a global option",
-                     HasButton(page, PREFS_BUTTON_TEXT_ALIGN));
     test::ExpectTrue("global options keep reopen-last-book",
                      HasButton(page, PREFS_BUTTON_REOPEN_LAST_BOOK));
+    test::ExpectTrue("control schemes are global options",
+                     HasButton(page, PREFS_BUTTON_CONTROL_SCHEME) &&
+                     HasButton(page, PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE));
+    // Five rows keep the roomy pitch; no global page lists more than eight.
+    test::ExpectEq("global options page row count",
+                   settings::PrefsPageButtonCount(page), 5);
+    test::ExpectEq("five rows use the roomy pitch",
+                   settings::PrefsRowPitch(settings::PrefsPageButtonCount(page)), 38);
+    page.page = 3;
     test::ExpectTrue("Circle Pad remains a global option",
                      HasButton(page, PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN));
     test::ExpectTrue("global options keep reset and cache cleanup",
                      HasButton(page, PREFS_BUTTON_RESET_DEFAULTS) &&
                      HasButton(page, PREFS_BUTTON_CLEAR_CACHE));
-    test::ExpectTrue("control schemes are global options",
-                     HasButton(page, PREFS_BUTTON_CONTROL_SCHEME) &&
-                     HasButton(page, PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE));
-    // Nine rows use the 32px pitch; the last row must still clear the footer.
-    test::ExpectEq("global options page row count",
-                   settings::PrefsPageButtonCount(page), 9);
-    test::ExpectEq("nine rows use the compact pitch",
-                   settings::PrefsRowPitch(settings::PrefsPageButtonCount(page)), 32);
+    test::ExpectTrue("text alignment is a global option",
+                     HasButton(page, PREFS_BUTTON_TEXT_ALIGN));
+    test::ExpectEq("fourth page row count",
+                   settings::PrefsPageButtonCount(page), 4);
+    // Eight rows use 36px pitch (34px boxes hold two 12px lines).
+    test::ExpectEq("eight rows pitch", settings::PrefsRowPitch(8), 36);
+    test::ExpectEq("seven rows pitch", settings::PrefsRowPitch(7), 38);
   }
 
   page.from_book = true;

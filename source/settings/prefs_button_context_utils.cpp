@@ -3,8 +3,10 @@
 namespace settings {
 
 int PrefsRowPitch(unsigned char visible_count) {
-  // Eight per-book style rows must clear the footer, including touch slack.
-  return visible_count > 8 ? 32 : visible_count > 7 ? 35 : 38;
+  // Eight rows must clear the footer, including touch slack. Two lines of
+  // text need 34px, so only pages that still list nine rows (MOBI books with
+  // the line-wrap option) fall back to 32 and a smaller font.
+  return visible_count > 8 ? 32 : visible_count > 7 ? 36 : 38;
 }
 
 int PrefsButtonIndexForAction(int action) {
@@ -40,6 +42,11 @@ static const int kGeneralExtraButtons[] = {
     PREFS_BUTTON_CONTROL_SCHEME,
     PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE,
     PREFS_BUTTON_REOPEN_LAST_BOOK,
+};
+
+// Global options continue on a fourth page so every page keeps rows tall enough
+// for two lines of text at the normal size.
+static const int kGeneralMoreButtons[] = {
     PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN,
     PREFS_BUTTON_TEXT_ALIGN,
     PREFS_BUTTON_RESET_DEFAULTS,
@@ -106,6 +113,9 @@ unsigned char PrefsPageButtonCount(const PrefsPageContext &context) {
   }
   if (!context.from_book && context.page == 2)
     return ExtraPrefsButtonCount();
+  if (!context.from_book && context.page == 3)
+    return (unsigned char)(sizeof(kGeneralMoreButtons) /
+                           sizeof(kGeneralMoreButtons[0]));
   if (context.from_book && context.page == 1)
     return BookPrefsPage2ButtonCount(context.fixed_layout) +
            (context.fixed_layout && context.wide_top_capable ? 1 : 0);
@@ -121,6 +131,8 @@ static int PageActionForSlot(const PrefsPageContext &context,
     return kGeneralStyleButtons[slot];
   if (!context.from_book && context.page == 2)
     return ExtraPrefsButtonForSlot(slot);
+  if (!context.from_book && context.page == 3)
+    return kGeneralMoreButtons[slot];
   if (context.from_book && context.page == 1) {
     if (context.fixed_layout && context.wide_top_capable &&
         slot == BookPrefsPage2ButtonCount(true))

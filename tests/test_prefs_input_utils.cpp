@@ -25,6 +25,19 @@ static void TestNextAtLastSlotRollsToNextPage() {
   test::ExpectEq("book roll selected", book.selected, 0);
 }
 
+static void TestGlobalOptionsContinueOnFourthPage() {
+  PrefsNavStep fwd = StepPrefsSelection(2, 4, 5, false, true, +1);
+  test::ExpectTrue("page 2 rolls on", fwd.changed);
+  test::ExpectEq("page 2 rolls to page 3", fwd.page, 3);
+  test::ExpectEq("page 3 starts at the top", fwd.selected, 0);
+  PrefsNavStep end = StepPrefsSelection(3, 3, 4, false, true, +1);
+  test::ExpectFalse("page 3 is the last page", end.changed);
+  PrefsNavStep back = StepPrefsSelection(3, 0, 4, false, true, -1);
+  test::ExpectTrue("page 3 rolls back", back.changed);
+  test::ExpectEq("page 3 rolls back to page 2", back.page, 2);
+  test::ExpectTrue("page 3 back lands on the last row", back.select_last);
+}
+
 static void TestNextAtLastSlotWithoutSubmenuStays() {
   PrefsNavStep s = StepPrefsSelection(0, 4, 5, true, false, +1);
   test::ExpectFalse("no submenu stays", s.changed);
@@ -65,7 +78,7 @@ static void TestPrevAtFirstSlotOfPageZeroStays() {
 }
 
 static void TestNextAtLastSlotOfFinalPageStays() {
-  PrefsNavStep s = StepPrefsSelection(2, 2, 3, false, true, +1);
+  PrefsNavStep s = StepPrefsSelection(3, 2, 3, false, true, +1);
   test::ExpectFalse("final page last slot stays", s.changed);
   test::ExpectEq("final page selected", s.selected, 2);
 }
@@ -73,6 +86,7 @@ static void TestNextAtLastSlotOfFinalPageStays() {
 int main() {
   TestNextInsidePageMovesSelection();
   TestNextAtLastSlotRollsToNextPage();
+  TestGlobalOptionsContinueOnFourthPage();
   TestNextAtLastSlotWithoutSubmenuStays();
   TestPrevAtFirstSlotLandsOnLastSlot();
   TestLibraryStyleSubmenuBackReturnsToPageZero();

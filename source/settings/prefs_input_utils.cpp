@@ -30,6 +30,10 @@ PrefsNavStep StepPrefsSelection(int page, int selected, int visible_count,
       step.page = 2;
       step.selected = 0;
       step.changed = true;
+    } else if (!book_ctx && page == 2) {
+      step.page = 3;
+      step.selected = 0;
+      step.changed = true;
     } else if (book_ctx && page == 0 && has_submenu) {
       step.page = 1;
       step.selected = 0;
@@ -38,6 +42,10 @@ PrefsNavStep StepPrefsSelection(int page, int selected, int visible_count,
   } else {
     if (selected > 0) {
       step.selected = selected - 1;
+      step.changed = true;
+    } else if (!book_ctx && page == 3) {
+      step.page = 2;
+      step.select_last = true;
       step.changed = true;
     } else if (!book_ctx && page == 2) {
       step.page = 0;

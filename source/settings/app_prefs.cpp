@@ -398,6 +398,11 @@ void SettingsController::PrefsInit() {
   button_prefs_page_nav_.Init(app_.ts.get());
   button_prefs_page_nav_.SetStyle(BUTTON_STYLE_BOOK);
   button_prefs_page_nav_.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  button_prefs_page_next_.Init(app_.ts.get());
+  button_prefs_page_next_.SetStyle(BUTTON_STYLE_BOOK);
+  button_prefs_page_next_.Resize(screen_layout::kFooterNavW, screen_layout::kFooterButtonH);
+  button_prefs_page_next_.Label("next");
+  button_prefs_page_next_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
 
   button_prefs_library_.Init(app_.ts.get());
   button_prefs_library_.SetStyle(BUTTON_STYLE_BOOK);
@@ -461,10 +466,12 @@ void SettingsController::PrefsDraw() {
       button_prefs_page_nav_.Label("next");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
       button_prefs_page_nav_.Draw(ts->screenright);
-    } else if (prefs_general_page_ == 2) {
+    } else if (prefs_general_page_ >= 2) {
       button_prefs_page_nav_.Label("prev");
       button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
       button_prefs_page_nav_.Draw(ts->screenright);
+      if (prefs_general_page_ == 2)
+        button_prefs_page_next_.Draw(ts->screenright);
     } else {
       button_prefs_page_nav_.Label("back");
       button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
@@ -640,7 +647,7 @@ void SettingsController::PrefsHandleTouch(const FrameInput &input) {
     if (has_submenu)
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
   }
-  if (!book_ctx_touch && prefs_general_page_ == 2) {
+  if (!book_ctx_touch && prefs_general_page_ >= 2) {
     button_prefs_page_nav_.Move(screen_layout::kFooterLeftX, screen_layout::kFooterY);
   }
   auto enclosesWithSlack = [&](Button &button, int x, int y) {
@@ -673,9 +680,14 @@ void SettingsController::PrefsHandleTouch(const FrameInput &input) {
     GoToPrefsPage(prefs_general_page_ == 0 ? 1 : 0);
     return;
   }
+  if (!book_ctx_touch && prefs_general_page_ == 2 &&
+      enclosesWithSlack(button_prefs_page_next_, footerX, footerY)) {
+    GoToPrefsPage(3);
+    return;
+  }
   if (!book_ctx_touch &&
       enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) {
-    GoToPrefsPage(prefs_general_page_ == 0 ? 2 : 0);
+    GoToPrefsPage(prefs_general_page_ == 0 ? 2 : prefs_general_page_ == 3 ? 2 : 0);
     return;
   }
 
