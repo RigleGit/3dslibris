@@ -55,6 +55,7 @@
 #include "library/browser_warmup_utils.h"
 #include "shared/debug_runtime_mode.h"
 #include "shared/string_utils.h"
+#include "library/browser_touch_gesture_utils.h"
 #include "settings/prefs.h"
 #include "shared/path_constants.h"
 #include "ui/text.h"
@@ -120,10 +121,14 @@ void LibraryController::LayoutBrowserNavButtons() {
 namespace {
 
 static BrowserGridMarqueeState g_marquee;
+static browser_touch_gesture::State g_touch_gesture;
 
 } // namespace
 
-void LibraryController::ResetBrowserMarquee() { g_marquee.Reset(); }
+void LibraryController::ResetBrowserMarquee() {
+  g_marquee.Reset();
+  g_touch_gesture.Reset();
+}
 
 // NOTE: job-queue and warmup methods (HasQueuedJob, PrioritizeSelectedBookJobs,
 // EnqueueJob, QueueBookWarmup, TickBrowserWarmup, QueueTocResolve, ProcessJobs,
@@ -196,6 +201,8 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
                            app_.key.left | app_.key.right | app_.key.l |
                            app_.key.r | app_.key.zl | app_.key.zr;
   if (app_.IsBrowserWaitingInputRelease()) {
+    // A touch still held from another screen must not start or finish a tap.
+    g_touch_gesture.Reset();
     const u64 now = input.timestamp_ms;
     if (input.keys_held & release_mask &&
         !browser_warmup_utils::ShouldForceClearInputRelease(
@@ -306,83 +313,120 @@ void LibraryController::browser_handleevent(const FrameInput &input) {
     app_.ShowSettingsView(false);
   }
 
-  else if (keys & KEY_TOUCH) {
-    auto hitsButtonAt = [&](Button &button, int px, int py, int slack) {
-      if (slack <= 0)
-        return button.EnclosesPoint((u16)px, (u16)py);
-      for (int dy = -slack; dy <= slack; dy += slack) {
-        for (int dx = -slack; dx <= slack; dx += slack) {
-          int x = px + dx;
-          int y = py + dy;
-          if (x < 0 || y < 0 || x > 239 || y > 319)
-            continue;
-          if (button.EnclosesPoint((u16)x, (u16)y))
-            return true;
-        }
-      }
-      return false;
-    };
+  // Touch is handled outside the key chain: a tap/hold decision needs the held
+  // and release frames too, not only the touch-down edge.
+  const bool other_key_edge = (keys & ~(u32)KEY_TOUCH) != 0;
+  if (other_key_edge || app_.GetMode() != AppMode::Browser) {
+    g_touch_gesture.Reset();
+    return;
+  }
+  const bool touching = (input.keys_held & KEY_TOUCH) != 0;
+  const bool touch_down_edge = (keys & KEY_TOUCH) != 0 && !other_key_edge;
+  if (!touching && !touch_down_edge && !g_touch_gesture.active)
+    return;
 
-    auto handleTouchAt = [&](int x, int y) -> bool {
-      if (x < 0 || y < 0 || x > 239 || y > 319)
-        return false;
+  auto hitsButtonAt = [&](Button &button, int px, int py, int slack) {
+    if (slack <= 0)
+      return button.EnclosesPoint((u16)px, (u16)py);
+    for (int dy = -slack; dy <= slack; dy += slack) {
+      for (int dx = -slack; dx <= slack; dx += slack) {
+        int x = px + dx;
+        int y = py + dy;
+        if (x < 0 || y < 0 || x > 239 || y > 319)
+          continue;
+        if (button.EnclosesPoint((u16)x, (u16)y))
+          return true;
+      }
+    }
+    return false;
+  };
 
-      if (hitsButtonAt(app_.buttonnext, x, y, 4)) {
-        browser_nextpage();
-        return true;
-      }
-      if (hitsButtonAt(app_.buttonprev, x, y, 4)) {
-        browser_prevpage();
-        return true;
-      }
-      if (hitsButtonAt(app_.buttonprefs, x, y, 4)) {
-        app_.ShowSettingsView(false);
-        return true;
-      }
-      if (IsInsideFolder() && hitsButtonAt(app_.buttonback, x, y, 4)) {
-        LeaveFolder();
-        return true;
-      }
-
-      // Prefer coarse cell hit-test (cover + title/progress area):
-      // single tap selects, tapping selected book opens.
-      int book_idx = -1;
-      if (CurrentBrowserViewMode(app_) == BROWSER_VIEW_LIST) {
-        book_idx = browser_list_view::HitTestBookIndex(
-            x, y, app_.GetBrowserPageStart(), app_.BookCount(),
-            CurrentBrowserPageSize(app_));
-      } else {
-        book_idx = browser_grid_view::HitTestBookIndex(
-            x, y, app_.GetBrowserPageStart(), app_.BookCount());
-        if (book_idx < 0) {
-          for (int i = app_.GetBrowserPageStart();
-               (i < app_.BookCount()) &&
-               (i < app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT);
-               i++) {
-            if (hitsButtonAt(*app_.buttons[i - app_.GetBrowserPageStart()], x, y, 4)) {
-              book_idx = i;
-              break;
-            }
+  // Cell under (x, y): coarse cover + title/progress hit-test first, then the
+  // cover buttons with slack. Returns a book index or -1.
+  auto cellAt = [&](int x, int y) -> int {
+    if (x < 0 || y < 0 || x > 239 || y > 319)
+      return -1;
+    int book_idx = -1;
+    if (CurrentBrowserViewMode(app_) == BROWSER_VIEW_LIST) {
+      book_idx = browser_list_view::HitTestBookIndex(
+          x, y, app_.GetBrowserPageStart(), app_.BookCount(),
+          CurrentBrowserPageSize(app_));
+    } else {
+      book_idx = browser_grid_view::HitTestBookIndex(
+          x, y, app_.GetBrowserPageStart(), app_.BookCount());
+      if (book_idx < 0) {
+        for (int i = app_.GetBrowserPageStart();
+             (i < app_.BookCount()) &&
+             (i < app_.GetBrowserPageStart() + APP_BROWSER_BUTTON_COUNT);
+             i++) {
+          if (hitsButtonAt(*app_.buttons[i - app_.GetBrowserPageStart()], x, y,
+                           4)) {
+            book_idx = i;
+            break;
           }
         }
       }
-      if (book_idx >= 0 && book_idx < app_.BookCount()) {
-        if (app_.GetSelectedBook() == app_.books[book_idx]) {
-          OpenSelectedBrowserEntry();
-        } else {
-          app_.SetSelectedBook(app_.books[book_idx]);
-          g_marquee.Reset();
-          PrioritizeSelectedBookJobs(app_.GetSelectedBook());
-          app_.SetBrowserLastInteractionMs(osGetTime());
-          app_.SetBrowserDirty(true);
-        }
-        return true;
-      }
-      return false;
-    };
+    }
+    return (book_idx >= 0 && book_idx < app_.BookCount()) ? book_idx : -1;
+  };
 
-    touchPosition mapped = app_.MapTouch(input);
-    handleTouchAt((int)mapped.px, (int)mapped.py);
+  touchPosition mapped = app_.MapTouch(input);
+  const int tx = (int)mapped.px;
+  const int ty = (int)mapped.py;
+
+  // Footer buttons act on touch-down, as before; they never start a gesture.
+  if (touch_down_edge && tx >= 0 && ty >= 0 && tx <= 239 && ty <= 319) {
+    if (hitsButtonAt(app_.buttonnext, tx, ty, 4)) {
+      browser_nextpage();
+      return;
+    }
+    if (hitsButtonAt(app_.buttonprev, tx, ty, 4)) {
+      browser_prevpage();
+      return;
+    }
+    if (hitsButtonAt(app_.buttonprefs, tx, ty, 4)) {
+      app_.ShowSettingsView(false);
+      return;
+    }
+    if (IsInsideFolder() && hitsButtonAt(app_.buttonback, tx, ty, 4)) {
+      LeaveFolder();
+      return;
+    }
+  }
+
+  // Release frames carry no coordinates; the gesture only needs them while
+  // the finger is down.
+  const int cell = touching ? cellAt(tx, ty) : -1;
+  const int gesture_cell = g_touch_gesture.cell;
+  const browser_touch_gesture::Action action = browser_touch_gesture::Step(
+      g_touch_gesture, false, touching, touch_down_edge, cell,
+      input.timestamp_ms);
+  if (action == browser_touch_gesture::ACTION_NONE)
+    return;
+
+  // The release frame has no coordinates; open the cell the tap started on.
+  const int target =
+      (action == browser_touch_gesture::ACTION_OPEN) ? gesture_cell : cell;
+  if (target < 0 || target >= app_.BookCount())
+    return;
+  if (action == browser_touch_gesture::ACTION_SELECT) {
+    if (app_.GetSelectedBook() != app_.books[target]) {
+      app_.SetSelectedBook(app_.books[target]);
+      g_marquee.Reset();
+      PrioritizeSelectedBookJobs(app_.GetSelectedBook());
+    }
+    app_.SetBrowserLastInteractionMs(osGetTime());
+    app_.SetBrowserDirty(true);
+  } else if (action == browser_touch_gesture::ACTION_PREVIEW) {
+    // Selection already follows touch-down; restart the marquee so the full
+    // title scrolls from its start while the finger rests on the cell.
+    g_marquee.Reset();
+    app_.SetBrowserLastInteractionMs(osGetTime());
+    app_.SetBrowserDirty(true);
+  } else if (action == browser_touch_gesture::ACTION_OPEN) {
+    if (app_.GetSelectedBook() != app_.books[target])
+      app_.SetSelectedBook(app_.books[target]);
+    OpenSelectedBrowserEntry();
   }
 }
 

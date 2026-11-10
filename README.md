@@ -90,7 +90,7 @@ Library:
 - `D-Pad`: move selection
 - `A`: open selected book
 - `L` / `R`: previous or next library page
-- `Touch`: select and open books
+- `Touch`: tap a book or folder to open it; touch and hold to select it and see its full title without opening
 - `Y`: search the library by filename, title or author
 - `SELECT`: open `GENERAL` settings (includes library search and [preload book data](docs/LIBRARY_PRELOAD.md))
 
