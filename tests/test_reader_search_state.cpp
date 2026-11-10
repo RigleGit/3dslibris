@@ -83,6 +83,8 @@ struct App {
     u32 l=KEY_L,r=KEY_R,dleft=KEY_DLEFT,dright=KEY_DRIGHT,dup=KEY_DUP,ddown=KEY_DDOWN;
     u32 left=0,right=0,up=0,down=0,zl=0,zr=0;
   } key;
+  struct PrefsStub { uint8_t control_scheme_portrait=0, control_scheme_landscape=0; };
+  std::unique_ptr<PrefsStub> prefs;
   AppMode mode=AppMode::Search;
   bool abort_work=false, abort_on_present=false;
   std::vector<std::string> search_logs;

@@ -27,6 +27,7 @@
 #include "book/book_renderer.h"
 #include "library/browser_view_utils.h"
 #include "library/cover_cache.h"
+#include "reader/reader_control_scheme.h"
 #include "ui/button.h"
 #include "ui/ui_button_skin.h"
 #include "shared/color_utils.h"
@@ -1214,6 +1215,8 @@ void SettingsController::ResetToDefaults() {
   app_.ts->SetTopScreenWideMode(false);
   app_.prefs->circle_pad_page_turn = true;
   app_.prefs->disable_ebook_images = false;
+  app_.prefs->control_scheme_portrait = CONTROL_SCHEME_DEFAULT;
+  app_.prefs->control_scheme_landscape = CONTROL_SCHEME_DEFAULT;
   app_.prefs->show_time_remaining = false;
   app_.reopen = true;
   app_.MarkBookLayoutDirty();

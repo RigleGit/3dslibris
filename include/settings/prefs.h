@@ -71,6 +71,9 @@ public:
   bool fixed_layout_wide_top_screen;
   bool circle_pad_page_turn;
   bool disable_ebook_images;
+  // ControlScheme ids (reader/reader_control_scheme.h), per orientation group
+  uint8_t control_scheme_portrait;
+  uint8_t control_scheme_landscape;
   LibrarySortMode library_sort_mode;
 
 private:

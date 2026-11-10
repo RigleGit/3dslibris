@@ -8,6 +8,7 @@
 #include "reader/reader_controls.h"
 #include "shared/debug_log.h"
 #include "shared/orientation_utils.h"
+#include "settings/prefs.h"
 #include "shared/text_unicode_utils.h"
 #include "ui/touch_utils.h"
 #include <3ds.h>
@@ -257,8 +258,9 @@ void ReaderController::RunSearchFrame(const FrameInput &input) {
     } else if (keys & (app_.key.l | app_.key.r)) {
       StartSearch((keys & app_.key.l) != 0, false);
     } else if (keys & (KEY_DLEFT | KEY_DRIGHT | KEY_DUP | KEY_DDOWN)) {
-      const ReaderControls controls = orientation_utils::IsLandscape(book->GetOrientation()) ?
-          BuildLandscapeControls(app_.key) : BuildPortraitControls(app_.key);
+      const bool landscape = orientation_utils::IsLandscape(book->GetOrientation());
+      const ReaderControls controls = BuildReaderControls(
+          SelectedControlScheme(app_.prefs.get(), landscape), landscape, app_.key);
       const int delta = (keys & controls.page_next) ? 1 : (keys & controls.page_prev) ? -1 : 0;
       if (delta) {
         const bool cancelled=s.engine.GetStatus()==text_search::Searching;

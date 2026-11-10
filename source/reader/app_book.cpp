@@ -655,10 +655,10 @@ void ReaderController::HandleEventInBook(const FrameInput &input)
   if (app_.ShouldAbortWork() || !bookcurrent_)
     return;
 
-  const ReaderControls ctrl =
-      orientation_utils::IsLandscape(bookcurrent_->GetOrientation())
-          ? BuildLandscapeControls(app_.key)
-          : BuildPortraitControls(app_.key);
+  const bool landscape =
+      orientation_utils::IsLandscape(bookcurrent_->GetOrientation());
+  const ReaderControls ctrl = BuildReaderControls(
+      SelectedControlScheme(app_.prefs.get(), landscape), landscape, app_.key);
   const u16 position_before = bookcurrent_->GetPosition();
   u16 pagecurrent = bookcurrent_->GetPosition();
   u16 pagecount = bookcurrent_->GetPageCount();

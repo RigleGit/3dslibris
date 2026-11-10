@@ -22,6 +22,7 @@
 #include "book/book_xml.h"
 #include "formats/common/xml_parse_utils.h"
 #include "library/browser_view_utils.h"
+#include "reader/reader_control_scheme.h"
 #include "shared/path_constants.h"
 #include "shared/orientation_utils.h"
 #include "shared/utf8_utils.h"
@@ -348,6 +349,12 @@ void start(void *data, const XML_Char *name, const XML_Char **attr) {
       }
       if (!strcmp(attr[i], "disableEbookImages"))
         p->prefs->disable_ebook_images = atoi(attr[i + 1]) != 0;
+      if (!strcmp(attr[i], "controlsPortrait"))
+        p->prefs->control_scheme_portrait =
+            (uint8_t)ClampControlScheme(atoi(attr[i + 1]));
+      if (!strcmp(attr[i], "controlsLandscape"))
+        p->prefs->control_scheme_landscape =
+            (uint8_t)ClampControlScheme(atoi(attr[i + 1]));
       if (!strcmp(attr[i], "librarySortMode")) {
         int m = atoi(attr[i + 1]);
         if (m >= 0 && m < LIBRARY_SORT_COUNT)
@@ -667,7 +674,7 @@ int Prefs::Write() {
 #endif
   fprintf(fp, "<dslibris format=\"2\">\n");
   fprintf(fp,
-      "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" fixedLayoutWideTopScreen=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" disableEbookImages=\"%d\" />\n",
+      "<option swapshoulder=\"%d\" time24h=\"%d\" showTimeRemaining=\"%d\" browserView=\"%s\" fixedLayoutRtl=\"%d\" fixedLayoutWideTopScreen=\"%d\" circlePadPageTurn=\"%d\" librarySortMode=\"%d\" disableEbookImages=\"%d\" controlsPortrait=\"%d\" controlsLandscape=\"%d\" />\n",
           swapshoulder, time24h,
       show_time_remaining ? 1 : 0,
           browser_view_utils::ToPrefValue(browser_view_mode),
@@ -675,7 +682,9 @@ int Prefs::Write() {
           fixed_layout_wide_top_screen ? 1 : 0,
           circle_pad_page_turn ? 1 : 0,
           static_cast<int>(library_sort_mode),
-          disable_ebook_images ? 1 : 0);
+          disable_ebook_images ? 1 : 0,
+          (int)control_scheme_portrait,
+          (int)control_scheme_landscape);
   fprintf(fp,
           "\t<screen colorMode=\"%d\" flip=\"%d\" landscape=\"%d\" />\n",
           ts ? ts->GetColorMode() : 0,
@@ -914,6 +923,8 @@ void Prefs::Init() {
   fixed_layout_wide_top_screen = false;
   circle_pad_page_turn = true;
   disable_ebook_images = false;
+  control_scheme_portrait = CONTROL_SCHEME_DEFAULT;
+  control_scheme_landscape = CONTROL_SCHEME_DEFAULT;
   library_sort_mode = LIBRARY_SORT_TITLE;
   last_opened_by_book_key.clear();
   saved_state_by_book_key.clear();

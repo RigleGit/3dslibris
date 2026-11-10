@@ -120,6 +120,16 @@ inline ControlScheme ClampControlScheme(int value)
              : CONTROL_SCHEME_DEFAULT;
 }
 
+// Scheme selected in prefs for the given orientation group; Default without prefs.
+template <typename PrefsT>
+inline ControlScheme SelectedControlScheme(const PrefsT *prefs, bool landscape)
+{
+  if (!prefs)
+    return CONTROL_SCHEME_DEFAULT;
+  return ClampControlScheme(landscape ? prefs->control_scheme_landscape
+                                      : prefs->control_scheme_portrait);
+}
+
 // Resolve a LogicalButton bitset to the physical masks of the active KeyMap.
 template <typename KeyMap>
 inline uint32_t ResolveButtons(uint32_t lb, const KeyMap &key)

@@ -1,4 +1,5 @@
 #include "reader/reader_layout_state.h"
+#include "reader/reader_control_scheme.h"
 #include "settings/prefs.h"
 #include "settings/prefs_file_utils.h"
 #include "shared/orientation_utils.h"
@@ -252,6 +253,37 @@ static void TestEbookImagesOption() {
     assert(ReadCurrent().find(saved[i])!=std::string::npos);
   }
 }
+static void TestControlSchemeOption() {
+  App owner; owner.ts.reset(new Text());
+  // Missing attributes fall back to Default and are written back as 0.
+  WriteXml("<dslibris><option time24h=\"1\"/></dslibris>");
+  Prefs missing(&owner);
+  assert(missing.Read()==0);
+  assert(missing.control_scheme_portrait==CONTROL_SCHEME_DEFAULT);
+  assert(missing.control_scheme_landscape==CONTROL_SCHEME_DEFAULT);
+  assert(missing.Write()==0);
+  std::string out=ReadCurrent();
+  assert(out.find("controlsPortrait=\"0\"")!=std::string::npos);
+  assert(out.find("controlsLandscape=\"0\"")!=std::string::npos);
+  // Every valid id round-trips per orientation group.
+  for (int p=0;p<(int)CONTROL_SCHEME_COUNT;++p) {
+    for (int l=0;l<(int)CONTROL_SCHEME_COUNT;++l) {
+      Prefs w(&owner); assert(w.Read()==0);
+      w.control_scheme_portrait=(uint8_t)p; w.control_scheme_landscape=(uint8_t)l;
+      assert(w.Write()==0);
+      Prefs r(&owner); assert(r.Read()==0);
+      assert(r.control_scheme_portrait==p && r.control_scheme_landscape==l);
+    }
+  }
+  // Out-of-range and junk values clamp to Default.
+  const char *bad[]={"99","-1","abc","256"};
+  for (int i=0;i<4;++i) {
+    WriteXml(std::string("<dslibris><option controlsPortrait=\"")+bad[i]+"\" controlsLandscape=\""+bad[i]+"\"/></dslibris>");
+    Prefs c(&owner); assert(c.Read()==0);
+    assert(c.control_scheme_portrait==CONTROL_SCHEME_DEFAULT);
+    assert(c.control_scheme_landscape==CONTROL_SCHEME_DEFAULT);
+  }
+}
 static void TestParagraphPreferenceContracts() {
   struct Case {
     const char *attrs;
@@ -445,6 +477,7 @@ int main() {
   assert(wrong_folder.position == 0 && wrong_folder.bookmarks.empty() && wrong_folder.FontSize == -1);
   TestReadContracts();
   TestEbookImagesOption();
+  TestControlSchemeOption();
   TestParagraphPreferenceContracts();
   puts("PASS: real preference save/read/restart, retry, migration and folder restoration");
 }
