@@ -122,7 +122,9 @@ void LibraryController::ActivateLibrarySearchResult(size_t index) {
       else {
         // The normal opening flow enters the reader from the browser mode.
         app_.SetMode(AppMode::Browser);
-        opened=app_.OpenBook()==0 && app_.GetMode()==AppMode::Book;
+        // Reflow formats return 0 while parsing in Opening mode; that is success.
+        opened=app_.OpenBook()==0 &&
+               (app_.GetMode()==AppMode::Book || app_.GetMode()==AppMode::Opening);
       }
       break;
     }

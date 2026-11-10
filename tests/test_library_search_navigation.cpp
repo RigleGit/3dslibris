@@ -26,6 +26,7 @@ struct App {
   struct {u8 orientation=0;} reader_layout;
   int page=10;
   bool open_ok=false;
+  bool open_async=false; // EPUB/MOBI/FB2 return 0 while parsing in Opening mode.
   u8 portrait_orientation=0;
   bool ShouldAbortWork() const {return false;}
   void ApplyRenderOrientation(u8) {}
@@ -38,6 +39,7 @@ struct App {
   void ShowLibraryView() {mode=AppMode::Browser;}
   void ShowCurrentBookView() {if(current) mode=AppMode::Book;}
   int OpenBook() {
+    if(open_async) {current=selected;mode=AppMode::Opening;return 0;}
     if(open_ok) {
       current=selected;
       // Use the actual reader transition gate, rather than supplying its result.
@@ -78,6 +80,13 @@ int main() {
   app.open_ok=true;owner.ActivateLibrarySearchResult(0);
   assert(!owner.search_ && owner.inside_folder_ && app.selected==&child && app.mode==AppMode::Book);
   assert(app.current==&child);
+  // Reflow formats return 0 and leave the app in Opening mode; that is a successful open.
+  owner.search_.reset(new LibrarySearchSession);app.mode=AppMode::LibrarySearch;app.open_ok=false;app.open_async=true;
+  candidates.entries={{child.path,"child.epub",false}};
+  assert(owner.search_->engine.Start(library_search::Field::Name,"child",Root,&candidates,false));
+  owner.search_->engine.Pump();owner.ActivateLibrarySearchResult(0);
+  assert(!owner.search_ && app.mode==AppMode::Opening && app.current==&child);
+  app.open_async=false;app.open_ok=true;
   // Root results must use the same reader transition while retaining virtual root.
   owner.search_.reset(new LibrarySearchSession);app.mode=AppMode::LibrarySearch;
   candidates.entries={{root.path,"root.epub",false}};
