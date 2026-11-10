@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 #include "book/book.h"
 #include "shared/debug_log.h"
@@ -9,6 +10,7 @@
 #include "library/browser_presentation_hit_utils.h"
 #include "library/browser_presentation_utils.h"
 #include "library/browser_view_utils.h"
+#include "shared/text_wrap_adapter.h"
 #include "ui/button.h"
 #include "ui/text.h"
 
@@ -39,6 +41,107 @@ int HitTestBookIndex(int x, int y, int page_start, int book_count) {
   return browser_presentation_hit_utils::HitTestGridBookIndex(
       x, y, page_start, book_count, kGridX0, kGridY0, kCellW, kCellH, kGridCols,
       kGridRows, kPageCapacity);
+}
+
+void BuildMarquee(Text *ts, BrowserGridMarqueeState &marquee, Book *book,
+                  const std::string &name, unsigned char style, int x,
+                  int baseline_y, int vis_w) {
+  // Each chunk is rendered on its own so that the strip can be wider than the
+  // offscreen buffer: no part of a long title is left out of the scroll.
+  const int kChunkW = 230;
+  const int kMaxStripW = 4096;
+  const int lh = ts->GetHeight();
+  const int sh = lh + 2;
+  int glyph_top = baseline_y - lh;
+  if (glyph_top < 0)
+    glyph_top = 0;
+  const int stride = ts->BufferStride();
+
+  marquee.Reset();
+  marquee.book = book;
+  marquee.display_name = name;
+  marquee.strip_h = sh;
+  marquee.strip_x = x;
+  marquee.strip_y = glyph_top;
+  marquee.blit_w = vis_w;
+  marquee.bg_strip = new unsigned short[vis_w * sh];
+  for (int r = 0; r < sh; r++) {
+    memcpy(marquee.bg_strip + r * vis_w,
+           ts->screenright + (glyph_top + r) * stride + x,
+           vis_w * sizeof(unsigned short));
+  }
+  const int bg_pixels = vis_w * sh;
+  u32 r_acc = 0, g_acc = 0, b_acc = 0;
+  for (int i = 0; i < bg_pixels; i++) {
+    u16 c = marquee.bg_strip[i];
+    r_acc += ((c >> 11) & 0x1F) << 3 | ((c >> 11) & 0x1F) >> 2;
+    g_acc += ((c >> 5) & 0x3F) << 2 | ((c >> 5) & 0x3F) >> 4;
+    b_acc += (c & 0x1F) << 3 | (c & 0x1F) >> 2;
+  }
+  marquee.bg_color = (u16)(((r_acc / bg_pixels) >> 3 << 11) |
+                           ((g_acc / bg_pixels) >> 2 << 5) |
+                           ((b_acc / bg_pixels) >> 3));
+
+  std::vector<text_wrap_utils::Line> chunks;
+  text_wrap_adapter::Wrap(ts, style, kChunkW, name, &chunks);
+
+  struct Piece {
+    int w;
+    std::vector<unsigned short> px;
+  };
+  std::vector<Piece> pieces;
+  const int gap = ts->GetAdvance(' ', style);
+  int total_w = 0;
+  u16 *saved_screen = ts->GetScreen();
+  const int saved_ml = ts->margin.left;
+  const int saved_mr = ts->margin.right;
+  ts->SetScreen(ts->offscreen);
+  ts->margin.left = 0;
+  ts->margin.right = 0;
+  for (size_t i = 0; i < chunks.size() && total_w < kMaxStripW; i++) {
+    const std::string chunk =
+        name.substr(chunks[i].start, chunks[i].end - chunks[i].start);
+    for (int r = 0; r < sh; r++)
+      std::fill(ts->offscreen + (glyph_top + r) * stride,
+                ts->offscreen + (glyph_top + r) * stride + kChunkW + 8,
+                marquee.bg_color);
+    ts->SetPen(0, baseline_y);
+    ts->PrintString(chunk.c_str(), style);
+    int w = ts->GetPenX();
+    if (w < 1)
+      w = 1;
+    if (w > kChunkW + 8)
+      w = kChunkW + 8;
+    Piece piece;
+    piece.w = w;
+    piece.px.resize((size_t)w * sh);
+    for (int r = 0; r < sh; r++)
+      memcpy(&piece.px[(size_t)r * w],
+             ts->offscreen + (glyph_top + r) * stride,
+             w * sizeof(unsigned short));
+    total_w += w + (i + 1 < chunks.size() ? gap : 0);
+    pieces.push_back(piece);
+  }
+  ts->margin.left = saved_ml;
+  ts->margin.right = saved_mr;
+  ts->SetScreen(saved_screen);
+
+  marquee.strip_w = total_w;
+  marquee.strip = new unsigned short[(size_t)total_w * sh];
+  std::fill(marquee.strip, marquee.strip + (size_t)total_w * sh,
+            marquee.bg_color);
+  int cursor = 0;
+  for (size_t i = 0; i < pieces.size(); i++) {
+    for (int r = 0; r < sh; r++)
+      memcpy(marquee.strip + (size_t)r * total_w + cursor,
+             &pieces[i].px[(size_t)r * pieces[i].w],
+             pieces[i].w * sizeof(unsigned short));
+    cursor += pieces[i].w + gap;
+  }
+  marquee.scroll_offset = 0;
+  marquee.scroll_timer = 0;
+  marquee.color_mode = ts->GetColorMode();
+  marquee.active = true;
 }
 
 void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
@@ -114,7 +217,8 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
       if (!display_name.empty()) {
         const char *dname = display_name.c_str();
         unsigned char cur_style = (unsigned char)ctx.ts->GetStyle();
-        int full_w = (int)ctx.ts->GetStringWidth(dname, cur_style);
+        // GetStringWidth() returns a byte and wraps for names wider than 255px.
+        int full_w = ctx.ts->GetStringAdvance(dname);
         Book *book_i = (*ctx.books)[i];
         Book *sel = ctx.selected_book;
         bool overflows = full_w > kCellW;
@@ -130,92 +234,14 @@ void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
 
         if (is_selected && overflows) {
           marquee.painted_offset = -1;
-          const int glyph_top = btnY + kTitleOffsetY - ctx.ts->GetHeight();
-          const int title_y = (glyph_top >= 0) ? glyph_top : 0;
-          const int sh = ctx.ts->GetHeight() + 2;
-          const int sw = full_w;
-          const int fb_stride = ctx.ts->display.height;
-
           int current_color_mode = ctx.ts->GetColorMode();
           if (marquee.book != book_i || marquee.display_name != display_name ||
               marquee.color_mode != current_color_mode) {
             const int vis_w = (btnX + kCellW <= ctx.ts->display.width)
                                   ? kCellW
                                   : ctx.ts->display.width - btnX;
-            const int capture_w =
-                (sw < ctx.ts->display.width) ? sw : ctx.ts->display.width;
-
-            marquee.Reset();
-            marquee.book = book_i;
-            marquee.display_name = display_name;
-            marquee.strip_w = capture_w;
-            marquee.strip_h = sh;
-            marquee.strip_x = btnX;
-            marquee.strip_y = title_y;
-            marquee.blit_w = vis_w;
-            marquee.strip = new unsigned short[capture_w * sh];
-            marquee.bg_strip = new unsigned short[vis_w * sh];
-#ifdef DSLIBRIS_DEBUG
-            if (book_i->GetStatusReporter()) {
-              DBG_LOGF(book_i->GetStatusReporter(),
-                       "MARQUEE build: dname='%.20s' full_w=%d sw=%d "
-                       "capture_w=%d vis_w=%d btnX=%d title_y=%d sh=%d",
-                       dname, full_w, sw, capture_w, vis_w, btnX, title_y,
-                       sh);
-            }
-#endif
-
-            for (int r = 0; r < sh; r++) {
-              const unsigned short *src =
-                  ctx.ts->screenright + (title_y + r) * fb_stride + btnX;
-              unsigned short *dst = marquee.bg_strip + r * vis_w;
-              memcpy(dst, src, vis_w * sizeof(unsigned short));
-            }
-
-            unsigned short *saved_screen = ctx.ts->GetScreen();
-            int saved_mr = ctx.ts->margin.right;
-            int saved_ml = ctx.ts->margin.left;
-            const int off_fb_stride = ctx.ts->display.height;
-            int bg_pixels = vis_w * sh;
-            if (bg_pixels > 0) {
-              u32 r_acc = 0, g_acc = 0, b_acc = 0;
-              for (int i = 0; i < bg_pixels; i++) {
-                u16 c = marquee.bg_strip[i];
-                r_acc += ((c >> 11) & 0x1F) << 3 | ((c >> 11) & 0x1F) >> 2;
-                g_acc += ((c >> 5) & 0x3F) << 2 | ((c >> 5) & 0x3F) >> 4;
-                b_acc += (c & 0x1F) << 3 | (c & 0x1F) >> 2;
-              }
-              marquee.bg_color = (u16)(((r_acc / bg_pixels) >> 3 << 11) |
-                                       ((g_acc / bg_pixels) >> 2 << 5) |
-                                       ((b_acc / bg_pixels) >> 3));
-            }
-
-            for (int r = 0; r < sh; r++) {
-              for (int c = 0; c < capture_w; c++) {
-                ctx.ts->offscreen[(title_y + r) * off_fb_stride + c] =
-                    marquee.bg_color;
-              }
-            }
-
-            ctx.ts->SetScreen(ctx.ts->offscreen);
-            ctx.ts->margin.left = 0;
-            ctx.ts->margin.right = 0;
-            ctx.ts->SetPen(0, btnY + kTitleOffsetY);
-            ctx.ts->PrintString(dname, cur_style);
-            ctx.ts->margin.left = saved_ml;
-            ctx.ts->margin.right = saved_mr;
-            ctx.ts->SetScreen(saved_screen);
-
-            for (int row_i = 0; row_i < sh; row_i++) {
-              const unsigned short *src =
-                  ctx.ts->offscreen + (title_y + row_i) * fb_stride;
-              unsigned short *dst = marquee.strip + row_i * capture_w;
-              memcpy(dst, src, capture_w * sizeof(unsigned short));
-            }
-            marquee.scroll_offset = 0;
-            marquee.scroll_timer = 0;
-            marquee.color_mode = current_color_mode;
-            marquee.active = true;
+            BuildMarquee(ctx.ts, marquee, book_i, display_name, cur_style,
+                         btnX, btnY + kTitleOffsetY, vis_w);
           }
         } else if (is_selected && !overflows) {
           marquee.Reset();

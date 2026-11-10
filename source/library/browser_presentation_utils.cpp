@@ -7,6 +7,7 @@
 #include "book/book.h"
 #include "shared/debug_log.h"
 #include "shared/string_utils.h"
+#include "shared/text_wrap_adapter.h"
 #include "shared/utf8_utils.h"
 #include "ui/text.h"
 
@@ -197,6 +198,15 @@ size_t Utf8BytesForCharCount(const char *s, size_t char_count) {
   return bytes;
 }
 
+int CountWrappedTitleLines(Text *ts, const std::string &title, int w,
+                           unsigned char style) {
+  if (!ts || title.empty())
+    return 0;
+  std::vector<text_wrap_utils::Line> wrapped;
+  text_wrap_adapter::Wrap(ts, style, w - 16, title, &wrapped);
+  return (int)wrapped.size();
+}
+
 void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
                                  int x, int y, int w, int h,
                                  unsigned char style, int padding_y) {
@@ -218,37 +228,13 @@ void DrawWrappedTitleInsideCover(Text *ts, const std::string &title,
   if (max_lines > kMaxLines)
     max_lines = kMaxLines;
 
+  std::vector<text_wrap_utils::Line> wrapped;
+  text_wrap_adapter::Wrap(ts, style, inner_w, title, &wrapped);
   std::vector<std::string> lines;
   lines.reserve((size_t)max_lines);
-
-  size_t pos = 0;
-  while (pos < title.size() && (int)lines.size() < max_lines) {
-    while (pos < title.size() && title[pos] == ' ')
-      pos++;
-    if (pos >= title.size())
-      break;
-
-    unsigned char fit =
-        ts->GetCharCountInsideWidth(title.c_str() + pos, style, inner_w);
-    if (!fit)
-      break;
-
-    size_t take = Utf8BytesForCharCount(title.c_str() + pos, fit);
-    if (pos + take < title.size()) {
-      size_t back = take;
-      while (back > 0 && title[pos + back - 1] != ' ')
-        back--;
-      if (back > 0)
-        take = back;
-    }
-    std::string line = TrimSpacesLocal(title.substr(pos, take));
-    if (line.empty()) {
-      pos += take;
-      continue;
-    }
-    lines.push_back(line);
-    pos += take;
-  }
+  for (size_t i = 0; i < wrapped.size() && (int)lines.size() < max_lines; i++)
+    lines.push_back(
+        title.substr(wrapped[i].start, wrapped[i].end - wrapped[i].start));
 
   if (lines.empty())
     return;

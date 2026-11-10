@@ -44,6 +44,12 @@ static const int kGridX0 = 5;
 static const int kGridY0 = 3;
 
 int HitTestBookIndex(int x, int y, int page_start, int book_count);
+// Renders `name` as one line into the marquee strip and records the visible
+// window (x, baseline_y, vis_w) on the right screen. Text size, style and color
+// override must already be set. The strip holds the whole name.
+void BuildMarquee(Text *ts, BrowserGridMarqueeState &marquee, Book *book,
+                  const std::string &name, unsigned char style, int x,
+                  int baseline_y, int vis_w);
 void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee, int page_start);
 void TickMarquee(Text *ts, BrowserGridMarqueeState &marquee);
 

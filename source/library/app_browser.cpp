@@ -553,7 +553,8 @@ void LibraryController::browser_draw(void) {
   BrowserDrawContext ctx{app_.ts.get(), &app_.books, app_.GetSelectedBook(),
                          &app_.buttons};
   if (view_mode == BROWSER_VIEW_LIST)
-    browser_list_view::DrawPage(ctx, app_.GetBrowserPageStart(), page_size);
+    browser_list_view::DrawPage(ctx, g_marquee, app_.GetBrowserPageStart(),
+                                page_size);
   else
     browser_grid_view::DrawPage(ctx, g_marquee, app_.GetBrowserPageStart());
 

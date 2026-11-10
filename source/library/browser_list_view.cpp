@@ -1,5 +1,7 @@
 #include "library/browser_list_view.h"
 
+#include "library/browser_grid_view.h"
+
 #include "book/book.h"
 #include "library/browser_presentation_hit_utils.h"
 #include "library/browser_presentation_utils.h"
@@ -15,7 +17,8 @@ int HitTestBookIndex(int x, int y, int page_start, int book_count,
       kRowPitch);
 }
 
-void DrawPage(const BrowserDrawContext &ctx, int page_start, int page_size) {
+void DrawPage(const BrowserDrawContext &ctx, BrowserGridMarqueeState &marquee,
+              int page_start, int page_size) {
   const int book_count = (int)ctx.books->size();
   for (int i = page_start; i < book_count && i < page_start + page_size; i++) {
     const int row = i - page_start;
@@ -38,9 +41,34 @@ void DrawPage(const BrowserDrawContext &ctx, int page_start, int page_size) {
     const int title_width = progress_x - row_x - 6;
     const int title_height =
         browser_view_utils::ListTitleBoxHeight(ctx.ts->GetHeight());
-    browser_presentation_utils::DrawWrappedTitleInsideCover(
-        ctx.ts, display_name, row_x, row_y, title_width, title_height,
-        ctx.ts->GetStyle(), 6);
+    const unsigned char title_style = (unsigned char)ctx.ts->GetStyle();
+    // Only the selected row scrolls, and only when the wrapped name needs more
+    // lines than the row has. Other rows wrap inside their box as before.
+    const bool scrolls =
+        selected &&
+        browser_presentation_utils::CountWrappedTitleLines(
+            ctx.ts, display_name, title_width, title_style) >
+            browser_view_utils::ListTitleMaxLines();
+    if (scrolls) {
+      marquee.painted_offset = -1;
+      const int color_mode = ctx.ts->GetColorMode();
+      if (marquee.book != (*ctx.books)[i] ||
+          marquee.display_name != display_name ||
+          marquee.color_mode != color_mode) {
+        const int line_h = ctx.ts->GetHeight();
+        const int baseline = row_y + (kRowH - (line_h + 2)) / 2 + line_h;
+        browser_grid_view::BuildMarquee(ctx.ts, marquee, (*ctx.books)[i],
+                                        display_name, title_style,
+                                        row_x + kTitlePadX, baseline,
+                                        title_width - kTitlePadX * 2);
+      }
+    } else {
+      if (selected)
+        marquee.Reset();
+      browser_presentation_utils::DrawWrappedTitleInsideCover(
+          ctx.ts, display_name, row_x, row_y, title_width, title_height,
+          title_style, 6);
+    }
 
     if (!(*ctx.books)[i]->IsBrowserFolder()) {
       int pos = (*ctx.books)[i]->GetPosition();
