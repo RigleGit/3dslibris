@@ -13,5 +13,6 @@ build_test test_image_viewer_controls -- -I"$TASK_TMP" -I"$ROOT/tests/stubs/imag
   "$ROOT/source/formats/common/fixed_layout_preview_border.cpp" \
   "$ROOT/source/formats/common/fixed_layout_surface.cpp" \
   "$ROOT/source/shared/text_unicode_utils.cpp" "$ROOT/source/shared/text_layout_utils.cpp" \
+  "$ROOT/source/shared/text_wrap_utils.cpp" \
   "$ROOT/source/shared/text_bidi_utils.cpp" "$ROOT/source/shared/text_arabic_shaping.cpp" \
   "$ROOT/tests/stubs/mupdf_bidi_stub.cpp"
