@@ -1216,8 +1216,11 @@ void SettingsController::ResetToDefaults() {
   app_.reader_layout.text_align_mode = 0;
   if (app_.reader_layout.orientation != orientation_utils::ORIENT_TURNED_LEFT)
     app_.SetOrientation(orientation_utils::ORIENT_TURNED_LEFT);
+  // Keep App::colorMode (gradients, menus) in step with Text and the button skin.
+  app_.colorMode = 0;
   app_.ts->SetColorMode(0);
   UiButtonSkin_SetColorMode(0);
+  app_.ts->MarkAllScreensDirty();
   app_.prefs->time24h = true;
   app_.prefs->swapshoulder = false;
   app_.prefs->browser_view_mode = BROWSER_VIEW_GALLERY;
