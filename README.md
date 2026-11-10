@@ -103,6 +103,7 @@ Standard reading:
 - `X`: change background color
 - `SELECT`: open `BOOK` settings
 - `START`: return to library
+- Settings > `GENERAL` page 3 > `controls (vertical)` / `controls (horizontal)`: choose `Default` or `One-handed` per orientation. `One-handed` adds `D-Pad Left` (vertical) or `D-Pad Up` (horizontal) to the bookmark/link-selection key, moves link selection to the D-Pad and Circle Pad bookmark jumps, and lets `L` / `R` leave link selection.
 
 Book images (`EPUB` / `MOBI` / `FB2`):
 
