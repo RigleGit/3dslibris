@@ -10,6 +10,8 @@
 #include "shared/orientation_utils.h"
 #include "settings/prefs.h"
 #include "shared/text_unicode_utils.h"
+#include "shared/text_wrap_adapter.h"
+#include "ui/button_text_layout.h"
 #include "ui/touch_utils.h"
 #include <3ds.h>
 #include <algorithm>
@@ -73,6 +75,7 @@ void ReaderController::OpenSearch() {
     s.buttons[i].Move(5, i == 3 ? 286 : 65 + i*54);
     s.buttons[i].Resize(230, i == 3 ? 28 : 44);
   }
+  s.buttons[0].SetWrap(true);
   app_.SetMode(AppMode::Search);
   DrawSearch();
 }
@@ -164,13 +167,29 @@ void ReaderController::DrawSearch() {
     ts->SetStyle(TEXT_STYLE_BROWSER);
     ts->SetPen(8, 28); ts->PrintString("search");
     s.buttons[0].SetLabel1("word or phrase");
-    s.buttons[0].SetLabel2(s.query.empty() ? "open keyboard >" : ShortLabel(s.query, 26));
+    s.buttons[0].SetLabel2(s.query.empty() ? "open keyboard >" : s.query);
     s.buttons[1].SetLabel1("whole words");
     s.buttons[1].SetLabel2(s.whole_words ? "on" : "off");
     s.buttons[2].SetLabel1("find"); s.buttons[2].SetLabel2("from current page >");
     s.buttons[3].Label("back");
+    // The query button grows with its wrapped text (capped; text then shrinks
+    // instead of being cut) and the buttons below follow it.
+    const int lh = ts->GetHeight();
+    int query_h = button_text_layout::HeightForLines(
+        s.buttons[0].WrappedLineCount(230), lh, ts->GetAscent(), ts->GetDescent(), 44);
+    if (query_h > 100) query_h = 100;
+    s.buttons[0].Resize(230, query_h);
+    s.buttons[1].Move(5, 65 + query_h + 10);
+    s.buttons[2].Move(5, 65 + query_h + 10 + 54);
     for (int i = 0; i < 4; ++i) s.buttons[i].Draw(i == s.selected);
-    ts->SetPen(8, 250); ts->PrintString(ShortLabel(s.message, 31).c_str());
+    // Status text sits between the title and the first button, wrapped.
+    std::vector<text_wrap_utils::Line> message_lines;
+    text_wrap_adapter::Wrap(ts, TEXT_STYLE_BROWSER, 224, s.message, &message_lines);
+    for (size_t i = 0; i < message_lines.size(); ++i) {
+      ts->SetPen(8, 46 + (int)i * lh);
+      ts->PrintString(s.message.substr(message_lines[i].start,
+          message_lines[i].end - message_lines[i].start).c_str());
+    }
     ts->SetStyle(old_style); ts->MarkScreenDirty(ts->screenright);
   } else {
     app_.ApplyRenderOrientation(app_.reader_layout.orientation);
