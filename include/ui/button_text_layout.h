@@ -40,4 +40,17 @@ inline Block Compute(int box_h, int lines, int line_h, int ascent, int descent) 
   return b;
 }
 
+// Box height that holds `lines` lines at the natural line pitch. Callers that
+// wrap labels use this to grow the button instead of dropping lines.
+inline int HeightForLines(int lines, int line_h, int ascent, int descent,
+                          int min_h) {
+  if (lines < 1)
+    lines = 1;
+  int h = (lines - 1) * line_h + InkTop(ascent) + descent + kInset;
+  // Single lines are centered with a 2px upward bias, give them room for it.
+  if (lines == 1)
+    h += 2;
+  return h < min_h ? min_h : h;
+}
+
 } // namespace button_text_layout

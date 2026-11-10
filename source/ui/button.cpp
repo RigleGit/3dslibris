@@ -16,11 +16,13 @@
 
 #include <3ds.h>
 #include <algorithm>
+#include <vector>
 #include <stdio.h>
 #include <string.h>
 
 #include "shared/text_layout_utils.h"
 #include "shared/text_unicode_utils.h"
+#include "shared/text_wrap_adapter.h"
 
 namespace {
 
@@ -94,6 +96,8 @@ void Button::Init(Text *typesetter) {
   icon = UI_BUTTON_ICON_NONE;
   iconExplicit = false;
   enabled = true;
+  wrap_ = false;
+  indent = 0;
   ts = typesetter;
   UiButtonSkin_Init();
 }
@@ -159,6 +163,65 @@ UiButtonIconId Button::ResolveIcon() const {
   return UiButtonSkin_IconFromLabel(text1.c_str());
 }
 
+void Button::CollectLines(int width, bool wrapping,
+                          std::vector<DrawLine> *out) const {
+  out->clear();
+  const std::string *raw[3] = {&text1, &text2, &text3};
+  const std::string *disp[3] = {&display1, &display2, &display3};
+  const bool rtl[3] = {text1_rtl, text2_rtl, text3_rtl};
+  if (width < 6)
+    width = 6;
+  for (int i = 0; i < 3; i++) {
+    if (raw[i]->empty())
+      continue;
+    if (!wrapping) {
+      // Fixed-size labels: shown as one clipped line each.
+      const char *src = rtl[i] ? disp[i]->c_str() : raw[i]->c_str();
+      const u8 fit = ButtonCharCountInsideWidth(ts, src, text.style, (u8)width);
+      const size_t bytes = Utf8BytesForCharCount(ts, src, fit);
+      DrawLine line;
+      line.text.assign(src, bytes);
+      line.rtl = rtl[i];
+      out->push_back(line);
+      continue;
+    }
+    // Wrap the logical string, then shape and reorder each line on its own so
+    // that bidi runs never straddle a break.
+    std::vector<text_wrap_utils::Line> pieces;
+    text_wrap_adapter::Wrap(ts, text.style, width, *raw[i], &pieces);
+    for (size_t j = 0; j < pieces.size(); j++) {
+      const std::string piece =
+          raw[i]->substr(pieces[j].start, pieces[j].end - pieces[j].start);
+      DrawLine line;
+      bool is_rtl = false;
+      text_layout_utils::PrepareDisplayUtf8(piece.c_str(), piece.size(),
+                                            &line.text, &is_rtl);
+      if (line.text.empty())
+        line.text = piece;
+      line.rtl = is_rtl;
+      out->push_back(line);
+    }
+  }
+}
+
+int Button::TextWidthFor(int box_w) const {
+  const int text_x = (box_w <= 90) ? 6 : 8;
+  const int right_pad = (box_w <= 90) ? 6 : 8;
+  int w = box_w - text_x - right_pad - 2 - indent;
+  return w < 6 ? 6 : w;
+}
+
+int Button::WrappedLineCount(int box_w) {
+  if (!ts || text1.empty())
+    return 0;
+  const auto save_style = ts->GetStyle();
+  ts->SetStyle(text.style);
+  std::vector<DrawLine> lines;
+  CollectLines(TextWidthFor(box_w), true, &lines);
+  ts->SetStyle(save_style);
+  return (int)lines.size();
+}
+
 void Button::Draw(u16 *screen, bool highlight) {
   if (!ts)
     return;
@@ -192,6 +255,7 @@ void Button::Draw(u16 *screen, bool highlight) {
   UiButtonSkin_Draw(screen, stride, logicalWidth, logicalHeight, bx, by, bw, bh,
                     state, hasIcon);
 
+  const bool wrap = wrap_;
   int line_height = ts->GetHeight();
   int text_x = bx + ((bw <= 90) ? 6 : 8);
   int right_pad = (bw <= 90) ? 6 : 8;
@@ -202,19 +266,20 @@ void Button::Draw(u16 *screen, bool highlight) {
     text_width = 6;
 
   const u8 saved_pixel_size = ts->GetPixelSize();
-  if (!text1.empty()) {
-    int line_count = text3.empty() ? (text2.empty() ? 1 : 2) : 3;
-    int top;
-    // Distance from the block top to the first baseline, and baseline pitch.
+  std::vector<DrawLine> lines;
+  if (!text1.empty())
+    CollectLines(text_width - indent, wrap, &lines);
+  if (!lines.empty()) {
+    const int line_count = (int)lines.size();
+    // Distance from the box top to the first baseline, and baseline pitch.
     int first_baseline;
     int pitch = line_height;
     if (line_count == 1) {
-      int block_h = line_height;
-      top = by + (bh - block_h) / 2 - 2;
+      int top = by + (bh - line_height) / 2 - 2;
       if (top < by)
         top = by;
-      if (top + block_h > by + bh - 1)
-        top = (by + bh - 1) - block_h;
+      if (top + line_height > by + bh - 1)
+        top = (by + bh - 1) - line_height;
       first_baseline = top + line_height;
     } else {
       // The skin's border and drop shadow take button_text_layout::kInset
@@ -234,56 +299,15 @@ void Button::Draw(u16 *screen, bool highlight) {
       pitch = block.pitch;
       first_baseline = by + block.first_baseline;
     }
-    line_height = pitch;
-    top = first_baseline - line_height;
 
-    // For RTL labels use the display-ready (shaped + reordered) string.
-    const char *src1 = text1_rtl ? display1.c_str() : text1.c_str();
-    char line1[256];
-    u8 len1 = ButtonCharCountInsideWidth(ts, src1, text.style, (u8)text_width);
-    size_t bytes1 = Utf8BytesForCharCount(ts, src1, len1);
-    if (bytes1 > sizeof(line1) - 1)
-      bytes1 = sizeof(line1) - 1;
-    memcpy(line1, src1, bytes1);
-    line1[bytes1] = '\0';
-
-    int pen1_x = text1_rtl ? RtlPenX(ts, line1, text_x, bx, bw, right_pad)
-                           : text_x;
-    ts->SetPen((u16)pen1_x, (u16)(top + line_height));
-    ts->PrintString(line1, text.style);
-
-    if (!text2.empty()) {
-      const char *src2 = text2_rtl ? display2.c_str() : text2.c_str();
-      char line2[256];
-      u8 len2 =
-          ButtonCharCountInsideWidth(ts, src2, text.style, (u8)text_width);
-      size_t bytes2 = Utf8BytesForCharCount(ts, src2, len2);
-      if (bytes2 > sizeof(line2) - 1)
-        bytes2 = sizeof(line2) - 1;
-      memcpy(line2, src2, bytes2);
-      line2[bytes2] = '\0';
-
-      int pen2_x = text2_rtl ? RtlPenX(ts, line2, text_x, bx, bw, right_pad)
-                             : text_x;
-      ts->SetPen((u16)pen2_x, (u16)(top + line_height * 2));
-      ts->PrintString(line2, text.style);
-    }
-
-    if (!text3.empty()) {
-      const char *src3 = text3_rtl ? display3.c_str() : text3.c_str();
-      char line3[256];
-      u8 len3 =
-          ButtonCharCountInsideWidth(ts, src3, text.style, (u8)text_width);
-      size_t bytes3 = Utf8BytesForCharCount(ts, src3, len3);
-      if (bytes3 > sizeof(line3) - 1)
-        bytes3 = sizeof(line3) - 1;
-      memcpy(line3, src3, bytes3);
-      line3[bytes3] = '\0';
-
-      int pen3_x = text3_rtl ? RtlPenX(ts, line3, text_x, bx, bw, right_pad)
-                             : text_x;
-      ts->SetPen((u16)pen3_x, (u16)(top + line_height * 3));
-      ts->PrintString(line3, text.style);
+    const int line_x = text_x + indent;
+    for (int i = 0; i < line_count; i++) {
+      const DrawLine &line = lines[(size_t)i];
+      const int pen_x = line.rtl ? RtlPenX(ts, line.text.c_str(), line_x, bx,
+                                           bw, right_pad)
+                                 : line_x;
+      ts->SetPen((u16)pen_x, (u16)(first_baseline + i * pitch));
+      ts->PrintString(line.text.c_str(), text.style);
     }
   }
 

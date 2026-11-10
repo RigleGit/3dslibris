@@ -2,6 +2,7 @@
 #include "library/library_search_session.h"
 #include "app/frame_input.h"
 #include "shared/orientation_utils.h"
+#include "shared/text_wrap_utils.h"
 #include <algorithm>
 #include <cstring>
 #include <memory>
@@ -86,6 +87,19 @@ int main() {
   input.keys_down=0;controller.RunLibrarySearchFrame(input);
   input.keys_down=app.key.b;controller.RunLibrarySearchFrame(input);
   assert(controller.closed==1 && app.mode==AppMode::Browser);
+  // Search again to get a result list for the page jumps.
+  input.keys_down=0;controller.RunLibrarySearchFrame(input);
+  session.selected=2;input.keys_down=app.key.a;controller.RunLibrarySearchFrame(input);
+  input.keys_down=0;controller.RunLibrarySearchFrame(input);
+  assert(!session.editor && session.engine.Results().size()>=16);
+  // L/R jump between pages of cumulative-height pagination (variable row count).
+  session.page_starts={0,4,9,12};session.result_selection=5;
+  input.keys_down=app.key.l;controller.RunLibrarySearchFrame(input);assert(session.result_selection==0);
+  input.keys_down=app.key.r;controller.RunLibrarySearchFrame(input);assert(session.result_selection==4);
+  controller.RunLibrarySearchFrame(input);assert(session.result_selection==9);
+  controller.RunLibrarySearchFrame(input);assert(session.result_selection==12);
+  controller.RunLibrarySearchFrame(input);assert(session.result_selection==session.engine.Results().size()-1);
+  input.keys_down=app.key.l;controller.RunLibrarySearchFrame(input);assert(session.result_selection==9);
   assert((int)AppMode::LibrarySearch==14);
   puts("PASS: real library-search input/editor, native keyboard cancel, name isolation and cooperative cancellation");
 }

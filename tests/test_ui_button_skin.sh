@@ -21,7 +21,7 @@ cd "$TASK_TMP/fallback"
 build_test test_ui_button_skin -- -I"$ROOT/tests/stubs/image_viewer" -I"$ROOT/tests/stubs" -I"$ROOT/include" -I"$ROOT/third_party/stb" -I"$ROOT/third_party/utf8proc" -I"$ROOT/third_party/libunibreak/src" \
  "$ROOT/tests/test_ui_button_skin.cpp" "$ROOT/source/ui/ui_button_skin.cpp" \
  "$ROOT/source/ui/button.cpp" "$ROOT/source/core/stb_image_impl.cpp" \
- "$ROOT/source/shared/text_unicode_utils.cpp" "$ROOT/source/shared/text_layout_utils.cpp" \
+ "$ROOT/source/shared/text_unicode_utils.cpp" "$ROOT/source/shared/text_wrap_utils.cpp" "$ROOT/source/shared/text_layout_utils.cpp" \
  "$ROOT/source/shared/text_bidi_utils.cpp" "$ROOT/source/shared/text_arabic_shaping.cpp" \
  "$ROOT/tests/stubs/mupdf_bidi_stub.cpp"
 cd "$TASK_TMP/loaded"

@@ -8,6 +8,8 @@
 #include "shared/path_constants.h"
 #include "shared/debug_log.h"
 #include "shared/text_unicode_utils.h"
+#include "shared/text_wrap_adapter.h"
+#include "ui/button_text_layout.h"
 #include "ui/text.h"
 #include <3ds.h>
 #include <algorithm>
@@ -25,10 +27,53 @@ bool Exists(const std::string &path,bool directory) {
   struct stat st;
   return stat(path.c_str(),&st)==0 && (directory ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
 }
-std::string Fit(Text *ts,const std::string &text) {
-  const unsigned chars=ts->GetCharCountInsideWidth(text.c_str(),TEXT_STYLE_BROWSER,224);
-  const size_t bytes=text_unicode_utils::Utf8BytesForDisplayChars(text.c_str(),chars);
-  return text.substr(0,bytes);
+const int kRowsTop=44,kRowsBottom=282,kRowGap=2,kRowW=230;
+// Prints `text` wrapped to `width`, one line per text height; returns the lines.
+int PrintWrapped(Text *ts,const std::string &text,int x,int y,int width) {
+  std::vector<text_wrap_utils::Line> lines;
+  text_wrap_adapter::Wrap(ts,TEXT_STYLE_BROWSER,width,text,&lines);
+  const int lh=ts->GetHeight();
+  for(size_t i=0;i<lines.size();++i) {
+    ts->SetPen(x,y+(int)i*lh);
+    ts->PrintString(text.substr(lines[i].start,lines[i].end-lines[i].start).c_str());
+  }
+  return lines.empty() ? 1 : (int)lines.size();
+}
+// Draws a wrapped block and returns the y of the next block.
+int PrintBlock(Text *ts,const std::string &text,int y) {
+  const int lines=PrintWrapped(ts,text,6,y,228);
+  return y+26+(lines-1)*ts->GetHeight();
+}
+std::string ResultLabel(const library_search::Result &r) {
+  return r.directory ? "[folder] "+r.label : r.label;
+}
+// Measures results not seen yet and repaginates by cumulative row height. The
+// text style and size must already be set.
+void RefreshResultLayout(LibrarySearchSession &s,Text *ts) {
+  const auto &results=s.engine.Results();
+  if(s.measured>results.size()) {s.row_heights.clear();s.measured=0;}
+  const int lh=ts->GetHeight(),asc=ts->GetAscent(),desc=ts->GetDescent();
+  const int min_h=button_text_layout::HeightForLines(2,lh,asc,desc,0);
+  for(;s.measured<results.size();++s.measured) {
+    Button &probe=s.rows[0];
+    probe.SetLabel1(ResultLabel(results[s.measured]));
+    probe.SetLabel2(Parent(results[s.measured].path));
+    s.row_heights.push_back(button_text_layout::HeightForLines(probe.WrappedLineCount(kRowW),lh,asc,desc,min_h));
+  }
+  text_wrap_utils::PageStarts(s.row_heights.data(),(int)s.row_heights.size(),kRowsBottom-kRowsTop,kRowGap,&s.page_starts);
+}
+size_t ResultPage(const LibrarySearchSession &s) {
+  return s.page_starts.empty() ? 0 : (size_t)text_wrap_utils::PageOfRow(s.page_starts,(int)s.result_selection);
+}
+size_t PageEnd(const LibrarySearchSession &s,size_t page) {
+  return page+1<s.page_starts.size() ? (size_t)s.page_starts[page+1] : s.engine.Results().size();
+}
+// Page jumps follow the cumulative-height pages; the last page ends the list.
+size_t JumpPage(const LibrarySearchSession &s,int direction) {
+  const size_t count=s.engine.Results().size(),page=ResultPage(s);
+  if(s.page_starts.empty()) return s.result_selection;
+  if(direction<0) return page ? (size_t)s.page_starts[page-1] : 0;
+  return page+1<s.page_starts.size() ? (size_t)s.page_starts[page+1] : count-1;
 }
 void InitSearchButton(Button &button,Text *ts,int x,int y,int w,int h) {
   button.Init(ts);button.SetStyle(BUTTON_STYLE_SETTING);
@@ -70,7 +115,8 @@ void LibraryController::OpenLibrarySearch() {
   fixed_layout_gpu::Software(ts,true);ts->SetTopScreenWideMode(false);
   app_.ApplyRenderOrientation(app_.portrait_orientation);
   for(int i=0;i<4;++i) InitSearchButton(s.editor_buttons[i],ts,5,i==3 ? 286 : 60+i*56,230,i==3 ? 28 : 44);
-  for(int i=0;i<5;++i) InitSearchButton(s.rows[i],ts,5,44+i*46,230,44);
+  for(int i=0;i<LibrarySearchSession::kMaxRows;++i) {InitSearchButton(s.rows[i],ts,5,kRowsTop,kRowW,44);s.rows[i].SetWrap(true);}
+  s.editor_buttons[0].SetWrap(true);s.editor_buttons[1].SetWrap(true);
   for(int i=0;i<3;++i) InitSearchButton(s.footer[i],ts,6+i*80,286,68,28);
   s.footer[0].Label("prev");s.footer[1].Label("back");s.footer[2].Label("next");
   app_.SetMode(AppMode::LibrarySearch);
@@ -81,7 +127,7 @@ void LibraryController::StartLibrarySearch() {
   if(!s.engine.Start(s.field,s.query,SearchRoot,this,!inside_folder_,SearchMetadata)) {
     s.message="Enter a word or name";s.dirty=true;return;
   }
-  s.editor=false;s.result_selection=0;s.message.clear();s.dirty=true;
+  s.editor=false;s.result_selection=0;s.row_heights.clear();s.page_starts.clear();s.measured=0;s.message.clear();s.dirty=true;
 }
 void LibraryController::ResumeLibrarySearch() {
   if(!search_ || app_.GetMode()!=AppMode::LibrarySearch || app_.ShouldAbortWork()) return;
@@ -162,26 +208,27 @@ void LibraryController::DrawLibrarySearch() {
   ts->SetStyle(TEXT_STYLE_BROWSER);ts->SetPixelSize(10);ts->SetAutoWrapEnabled(false);ts->margin.bottom=0;
   ts->SetScreen(ts->screenleft);ts->ClearScreen();
   ts->SetPen(6,24);ts->PrintString("library search");
-  ts->SetPen(6,50);ts->PrintString(Fit(ts,s.origin_folder.empty() ? "Library + folders" : s.origin_folder).c_str());
-  ts->SetPen(6,76);ts->PrintString(Fit(ts,s.query).c_str());
+  int y=50;
+  y=PrintBlock(ts,s.origin_folder.empty() ? "Library + folders" : s.origin_folder,y);
+  y=PrintBlock(ts,s.query,y);
   char progress[96];
   snprintf(progress,sizeof(progress),"%u results / %u examined",(unsigned)s.engine.Results().size(),(unsigned)s.engine.Examined());
-  ts->SetPen(6,108);ts->PrintString(progress);
+  y=PrintBlock(ts,progress,y);
   std::string status=s.message;
   if(status.empty() && !s.editor) {
     if(s.engine.GetStatus()==library_search::Status::Searching) status=s.field==library_search::Field::Name ? "Searching... B: cancel" : "Preparing metadata... B: cancel";
     else if(s.engine.GetStatus()==library_search::Status::Limited) status="Too many matches; refine search";
     else if(s.engine.Results().empty()) status="No matches";
   }
-  ts->SetPen(6,140);ts->PrintString(Fit(ts,status).c_str());
+  y=PrintBlock(ts,status,y);
   if(s.engine.Errors() || s.engine.Unsupported()) {
     snprintf(progress,sizeof(progress),"Incomplete: %u errors, %u unsupported",(unsigned)s.engine.Errors(),(unsigned)s.engine.Unsupported());
-    ts->SetPen(6,164);ts->PrintString(Fit(ts,progress).c_str());
+    y=PrintBlock(ts,progress,y);
   }
-  if(s.engine.Uncached()) {ts->SetPen(6,188);ts->PrintString("Some metadata was not saved");}
+  if(s.engine.Uncached()) y=PrintBlock(ts,"Some metadata was not saved",y);
   if(s.field!=library_search::Field::Name) {
-    ts->SetPen(6,216);ts->PrintString("Metadata: EPUB PDF XPS MOBI");
-    ts->SetPen(6,236);ts->PrintString("FB2 CBZ; other formats excluded");
+    y=PrintBlock(ts,"Metadata: EPUB PDF XPS MOBI",y);
+    y=PrintBlock(ts,"FB2 CBZ; other formats excluded",y);
   }
   ts->SetScreen(ts->screenright);ts->ClearScreen();
   ts->SetPen(6,24);ts->PrintString(s.editor ? "search library" : "search results");
@@ -190,14 +237,26 @@ void LibraryController::DrawLibrarySearch() {
     s.editor_buttons[0].SetLabel1("search by");s.editor_buttons[0].SetLabel2(fields[(int)s.field]);
     s.editor_buttons[1].SetLabel1("word or name");s.editor_buttons[1].SetLabel2(s.query.empty() ? "open keyboard >" : s.query);
     s.editor_buttons[2].Label("search");s.editor_buttons[3].Label("back");
+    // The query button grows with its wrapped text; the buttons below follow.
+    const int lh=ts->GetHeight();
+    int query_h=button_text_layout::HeightForLines(s.editor_buttons[1].WrappedLineCount(kRowW),lh,ts->GetAscent(),ts->GetDescent(),44);
+    if(query_h>100) query_h=100;
+    s.editor_buttons[1].Resize(kRowW,query_h);
+    s.editor_buttons[2].Move(5,std::max(60+2*56,116+query_h+12));
     for(int i=0;i<4;++i) s.editor_buttons[i].Draw(i==s.selected);
   } else {
     const auto &results=s.engine.Results();
-    const size_t page=s.result_selection/5;
-    for(int i=0;i<5 && page*5+i<results.size();++i) {
-      const auto &result=results[page*5+i];
-      s.rows[i].SetLabel1(result.directory ? "[folder] "+result.label : result.label);
-      s.rows[i].SetLabel2(Parent(result.path));s.rows[i].Draw(page*5+i==s.result_selection);
+    RefreshResultLayout(s,ts);
+    const size_t page=ResultPage(s);
+    if(!s.page_starts.empty()) {
+      const size_t first=(size_t)s.page_starts[page],end=PageEnd(s,page);
+      int row_y=kRowsTop;
+      for(size_t i=first;i<end && i-first<(size_t)LibrarySearchSession::kMaxRows;++i) {
+        Button &row=s.rows[i-first];
+        row.SetLabel1(ResultLabel(results[i]));row.SetLabel2(Parent(results[i].path));
+        row.Move(5,row_y);row.Resize(kRowW,s.row_heights[i]);row.Draw(i==s.result_selection);
+        row_y+=s.row_heights[i]+kRowGap;
+      }
     }
     for(int i=0;i<3;++i) s.footer[i].Draw(false);
   }
@@ -233,18 +292,19 @@ void LibraryController::RunLibrarySearchFrame(const FrameInput &input) {
       const size_t old=s.result_selection;
       if(keys&KEY_DUP) s.result_selection=s.result_selection ? s.result_selection-1 : 0;
       if(keys&KEY_DDOWN) s.result_selection=std::min(count-1,s.result_selection+1);
-      if(keys&app_.key.l) s.result_selection=s.result_selection>=5 ? s.result_selection-5 : 0;
-      if(keys&app_.key.r) s.result_selection=std::min(count-1,s.result_selection+5);
+      if(keys&app_.key.l) s.result_selection=JumpPage(s,-1);
+      if(keys&app_.key.r) s.result_selection=JumpPage(s,1);
       s.dirty|=old!=s.result_selection;
       if(keys&app_.key.a) {ActivateLibrarySearchResult(s.result_selection);return;}
-      if(keys&KEY_TOUCH) for(int i=0;i<5;++i) {
-        const size_t index=(s.result_selection/5)*5+i;
-        if(index<count && s.rows[i].EnclosesPoint(touch.x,touch.y)) {ActivateLibrarySearchResult(index);return;}
+      if(keys&KEY_TOUCH && !s.page_starts.empty()) {
+        const size_t page=ResultPage(s),first=(size_t)s.page_starts[page],end=PageEnd(s,page);
+        for(size_t index=first;index<end && index-first<(size_t)LibrarySearchSession::kMaxRows;++index)
+          if(s.rows[index-first].EnclosesPoint(touch.x,touch.y)) {ActivateLibrarySearchResult(index);return;}
       }
     }
     if(keys&KEY_TOUCH) for(int i=0;i<3;++i) if(s.footer[i].EnclosesPoint(touch.x,touch.y)) {
       if(i==1) {CloseLibrarySearch();return;}
-      if(count) s.result_selection=i==0 ? (s.result_selection>=5 ? s.result_selection-5 : 0) : std::min(count-1,s.result_selection+5);
+      if(count) s.result_selection=JumpPage(s,i==0 ? -1 : 1);
       s.dirty=true;
     }
     if(s.engine.GetStatus()==library_search::Status::Searching) {

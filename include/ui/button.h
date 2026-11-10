@@ -14,6 +14,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include <unistd.h>
 
 #include "ui/text.h"
@@ -51,7 +52,16 @@ private:
   UiButtonIconId icon;
   bool enabled;
   bool iconExplicit;
+  bool wrap_;
+  int indent;
   Text *ts;
+
+  struct DrawLine {
+    std::string text; // display-ready: shaped and reordered for RTL
+    bool rtl;
+  };
+  void CollectLines(int width, bool wrapping, std::vector<DrawLine> *out) const;
+  int TextWidthFor(int box_w) const;
 
   UiButtonIconId ResolveIcon() const;
 
@@ -78,6 +88,14 @@ public:
     iconExplicit = false;
   };
   inline UiButtonIconId GetIcon() const { return icon; };
+  // Wrapped buttons break every label onto as many lines as it needs instead
+  // of clipping it to one line; the caller sizes the box with
+  // WrappedLineCount() so nothing is dropped.
+  inline void SetWrap(bool on) { wrap_ = on; }
+  // Extra left padding for the text (hanging indent of nested list entries).
+  inline void SetIndent(int px) { indent = px; }
+  // Lines the labels occupy when wrapped for a box `box_w` pixels wide.
+  int WrappedLineCount(int box_w);
   inline void SetEnabled(bool isEnabled) { enabled = isEnabled; };
   inline bool IsEnabled() const { return enabled; };
   inline void SetStyle(int astyle) { style = astyle; };

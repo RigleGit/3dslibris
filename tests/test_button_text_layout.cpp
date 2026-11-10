@@ -57,5 +57,17 @@ int main() {
   const int slack_top = top - kInsetTop, slack_bottom = bottom - kInsetBottom;
   test::ExpectTrue("block is centered between the insets",
                    slack_top - slack_bottom <= 1 && slack_bottom - slack_top <= 1);
+  // HeightForLines holds any number of lines at the natural pitch.
+  for (int px = 9; px <= 14; px++) {
+    Metrics(px, &lh, &asc, &desc);
+    for (int lines = 2; lines <= 8; lines++) {
+      const int h = HeightForLines(lines, lh, asc, desc, 0);
+      Block b = Compute(h, lines, lh, asc, desc);
+      test::ExpectTrue("grown box fits", b.fits);
+      test::ExpectEq("grown box keeps natural pitch", b.pitch, lh);
+    }
+  }
+  test::ExpectTrue("min height is honored",
+                   HeightForLines(1, 14, 11, 3, 44) == 44);
   return 0;
 }
