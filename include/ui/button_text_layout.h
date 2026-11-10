@@ -4,12 +4,13 @@
 // geometry can be checked on the host for every row pitch.
 namespace button_text_layout {
 
-// The skin's border (with the compact focus ring) and drop shadow take about
-// this much at the top and at the bottom of the button box (the bottom is
-// shallower because the focus ring and shadow sit on the lower edge).
-static const int kInsetTop = 6;
-static const int kInsetBottom = 4;
-static const int kInset = kInsetTop + kInsetBottom; // both sides together
+// Space the skin takes at the top and the bottom of the button box: border,
+// focus ring and drop shadow. Compact boxes (<= kCompactMax tall) draw the ring
+// against the border (see ui_button_skin.cpp), taller ones keep it inset.
+static const int kCompactMax = 36;
+inline int InsetTop(int box_h) { return box_h <= kCompactMax ? 6 : 8; }
+inline int InsetBottom(int box_h) { return box_h <= kCompactMax ? 4 : 8; }
+inline int Insets(int box_h) { return InsetTop(box_h) + InsetBottom(box_h); }
 
 struct Block {
   int pitch;          // baseline-to-baseline distance
@@ -23,7 +24,7 @@ inline int InkTop(int ascent) { return (ascent * 3 + 3) / 4; }
 // natural line height down to ink_top + descent when the box is short.
 inline Block Compute(int box_h, int lines, int line_h, int ascent, int descent) {
   Block b;
-  const int avail = box_h - kInset;
+  const int avail = box_h - Insets(box_h);
   const int ink_top = InkTop(ascent);
   const int min_pitch = ink_top + descent;
   const int need = (lines - 1) * min_pitch + ink_top + descent;
@@ -36,7 +37,7 @@ inline Block Compute(int box_h, int lines, int line_h, int ascent, int descent) 
     pitch = min_pitch;
   const int ink = (lines - 1) * pitch + ink_top + descent;
   b.pitch = pitch;
-  b.first_baseline = kInsetTop + (avail - ink) / 2 + ink_top;
+  b.first_baseline = InsetTop(box_h) + (avail - ink) / 2 + ink_top;
   return b;
 }
 
@@ -46,10 +47,12 @@ inline int HeightForLines(int lines, int line_h, int ascent, int descent,
                           int min_h) {
   if (lines < 1)
     lines = 1;
-  int h = (lines - 1) * line_h + InkTop(ascent) + descent + kInset;
+  const int ink = (lines - 1) * line_h + InkTop(ascent) + descent;
   // Single lines are centered with a 2px upward bias, give them room for it.
-  if (lines == 1)
-    h += 2;
+  const int bias = lines == 1 ? 2 : 0;
+  int h = ink + bias + Insets(kCompactMax);
+  if (h > kCompactMax)
+    h = ink + bias + Insets(kCompactMax + 1);
   return h < min_h ? min_h : h;
 }
 
