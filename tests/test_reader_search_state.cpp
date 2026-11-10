@@ -79,7 +79,7 @@ struct App {
   struct ScreenText : Text { void MarkAllScreensDirty() {} };
   std::unique_ptr<ScreenText> ts{new ScreenText};
   struct Keys {
-    u32 a=128,b=256,x=512,start=1024,select=2048;
+    u32 a=128,b=256,x=512,y=4096,start=1024,select=2048;
     u32 l=KEY_L,r=KEY_R,dleft=KEY_DLEFT,dright=KEY_DRIGHT,dup=KEY_DUP,ddown=KEY_DDOWN;
     u32 left=0,right=0,up=0,down=0,zl=0,zr=0;
   } key;

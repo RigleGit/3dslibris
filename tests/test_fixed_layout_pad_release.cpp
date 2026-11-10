@@ -103,10 +103,11 @@ static bool Frame(App &app, Book &book, Text &text, uint32_t down=0, uint32_t he
 struct TestKeys {
   uint32_t a, b, l, r, up, down, left, right;
   uint32_t dup, ddown, dleft, dright, zl, zr, start, select;
+  uint32_t x, y;
 };
 static void TestControlRouting() {
   const TestKeys key={1u<<0, 1u<<1, 1u<<2, 1u<<3, 1u<<4, 1u<<5, 1u<<6, 1u<<7,
-      1u<<8, 1u<<9, 1u<<10, 1u<<11, 1u<<12, 1u<<13, 1u<<14, 1u<<15};
+      1u<<8, 1u<<9, 1u<<10, 1u<<11, 1u<<12, 1u<<13, 1u<<14, 1u<<15, 1u<<16, 1u<<17};
   const ReaderControls portrait=BuildPortraitControls(key);
   const ReaderControls landscape=BuildLandscapeControls(key);
   // Distinct reflow constructor/repeat contracts remain focused mask checks.

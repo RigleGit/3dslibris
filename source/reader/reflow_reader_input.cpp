@@ -215,14 +215,14 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
   const bool has_inline_links = CurrentPageHasInlineLinks(book);
   const uint64_t now_ms = input.timestamp_ms;
 
-  if (!app.IsInlineLinkFocusActive() && (keys & app.key.y)) {
+  if (!app.IsInlineLinkFocusActive() && (keys & ctrl.focus_hold)) {
     app.SetInlineLinkHoldArmed(true);
     app.SetInlineLinkHoldConsumed(false);
     app.SetInlineLinkHoldStartedAtMs(now_ms);
   }
 
   if (!app.IsInlineLinkFocusActive() && app.IsInlineLinkHoldArmed() &&
-      (held & app.key.y) && !app.IsInlineLinkHoldConsumed() &&
+      (held & ctrl.focus_hold) && !app.IsInlineLinkHoldConsumed() &&
       has_inline_links &&
       now_ms >= app.GetInlineLinkHoldStartedAtMs() + kInlineLinkHoldThresholdMs) {
     if (EnterInlineLinkFocus(&app, book, ts)) {
@@ -242,17 +242,17 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
     const uint32_t link_repeat_mask =
         circle_link_repeat ? ~0u : ~circle_bits;
     const reader::PageRepeatAction link_repeat = app.ResolvePageRepeat(
-        keys, held & ~app.key.y, ctrl.link_next & link_repeat_mask,
+        keys, held & ~ctrl.focus_hold, ctrl.link_next & link_repeat_mask,
         ctrl.link_prev & link_repeat_mask, now_ms, kPageRepeatInitialDelayMs,
         kPageRepeatIntervalMs);
-    if (keys & (app.key.b | app.key.y)) {
+    if (keys & ctrl.link_exit) {
       ExitInlineLinkFocus(&app, book);
       book_nav::DrawPage(book, ts);
       status_dirty = true;
     } else if (keys & KEY_TOUCH) {
       touchPosition mapped = app.MapTouch(input);
       status_dirty = TryTouchTarget(book, ts, mapped.px, mapped.py, true);
-    } else if (keys & app.key.a) {
+    } else if (keys & ctrl.link_activate) {
       const auto *targets = CurrentPageInlineLinks(book);
       const int selected = book->GetFocusedInlineLinkIndex();
       if (targets && selected >= 0 && selected < (int)targets->size() &&
@@ -264,7 +264,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
         app.SetInlineLinkFocusActive(false);
         status_dirty = true;
       }
-    } else if (keys & app.key.x) {
+    } else if (keys & ctrl.link_follow_image) {
       const auto *targets = CurrentPageInlineLinks(book);
       const int selected = book->GetFocusedInlineLinkIndex();
       if (targets && selected >= 0 && selected < (int)targets->size() &&
@@ -314,7 +314,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
         status_dirty = true;
       else
         app.ResetPageRepeat();
-    } else if (keys & app.key.x) {
+    } else if (keys & ctrl.color_cycle) {
       int mode = ts->GetColorMode();
       int next = (mode + 1) % 6;
       app.colorMode = next;
@@ -323,8 +323,8 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
       ts->MarkAllScreensDirty();
       book_nav::DrawPage(book, ts);
       status_dirty = true;
-    } else if (keys & app.key.y) {
-      // y without hold: consumed by hold-arm; no-op here
+    } else if (keys & ctrl.focus_hold) {
+      // focus_hold without hold: consumed by hold-arm; no-op here
     } else if (keys & KEY_TOUCH) {
       app.ResetPageRepeat();
       touchPosition mapped = app.MapTouch(input);
@@ -362,7 +362,7 @@ bool HandleInBook(App &app, Book *book, Text *ts, Prefs * /*prefs*/,
     }
   } // end else (reflowable input)
 
-  if (app.IsInlineLinkHoldArmed() && !(held & app.key.y)) {
+  if (app.IsInlineLinkHoldArmed() && !(held & ctrl.focus_hold)) {
     const bool consumed = app.IsInlineLinkHoldConsumed();
     app.SetInlineLinkHoldArmed(false);
     app.SetInlineLinkHoldStartedAtMs(0);

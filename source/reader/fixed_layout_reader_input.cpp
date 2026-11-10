@@ -122,13 +122,13 @@ bool HandleInBook(App &app, Book *book, Text *ts, const FrameInput &input,
       delay_deferred();
     }
   } else if (reader_input_utils::FixedLayoutSupportsShoulderPageTurn(book->format) &&
-             (keys & (app.key.r | app.key.zl))) {
+             (keys & ctrl.fixed_shoulder_next)) {
     if (book_nav::TurnPage(book, ts, pagecurrent, pagecount, 1)) {
       status_dirty = true;
       delay_deferred();
     }
   } else if (reader_input_utils::FixedLayoutSupportsShoulderPageTurn(book->format) &&
-             (keys & (app.key.l | app.key.zr))) {
+             (keys & ctrl.fixed_shoulder_prev)) {
     if (book_nav::TurnPage(book, ts, pagecurrent, pagecount, -1)) {
       status_dirty = true;
       delay_deferred();
