@@ -86,9 +86,95 @@ static void TestHandednessSwap() {
   test::ExpectEqU("swapped shoulder next", c.fixed_shoulder_next, key.l | key.zr);
 }
 
+// Distinct physical bit per logical button, with or without the L/R and
+// ZL/ZR handedness swap applied by App::ApplyRenderOrientation.
+static KeyMap Handed(bool swapped) {
+  KeyMap key;
+  if (swapped) {
+    KeyMap o = key;
+    key.l = o.r; key.r = o.l; key.zl = o.zr; key.zr = o.zl;
+  }
+  return key;
+}
+
+static void TestValidateAllSchemes() {
+  for (int s = 0; s < (int)CONTROL_SCHEME_COUNT; ++s)
+    for (int land = 0; land < 2; ++land)
+      for (int swapped = 0; swapped < 2; ++swapped) {
+        const ReaderControls c =
+            BuildReaderControls((ControlScheme)s, land != 0, Handed(swapped != 0));
+        const char *why = "";
+        const bool ok = ValidateScheme(c, &why);
+        if (!ok)
+          test::Fail(std::string("scheme ") + std::to_string(s) + " landscape " +
+                     std::to_string(land) + " swapped " + std::to_string(swapped) +
+                     ": " + why);
+      }
+}
+
+static void TestValidatorRejectsConflicts() {
+  KeyMap key;
+  const ReaderControls base = BuildReaderControls(CONTROL_SCHEME_DEFAULT, false, key);
+  test::ExpectTrue("base valid", ValidateScheme(base));
+  ReaderControls c = base;
+  c.focus_hold |= c.page_next;
+  test::ExpectFalse("focus_hold shared with page_next", ValidateScheme(c));
+  c = base; c.color_cycle = c.bookmark_next;
+  test::ExpectFalse("color cycle shared with bookmark", ValidateScheme(c));
+  c = base; c.link_activate = c.link_next;
+  test::ExpectFalse("link activate shared with link next", ValidateScheme(c));
+  c = base; c.zoom_in = c.fixed_page_next;
+  test::ExpectFalse("zoom shared with fixed page", ValidateScheme(c));
+  c = base; c.page_repeat_next_dpad = key.dleft;
+  test::ExpectFalse("repeat key outside page keys", ValidateScheme(c));
+  c = base; c.link_exit = 0;
+  test::ExpectFalse("unbound action", ValidateScheme(c));
+  // Different contexts may share keys (X is color cycle and image follow).
+  test::ExpectEqU("x shared across contexts", base.color_cycle, base.link_follow_image);
+}
+
+static void TestOneHandedMasks() {
+  KeyMap key;
+  const ReaderControls p = BuildReaderControls(CONTROL_SCHEME_ONE_HANDED, false, key);
+  const ReaderControls l = BuildReaderControls(CONTROL_SCHEME_ONE_HANDED, true, key);
+  const ReaderControls dp = BuildPortraitControls(key);
+  const ReaderControls dl = BuildLandscapeControls(key);
+  // Page turns and fixed layout are unchanged from Default.
+  test::ExpectEqU("portrait page_next", p.page_next, dp.page_next);
+  test::ExpectEqU("portrait page_prev", p.page_prev, dp.page_prev);
+  test::ExpectEqU("landscape page_next", l.page_next, dl.page_next);
+  test::ExpectEqU("landscape page_prev", l.page_prev, dl.page_prev);
+  test::ExpectEqU("portrait fixed", p.fixed_page_next, dp.fixed_page_next);
+  test::ExpectEqU("landscape shoulder", l.fixed_shoulder_next, dl.fixed_shoulder_next);
+  test::ExpectEqU("portrait focus_hold", p.focus_hold, key.y | key.dleft);
+  test::ExpectEqU("landscape focus_hold", l.focus_hold, key.y | key.dup);
+  test::ExpectEqU("portrait bookmark next", p.bookmark_next, key.left);
+  test::ExpectEqU("portrait bookmark prev", p.bookmark_prev, key.right);
+  test::ExpectEqU("landscape bookmark next", l.bookmark_next, key.down);
+  test::ExpectEqU("landscape bookmark prev", l.bookmark_prev, key.up);
+  test::ExpectEqU("portrait link next", p.link_next, key.ddown);
+  test::ExpectEqU("portrait link prev", p.link_prev, key.dup);
+  test::ExpectEqU("landscape link next", l.link_next, key.dright);
+  test::ExpectEqU("landscape link prev", l.link_prev, key.dleft);
+  test::ExpectEqU("portrait link activate", p.link_activate, key.a | key.dright);
+  test::ExpectEqU("landscape link activate", l.link_activate, key.a | key.ddown);
+  test::ExpectEqU("portrait link exit", p.link_exit, key.b | key.y | key.l | key.r);
+  test::ExpectEqU("landscape link exit", l.link_exit, key.b | key.y | key.l | key.r);
+  // Swapped handedness: L/R exit follows the swapped physical masks.
+  KeyMap sw = Handed(true);
+  const ReaderControls ps = BuildReaderControls(CONTROL_SCHEME_ONE_HANDED, false, sw);
+  test::ExpectEqU("swapped link exit", ps.link_exit, sw.b | sw.y | sw.l | sw.r);
+  test::ExpectEqU("clamp high", ClampControlScheme(2), CONTROL_SCHEME_DEFAULT);
+  test::ExpectEqU("clamp negative", ClampControlScheme(-1), CONTROL_SCHEME_DEFAULT);
+  test::ExpectEqU("clamp one-handed", ClampControlScheme(1), CONTROL_SCHEME_ONE_HANDED);
+}
+
 int main() {
   TestDefaultGolden();
   TestDefaultFormerRawKeys();
   TestHandednessSwap();
+  TestValidateAllSchemes();
+  TestValidatorRejectsConflicts();
+  TestOneHandedMasks();
   return 0;
 }

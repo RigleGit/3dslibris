@@ -659,6 +659,19 @@ void ReaderController::HandleEventInBook(const FrameInput &input)
       orientation_utils::IsLandscape(bookcurrent_->GetOrientation());
   const ReaderControls ctrl = BuildReaderControls(
       SelectedControlScheme(app_.prefs.get(), landscape), landscape, app_.key);
+#ifdef DSLIBRIS_DEBUG
+  {
+    static bool scheme_checked = false;
+    const char *why = 0;
+    if (!scheme_checked) {
+      scheme_checked = true;
+      for (int s = 0; s < (int)CONTROL_SCHEME_COUNT; ++s)
+        for (int l = 0; l < 2; ++l)
+          if (!ValidateScheme(BuildReaderControls((ControlScheme)s, l != 0, app_.key), &why))
+            DBG_LOGF(&app_, "Control scheme %d landscape=%d invalid: %s", s, l, why);
+    }
+  }
+#endif
   const u16 position_before = bookcurrent_->GetPosition();
   u16 pagecurrent = bookcurrent_->GetPosition();
   u16 pagecount = bookcurrent_->GetPageCount();

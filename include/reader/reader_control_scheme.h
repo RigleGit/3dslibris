@@ -15,6 +15,7 @@
 
 enum ControlScheme : uint8_t {
   CONTROL_SCHEME_DEFAULT = 0,
+  CONTROL_SCHEME_ONE_HANDED = 1,
   CONTROL_SCHEME_COUNT
 };
 
@@ -106,9 +107,75 @@ static const SchemeTable kSchemeDefaultLandscape = {{
     /* RA_FIXED_SHOULDER_PREV */ LBM(LB_L) | LBM(LB_ZR),
 }};
 
+// One-handed, portrait. Same page turns as Default; the Y-only actions get
+// a second D-pad key so the thumb never leaves the D-pad/Circle Pad.
+//   focus_hold: Y | DLEFT (tap = bookmark, hold = link focus)
+//   bookmark jump: Circle Pad left/right only (D-pad keys are taken)
+//   link focus: DDOWN/DUP move, A | DRIGHT activate, L/R also leave focus
+static const SchemeTable kSchemeOneHandedPortrait = {{
+    /* RA_PAGE_NEXT */ LBM(LB_A) | LBM(LB_R) | LBM(LB_CDOWN) | LBM(LB_DDOWN) | LBM(LB_ZL),
+    /* RA_PAGE_PREV */ LBM(LB_B) | LBM(LB_L) | LBM(LB_CUP) | LBM(LB_DUP) | LBM(LB_ZR),
+    /* RA_REPEAT_NEXT_DPAD */ LBM(LB_DDOWN),
+    /* RA_REPEAT_PREV_DPAD */ LBM(LB_DUP),
+    /* RA_REPEAT_NEXT_CIRCLE */ LBM(LB_CDOWN),
+    /* RA_REPEAT_PREV_CIRCLE */ LBM(LB_CUP),
+    /* RA_BOOKMARK_NEXT */ LBM(LB_CLEFT),
+    /* RA_BOOKMARK_PREV */ LBM(LB_CRIGHT),
+    /* RA_LINK_NEXT */ LBM(LB_DDOWN),
+    /* RA_LINK_PREV */ LBM(LB_DUP),
+    /* RA_FIXED_PAGE_NEXT */ LBM(LB_DRIGHT),
+    /* RA_FIXED_PAGE_PREV */ LBM(LB_DLEFT),
+    /* RA_FIXED_CHAPTER_NEXT */ LBM(LB_DDOWN),
+    /* RA_FIXED_CHAPTER_PREV */ LBM(LB_DUP),
+    /* RA_ZOOM_IN */ LBM(LB_A),
+    /* RA_ZOOM_OUT */ LBM(LB_B),
+    /* RA_BACK_TO_LIBRARY */ LBM(LB_START),
+    /* RA_OPEN_SETTINGS */ LBM(LB_SELECT),
+    /* RA_FOCUS_HOLD */ LBM(LB_Y) | LBM(LB_DLEFT),
+    /* RA_LINK_ACTIVATE */ LBM(LB_A) | LBM(LB_DRIGHT),
+    /* RA_LINK_EXIT */ LBM(LB_B) | LBM(LB_Y) | LBM(LB_L) | LBM(LB_R),
+    /* RA_LINK_FOLLOW_IMAGE */ LBM(LB_X),
+    /* RA_COLOR_CYCLE */ LBM(LB_X),
+    /* RA_FIXED_SHOULDER_NEXT */ LBM(LB_R) | LBM(LB_ZL),
+    /* RA_FIXED_SHOULDER_PREV */ LBM(LB_L) | LBM(LB_ZR),
+}};
+
+// One-handed, landscape. Page turns already live on DRIGHT/DLEFT.
+//   focus_hold: Y | DUP
+//   bookmark jump: Circle Pad down/up only
+//   link focus: DRIGHT/DLEFT move, A | DDOWN activate, L/R also leave focus
+static const SchemeTable kSchemeOneHandedLandscape = {{
+    /* RA_PAGE_NEXT */ LBM(LB_A) | LBM(LB_R) | LBM(LB_CRIGHT) | LBM(LB_DRIGHT) | LBM(LB_ZL),
+    /* RA_PAGE_PREV */ LBM(LB_B) | LBM(LB_L) | LBM(LB_CLEFT) | LBM(LB_DLEFT) | LBM(LB_ZR),
+    /* RA_REPEAT_NEXT_DPAD */ LBM(LB_DRIGHT),
+    /* RA_REPEAT_PREV_DPAD */ LBM(LB_DLEFT),
+    /* RA_REPEAT_NEXT_CIRCLE */ LBM(LB_CRIGHT),
+    /* RA_REPEAT_PREV_CIRCLE */ LBM(LB_CLEFT),
+    /* RA_BOOKMARK_NEXT */ LBM(LB_CDOWN),
+    /* RA_BOOKMARK_PREV */ LBM(LB_CUP),
+    /* RA_LINK_NEXT */ LBM(LB_DRIGHT),
+    /* RA_LINK_PREV */ LBM(LB_DLEFT),
+    /* RA_FIXED_PAGE_NEXT */ LBM(LB_DRIGHT),
+    /* RA_FIXED_PAGE_PREV */ LBM(LB_DLEFT),
+    /* RA_FIXED_CHAPTER_NEXT */ LBM(LB_DDOWN),
+    /* RA_FIXED_CHAPTER_PREV */ LBM(LB_DUP),
+    /* RA_ZOOM_IN */ LBM(LB_A),
+    /* RA_ZOOM_OUT */ LBM(LB_B),
+    /* RA_BACK_TO_LIBRARY */ LBM(LB_START),
+    /* RA_OPEN_SETTINGS */ LBM(LB_SELECT),
+    /* RA_FOCUS_HOLD */ LBM(LB_Y) | LBM(LB_DUP),
+    /* RA_LINK_ACTIVATE */ LBM(LB_A) | LBM(LB_DDOWN),
+    /* RA_LINK_EXIT */ LBM(LB_B) | LBM(LB_Y) | LBM(LB_L) | LBM(LB_R),
+    /* RA_LINK_FOLLOW_IMAGE */ LBM(LB_X),
+    /* RA_COLOR_CYCLE */ LBM(LB_X),
+    /* RA_FIXED_SHOULDER_NEXT */ LBM(LB_R) | LBM(LB_ZL),
+    /* RA_FIXED_SHOULDER_PREV */ LBM(LB_L) | LBM(LB_ZR),
+}};
+
 inline const SchemeTable &GetSchemeTable(ControlScheme scheme, bool landscape)
 {
-  (void)scheme;
+  if (scheme == CONTROL_SCHEME_ONE_HANDED)
+    return landscape ? kSchemeOneHandedLandscape : kSchemeOneHandedPortrait;
   return landscape ? kSchemeDefaultLandscape : kSchemeDefaultPortrait;
 }
 
@@ -201,4 +268,83 @@ template <typename KeyMap>
 inline ReaderControls BuildLandscapeControls(const KeyMap &key)
 {
   return BuildReaderControls(CONTROL_SCHEME_DEFAULT, true, key);
+}
+
+// Conflict check over resolved masks. Actions that can fire in the same input
+// context must not share a key:
+//   Reading:   page turns, bookmark jumps, focus_hold, color cycle, back, settings
+//   LinkFocus: link moves, activate, exit, follow image, back, settings
+//   Fixed:     page/chapter/shoulder turns, zoom, back, settings
+// The repeat keys must also be a subset of their page keys, and the actions a
+// context needs to be usable must be bound. Returns false and optionally sets
+// *why to a static description of the first violation.
+namespace reader_scheme_detail {
+
+inline bool Disjoint(const uint32_t *masks, unsigned n)
+{
+  uint32_t seen = 0;
+  for (unsigned i = 0; i < n; ++i) {
+    if (masks[i] & seen)
+      return false;
+    seen |= masks[i];
+  }
+  return true;
+}
+
+} // namespace reader_scheme_detail
+
+inline bool ValidateScheme(const ReaderControls &c, const char **why = 0)
+{
+  const char *dummy;
+  if (!why)
+    why = &dummy;
+
+  const uint32_t reading[] = {c.page_next, c.page_prev, c.bookmark_next,
+                              c.bookmark_prev, c.focus_hold, c.color_cycle,
+                              c.back_to_library, c.open_settings};
+  const uint32_t link_focus[] = {c.link_next, c.link_prev, c.link_activate,
+                                 c.link_exit, c.link_follow_image,
+                                 c.back_to_library, c.open_settings};
+  const uint32_t fixed[] = {c.fixed_page_next, c.fixed_page_prev,
+                            c.fixed_chapter_next, c.fixed_chapter_prev,
+                            c.zoom_in, c.zoom_out, c.fixed_shoulder_next,
+                            c.fixed_shoulder_prev, c.back_to_library,
+                            c.open_settings};
+  const unsigned nr = sizeof(reading) / sizeof(reading[0]);
+  const unsigned nl = sizeof(link_focus) / sizeof(link_focus[0]);
+  const unsigned nf = sizeof(fixed) / sizeof(fixed[0]);
+
+  for (unsigned i = 0; i < nr; ++i)
+    if (!reading[i]) { *why = "unbound reading action"; return false; }
+  for (unsigned i = 0; i < nl; ++i)
+    if (!link_focus[i]) { *why = "unbound link focus action"; return false; }
+  for (unsigned i = 0; i < nf; ++i)
+    if (!fixed[i]) { *why = "unbound fixed layout action"; return false; }
+  if (!c.page_repeat_next_dpad || !c.page_repeat_prev_dpad ||
+      !c.page_repeat_next_circle || !c.page_repeat_prev_circle) {
+    *why = "unbound page repeat key";
+    return false;
+  }
+
+  if (!reader_scheme_detail::Disjoint(reading, nr)) {
+    *why = "reading actions share a key";
+    return false;
+  }
+  if (!reader_scheme_detail::Disjoint(link_focus, nl)) {
+    *why = "link focus actions share a key";
+    return false;
+  }
+  if (!reader_scheme_detail::Disjoint(fixed, nf)) {
+    *why = "fixed layout actions share a key";
+    return false;
+  }
+  if ((c.page_repeat_next_dpad | c.page_repeat_next_circle) & ~c.page_next) {
+    *why = "next repeat keys are not page_next keys";
+    return false;
+  }
+  if ((c.page_repeat_prev_dpad | c.page_repeat_prev_circle) & ~c.page_prev) {
+    *why = "prev repeat keys are not page_prev keys";
+    return false;
+  }
+  return true;
 }

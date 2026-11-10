@@ -276,8 +276,8 @@ static void TestControlSchemeOption() {
     }
   }
   // Out-of-range and junk values clamp to Default.
-  const char *bad[]={"99","-1","abc","256"};
-  for (int i=0;i<4;++i) {
+  const char *bad[]={"99","-1","abc","256","2"};
+  for (int i=0;i<5;++i) {
     WriteXml(std::string("<dslibris><option controlsPortrait=\"")+bad[i]+"\" controlsLandscape=\""+bad[i]+"\"/></dslibris>");
     Prefs c(&owner); assert(c.Read()==0);
     assert(c.control_scheme_portrait==CONTROL_SCHEME_DEFAULT);
