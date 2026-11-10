@@ -243,7 +243,8 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
   labels.reserve(bookmarks.size());
   pages.reserve(bookmarks.size());
 
-  const int kPreviewWidth = 220;
+  // Matches the list row's text width so wrapped rows keep these exact lines.
+  const int kPreviewWidth = 212;
   const int kMaxPreviewLines = 2;
   const size_t kPreviewChars = 120;
 
@@ -255,7 +256,9 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
     preview_pages_.push_back(pg);
     preview_ready_.push_back(false);
     if (book->HasReflowPageCache()) {
-      labels.push_back(full_label + "\nloading preview...\n ");
+      // The no-break space keeps the third line so the row does not resize when
+      // the preview arrives.
+      labels.push_back(full_label + "\nloading preview...\n\xC2\xA0");
       pages.push_back(pg);
       continue;
     }
@@ -295,7 +298,7 @@ void BookmarkMenu::Draw() {
         break;
       }
       const std::string text = ExtractPagePreview(book->GetPage(target), 120);
-      const auto lines = WrapTextToLines(ts, text, 220, 2);
+      const auto lines = WrapTextToLines(ts, text, 212, 2);
       buttons[i]->SetLabel2(lines.empty() ? "" : lines[0]);
       buttons[i]->SetLabel3(lines.size() < 2 ? "" : lines[1]);
       preview_ready_[i] = true;

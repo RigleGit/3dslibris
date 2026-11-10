@@ -100,6 +100,23 @@ void PageStarts(const int *heights, int count, int avail, int gap,
   }
 }
 
+void LayoutRows(const int *heights, int count, int top, int bottom, int gap,
+                std::vector<int> *page_sizes, std::vector<int> *row_y) {
+  std::vector<int> starts;
+  PageStarts(heights, count, bottom - top, gap, &starts);
+  page_sizes->clear();
+  row_y->assign((size_t)(count > 0 ? count : 0), top);
+  for (size_t p = 0; p < starts.size(); p++) {
+    const int end = p + 1 < starts.size() ? starts[p + 1] : count;
+    page_sizes->push_back(end - starts[p]);
+    int y = top;
+    for (int i = starts[p]; i < end; i++) {
+      (*row_y)[(size_t)i] = y;
+      y += heights[i] + gap;
+    }
+  }
+}
+
 int PageOfRow(const std::vector<int> &starts, int index) {
   int page = 0;
   for (size_t i = 0; i < starts.size(); i++) {

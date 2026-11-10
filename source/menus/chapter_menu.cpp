@@ -26,69 +26,6 @@
 
 namespace {
 
-static std::vector<std::string> WrapTextToLines(Text *ts,
-                                                const std::string &text,
-                                                int max_width,
-                                                int max_lines) {
-  std::vector<std::string> lines;
-  std::string remaining = Trim(text);
-  const int style = TEXT_STYLE_BROWSER;
-
-  while (!remaining.empty() && (int)lines.size() < max_lines) {
-    u8 chars_fit =
-        ts->GetCharCountInsideWidth(remaining.c_str(), style, (u8)max_width);
-    if (chars_fit == 0)
-      chars_fit = 1;
-
-    size_t bytes =
-        text_unicode_utils::Utf8BytesForDisplayChars(remaining.c_str(), chars_fit);
-    if (bytes == 0)
-      bytes = 1;
-    if (bytes > remaining.size())
-      bytes = remaining.size();
-
-    std::string line_text = remaining.substr(0, bytes);
-
-    if ((int)lines.size() == max_lines - 1 && bytes < remaining.size()) {
-      if (chars_fit > 4) {
-        size_t text_bytes = text_unicode_utils::Utf8BytesForDisplayChars(
-            remaining.c_str(), chars_fit - 3);
-        if (text_bytes == 0)
-          text_bytes = 1;
-        line_text = remaining.substr(0, text_bytes) + "...";
-      }
-    }
-
-    lines.push_back(line_text);
-    remaining = remaining.substr(bytes);
-  }
-
-  return lines;
-}
-
-static std::string ApplyLevelPrefix(const std::string &label, u8 level) {
-  if (label.empty() || level == 0)
-    return label;
-
-  const u8 capped = (level > 6) ? 6 : level;
-  std::string prefix((size_t)capped * 2, ' ');
-  prefix += "- ";
-
-  std::string out;
-  out.reserve(label.size() + prefix.size() * 2);
-  bool line_start = true;
-  for (size_t i = 0; i < label.size(); i++) {
-    if (line_start) {
-      out += prefix;
-      line_start = false;
-    }
-    out.push_back(label[i]);
-    if (label[i] == '\n')
-      line_start = true;
-  }
-  return out;
-}
-
 static const char *TocQualityLabel(TocQuality q) {
   switch (q) {
   case TOC_QUALITY_STRONG:
@@ -544,25 +481,23 @@ void ChapterMenu::BuildEntries(Book *book, Text *text,
   entry_pages.reserve(chapters.size());
   approx_page_cache.reserve(chapters.size());
 
+  entry_levels.clear();
+  entry_levels.reserve(chapters.size());
   for (const auto &ch : chapters) {
-    int prefix_chars = (ch.level > 0) ? (ch.level * 2 + 2) : 0;
-    int text_width = 200 - prefix_chars * 6;
-    if (text_width < 60)
-      text_width = 60;
-    std::vector<std::string> lines =
-        WrapTextToLines(text, ch.title, text_width, 3);
-    std::string label;
-    for (size_t i = 0; i < lines.size(); i++) {
-      if (i > 0)
-        label += '\n';
-      label += lines[i];
-    }
-    labels.push_back(ApplyLevelPrefix(label, ch.level));
+    // The whole title is kept: the list wraps it and sizes the row for it.
+    // Nested entries are marked and indented (see EntryIndent).
+    labels.push_back(ch.level > 0 ? "- " + ch.title : ch.title);
+    entry_levels.push_back(ch.level);
     pages.push_back(ch.page);
     entry_titles.push_back(ch.title);
     entry_pages.push_back(ch.page);
     approx_page_cache.push_back(-1);
   }
+}
+
+int ChapterMenu::EntryIndent(size_t index) const {
+  const int level = index < entry_levels.size() ? entry_levels[index] : 0;
+  return (level > 6 ? 6 : level) * 8;
 }
 
 bool ChapterMenu::ResolveTargetPage(u16 index, u16 *page_out) {

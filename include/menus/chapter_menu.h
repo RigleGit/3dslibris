@@ -25,6 +25,7 @@ private:
   void BuildEntries(class Book *book, class Text *text,
                     std::vector<std::string> &labels,
                     std::vector<u16> &pages) override;
+  int EntryIndent(size_t index) const override;
   bool ResolveTargetPage(u16 index, u16 *page_out) override;
 
   bool approx_pending_ = false;
@@ -35,5 +36,6 @@ private:
   std::string approx_query_;
   std::vector<std::string> entry_titles;
   std::vector<u16> entry_pages;
+  std::vector<u8> entry_levels;
   std::vector<int> approx_page_cache;
 };

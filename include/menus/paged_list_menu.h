@@ -44,6 +44,8 @@ protected:
   virtual void BuildEntries(Book *book, class Text *text,
                             std::vector<std::string> &labels,
                             std::vector<u16> &pages) = 0;
+  // Left padding (pixels) of entry `index`, e.g. nested chapters.
+  virtual int EntryIndent(size_t index) const { (void)index; return 0; }
   virtual bool ResolveTargetPage(u16 index, u16 *page_out);
 
   Book *current_book_;

@@ -16,6 +16,8 @@
 #include "book/book.h"
 #include "book/book_renderer.h"
 #include "ui/button.h"
+#include "ui/button_text_layout.h"
+#include "shared/text_wrap_utils.h"
 #include "ui/gradient_utils.h"
 #include "shared/debug_log.h"
 #include "book/page.h"
@@ -28,6 +30,8 @@ static const int LIST_HEADER_X = 6;
 static const int LIST_HEADER_Y = 14;
 static const int LIST_ROW_X = 5;
 static const int LIST_ROW_Y0 = 24;
+// Rows end above the footer buttons; the page indicator lives in the header.
+static const int LIST_ROWS_BOTTOM = 288;
 static const int LIST_ROW_W = 230;
 static const int LIST_ROW_H = 34;
 static const int LIST_ROW_GAP = 2;
@@ -94,6 +98,15 @@ void PagedListMenu::Init() {
 
   size_t count = std::min(labels.size(), pages.size());
   target_pages.reserve(count);
+  int line_height = 14, ascent = 11, descent = 3;
+  int saved_style = 0;
+  if (ts) {
+    saved_style = ts->GetStyle();
+    ts->SetStyle(TEXT_STYLE_BROWSER);
+    line_height = ts->GetHeight();
+    ascent = ts->GetAscent();
+    descent = ts->GetDescent();
+  }
   for (size_t i = 0; i < count; i++) {
     Button *b = new Button(ts);
     b->Init();
@@ -117,40 +130,35 @@ void PagedListMenu::Init() {
     b->SetLabel2(line2);
     b->SetLabel3(line3);
 
-    int line_count = line3.empty() ? (line2.empty() ? 1 : 2) : 3;
-    int line_height = 14;
-    if (ts)
-      line_height = ts->GetHeight();
-    if (line_height < 10)
-      line_height = 10;
-    int button_height = LIST_ROW_H;
-    if (line_count > 2)
-      button_height = 8 + line_count * line_height;
-    else if (line_count == 2 && (8 + 2 * line_height) > LIST_ROW_H)
-      button_height = 8 + 2 * line_height;
+    // Labels wrap inside the row and the row grows to hold every line.
+    b->SetWrap(true);
+    b->SetIndent(EntryIndent(i));
+    const int lines = b->WrappedLineCount(LIST_ROW_W);
+    int button_height = button_text_layout::HeightForLines(
+        lines, line_height, ascent, descent, LIST_ROW_H);
+    if (button_height > LIST_ROWS_BOTTOM - LIST_ROW_Y0)
+      button_height = LIST_ROWS_BOTTOM - LIST_ROW_Y0; // text shrinks to fit
     b->Resize(LIST_ROW_W, button_height);
     buttons.push_back(b);
     target_pages.push_back(pages[i]);
   }
 
+  if (ts)
+    ts->SetStyle(saved_style);
+
+  // Pages hold as many rows as fit by cumulative height.
+  std::vector<int> heights;
+  heights.reserve(buttons.size());
+  for (size_t i = 0; i < buttons.size(); i++)
+    heights.push_back(buttons[i]->GetHeight());
+  std::vector<int> sizes, ys;
+  text_wrap_utils::LayoutRows(heights.data(), (int)heights.size(), LIST_ROW_Y0,
+                              LIST_ROWS_BOTTOM, LIST_ROW_GAP, &sizes, &ys);
   page_sizes.clear();
-  int current_y = LIST_ROW_Y0;
-  u16 items_on_page = 0;
-  for (size_t i = 0; i < buttons.size(); i++) {
-    int h = buttons[i]->GetHeight();
-    if (items_on_page > 0 && current_y + LIST_ROW_GAP + h > LIST_FOOTER_Y) {
-      page_sizes.push_back(items_on_page);
-      current_y = LIST_ROW_Y0;
-      items_on_page = 0;
-    } else if (items_on_page > 0) {
-      current_y += LIST_ROW_GAP;
-    }
-    buttons[i]->Move(LIST_ROW_X, current_y);
-    current_y += h;
-    items_on_page++;
-  }
-  if (items_on_page > 0)
-    page_sizes.push_back(items_on_page);
+  for (size_t p = 0; p < sizes.size(); p++)
+    page_sizes.push_back((u16)sizes[p]);
+  for (size_t i = 0; i < buttons.size(); i++)
+    buttons[i]->Move(LIST_ROW_X, (u16)ys[i]);
 
   selected = 0;
   page = 0;
@@ -204,11 +212,20 @@ void PagedListMenu::Draw() {
     buttons[i]->Draw(i == selected);
   }
 
+  // The page indicator sits in the header, right-aligned, so it never shares
+  // space with the rows.
   char label[32];
   u16 total_pages = page_sizes.empty() ? GetPageCount() : (u16)page_sizes.size();
   snprintf(label, sizeof(label), "Pg %d/%d", GetCurrentPage(), total_pages);
-  ts->SetPen(6, 282);
+  const bool saved_wrap = ts->IsAutoWrapEnabled();
+  const int saved_margin_right = ts->margin.right;
+  ts->SetAutoWrapEnabled(false);
+  ts->margin.right = 0;
+  ts->SetPen(std::max(LIST_HEADER_X, LIST_ROW_X + LIST_ROW_W - ts->GetStringAdvance(label)),
+             LIST_HEADER_Y);
   ts->PrintString(label);
+  ts->margin.right = saved_margin_right;
+  ts->SetAutoWrapEnabled(saved_wrap);
 
   LayoutFooterButtons();
   if (page > 0)

@@ -91,6 +91,32 @@ int main() {
   test::ExpectEq("page of 4", PageOfRow(starts, 4), 3);
   PageStarts(h, 0, 60, 2, &starts);
   test::ExpectEq("no rows", (int)starts.size(), 0);
+  // Chapter-list layout: 3-line titles (52px) mixed with 1-line rows (34px)
+  // between y=24 and the footer at 288; nothing may cross the bottom.
+  {
+    const int hs[] = {52, 34, 52, 34, 34, 52, 34, 34, 34, 34, 34, 34, 34, 34};
+    std::vector<int> sizes, ys;
+    LayoutRows(hs, 14, 24, 288, 2, &sizes, &ys);
+    int total = 0;
+    for (size_t p = 0; p < sizes.size(); p++) total += sizes[p];
+    test::ExpectEq("every row is on a page", total, 14);
+    test::ExpectEq("first row on top", ys[0], 24);
+    test::ExpectEq("next row follows with a gap", ys[1], 24 + 52 + 2);
+    int idx = 0;
+    for (size_t p = 0; p < sizes.size(); p++) {
+      for (int k = 0; k < sizes[p]; k++, idx++)
+        test::ExpectTrue("row stays above the footer", ys[idx] + hs[idx] <= 288);
+      if (p + 1 < sizes.size())
+        test::ExpectTrue("page is full: next row would not fit",
+                         ys[idx - 1] + hs[idx - 1] + 2 + hs[idx] > 288);
+    }
+    // A single row taller than the area still gets its own page.
+    const int tall[] = {40, 400, 40};
+    LayoutRows(tall, 3, 24, 288, 2, &sizes, &ys);
+    test::ExpectEq("tall row pages", (int)sizes.size(), 3);
+    LayoutRows(tall, 0, 24, 288, 2, &sizes, &ys);
+    test::ExpectEq("empty list", (int)sizes.size(), 0);
+  }
   printf("text_wrap_utils tests passed\n");
   return 0;
 }

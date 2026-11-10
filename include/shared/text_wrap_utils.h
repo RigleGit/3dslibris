@@ -31,6 +31,11 @@ int RowsThatFit(const int *heights, int count, int start, int avail, int gap);
 void PageStarts(const int *heights, int count, int avail, int gap,
                 std::vector<int> *out);
 
+// Paginates rows between `top` and `bottom`: rows per page, plus the y of every
+// row inside its page. A row taller than the area gets a page of its own.
+void LayoutRows(const int *heights, int count, int top, int bottom, int gap,
+                std::vector<int> *page_sizes, std::vector<int> *row_y);
+
 // Index in `starts` of the page holding row `index`.
 int PageOfRow(const std::vector<int> &starts, int index);
 
