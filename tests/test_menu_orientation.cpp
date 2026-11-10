@@ -83,6 +83,7 @@ struct App {
 };
 
 static bool CurrentBookHasExtraPrefsPage(void *, bool) { return false; }
+static int CurrentBookPrefsPageCount(void *, bool) { return 2; }
 
 struct SettingsController {
   App app_;

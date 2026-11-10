@@ -4,8 +4,8 @@ namespace settings {
 
 int PrefsRowPitch(unsigned char visible_count) {
   // Eight rows must clear the footer, including touch slack. Two lines of
-  // text need 34px, so only pages that still list nine rows (MOBI books with
-  // the line-wrap option) fall back to 32 and a smaller font.
+  // text need 34px, so no page lists more than eight rows; the 32px fallback
+  // only guards against a future page that does.
   return visible_count > 8 ? 32 : visible_count > 7 ? 36 : 38;
 }
 
@@ -104,7 +104,19 @@ static const int kFixedLayoutBookPrefsPage2Buttons[] = {
     PREFS_ACTION_READING_DIRECTION,
 };
 
+static const unsigned char kBookFirstPageRowsWhenSplit = 5;
+
 } // namespace
+
+unsigned char BookPrefsPageCount(bool fixed_layout, bool include_line_wrap_fix) {
+  return !fixed_layout && include_line_wrap_fix ? 3 : 2;
+}
+
+static bool BookMainListIsSplit(const PrefsPageContext &context) {
+  return context.from_book &&
+         BookPrefsPageCount(context.fixed_layout,
+                            context.include_line_wrap_fix) > 2;
+}
 
 unsigned char PrefsPageButtonCount(const PrefsPageContext &context) {
   if (!context.from_book && context.page == 1) {
@@ -119,9 +131,16 @@ unsigned char PrefsPageButtonCount(const PrefsPageContext &context) {
   if (context.from_book && context.page == 1)
     return BookPrefsPage2ButtonCount(context.fixed_layout) +
            (context.fixed_layout && context.wide_top_capable ? 1 : 0);
-  return VisiblePrefsButtonCount(context.from_book,
-                                 context.include_line_wrap_fix) -
-         (context.from_book && context.fixed_layout ? 2 : 0);
+  const unsigned char total =
+      (unsigned char)(VisiblePrefsButtonCount(context.from_book,
+                                              context.include_line_wrap_fix) -
+                      (context.from_book && context.fixed_layout ? 2 : 0));
+  if (BookMainListIsSplit(context)) {
+    if (context.page == 2)
+      return (unsigned char)(total - kBookFirstPageRowsWhenSplit);
+    return kBookFirstPageRowsWhenSplit;
+  }
+  return total;
 }
 
 static int PageActionForSlot(const PrefsPageContext &context,
@@ -139,6 +158,9 @@ static int PageActionForSlot(const PrefsPageContext &context,
       return PREFS_ACTION_WIDE_TOP_SCREEN;
     return BookPrefsPage2ButtonForSlot(context.fixed_layout, slot);
   }
+  if (BookMainListIsSplit(context) && context.page == 2)
+    return PrefsButtonForVisibleSlot(true, context.include_line_wrap_fix,
+                                     (unsigned char)(slot + kBookFirstPageRowsWhenSplit));
   if (context.from_book && context.fixed_layout) {
     const unsigned count=VisiblePrefsButtonCount(true,context.include_line_wrap_fix);
     for (unsigned i = 0, visible = 0; i<count; ++i) {

@@ -48,9 +48,18 @@ bool HasButton(const settings::PrefsPageContext &page, int button) {
   return false;
 }
 
+// Book main list: page 0, plus page 2 when the line-wrap option splits it.
+bool HasMainBookButton(settings::PrefsPageContext page, int button) {
+  page.page = 0;
+  if (HasButton(page, button)) return true;
+  page.page = 2;
+  return settings::BookPrefsPageCount(page.fixed_layout, page.include_line_wrap_fix) > 2 &&
+         HasButton(page, button);
+}
+
 void CheckDrawablePage(const settings::PrefsPageContext &page) {
   const unsigned char count = settings::PrefsPageButtonCount(page);
-  test::ExpectTrue("page has between one and nine rows", count > 0 && count <= 9);
+  test::ExpectTrue("page has between one and eight rows", count > 0 && count <= 8);
   const int pitch = settings::PrefsRowPitch(count);
   // The footer is at y=296 with eight pixels of upward touch slack.
   test::ExpectTrue("last row clears footer touch region",
@@ -241,26 +250,42 @@ int main() {
       page.include_line_wrap_fix = wrap != 0;
       page.page = 0;
       CheckDrawablePage(page);
+      if (settings::BookPrefsPageCount(page.fixed_layout, wrap != 0) > 2) {
+        test::ExpectEq("split book list keeps eight or fewer rows per page",
+                       settings::PrefsPageButtonCount(page), 5);
+        page.page = 2;
+        CheckDrawablePage(page);
+        test::ExpectEq("book list tail rows", settings::PrefsPageButtonCount(page), 4);
+        test::ExpectEq("tail starts with book information",
+                       settings::PrefsPageButtonForSlot(page, 0), PREFS_BUTTON_BOOK_INFO);
+        test::ExpectEq("tail ends with text alignment",
+                       settings::PrefsPageButtonForSlot(page, 3), PREFS_BUTTON_TEXT_ALIGN);
+        test::ExpectEq("split pages use full-size pitch",
+                       settings::PrefsRowPitch(5), 38);
+        page.page = 0;
+      } else {
+        test::ExpectEq("unsplit book page count", settings::BookPrefsPageCount(page.fixed_layout, wrap != 0), 2);
+      }
         test::ExpectTrue("search only appears for reflow book actions",
-            HasButton(page, PREFS_BUTTON_SEARCH) ==
+            HasMainBookButton(page, PREFS_BUTTON_SEARCH) ==
             (page.from_book && !page.fixed_layout && page.page == 0));
       test::ExpectFalse("preload excluded from book preferences",
-                        HasButton(page, PREFS_BUTTON_PRELOAD));
+                        HasMainBookButton(page, PREFS_BUTTON_PRELOAD));
       test::ExpectTrue("book navigation remains available",
-                       HasButton(page, PREFS_BUTTON_BOOK_INFO) &&
-                       HasButton(page, PREFS_BUTTON_INDEX) &&
-                       HasButton(page, PREFS_BUTTON_BOOKMARKS));
+                       HasMainBookButton(page, PREFS_BUTTON_BOOK_INFO) &&
+                       HasMainBookButton(page, PREFS_BUTTON_INDEX) &&
+                       HasMainBookButton(page, PREFS_BUTTON_BOOKMARKS));
       test::ExpectFalse("book page excludes global Circle Pad setting",
-                        HasButton(page, PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN));
+                        HasMainBookButton(page, PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN));
       test::ExpectTrue("per-book text alignment belongs to reflow books",
-                       HasButton(page, PREFS_BUTTON_TEXT_ALIGN) == (fixed == 0));
+                       HasMainBookButton(page, PREFS_BUTTON_TEXT_ALIGN) == (fixed == 0));
       test::ExpectTrue("optional line-wrap slot is present only when requested",
-                       HasButton(page, PREFS_ACTION_MOBI_LINE_WRAP_FIX) == (wrap != 0));
+                       HasMainBookButton(page, PREFS_ACTION_MOBI_LINE_WRAP_FIX) == (wrap != 0));
       test::ExpectFalse("book controls do not expose the library-view action",
-                        HasButton(page, PREFS_BUTTON_LIBRARY_VIEW));
+                        HasMainBookButton(page, PREFS_BUTTON_LIBRARY_VIEW));
       test::ExpectTrue("a paginated book exposes navigation rather than the clock",
-                       HasButton(page, PREFS_ACTION_GO_TO_PAGE) &&
-                       !HasButton(page, PREFS_BUTTON_TIME24H));
+                       HasMainBookButton(page, PREFS_ACTION_GO_TO_PAGE) &&
+                       !HasMainBookButton(page, PREFS_BUTTON_TIME24H));
       if (wrap) {
         test::ExpectEq("line-wrap action precedes normal book controls",
                        settings::PrefsPageButtonForSlot(page, 1),

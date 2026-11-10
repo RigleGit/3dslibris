@@ -16,7 +16,8 @@ bool ShouldRedrawPrefsAfterOverlayInput(bool prefs_dirty,
 }
 
 PrefsNavStep StepPrefsSelection(int page, int selected, int visible_count,
-                                bool book_ctx, bool has_submenu, int direction) {
+                                bool book_ctx, bool has_submenu, int direction,
+                                int book_page_count) {
   PrefsNavStep step;
   step.page = page;
   step.selected = selected;
@@ -38,6 +39,10 @@ PrefsNavStep StepPrefsSelection(int page, int selected, int visible_count,
       step.page = 1;
       step.selected = 0;
       step.changed = true;
+    } else if (book_ctx && page == 1 && book_page_count > 2) {
+      step.page = 2;
+      step.selected = 0;
+      step.changed = true;
     }
   } else {
     if (selected > 0) {
@@ -49,6 +54,10 @@ PrefsNavStep StepPrefsSelection(int page, int selected, int visible_count,
       step.changed = true;
     } else if (!book_ctx && page == 2) {
       step.page = 0;
+      step.select_last = true;
+      step.changed = true;
+    } else if (book_ctx && page == 2 && book_page_count > 2) {
+      step.page = 1;
       step.select_last = true;
       step.changed = true;
     } else if (page == 1 && has_submenu) {

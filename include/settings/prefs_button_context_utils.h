@@ -17,6 +17,10 @@ struct PrefsPageContext {
         include_line_wrap_fix(false), can_go_to_page(false), wide_top_capable(false) {}
 };
 
+// Reflow books that list the MOBI line-wrap option would need nine rows on the
+// first page; the rows after the first five continue on a third page instead.
+unsigned char BookPrefsPageCount(bool fixed_layout, bool include_line_wrap_fix);
+
 int PrefsRowPitch(unsigned char visible_count);
 int PrefsButtonIndexForAction(int action);
 

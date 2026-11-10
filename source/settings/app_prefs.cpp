@@ -178,6 +178,13 @@ static bool CurrentBookHasExtraPrefsPage(Book *book, bool is_book_ctx) {
          (book->UsesTextLayoutSettings() || book->IsFixedLayout());
 }
 
+static int CurrentBookPrefsPageCount(Book *book, bool is_book_ctx) {
+  if (!is_book_ctx || !book)
+    return 2;
+  return settings::BookPrefsPageCount(
+      book->IsFixedLayout(), CurrentBookSupportsLineWrapFix(book, is_book_ctx));
+}
+
 static void ToggleFixedLayoutReadingDirection(Prefs *prefs) {
   if (!prefs)
     return;
@@ -455,7 +462,11 @@ void SettingsController::PrefsDraw() {
     button_prefs_library_.Resize(screen_layout::kFooterMidW, screen_layout::kFooterButtonH);
     button_prefs_library_.Draw(ts->screenright);
     if (has_submenu) {
-      button_prefs_page_nav_.Label(prefs_general_page_ == 0 ? "next" : "prev");
+      const int last_page =
+          CurrentBookPrefsPageCount(app_.GetCurrentBook(), book_ctx) - 1;
+      button_prefs_page_nav_.Label(prefs_general_page_ >= last_page
+                                       ? (last_page > 1 ? "first" : "prev")
+                                       : "next");
       button_prefs_page_nav_.Move(screen_layout::kFooterRightX, screen_layout::kFooterY);
       button_prefs_page_nav_.Draw(ts->screenright);
     }
@@ -600,7 +611,8 @@ void SettingsController::PrefsHandleEvent(const FrameInput &input) {
     const prefs_input_utils::PrefsNavStep step =
         prefs_input_utils::StepPrefsSelection(
             prefs_general_page_, app_.GetPrefsSelectedIndex(), visibleCount,
-            book_ctx, has_submenu, direction);
+            book_ctx, has_submenu, direction,
+            CurrentBookPrefsPageCount(app_.GetCurrentBook(), book_ctx));
     if (step.page != prefs_general_page_) {
       GoToPrefsPage(step.page, step.select_last);
     } else if (step.changed) {
@@ -677,7 +689,8 @@ void SettingsController::PrefsHandleTouch(const FrameInput &input) {
 
   if (book_ctx_touch && has_submenu &&
       enclosesWithSlack(button_prefs_page_nav_, footerX, footerY)) {
-    GoToPrefsPage(prefs_general_page_ == 0 ? 1 : 0);
+    const int pages = CurrentBookPrefsPageCount(app_.GetCurrentBook(), book_ctx_touch);
+    GoToPrefsPage((prefs_general_page_ + 1) % pages);
     return;
   }
   if (!book_ctx_touch && prefs_general_page_ == 2 &&

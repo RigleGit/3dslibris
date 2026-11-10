@@ -22,8 +22,10 @@ struct PrefsNavStep {
 // neighbouring settings page at list ends. direction: +1 next, -1 previous.
 // Page graph: library context 0 <-> 2; book context 0 <-> 1 (only when the
 // book has a submenu page). Page 1 always steps back to page 0, since the
-// library "style customization" button also opens it.
+// library "style customization" button also opens it. A book with three
+// pages (book_page_count 3) continues 0 <-> 1 <-> 2.
 PrefsNavStep StepPrefsSelection(int page, int selected, int visible_count,
-                                bool book_ctx, bool has_submenu, int direction);
+                                bool book_ctx, bool has_submenu, int direction,
+                                int book_page_count = 2);
 
 } // namespace prefs_input_utils
