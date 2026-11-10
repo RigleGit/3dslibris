@@ -381,7 +381,7 @@ void SettingsController::PrefsInit() {
       "reset settings",
       "clear cache",        "publisher indent", "publisher spacing",
       "publisher sides", "search", "disable ebook images", "preload book data",
-      "text alignment"};
+      "text alignment", "controls (vertical)"};
 
   for (int i = 0; i < PREFS_BUTTON_COUNT; i++) {
     app_.prefsButtons[i].Init(app_.ts.get());
@@ -954,6 +954,17 @@ void SettingsController::PrefsRefreshButton(int index) {
         app_.landscape ? std::string("Horizontal")
                        : std::string("Vertical"));
     break;
+  case PREFS_BUTTON_CONTROL_SCHEME:
+  case PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE: {
+    static const char *const kSchemeLabels[CONTROL_SCHEME_COUNT] = {
+        "Default", "One-handed"};
+    const bool landscape_scheme = index == PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE;
+    const int scheme = SelectedControlScheme(app_.prefs.get(), landscape_scheme);
+    button.SetLabel1(std::string(landscape_scheme ? "controls (horizontal)"
+                                                  : "controls (vertical)"));
+    button.SetLabel2(std::string(kSchemeLabels[scheme]));
+    break;
+  }
   case PREFS_BUTTON_HANDEDNESS:
     button.SetLabel2(
         orientation_utils::IsTurnedRight(app_.portrait_orientation)
@@ -1350,6 +1361,20 @@ void SettingsController::PrefsHandlePress() {
   if (selected_button == PREFS_BUTTON_DISABLE_EBOOK_IMAGES) {
     ToggleEbookImagesSetting(&app_);
     PrefsRefreshButton(PREFS_BUTTON_DISABLE_EBOOK_IMAGES);
+    app_.MarkPrefsDirty();
+    return;
+  }
+
+  if (selected_button == PREFS_BUTTON_CONTROL_SCHEME ||
+      selected_button == PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE) {
+    uint8_t &slot_value =
+        selected_button == PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE
+            ? app_.prefs->control_scheme_landscape
+            : app_.prefs->control_scheme_portrait;
+    slot_value = (uint8_t)((ClampControlScheme(slot_value) + 1) %
+                           CONTROL_SCHEME_COUNT);
+    app_.prefs->RequestWrite();
+    PrefsRefreshButton(selected_button);
     app_.MarkPrefsDirty();
     return;
   }

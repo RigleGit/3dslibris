@@ -15,6 +15,9 @@ int PrefsButtonIndexForAction(int action) {
     return PREFS_BUTTON_TIME_REMAINING;
   if (action == PREFS_ACTION_GO_TO_PAGE)
     return PREFS_BUTTON_TIME24H;
+  // General page 2 only; library sort lives on page 0 and sets its own labels.
+  if (action == PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE)
+    return PREFS_BUTTON_LIBRARY_SORT;
   return action >= 0 && action < PREFS_BUTTON_COUNT ? action : -1;
 }
 
@@ -34,6 +37,8 @@ static const int kGeneralPrefsButtons[] = {
 static const int kGeneralExtraButtons[] = {
     PREFS_BUTTON_ORIENTATION,
     PREFS_BUTTON_HANDEDNESS,
+    PREFS_BUTTON_CONTROL_SCHEME,
+    PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE,
     PREFS_BUTTON_REOPEN_LAST_BOOK,
     PREFS_BUTTON_CIRCLE_PAD_PAGE_TURN,
     PREFS_BUTTON_TEXT_ALIGN,

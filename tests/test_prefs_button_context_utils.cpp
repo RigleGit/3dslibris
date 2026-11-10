@@ -218,6 +218,14 @@ int main() {
     test::ExpectTrue("global options keep reset and cache cleanup",
                      HasButton(page, PREFS_BUTTON_RESET_DEFAULTS) &&
                      HasButton(page, PREFS_BUTTON_CLEAR_CACHE));
+    test::ExpectTrue("control schemes are global options",
+                     HasButton(page, PREFS_BUTTON_CONTROL_SCHEME) &&
+                     HasButton(page, PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE));
+    // Nine rows use the 32px pitch; the last row must still clear the footer.
+    test::ExpectEq("global options page row count",
+                   settings::PrefsPageButtonCount(page), 9);
+    test::ExpectEq("nine rows use the compact pitch",
+                   settings::PrefsRowPitch(settings::PrefsPageButtonCount(page)), 32);
   }
 
   page.from_book = true;
@@ -285,6 +293,12 @@ int main() {
   test::ExpectEq("page navigation keeps the existing visual storage",
       settings::PrefsButtonIndexForAction(PREFS_ACTION_GO_TO_PAGE),
       PREFS_BUTTON_TIME24H);
+  test::ExpectEq("landscape control scheme borrows an off-page visual button",
+      settings::PrefsButtonIndexForAction(PREFS_ACTION_CONTROL_SCHEME_LANDSCAPE),
+      PREFS_BUTTON_LIBRARY_SORT);
+  test::ExpectEq("portrait control scheme owns its visual button",
+      settings::PrefsButtonIndexForAction(PREFS_BUTTON_CONTROL_SCHEME),
+      PREFS_BUTTON_CONTROL_SCHEME);
   test::ExpectEq("invalid actions cannot index button storage",
       settings::PrefsButtonIndexForAction(-1), -1);
   settings::PrefsPageContext wide_page;
