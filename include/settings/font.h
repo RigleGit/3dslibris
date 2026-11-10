@@ -28,6 +28,8 @@ public:
     explicit FontMenu(const FontMenuContext &context);
     ~FontMenu();
     void Open(AppMode requested_mode);
+    u16 GetPageCount() const override;
+    u16 GetCurrentPage() const override;
     void draw();
     void Draw() override { draw(); } // Override to use the draw method
     void HandleInput(const FrameInput &input) override { handleInput(input); }
@@ -49,7 +51,8 @@ private:
     void handleFileInput(const FrameInput &input);
     void handleTargetTouchInput(const FrameInput &input);
     void handleButtonPress();
-    void LayoutFileButtons();
+    void relayoutTargets();
+    void relayoutFiles();
     void handleFileTouchInput(const FrameInput &input);
     void nextTargetPage();
     void previousTargetPage();
@@ -71,4 +74,7 @@ private:
     ViewState viewState;
     u8 targetSelected;
     u8 targetPage;
+    // Rows per page, paginated by cumulative wrapped height.
+    std::vector<int> targetPageSizes;
+    std::vector<int> filePageSizes;
 };

@@ -31,51 +31,88 @@
 #include "shared/orientation_utils.h"
 #include "shared/string_utils.h"
 #include "shared/text_unicode_utils.h"
+#include "shared/text_wrap_utils.h"
+#include "ui/button_text_layout.h"
 #include "ui/text.h"
 #include "ui/touch_utils.h"
 
 namespace {
 
-static const u8 kTargetsPerPage = 5;
+static const int kRowX = 5;
+static const int kRowTop = 24;
+// Rows end above the footer buttons; the page indicator lives in the header.
+static const int kRowsBottom = 288;
+static const int kRowW = 230;
+static const int kRowMinH = 36;
+static const int kRowGap = 2;
+static const int kHeaderY = 14;
 
-static std::vector<std::string> WrapTextToLines(Text *ts,
-                                                const std::string &text,
-                                                int max_width,
-                                                int max_lines) {
-  std::vector<std::string> lines;
-  std::string remaining = Trim(text);
-  const int style = TEXT_STYLE_BROWSER;
+// Wraps every label of `b` inside a row of kRowW and returns the box height
+// that holds all lines, so no name is ever cut or clipped.
+static int WrappedRowHeight(Text *ts, Button *b) {
+  const int saved_style = ts->GetStyle();
+  ts->SetStyle(TEXT_STYLE_BROWSER);
+  const int line_h = ts->GetHeight();
+  const int ascent = ts->GetAscent();
+  const int descent = ts->GetDescent();
+  ts->SetStyle(saved_style);
+  b->SetWrap(true);
+  const int lines = b->WrappedLineCount(kRowW);
+  int h = button_text_layout::HeightForLines(lines, line_h, ascent, descent,
+                                             kRowMinH);
+  if (h > kRowsBottom - kRowTop)
+    h = kRowsBottom - kRowTop; // a single huge row still gets a page
+  return h;
+}
 
-  while (!remaining.empty() && (int)lines.size() < max_lines) {
-    u8 chars_fit =
-        ts->GetCharCountInsideWidth(remaining.c_str(), style, (u8)max_width);
-    if (chars_fit == 0)
-      chars_fit = 1;
-
-    size_t bytes =
-        text_unicode_utils::Utf8BytesForDisplayChars(remaining.c_str(), chars_fit);
-    if (bytes == 0)
-      bytes = 1;
-    if (bytes > remaining.size())
-      bytes = remaining.size();
-
-    std::string line_text = remaining.substr(0, bytes);
-
-    if ((int)lines.size() == max_lines - 1 && bytes < remaining.size()) {
-      if (chars_fit > 4) {
-        size_t text_bytes = text_unicode_utils::Utf8BytesForDisplayChars(
-            remaining.c_str(), chars_fit - 3);
-        if (text_bytes == 0)
-          text_bytes = 1;
-        line_text = remaining.substr(0, text_bytes) + "...";
-      }
-    }
-
-    lines.push_back(line_text);
-    remaining = remaining.substr(bytes);
+// Sizes every button, paginates them by cumulative height and places each one
+// inside its page. `sizes` receives the number of rows of every page.
+static void LayoutButtonPages(Text *ts, std::vector<Button *> &rows,
+                              std::vector<int> *sizes) {
+  std::vector<int> heights;
+  heights.reserve(rows.size());
+  for (size_t i = 0; i < rows.size(); i++) {
+    const int h = WrappedRowHeight(ts, rows[i]);
+    rows[i]->Resize(kRowW, (u16)h);
+    heights.push_back(h);
   }
+  std::vector<int> ys;
+  text_wrap_utils::LayoutRows(heights.data(), (int)heights.size(), kRowTop,
+                              kRowsBottom, kRowGap, sizes, &ys);
+  for (size_t i = 0; i < rows.size(); i++)
+    rows[i]->Move(kRowX, (u16)ys[i]);
+}
 
-  return lines;
+static int PageStartOf(const std::vector<int> &sizes, int page) {
+  int start = 0;
+  for (int i = 0; i < page && i < (int)sizes.size(); i++)
+    start += sizes[i];
+  return start;
+}
+
+static int PageOfIndex(const std::vector<int> &sizes, int index) {
+  int start = 0;
+  for (size_t i = 0; i < sizes.size(); i++) {
+    if (index < start + sizes[i])
+      return (int)i;
+    start += sizes[i];
+  }
+  return sizes.empty() ? 0 : (int)sizes.size() - 1;
+}
+
+// "Pg n/m" sits in the header, right-aligned, so it never shares space with
+// the rows.
+static void DrawPageIndicator(Text *ts, int current, int total) {
+  char label[24];
+  snprintf(label, sizeof(label), "Pg %d/%d", current, total);
+  const bool saved_wrap = ts->IsAutoWrapEnabled();
+  const int saved_margin_right = ts->margin.right;
+  ts->SetAutoWrapEnabled(false);
+  ts->margin.right = 0;
+  ts->SetPen(std::max(6, kRowX + kRowW - ts->GetStringAdvance(label)), kHeaderY);
+  ts->PrintString(label);
+  ts->margin.right = saved_margin_right;
+  ts->SetAutoWrapEnabled(saved_wrap);
 }
 
 static std::string BasenameOnly(const std::string &path) {
@@ -141,20 +178,9 @@ FontMenu::FontMenu(const FontMenuContext &context)
   for (auto &filename : files) {
     Button *b = new Button(ts);
     b->Init();
-    b->Move(5, 24);
-
-    std::vector<std::string> lines = WrapTextToLines(ts, filename, 220, 2);
-    if (lines.size() > 0) b->SetLabel1(lines[0]);
-    if (lines.size() > 1) b->SetLabel2(lines[1]);
-
-    int line_height = ts->GetHeight();
-    if (line_height < 10)
-      line_height = 10;
-    int button_height = 34;
-    if (lines.size() == 2)
-      button_height = 8 + 2 * line_height;
-    b->Resize(230, button_height);
-
+    b->Move(kRowX, kRowTop);
+    b->SetLabel1(filename);
+    b->Resize(kRowW, kRowMinH);
     buttons.push_back(b);
   }
 
@@ -162,13 +188,15 @@ FontMenu::FontMenu(const FontMenuContext &context)
     Button *b = new Button(ts);
     b->Init();
     b->SetStyle(BUTTON_STYLE_SETTING);
-    b->Move(5, 24 + (i % kTargetsPerPage) * 38);
-    b->Resize(230, 36);
+    b->Move(kRowX, kRowTop);
+    b->Resize(kRowW, kRowMinH);
     b->SetLabel1(std::string(font_config_utils::GetFontTargetLabel(i)));
     targetButtons.push_back(b);
   }
 
   refreshTargetButtons();
+  relayoutTargets();
+  relayoutFiles();
 }
 
 FontMenu::~FontMenu() {
@@ -243,6 +271,19 @@ void FontMenu::refreshTargetButtons() {
       targetButtons[i]->SetLabel2(BasenameOnly(current));
     }
   }
+  relayoutTargets();
+}
+
+void FontMenu::relayoutTargets() {
+  LayoutButtonPages(ts, targetButtons, &targetPageSizes);
+  if (targetPage >= targetPageSizes.size())
+    targetPage = targetPageSizes.empty() ? 0 : (u8)(targetPageSizes.size() - 1);
+}
+
+void FontMenu::relayoutFiles() {
+  LayoutButtonPages(ts, buttons, &filePageSizes);
+  if (page >= filePageSizes.size())
+    page = filePageSizes.empty() ? 0 : (u16)(filePageSizes.size() - 1);
 }
 
 void FontMenu::enterTargetView(u8 requested_target) {
@@ -254,22 +295,11 @@ void FontMenu::enterTargetView(u8 requested_target) {
   dirty = true;
 }
 
-void FontMenu::LayoutFileButtons() {
-  int y = 24;
-  u8 start = page * pagesize;
-  u8 end = (page + 1) * pagesize;
-  if (end > buttons.size())
-    end = buttons.size();
-  for (u8 i = start; i < end; i++) {
-    buttons[i]->Move(5, y);
-    y += buttons[i]->GetHeight() + 2;
-  }
-}
-
 void FontMenu::enterFileView() {
   viewState = VIEW_FILES;
   selected = 0;
   page = 0;
+  relayoutFiles();
 
   if (buttons.empty()) {
     dirty = true;
@@ -283,13 +313,13 @@ void FontMenu::enterFileView() {
 
   for (size_t i = 0; i < files.size(); i++) {
     if (FontNameEquals(files[i], current)) {
-      selected = (u8)i;
+      selected = (u16)i;
       break;
     }
   }
 
-  page = selected / pagesize;
-  LayoutFileButtons();
+  relayoutFiles();
+  page = (u16)PageOfIndex(filePageSizes, selected);
   dirty = true;
 }
 
@@ -431,8 +461,9 @@ void FontMenu::handleFileTouchInput(const FrameInput &input) {
   int footerX = -1;
   touch::FirstXInBottomBand(candidates, 284, &footerX);
 
-  for (u8 i = page * pagesize;
-       (i < buttons.size()) && (i < (page + 1) * pagesize); i++) {
+  const u16 file_start = (u16)PageStartOf(filePageSizes, page);
+  const u16 file_end = (u16)std::min((size_t)(file_start + (page < filePageSizes.size() ? filePageSizes[page] : 0)), buttons.size());
+  for (u16 i = file_start; i < file_end; i++) {
     if (touch::HitsButton(candidates, buttons[i], 4)) {
       selected = i;
       handleButtonPress();
@@ -501,21 +532,16 @@ void FontMenu::draw() {
 
   if (viewState == VIEW_TARGETS) {
     LayoutTargetFooterButtons(buttonprefs);
-    ts->SetPen(6, 14);
+    ts->SetPen(6, kHeaderY);
     ts->PrintString("font configuration");
 
     const u8 start = getTargetPageStart();
     const u8 end = getTargetPageEnd();
     for (u8 i = start; i < end; i++) {
-      targetButtons[i]->Move(5, 24 + (i - start) * 38);
       targetButtons[i]->Draw(i == targetSelected);
     }
 
-    char pageLabel[24];
-    snprintf(pageLabel, sizeof(pageLabel), "Pg %d/%d", getTargetCurrentPage(),
-             getTargetPageCount());
-    ts->SetPen(6, 282);
-    ts->PrintString(pageLabel);
+    DrawPageIndicator(ts, getTargetCurrentPage(), getTargetPageCount());
 
     if (targetPage > 0)
       buttonprev->Draw();
@@ -539,23 +565,20 @@ void FontMenu::draw() {
   }
 
   LayoutFileFooterButtons(buttonprev, buttonnext, buttonprefs);
-  ts->SetPen(6, 14);
+  ts->SetPen(6, kHeaderY);
   char header[72];
   snprintf(header, sizeof(header), "select %s",
            font_config_utils::GetFontTargetLabel(targetSelected));
   ts->PrintString(header);
 
-  LayoutFileButtons();
-  for (u8 i = page * pagesize;
-       (i < buttons.size()) && (i < (page + 1) * pagesize); i++) {
+  const u16 draw_start = (u16)PageStartOf(filePageSizes, page);
+  const u16 draw_end = (u16)std::min(
+      (size_t)(draw_start + (page < filePageSizes.size() ? filePageSizes[page] : 0)),
+      buttons.size());
+  for (u16 i = draw_start; i < draw_end; i++)
     buttons[i]->Draw(i == selected);
-  }
 
-  char pageLabel[24];
-  snprintf(pageLabel, sizeof(pageLabel), "Pg %d/%d", GetCurrentPage(),
-           GetPageCount());
-  ts->SetPen(6, 282);
-  ts->PrintString(pageLabel);
+  DrawPageIndicator(ts, GetCurrentPage(), GetPageCount());
 
   if (page > 0)
     buttonprev->Draw();
@@ -576,12 +599,18 @@ void FontMenu::draw() {
 #endif
 }
 
+u16 FontMenu::GetPageCount() const {
+  return filePageSizes.empty() ? 1 : (u16)filePageSizes.size();
+}
+
+u16 FontMenu::GetCurrentPage() const { return page + 1; }
+
 void FontMenu::selectNext() {
   if (buttons.empty())
     return;
   if (selected < buttons.size() - 1) {
     selected++;
-    page = selected / pagesize;
+    page = (u16)PageOfIndex(filePageSizes, selected);
     dirty = true;
   }
 }
@@ -589,9 +618,9 @@ void FontMenu::selectNext() {
 void FontMenu::nextPage() {
   if (buttons.empty())
     return;
-  if ((u16)(page + 1) * pagesize < buttons.size()) {
+  if (page + 1 < GetPageCount()) {
     page += 1;
-    selected = page * pagesize;
+    selected = (u16)PageStartOf(filePageSizes, page);
     dirty = true;
   }
 }
@@ -601,7 +630,7 @@ void FontMenu::previousPage() {
     return;
   if (page > 0) {
     page--;
-    selected = page * pagesize;
+    selected = (u16)PageStartOf(filePageSizes, page);
     dirty = true;
   }
 }
@@ -611,7 +640,7 @@ void FontMenu::selectPrevious() {
     return;
   if (selected > 0) {
     selected--;
-    page = selected / pagesize;
+    page = (u16)PageOfIndex(filePageSizes, selected);
     dirty = true;
   }
 }
@@ -633,24 +662,25 @@ void FontMenu::selectPreviousTarget() {
 }
 
 u8 FontMenu::getTargetPageCount() const {
-  return (font_config_utils::FONT_TARGET_COUNT + kTargetsPerPage - 1) /
-         kTargetsPerPage;
+  return targetPageSizes.empty() ? 1 : (u8)targetPageSizes.size();
 }
 
 u8 FontMenu::getTargetCurrentPage() const { return targetPage + 1; }
 
-u8 FontMenu::getTargetPageStart() const { return targetPage * kTargetsPerPage; }
+u8 FontMenu::getTargetPageStart() const {
+  return (u8)PageStartOf(targetPageSizes, targetPage);
+}
 
 u8 FontMenu::getTargetPageEnd() const {
-  const u8 start = getTargetPageStart();
-  const u8 end = start + kTargetsPerPage;
-  return (end < font_config_utils::FONT_TARGET_COUNT)
-             ? end
-             : font_config_utils::FONT_TARGET_COUNT;
+  const int size = targetPage < targetPageSizes.size() ? targetPageSizes[targetPage] : 0;
+  const int end = getTargetPageStart() + size;
+  return (u8)(end < font_config_utils::FONT_TARGET_COUNT
+                  ? end
+                  : font_config_utils::FONT_TARGET_COUNT);
 }
 
 void FontMenu::syncTargetPageToSelection() {
-  targetPage = targetSelected / kTargetsPerPage;
+  targetPage = (u8)PageOfIndex(targetPageSizes, targetSelected);
 }
 
 void FontMenu::nextTargetPage() {
