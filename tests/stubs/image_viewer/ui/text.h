@@ -45,6 +45,8 @@ public:
   int GetHeight() const {
     return 14;
   }
+  u8 GetAscent() const { return 11; }
+  u8 GetDescent() const { return 3; }
   int GetAdvance(u32, u8 = TEXT_STYLE_REGULAR) const {
     return 7;
   }

@@ -75,6 +75,9 @@ public:
   FT_UInt GetGlyphIndex(u32 ucs);
   u8 GetStringWidth(const char *txt, FT_Face face);
   u8 GetHeight();
+  // Pixels above / below the baseline reserved by the current face.
+  u8 GetAscent();
+  u8 GetDescent();
   std::string GetFontName(u8 style);
   bool GetFontName(std::string &s);
   void SetFontFile(const char *path, u8 style);

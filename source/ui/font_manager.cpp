@@ -733,6 +733,20 @@ u8 FontManager::GetHeight() {
   return (face->size->metrics.height >> 6);
 }
 
+u8 FontManager::GetAscent() {
+  FT_Face face = GetFace((u8)parent->GetStyle());
+  if (!face || !face->size)
+    return 0;
+  return (u8)(face->size->metrics.ascender >> 6);
+}
+
+u8 FontManager::GetDescent() {
+  FT_Face face = GetFace((u8)parent->GetStyle());
+  if (!face || !face->size)
+    return 0;
+  return (u8)((-face->size->metrics.descender) >> 6);
+}
+
 std::string FontManager::GetFontName(u8 style) {
   FT_Face face = GetFace(style);
   if (!face)

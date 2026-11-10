@@ -12,6 +12,7 @@
 */
 
 #include "ui/button.h"
+#include "ui/button_text_layout.h"
 
 #include <3ds.h>
 #include <algorithm>
@@ -200,18 +201,41 @@ void Button::Draw(u16 *screen, bool highlight) {
   if (text_width < 6)
     text_width = 6;
 
+  const u8 saved_pixel_size = ts->GetPixelSize();
   if (!text1.empty()) {
     int line_count = text3.empty() ? (text2.empty() ? 1 : 2) : 3;
-    int block_h = line_count * line_height;
-    int top = by + (bh - block_h) / 2;
-    if (line_count == 1)
-      top -= 2;
-    else if (bh <= 22)
-      top -= 1;
-    if (top < by)
-      top = by;
-    if (top + block_h > by + bh - 1)
-      top = (by + bh - 1) - block_h;
+    int top;
+    // Distance from the block top to the first baseline, and baseline pitch.
+    int first_baseline;
+    int pitch = line_height;
+    if (line_count == 1) {
+      int block_h = line_height;
+      top = by + (bh - block_h) / 2 - 2;
+      if (top < by)
+        top = by;
+      if (top + block_h > by + bh - 1)
+        top = (by + bh - 1) - block_h;
+      first_baseline = top + line_height;
+    } else {
+      // The skin's border and drop shadow take button_text_layout::kInset
+      // at the top and the bottom, so multi-line text is laid out inside. Lines are
+      // centered as a block; if the block does not fit at the natural line
+      // pitch the pitch tightens, and as a last resort the text shrinks.
+      button_text_layout::Block block;
+      for (;;) {
+        line_height = ts->GetHeight();
+        block = button_text_layout::Compute(bh, line_count, line_height,
+                                            ts->GetAscent(), ts->GetDescent());
+        const u8 size = ts->GetPixelSize();
+        if (block.fits || size <= 8)
+          break;
+        ts->SetPixelSize((u8)(size - 1));
+      }
+      pitch = block.pitch;
+      first_baseline = by + block.first_baseline;
+    }
+    line_height = pitch;
+    top = first_baseline - line_height;
 
     // For RTL labels use the display-ready (shaped + reordered) string.
     const char *src1 = text1_rtl ? display1.c_str() : text1.c_str();
@@ -268,6 +292,7 @@ void Button::Draw(u16 *screen, bool highlight) {
                           bw, bh, resolvedIcon, !enabled);
   }
 
+  ts->SetPixelSize(saved_pixel_size);
   ts->SetScreen(save_screen);
   ts->SetStyle(save_style);
 }

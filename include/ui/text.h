@@ -114,6 +114,8 @@ public:
   std::string GetFontName(u8 style);
   bool GetFontName(std::string &s);
   u8 GetHeight(void);
+  u8 GetAscent(void);
+  u8 GetDescent(void);
   bool GetInvert();
   void GetPen(u16 *x, u16 *y);
   void GetPen(u16 &x, u16 &y);

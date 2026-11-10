@@ -114,6 +114,10 @@ bool Text::GetFontName(std::string &s) { return fm->GetFontName(s); }
 
 u8 Text::GetHeight() { return fm ? fm->GetHeight() : PIXELSIZE; }
 
+u8 Text::GetAscent() { return fm ? fm->GetAscent() : PIXELSIZE; }
+
+u8 Text::GetDescent() { return fm ? fm->GetDescent() : 0; }
+
 void Text::GetPen(u16 *x, u16 *y) { tr->GetPen(x, y); }
 
 void Text::GetPen(u16 &x, u16 &y) { tr->GetPen(x, y); }
