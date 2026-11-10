@@ -205,7 +205,7 @@ void Button::CollectLines(int width, bool wrapping,
 }
 
 int Button::TextWidthFor(int box_w) const {
-  const int text_x = (box_w <= 90) ? 6 : 8;
+  const int text_x = (box_w <= 90) ? 6 : 10;
   const int right_pad = (box_w <= 90) ? 6 : 8;
   int w = box_w - text_x - right_pad - 2 - indent;
   return w < 6 ? 6 : w;
@@ -257,7 +257,7 @@ void Button::Draw(u16 *screen, bool highlight) {
 
   const bool wrap = wrap_;
   int line_height = ts->GetHeight();
-  int text_x = bx + ((bw <= 90) ? 6 : 8);
+  int text_x = bx + ((bw <= 90) ? 6 : 10);
   int right_pad = (bw <= 90) ? 6 : 8;
   if (hasIcon)
     right_pad += UiButtonSkin_IconBlockWidth(bh);

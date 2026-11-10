@@ -244,7 +244,7 @@ void BookmarkMenu::BuildEntries(Book *book, Text *text,
   pages.reserve(bookmarks.size());
 
   // Matches the list row's text width so wrapped rows keep these exact lines.
-  const int kPreviewWidth = 212;
+  const int kPreviewWidth = 210;
   const int kMaxPreviewLines = 2;
   const size_t kPreviewChars = 120;
 
@@ -298,7 +298,7 @@ void BookmarkMenu::Draw() {
         break;
       }
       const std::string text = ExtractPagePreview(book->GetPage(target), 120);
-      const auto lines = WrapTextToLines(ts, text, 212, 2);
+      const auto lines = WrapTextToLines(ts, text, 210, 2);
       buttons[i]->SetLabel2(lines.empty() ? "" : lines[0]);
       buttons[i]->SetLabel3(lines.size() < 2 ? "" : lines[1]);
       preview_ready_[i] = true;
