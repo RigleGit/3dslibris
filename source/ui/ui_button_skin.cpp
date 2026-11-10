@@ -592,7 +592,8 @@ UiButtonIconId UiButtonSkin_IconFromLabel(const char *label) {
     return UI_BUTTON_ICON_GEAR;
   if (strcmp(lower, "next") == 0)
     return UI_BUTTON_ICON_NEXT;
-  if (strcmp(lower, "prev") == 0 || strcmp(lower, "previous") == 0)
+  if (strcmp(lower, "prev") == 0 || strcmp(lower, "previous") == 0 ||
+      strcmp(lower, "first") == 0)
     return UI_BUTTON_ICON_PREV;
   if (strcmp(lower, "back") == 0)
     return UI_BUTTON_ICON_BACK;
