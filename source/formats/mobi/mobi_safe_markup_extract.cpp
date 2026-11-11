@@ -1,6 +1,7 @@
 #include "formats/mobi/mobi_safe_markup_extract.h"
 #include "formats/common/cache_memory_utils.h"
 
+#include <algorithm>
 #include <cctype>
 #include <new>
 #include <stdint.h>
@@ -100,81 +101,67 @@ static void AppendInlineImageToken(std::string *out, uint16_t image_id,
   out->push_back((char)(image_id & 0xFF));
 }
 
-} // namespace
-
-struct Session::State {
-  const std::string *source;
-  std::string *output;
+// Extraction state shared by the whole-buffer Session and the incremental
+// Stream. `out` holds the output not yet handed away; `out_base` counts the
+// bytes already drained, so map offsets stay absolute.
+struct Core {
+  std::string *out = nullptr;
+  size_t out_base = 0;
   InlineImageCallbacks callbacks;
-  std::vector<std::pair<uint32_t, uint32_t>> *map;
-  size_t cursor = 0, interval = 0, next_sample = 0;
+  std::vector<std::pair<uint32_t, uint32_t>> *map = nullptr;
+  size_t interval = 0, next_sample = 0;
   bool in_script = false, in_style = false, pending_space = false,
-       at_paragraph_start = true, done = false, no_memory = false;
+       at_paragraph_start = true;
 };
-Session::Session() : state_(nullptr) {}
-Session::~Session() {
-  delete state_;
-}
-bool Session::Begin(const std::string *source, std::string *output,
-                    const InlineImageCallbacks &callbacks,
-                    std::vector<std::pair<uint32_t, uint32_t>> *map) {
-  delete state_;
-  state_ = new (std::nothrow) State;
-  if (!state_ || !source || !output)
-    return false;
-  State &s = *state_;
-  s.source = source;
-  s.output = output;
-  s.callbacks = callbacks;
-  s.map = map;
+
+void BeginCore(Core *c, std::string *output, const InlineImageCallbacks &cb,
+               std::vector<std::pair<uint32_t, uint32_t>> *map,
+               size_t total_markup_bytes) {
+  c->out = output;
+  c->callbacks = cb;
+  c->map = map;
   output->clear();
   if (map) {
-    s.interval =
-        mobi_position_map::HtmlSampleIntervalForTextBytes(source->size());
-    s.next_sample = s.interval;
+    c->interval =
+        mobi_position_map::HtmlSampleIntervalForTextBytes(total_markup_bytes);
+    c->next_sample = c->interval;
     map->clear();
     map->push_back({0u, 0u});
   }
-  return true;
 }
-size_t Session::Progress() const {
-  return state_ ? state_->cursor : 0;
-}
-bool Session::NoMemory() const {
-  return state_ && state_->no_memory;
-}
-bool Session::Step(size_t bytes) {
-  if (!state_ || state_->done)
-    return true;
-  State &s = *state_;
-  const std::string &markup_utf8 = *s.source;
-  std::string &out = *s.output;
-  const InlineImageCallbacks &image_callbacks = s.callbacks;
-  auto *html_to_text_map = s.map;
-  const size_t kSampleInterval = s.interval;
-  size_t &next_sample = s.next_sample, &i = s.cursor;
-  bool &in_script = s.in_script, &in_style = s.in_style,
-       &pending_space = s.pending_space,
-       &at_paragraph_start = s.at_paragraph_start;
-  const size_t begin = i;
-  if (s.no_memory)
-    return false;
-  if (!cache_memory::CanAppend(out,
-                               std::min(markup_utf8.size() - i, bytes + 16))) {
-    s.no_memory = true;
-    return false;
-  }
-  for (; i < markup_utf8.size() && i - begin < bytes;) {
-    if (html_to_text_map && kSampleInterval > 0 && i >= next_sample) {
-      html_to_text_map->push_back({(uint32_t)i, (uint32_t)out.size()});
-      next_sample = i + kSampleInterval;
-    }
-    const unsigned char c = (unsigned char)markup_utf8[i];
 
-    if (c == '<') {
+// Consumes markup_utf8[i..) for at most `limit` bytes (a construct that starts
+// inside the limit is finished). `abs_base` is the absolute offset of
+// markup_utf8[0]. With !final, a tag or entity that is not complete inside the
+// window stops the run with *need_more set; with final it behaves exactly like
+// the whole-buffer scan (an unterminated tag stops without progress).
+void Run(Core *c, const std::string &markup_utf8, size_t &i, size_t abs_base,
+         size_t limit, bool final, bool *need_more) {
+  std::string &out = *c->out;
+  const InlineImageCallbacks &image_callbacks = c->callbacks;
+  auto *html_to_text_map = c->map;
+  const size_t kSampleInterval = c->interval;
+  size_t &next_sample = c->next_sample;
+  bool &in_script = c->in_script, &in_style = c->in_style,
+       &pending_space = c->pending_space,
+       &at_paragraph_start = c->at_paragraph_start;
+  const size_t begin = i;
+  *need_more = false;
+  for (; i < markup_utf8.size() && i - begin < limit;) {
+    if (html_to_text_map && kSampleInterval > 0 &&
+        abs_base + i >= next_sample) {
+      html_to_text_map->push_back(
+          {(uint32_t)(abs_base + i), (uint32_t)(c->out_base + out.size())});
+      next_sample = abs_base + i + kSampleInterval;
+    }
+    const unsigned char ch = (unsigned char)markup_utf8[i];
+
+    if (ch == '<') {
       size_t close = markup_utf8.find('>', i + 1);
-      if (close == std::string::npos)
+      if (close == std::string::npos) {
+        *need_more = !final;
         break;
+      }
       const std::string tag_text = markup_utf8.substr(i + 1, close - i - 1);
       const std::string tag_name = ParseTagName(tag_text);
       const bool closing = IsClosingTag(tag_text);
@@ -223,9 +210,20 @@ bool Session::Step(size_t bytes) {
       continue;
     }
 
-    if (c == '&') {
-      size_t semi = markup_utf8.find(';', i + 1);
-      if (semi != std::string::npos && semi - i <= 12) {
+    if (ch == '&') {
+      // An entity is a ';' within 12 bytes of the '&'.
+      size_t semi = std::string::npos;
+      const size_t scan_end = std::min(markup_utf8.size(), i + 13);
+      for (size_t k = i + 1; k < scan_end; ++k)
+        if (markup_utf8[k] == ';') {
+          semi = k;
+          break;
+        }
+      if (semi == std::string::npos && !final && markup_utf8.size() < i + 13) {
+        *need_more = true;
+        break;
+      }
+      if (semi != std::string::npos) {
         std::string decoded;
         if (html_entity_utils::DecodeHtmlEntityUtf8(
                 markup_utf8.substr(i + 1, semi - i - 1), &decoded)) {
@@ -244,13 +242,13 @@ bool Session::Step(size_t bytes) {
       }
     }
 
-    if (IsAsciiSpace((char)c)) {
+    if (IsAsciiSpace((char)ch)) {
       pending_space = true;
       i++;
       continue;
     }
 
-    if (c < 0x20) {
+    if (ch < 0x20) {
       i++;
       continue;
     }
@@ -260,18 +258,146 @@ bool Session::Step(size_t bytes) {
       pending_space = false;
     }
 
-    out.push_back((char)c);
+    out.push_back((char)ch);
     at_paragraph_start = false;
     i++;
   }
+}
 
-  if (i < markup_utf8.size())
+void FinishOutput(std::string *out) {
+  TrimTrailingInlineWhitespace(out);
+  while (!out->empty() && out->back() == '\n')
+    out->pop_back();
+}
+
+} // namespace
+
+struct Session::State {
+  const std::string *source;
+  Core core;
+  size_t cursor = 0;
+  bool done = false, no_memory = false;
+};
+Session::Session() : state_(nullptr) {}
+Session::~Session() {
+  delete state_;
+}
+bool Session::Begin(const std::string *source, std::string *output,
+                    const InlineImageCallbacks &callbacks,
+                    std::vector<std::pair<uint32_t, uint32_t>> *map) {
+  delete state_;
+  state_ = new (std::nothrow) State;
+  if (!state_ || !source || !output)
     return false;
-  TrimTrailingInlineWhitespace(&out);
-  while (!out.empty() && out.back() == '\n')
-    out.pop_back();
+  state_->source = source;
+  BeginCore(&state_->core, output, callbacks, map, source->size());
+  return true;
+}
+size_t Session::Progress() const {
+  return state_ ? state_->cursor : 0;
+}
+bool Session::NoMemory() const {
+  return state_ && state_->no_memory;
+}
+bool Session::Step(size_t bytes) {
+  if (!state_ || state_->done)
+    return true;
+  State &s = *state_;
+  const std::string &markup_utf8 = *s.source;
+  std::string &out = *s.core.out;
+  if (s.no_memory)
+    return false;
+  if (!cache_memory::CanAppend(
+          out, std::min(markup_utf8.size() - s.cursor, bytes + 16))) {
+    s.no_memory = true;
+    return false;
+  }
+  bool need_more = false;
+  Run(&s.core, markup_utf8, s.cursor, 0, bytes, true, &need_more);
+  if (s.cursor < markup_utf8.size())
+    return false;
+  FinishOutput(&out);
   s.done = true;
   return true;
+}
+
+struct Stream::State {
+  Core core;
+  std::string window, out;
+  size_t abs_base = 0;
+  bool no_memory = false, finished = false;
+};
+Stream::Stream() : state_(nullptr) {}
+Stream::~Stream() {
+  delete state_;
+}
+bool Stream::Begin(const InlineImageCallbacks &callbacks,
+                   std::vector<std::pair<uint32_t, uint32_t>> *map,
+                   size_t total_markup_bytes) {
+  delete state_;
+  state_ = new (std::nothrow) State;
+  if (!state_)
+    return false;
+  BeginCore(&state_->core, &state_->out, callbacks, map, total_markup_bytes);
+  return true;
+}
+bool Stream::NoMemory() const {
+  return state_ && state_->no_memory;
+}
+size_t Stream::Consumed() const {
+  return state_ ? state_->abs_base : 0;
+}
+size_t Stream::OutputBytes() const {
+  return state_ ? state_->core.out_base + state_->out.size() : 0;
+}
+bool Stream::Feed(const char *data, size_t n, bool final) {
+  if (!state_ || state_->no_memory || state_->finished)
+    return false;
+  State &s = *state_;
+  // A tag with no end inside this much input is not markup worth waiting for.
+  const size_t kMaxPending = 4u * 1024u * 1024u;
+  if (!cache_memory::CanAppend(s.window, n) ||
+      !cache_memory::CanAppend(s.out, n + 64)) {
+    s.no_memory = true;
+    return false;
+  }
+  s.window.append(data, n);
+  size_t i = 0;
+  bool need_more = false;
+  Run(&s.core, s.window, i, s.abs_base, (size_t)-1, final, &need_more);
+  if (need_more && s.window.size() - i > kMaxPending) {
+    s.no_memory = true;
+    return false;
+  }
+  s.abs_base += final ? s.window.size() : i;
+  if (final)
+    s.window.clear();
+  else
+    s.window.erase(0, i);
+  if (final) {
+    FinishOutput(&s.out);
+    s.finished = true;
+  }
+  return true;
+}
+void Stream::Drain(std::string *chunk) {
+  if (!state_ || !chunk)
+    return;
+  State &s = *state_;
+  size_t keep = s.out.size();
+  if (!s.finished) {
+    // The newest whitespace run and the byte before it can still be rewritten
+    // by later trims and by the space/paragraph rules.
+    while (keep > 0 && IsAsciiSpace(s.out[keep - 1]))
+      --keep;
+    if (keep > 0)
+      --keep;
+  }
+  if (!keep)
+    return;
+  chunk->append(s.out, 0, keep);
+  s.out.erase(0, keep);
+  s.core.out_base += keep;
 }
 std::string ExtractToText(const std::string &source,
                           const InlineImageCallbacks &callbacks,
