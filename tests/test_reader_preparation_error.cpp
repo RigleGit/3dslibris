@@ -128,7 +128,7 @@ static void ResetOpeningState(App *app) {
   ++app->resets;
 }
 static void DrawOpeningSplashImpl(App *app, unsigned, unsigned,
-                                  const char *label) {
+                                  const char *label, bool = true) {
   app->displays.push_back(label);
 }
 struct ReaderController {
@@ -138,6 +138,7 @@ struct ReaderController {
   Book *cache_preparing_;
   std::string cache_label_;
   u64 cache_draw_ms_ = 0;
+  u64 cache_top_ms_ = 0;
   ReaderController(App &app, Book &book) : app_(app), cache_preparing_(&book) {}
   bool AdvanceCachePreparation(const FrameInput &);
   void OpenBook() {

@@ -214,7 +214,7 @@ OpenBookRelayoutState CaptureRelayoutState(Book *book, bool needs_relayout) {
 }
 
 void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
-                           const char *label) {
+                           const char *label, bool draw_top) {
   Book *selected = app ? app->GetSelectedBook() : NULL;
   if (!app || !app->ts || !selected)
     return;
@@ -229,7 +229,10 @@ void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
   u16 *savedScreen = app->ts->GetScreen();
 
   app->ts->SetStyle(TEXT_STYLE_BROWSER);
-  app->ts->PrintSplash(app->ts->screenleft);
+  // The top artwork is static during an open; callers skip its costly
+  // rescale between label changes.
+  if (draw_top)
+    app->ts->PrintSplash(app->ts->screenleft);
 
   app->ts->SetScreen(app->ts->screenright);
   app->ts->ClearScreen();

@@ -43,7 +43,8 @@ OpenBookRelayoutState CaptureRelayoutState(Book *book, bool needs_relayout);
 void ClearSavedRelayoutState(const Book *book);
 
 void DrawOpeningSplashImpl(App *app, unsigned spine_done, unsigned spine_total,
-                           const char *label = "opening book ...");
+                           const char *label = "opening book ...",
+                           bool draw_top = true);
 void DrawOpeningSplash(App *app);
 void MaybeDrawOpeningSplashProgress(App *app);
 

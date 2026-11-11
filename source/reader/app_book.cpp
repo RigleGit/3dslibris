@@ -246,12 +246,20 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
     return true;
   }
   const std::string label = preparation_->Label();
-  if (!cache_draw_ms_ || input.timestamp_ms - cache_draw_ms_ >= 100) {
-    if (label != cache_label_)
+  // Progress text changes slowly: redraw at most every 250 ms. The static top
+  // artwork is repainted only when the label changes (and every 2 s in case a
+  // resume discarded it).
+  if (!cache_draw_ms_ || input.timestamp_ms - cache_draw_ms_ >= 250) {
+    const bool label_changed = label != cache_label_;
+    if (label_changed)
       DBG_LOGF(&app_, "Reflow preparation stage=%s", label.c_str());
+    const bool draw_top = !cache_draw_ms_ || label_changed ||
+                          input.timestamp_ms - cache_top_ms_ >= 2000;
+    if (draw_top)
+      cache_top_ms_ = input.timestamp_ms;
     const u64 splash_begin = osGetTime();
     DrawOpeningSplashImpl(&app_, preparation_->Progress(),
-                          preparation_->Total(), label.c_str());
+                          preparation_->Total(), label.c_str(), draw_top);
     preparation_->NoteSplash((unsigned)(osGetTime() - splash_begin));
     cache_draw_ms_ = input.timestamp_ms;
     cache_label_ = label;
