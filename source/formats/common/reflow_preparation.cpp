@@ -511,7 +511,16 @@ ReflowPreparation::Result ReflowPreparation::Step() {
     if (r != Pending && r != Complete)
       return s.result = r;
     s.parsed = r == Complete;
-    if (!s.refined && s.mobi) {
+    if (!s.refined && s.mobi && s.profile.tier == reflow_open_profile::Stream) {
+      // The stream tier holds no source and only downgrades are refined: the
+      // header cannot change the pick, and the probe adds file_size back to a
+      // heap that never held it.
+      if (s.mobi->TextLength()) {
+        s.refined = true;
+        DBG_LOGF(s.book->GetStatusReporter(),
+                 "REFLOW profile refined kept tier=stream");
+      }
+    } else if (!s.refined && s.mobi) {
       const unsigned long long text_len = s.mobi->TextLength();
       if (text_len) {
         // The header gives the real text size: re-evaluate once. Only a
