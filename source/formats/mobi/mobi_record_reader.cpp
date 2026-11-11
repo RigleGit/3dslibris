@@ -4,17 +4,28 @@
 
 #include <algorithm>
 #include <new>
+#include <string.h>
 #include <unistd.h>
 
 namespace mobi_record_reader {
 
-RecordReader::RecordReader() : fd_(-1), file_size_(0) {}
+RecordReader::RecordReader()
+    : fd_(-1), file_size_(0), block_start_(0), block_len_(0),
+      read_ahead_(192 * 1024), disk_reads_(0) {}
+
+void RecordReader::SetReadAhead(size_t bytes) {
+  read_ahead_ = bytes;
+  block_len_ = 0;
+  if (!bytes)
+    std::string().swap(block_);
+}
 
 bool RecordReader::ReadAt(uint64_t offset, void *data, size_t size) const {
   if (fd_ < 0)
     return false;
   if (lseek(fd_, (off_t)offset, SEEK_SET) != (off_t)offset)
     return false;
+  ++disk_reads_;
   unsigned char *p = (unsigned char *)data;
   while (size) {
     const ssize_t n = read(fd_, p, size);
@@ -75,7 +86,29 @@ RecordReader::Status RecordReader::Read(uint32_t index,
   if (!cache_memory::HasHeadroom(size, 64 * 1024))
     return NoMemory;
   out->resize(size);
-  return ReadAt(offsets_[index], &(*out)[0], size) ? Ok : IoError;
+  const uint64_t start = offsets_[index];
+  if (read_ahead_ && size < read_ahead_) {
+    if (!(block_len_ && start >= block_start_ &&
+          start + size <= block_start_ + block_len_)) {
+      // Next block begins at this record; the tail of the file may be short.
+      const size_t want = (size_t)std::min<uint64_t>(read_ahead_,
+                                                      file_size_ - start);
+      if (block_.size() < want) {
+        if (!cache_memory::HasHeadroom(want, 64 * 1024))
+          goto direct;
+        block_.resize(want);
+      }
+      block_len_ = 0;
+      if (!ReadAt(start, &block_[0], want))
+        return IoError;
+      block_start_ = start;
+      block_len_ = want;
+    }
+    memcpy(&(*out)[0], block_.data() + (start - block_start_), size);
+    return Ok;
+  }
+direct:
+  return ReadAt(start, &(*out)[0], size) ? Ok : IoError;
 }
 
 RecordReader::Status RecordReader::LoadSparse(

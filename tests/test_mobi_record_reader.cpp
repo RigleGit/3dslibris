@@ -53,6 +53,30 @@ void CheckFile(const std::string &path) {
                        status == mobi_record_reader::RecordReader::Empty);
     }
   }
+  // Read-ahead blocks of every awkward size, sequential, reversed and random,
+  // give the same bytes as the table says (records straddle block edges).
+  const size_t blocks[] = {0, 1, 64, 100, 4096, 5000, 1u << 20};
+  for (size_t b = 0; b < sizeof(blocks) / sizeof(blocks[0]); ++b) {
+    mobi_record_reader::RecordReader ra;
+    test::ExpectTrue("open read-ahead", ra.Open(fd, raw.size()));
+    ra.SetReadAhead(blocks[b]);
+    const size_t n = expected.size() - 1;
+    for (size_t k = 0; k < n * 3; ++k) {
+      const uint32_t i = k < n ? (uint32_t)k : k < 2 * n ? (uint32_t)(n - 1 - (k - n))
+                                                         : (uint32_t)((k * 7919u) % n);
+      std::string got;
+      const auto st = ra.Read(i, &got);
+      const uint32_t start = expected[i], end = expected[i + 1];
+      if (end > start && end <= raw.size()) {
+        test::ExpectTrue("read-ahead record ok", st == mobi_record_reader::RecordReader::Ok);
+        test::ExpectTrue((name + " read-ahead bytes").c_str(),
+                         got == raw.substr(start, end - start));
+      } else
+        test::ExpectTrue("read-ahead empty", st == mobi_record_reader::RecordReader::Empty);
+    }
+    if (blocks[b] >= (1u << 20) && n > 8)
+      test::ExpectTrue("sequential reads share blocks", ra.DiskReads() < n * 3);
+  }
   std::string none;
   test::ExpectTrue("index past the table",
                    reader.Read((uint32_t)expected.size(), &none) ==

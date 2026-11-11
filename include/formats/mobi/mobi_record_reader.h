@@ -36,6 +36,11 @@ public:
   }
   size_t RecordSize(uint32_t index) const;
   Status Read(uint32_t index, std::string *out) const;
+  // Records are served from a read-ahead block (text records sit next to each
+  // other, so one SD read covers many). 0 disables it; the default is 192 KiB.
+  void SetReadAhead(size_t bytes);
+  // Reads that reached the file (not served from the block).
+  unsigned DiskReads() const { return disk_reads_; }
 
   // Loads the records of every inclusive [first, last] range into one compact
   // buffer. offsets keeps the whole table's shape (record_count + 1 entries):
@@ -51,6 +56,11 @@ private:
   int fd_;
   uint64_t file_size_;
   std::vector<uint32_t> offsets_;
+  mutable std::string block_;
+  mutable uint64_t block_start_;
+  mutable size_t block_len_;
+  size_t read_ahead_;
+  mutable unsigned disk_reads_;
 };
 
 } // namespace mobi_record_reader
