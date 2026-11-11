@@ -49,8 +49,15 @@ u8 ParseMobiHeader(const std::string &raw, MobiHeaderInfo *header) {
   if (rec0_end <= rec0_start || rec0_end - rec0_start < 16)
     return 254;
 
-  const u8 *rec0 = data + rec0_start;
-  const size_t rec0_len = (size_t)(rec0_end - rec0_start);
+  return ParseMobiHeaderRecord0(data + rec0_start,
+                                (size_t)(rec0_end - rec0_start), header);
+}
+
+u8 ParseMobiHeaderRecord0(const u8 *rec0, size_t rec0_len,
+                          MobiHeaderInfo *header) {
+  if (!header || !rec0 || rec0_len < 16 || header->offsets.size() < 3)
+    return 254;
+
   mobi_record_decode::MobiRecord0Header rec0_header;
   if (!mobi_record_decode::ParseRecord0Header(rec0, rec0_len, &rec0_header))
     return 254;

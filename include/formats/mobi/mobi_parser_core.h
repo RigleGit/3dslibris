@@ -35,6 +35,11 @@ u8 LoadMobiSource(const char *path, std::string *raw, u64 *t_after_read,
 
 u8 ParseMobiHeader(const std::string &raw, MobiHeaderInfo *header);
 
+// Record 0 half of ParseMobiHeader. header->offsets must already hold the
+// record table of the same file; rec0 is the record 0 payload.
+u8 ParseMobiHeaderRecord0(const u8 *rec0, size_t rec0_len,
+                          MobiHeaderInfo *header);
+
 bool BuildMobiMergedText(const std::string &raw, const MobiHeaderInfo &header,
                          std::string *merged);
 

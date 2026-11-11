@@ -368,9 +368,17 @@ void ApplyEmbeddedTitle(Book *book, const std::string &raw,
   const u32 rec0_end = (header.offsets.size() > 1) ? header.offsets[1] : 0;
   if (rec0_end <= rec0_start || rec0_end - rec0_start < 16)
     return;
+  ApplyEmbeddedTitleFromRecord0(book, data + rec0_start,
+                                (size_t)(rec0_end - rec0_start), header);
+}
 
-  const u8 *rec0 = data + rec0_start;
-  const size_t rec0_len = (size_t)(rec0_end - rec0_start);
+void ApplyEmbeddedTitleFromRecord0(
+    Book *book, const u8 *rec0, size_t rec0_len,
+    const mobi_parser_core::MobiHeaderInfo &header) {
+  if (!book || !rec0 || rec0_len < 16 || header.mobi_full_name_len == 0 ||
+      header.mobi_full_name_len >= 2048)
+    return;
+
   std::string title_raw;
   bool title_ok = false;
   if ((size_t)header.mobi_full_name_off + (size_t)header.mobi_full_name_len <=

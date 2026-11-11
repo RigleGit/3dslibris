@@ -40,5 +40,9 @@ std::string DecodeBytesToUtf8(const std::string &in, u32 encoding,
 
 void ApplyEmbeddedTitle(Book *book, const std::string &raw,
                         const mobi_parser_core::MobiHeaderInfo &header);
+// Same, from the record 0 payload alone.
+void ApplyEmbeddedTitleFromRecord0(
+    Book *book, const u8 *rec0, size_t rec0_len,
+    const mobi_parser_core::MobiHeaderInfo &header);
 
 } // namespace mobi_text_decode
