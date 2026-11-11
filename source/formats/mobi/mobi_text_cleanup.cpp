@@ -404,4 +404,321 @@ std::string FixBrokenParagraphWrapsPreservingMobiImageTokens(
       });
 }
 
+namespace {
+
+// Token at `pos` per the parser's rule (the id is read from image_pos+1).
+size_t ScanTokenAt(const std::string &t, size_t pos, size_t *image_pos) {
+  const unsigned char c0 = (unsigned char)t[pos];
+  if (c0 == kTextImage)
+    return pos + 2 < t.size() ? (*image_pos = pos, 3u) : 0u;
+  if (IsMobiImageContextByte(c0) && pos + 3 < t.size() &&
+      (unsigned char)t[pos + 1] == kTextImage)
+    return (*image_pos = pos + 1, 4u);
+  return 0;
+}
+
+// Summary of a merged block: everything ShouldMergeBlocks asks of `left`.
+struct BlockSummary {
+  size_t size, words, letters, upper;
+  unsigned char first, last;
+};
+
+static void CountLetters(const std::string &s, size_t *letters, size_t *upper) {
+  for (size_t i = 0; i < s.size(); i++) {
+    unsigned char c = (unsigned char)s[i];
+    if (c >= 'A' && c <= 'Z') {
+      ++*letters;
+      ++*upper;
+    } else if (c >= 'a' && c <= 'z')
+      ++*letters;
+  }
+}
+
+static BlockSummary Summarize(const std::string &line) {
+  BlockSummary b = {line.size(), CountWords(line), 0, 0,
+                    (unsigned char)line[0], (unsigned char)line[line.size() - 1]};
+  CountLetters(line, &b.letters, &b.upper);
+  return b;
+}
+
+static void AppendToSummary(BlockSummary *b, const std::string &line) {
+  b->size += 1 + line.size();
+  b->words += CountWords(line);
+  CountLetters(line, &b->letters, &b->upper);
+  b->last = (unsigned char)line[line.size() - 1];
+}
+
+static bool SummaryStartsLikeListOrHeading(const BlockSummary &b) {
+  if (b.first == '-' || b.first == '*' || b.first == 0xE2 ||
+      std::isdigit(b.first) != 0)
+    return true;
+  return b.letters >= 4 && b.upper == b.letters;
+}
+
+static bool ShouldMergeSummary(const BlockSummary &left,
+                               const std::string &right,
+                               int separator_blank_lines) {
+  if (right.empty())
+    return false;
+  if (separator_blank_lines > 1)
+    return false;
+  if (left.size < 20 || right.size() < 8)
+    return false;
+  if (left.words < 3 || CountWords(right) < 2)
+    return false;
+  if (SummaryStartsLikeListOrHeading(left) || StartsLikeListOrHeading(right))
+    return false;
+  if (left.last == '.' || left.last == '!' || left.last == '?')
+    return false;
+  return StartsWithLowercase(right);
+}
+
+static std::string TrimmedLine(const std::string &raw) {
+  size_t begin = 0, end = raw.size();
+  while (begin < end && std::isspace((unsigned char)raw[begin]) != 0)
+    ++begin;
+  while (end > begin && std::isspace((unsigned char)raw[end - 1]) != 0)
+    --end;
+  return raw.substr(begin, end - begin);
+}
+
+// Streaming FixBrokenParagraphWraps. A "piece" is the whole text, or with
+// token_aware each text run between inline image tokens (which the preserving
+// variant cleans on its own, keeping the run's edge whitespace).
+class WrapStage {
+public:
+  explicit WrapStage(bool token_aware) : token_aware_(token_aware) {
+    ResetPiece();
+  }
+  void Feed(const char *data, size_t n, bool final, std::string *out) {
+    std::string work;
+    work.swap(carry_);
+    work.append(data, n);
+    size_t i = 0;
+    while (i < work.size()) {
+      if (!final && work.size() - i < 4)
+        break;
+      size_t token_len = 0;
+      if (token_aware_)
+        token_len = MobiImageTokenLengthAt(work, i);
+      if (token_len) {
+        EndPiece(out);
+        out->append(work, i, token_len);
+        i += token_len;
+        continue;
+      }
+      Char((unsigned char)work[i++], out);
+    }
+    if (!final && i < work.size())
+      carry_.assign(work, i, std::string::npos);
+    if (final)
+      EndPiece(out);
+  }
+
+private:
+  void ResetPiece() {
+    leading_ = true;
+    have_block_ = false;
+    blank_lines_ = 0;
+    lead_.clear();
+    line_.clear();
+    trail_.clear();
+    held_.clear();
+  }
+  void Emit(std::string *out, bool all) {
+    const size_t cut = all ? held_.size() : held_.size() > 2 ? held_.size() - 2 : 0;
+    if (cut) {
+      out->append(held_, 0, cut);
+      held_.erase(0, cut);
+    }
+  }
+  void EndLine(std::string *out) {
+    const std::string t = TrimmedLine(line_);
+    line_.clear();
+    if (t.empty()) {
+      ++blank_lines_;
+      return;
+    }
+    if (!have_block_) {
+      held_ = t;
+      summary_ = Summarize(t);
+      have_block_ = true;
+    } else if (ShouldMergeSummary(summary_, t, blank_lines_)) {
+      AppendMergedSpace(&held_);
+      held_ += t;
+      AppendToSummary(&summary_, t);
+    } else {
+      held_ += blank_lines_ > 0 ? "\n\n" : "\n";
+      held_ += t;
+      summary_ = Summarize(t);
+    }
+    blank_lines_ = 0;
+    Emit(out, false);
+  }
+  void Char(unsigned char c, std::string *out) {
+    const bool space = std::isspace(c) != 0;
+    if (leading_) {
+      if (space) {
+        lead_.push_back((char)c);
+        return;
+      }
+      if (token_aware_)
+        out->append(lead_);
+      lead_.clear();
+      leading_ = false;
+    }
+    if (space)
+      trail_.push_back((char)c);
+    else
+      trail_.clear();
+    if (c == '\n')
+      EndLine(out);
+    else
+      line_.push_back((char)c);
+  }
+  void EndPiece(std::string *out) {
+    if (leading_) {
+      // Empty or whitespace-only: returned unchanged by both variants.
+      out->append(lead_);
+    } else {
+      EndLine(out);
+      Emit(out, true);
+      if (token_aware_)
+        out->append(trail_);
+    }
+    ResetPiece();
+  }
+  bool token_aware_, leading_, have_block_;
+  int blank_lines_;
+  BlockSummary summary_;
+  std::string carry_, lead_, line_, trail_, held_;
+};
+
+class MojibakeStage {
+public:
+  explicit MojibakeStage(bool token_aware) : token_aware_(token_aware) {}
+  void Feed(const char *data, size_t n, bool final, std::string *out) {
+    std::string work;
+    work.swap(carry_);
+    work.append(data, n);
+    size_t i = 0;
+    while (i < work.size()) {
+      if (!final && work.size() - i < 4)
+        break;
+      if (token_aware_) {
+        const size_t token_len = MobiImageTokenLengthAt(work, i);
+        if (token_len) {
+          out->append(work, i, token_len);
+          i += token_len;
+          continue;
+        }
+      }
+      if (i + 1 < work.size() && (unsigned char)work[i] == 0xC3 &&
+          (unsigned char)work[i + 1] == 0x83) {
+        size_t consumed = 0;
+        unsigned int cp = 0;
+        if (DecodeLatin1Supplement(work, i + 2, &consumed, &cp) && cp >= 0xA0 &&
+            cp <= 0xBF) {
+          out->push_back((char)0xC3);
+          out->push_back((char)cp);
+          i += 2 + consumed;
+          continue;
+        }
+      }
+      out->push_back(work[i++]);
+    }
+    if (!final && i < work.size())
+      carry_.assign(work, i, std::string::npos);
+  }
+
+private:
+  bool token_aware_;
+  std::string carry_;
+};
+
+} // namespace
+
+TokenScan::TokenScan() {}
+void TokenScan::Feed(const char *data, size_t n, bool final) {
+  std::string work;
+  work.swap(carry_);
+  work.append(data, n);
+  size_t i = 0;
+  while (i < work.size()) {
+    if (!final && work.size() - i < 4)
+      break;
+    size_t image_pos = 0;
+    const size_t len = ScanTokenAt(work, i, &image_pos);
+    if (!len) {
+      ++i;
+      continue;
+    }
+    ids_.push_back((unsigned short)(((unsigned char)work[image_pos + 1] << 8) |
+                                    (unsigned char)work[image_pos + 2]));
+    i += len;
+  }
+  if (!final && i < work.size())
+    carry_.assign(work, i, std::string::npos);
+}
+
+struct CleanupStream::State {
+  StreamOptions options;
+  bool pending_cr = false;
+  MojibakeStage mojibake;
+  WrapStage wrap;
+  TokenScan before, after;
+  std::string a, b, c;
+  explicit State(const StreamOptions &o)
+      : options(o), mojibake(o.token_aware), wrap(o.token_aware) {}
+};
+CleanupStream::CleanupStream(const StreamOptions &options)
+    : state_(new State(options)) {}
+CleanupStream::~CleanupStream() { delete state_; }
+const std::vector<unsigned short> &CleanupStream::IdsBefore() const {
+  return state_->before.Ids();
+}
+const std::vector<unsigned short> &CleanupStream::IdsAfter() const {
+  return state_->after.Ids();
+}
+void CleanupStream::Feed(const char *data, size_t n, bool final,
+                         std::string *out) {
+  State &s = *state_;
+  // NormalizeNewlines: "\r\n" and a lone "\r" become "\n".
+  std::string &a = s.a;
+  a.clear();
+  for (size_t i = 0; i < n; ++i) {
+    const char c = data[i];
+    if (s.pending_cr) {
+      s.pending_cr = false;
+      a.push_back('\n');
+      if (c == '\n')
+        continue;
+    }
+    if (c == '\r')
+      s.pending_cr = true;
+    else
+      a.push_back(c);
+  }
+  if (final && s.pending_cr) {
+    s.pending_cr = false;
+    a.push_back('\n');
+  }
+  const std::string *cur = &a;
+  if (s.options.token_aware)
+    s.before.Feed(a.data(), a.size(), final);
+  if (s.options.mojibake) {
+    s.b.clear();
+    s.mojibake.Feed(cur->data(), cur->size(), final, &s.b);
+    cur = &s.b;
+  }
+  if (s.options.wrap_fix) {
+    s.c.clear();
+    s.wrap.Feed(cur->data(), cur->size(), final, &s.c);
+    cur = &s.c;
+  }
+  if (s.options.token_aware)
+    s.after.Feed(cur->data(), cur->size(), final);
+  out->append(*cur);
+}
+
 } // namespace mobi_text_cleanup

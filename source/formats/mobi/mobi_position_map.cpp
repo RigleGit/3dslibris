@@ -70,14 +70,12 @@ bool LooksUsableForToc(
   return true;
 }
 
-void RemapHtmlToTextAfterCleanup(
-    const std::string &text_before_cleanup, const std::string &text_after_cleanup,
-    std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map) {
-  if (!html_to_text_map || html_to_text_map->empty())
-    return;
+namespace {
 
-  const size_t pre_len = text_before_cleanup.size();
-  const size_t post_len = text_after_cleanup.size();
+// The remap walks both texts forward only, so they can be read sequentially.
+template <class BeforeAt, class AfterAt>
+void RemapCore(size_t pre_len, size_t post_len, BeforeAt before, AfterAt after,
+               std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map) {
   std::vector<std::pair<uint32_t, uint32_t>> original = *html_to_text_map;
 
   size_t pi = 0, qi = 0, entry = 0;
@@ -91,7 +89,7 @@ void RemapHtmlToTextAfterCleanup(
       continue;
     }
     while (pi < (size_t)target && pi < pre_len && qi < post_len) {
-      if (text_before_cleanup[pi] == text_after_cleanup[qi]) {
+      if (before(pi) == after(qi)) {
         pi++;
         qi++;
       } else {
@@ -108,6 +106,39 @@ void RemapHtmlToTextAfterCleanup(
     *html_to_text_map = original;
     ScaleHtmlToTextMap(pre_len, post_len, html_to_text_map);
   }
+}
+
+struct StringByte {
+  const std::string *s;
+  unsigned char operator()(size_t i) const { return (unsigned char)(*s)[i]; }
+};
+struct CallbackByte {
+  ByteAtFn fn;
+  void *context;
+  unsigned char operator()(size_t i) const { return fn(context, i); }
+};
+
+} // namespace
+
+void RemapHtmlToTextAfterCleanup(
+    const std::string &text_before_cleanup, const std::string &text_after_cleanup,
+    std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map) {
+  if (!html_to_text_map || html_to_text_map->empty())
+    return;
+  StringByte before = {&text_before_cleanup}, after = {&text_after_cleanup};
+  RemapCore(text_before_cleanup.size(), text_after_cleanup.size(), before,
+            after, html_to_text_map);
+}
+
+void RemapHtmlToTextAfterCleanupStreamed(
+    size_t pre_len, size_t post_len, ByteAtFn before_at, void *before_context,
+    ByteAtFn after_at, void *after_context,
+    std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map) {
+  if (!html_to_text_map || html_to_text_map->empty() || !before_at || !after_at)
+    return;
+  CallbackByte before = {before_at, before_context},
+               after = {after_at, after_context};
+  RemapCore(pre_len, post_len, before, after, html_to_text_map);
 }
 
 } // namespace mobi_position_map
