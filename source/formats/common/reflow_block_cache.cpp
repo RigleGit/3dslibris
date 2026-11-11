@@ -264,7 +264,7 @@ struct Writer::State {
                    (uint32_t)encoded.size(),
                    words,
                    crc,
-                   (uint16_t)document,
+                   (uint16_t)std::min<unsigned>(document, 65535u),
                    (uint8_t)compressed,
                    (uint8_t)kind};
     blocks.push_back(block);

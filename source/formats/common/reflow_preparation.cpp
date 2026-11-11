@@ -4,6 +4,9 @@
 #include "formats/common/reflow_block_cache.h"
 #include "formats/common/reflow_open_clock.h"
 #include "formats/common/reflow_open_stats.h"
+#include "formats/common/reflow_append_policy.h"
+#include "formats/common/cache_memory_utils.h"
+#include "book/page.h"
 #include "formats/mobi/mobi_preparation.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/fb2/fb2_preparation.h"
@@ -71,6 +74,30 @@ struct ReflowPreparation::State {
   unsigned frames = 0, max_frame = 0, max_work = 0, splash_ms = 0,
            splash_draws = 0;
   u64 last_frame_ms = 0;
+  unsigned scanned = 0, pending_words = 0, flush_words =
+      reflow_append_policy::kDefaultFlushWords;
+  u64 last_probe_ms = 0;
+  // Closed pages are batched so the writer builds full blocks. Pages stay
+  // resident until validation either way, so batching does not raise the peak.
+  bool ShouldAppendNow() {
+    const unsigned count = book->GetPageCount();
+    for (; scanned < count; ++scanned) {
+      Page *page = book->GetPage(scanned);
+      if (page && page->GetLength() > 0)
+        pending_words += (unsigned)page->GetLength();
+    }
+    bool low_memory = false;
+    if (!parsed && pending_words >= reflow_append_policy::kBlockWords) {
+      const u64 now = osGetTime();
+      if (now - last_probe_ms >= 500) {
+        last_probe_ms = now;
+        low_memory = !cache_memory::HasHeadroom(256 * 1024, 0);
+      }
+    }
+    return reflow_append_policy::ShouldAppend(
+        count > written ? count - written : 0, pending_words, parsed,
+        low_memory, flush_words);
+  }
   void SnapshotWriter() {
     if (writing)
       wstats = writer.GetStats();
@@ -289,7 +316,7 @@ ReflowPreparation::Result ReflowPreparation::Step() {
         s.parsed = true;
         s.BeginWriter();
         if (s.writing && s.writer.AppendDocument(0, s.book->GetPageCount())) {
-          s.written = s.book->GetPageCount();
+          s.written = s.scanned = s.book->GetPageCount();
           s.phase = State::Append;
         } else {
           s.WriterFailed();
@@ -332,7 +359,8 @@ ReflowPreparation::Result ReflowPreparation::Step() {
     s.parsed = r == Complete;
     if (s.parsed)
       s.ChecksumPages();
-    if (s.writing && s.book->GetPageCount() > s.written) {
+    if (s.writing && s.book->GetPageCount() > s.written &&
+        s.ShouldAppendNow()) {
       const u64 append_begin = reflow_open_stats::NowUs();
       const bool appended =
           s.writer.AppendDocument(s.written, s.book->GetPageCount());
@@ -340,6 +368,7 @@ ReflowPreparation::Result ReflowPreparation::Step() {
                   reflow_open_stats::NowUs() - append_begin);
       if (appended) {
         s.written = s.book->GetPageCount();
+        s.pending_words = 0;
         s.phase = State::Append;
       } else
         s.WriterFailed();
@@ -498,7 +527,10 @@ unsigned ReflowPreparation::Progress() const {
   if (s.format == reflow_block_cache::Epub)
     return s.epub.Progress();
   if (s.phase == State::Parse || s.phase == State::Append)
-    return s.mobi ? s.mobi->Progress() : s.fb2 ? s.fb2->Progress() : 0;
+    return s.mobi   ? s.mobi->Progress()
+           : s.fb2  ? s.fb2->Progress()
+           : s.writing ? s.writer.Progress()
+                       : 0;
   return 0;
 }
 unsigned ReflowPreparation::Total() const {
@@ -508,7 +540,10 @@ unsigned ReflowPreparation::Total() const {
   if (s.format == reflow_block_cache::Epub)
     return s.epub.Total();
   if (s.phase == State::Parse || s.phase == State::Append)
-    return s.mobi ? s.mobi->Total() : s.fb2 ? s.fb2->Total() : 0;
+    return s.mobi   ? s.mobi->Total()
+           : s.fb2  ? s.fb2->Total()
+           : s.writing ? s.book->GetPageCount()
+                       : 0;
   return 0;
 }
 bool ReflowPreparation::PersistenceFailed() const {
