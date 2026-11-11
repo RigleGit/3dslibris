@@ -55,6 +55,8 @@ struct ReflowPreparation {
   unsigned Total() const {
     return 0;
   }
+  void NoteFrame(unsigned long long, unsigned) {}
+  void NoteSplash(unsigned) {}
   bool PersistenceFailed() const {
     std::abort();
   }
