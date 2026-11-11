@@ -65,7 +65,6 @@ Profile Choose(const Inputs &in) {
   p.tier = Fast;
   p.read_chunk = 256 * 1024;
   p.reserve_raw = true;
-  p.xml_feed_bytes = 16384;
   p.page_budget_ms = 25;
   p.page_budget_pages = 0;
   p.flush_words = 131072;

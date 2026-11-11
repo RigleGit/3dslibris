@@ -163,7 +163,6 @@ struct ReflowPreparation::State {
       return false;
     }
     fb2->SetStats(&stats);
-    fb2->SetProfile(&profile);
     return true;
   }
   void WriterFailed() {

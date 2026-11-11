@@ -32,7 +32,6 @@ struct Profile {
   // push a frame past ~100 ms on Old 3DS.
   unsigned read_chunk = 64 * 1024;
   bool reserve_raw = false;              // reserve the raw buffer up front
-  unsigned xml_feed_bytes = 8192;        // FB2 bytes fed to Expat per step
   unsigned page_budget_ms = 20;          // ContinueState time budget
   unsigned page_budget_pages = 8;        // ContinueState page cap (0 = none)
   unsigned flush_words = 65536;          // pages handed to the writer per batch

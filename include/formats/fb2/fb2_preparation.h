@@ -11,7 +11,6 @@ public:
   bool Begin(Book *book, const std::string &source);
   ReflowPreparation::Result Step();
   void SetStats(reflow_open_stats::Stats *stats);
-  void SetProfile(const reflow_open_profile::Profile *profile);
   ReflowPreparation::Result GetResult() const;
   void SignalPause();
   void SignalResume();
