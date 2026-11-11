@@ -20,13 +20,26 @@ void RemapHtmlToTextAfterCleanup(
     const std::string &text_after_cleanup,
     std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map);
 
-// Same remap without holding either text: byte accessors are called with
-// non-decreasing indexes (an index may repeat).
+// Same remap without holding either text, resumable: byte accessors are called
+// with non-decreasing indexes (an index may repeat). The map is final once Step
+// returns true; an empty map is left alone.
 typedef unsigned char (*ByteAtFn)(void *context, size_t index);
-void RemapHtmlToTextAfterCleanupStreamed(
-    size_t pre_len, size_t post_len, ByteAtFn before_at, void *before_context,
-    ByteAtFn after_at, void *after_context,
-    std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map);
+class StreamRemap {
+public:
+  StreamRemap();
+  ~StreamRemap();
+  bool Begin(size_t pre_len, size_t post_len, ByteAtFn before_at,
+             void *before_context, ByteAtFn after_at, void *after_context,
+             std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map);
+  // Compares at most `budget` bytes; true when finished.
+  bool Step(size_t budget);
+  size_t Progress() const;
+private:
+  struct State;
+  State *state_;
+  StreamRemap(const StreamRemap &);
+  StreamRemap &operator=(const StreamRemap &);
+};
 
 } // namespace mobi_position_map
 

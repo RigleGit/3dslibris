@@ -1,6 +1,7 @@
 #include "formats/mobi/mobi_position_map.h"
 
 #include <stddef.h>
+#include <new>
 
 namespace mobi_position_map {
 
@@ -72,23 +73,30 @@ bool LooksUsableForToc(
 
 namespace {
 
-// The remap walks both texts forward only, so they can be read sequentially.
-template <class BeforeAt, class AfterAt>
-void RemapCore(size_t pre_len, size_t post_len, BeforeAt before, AfterAt after,
-               std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map) {
-  std::vector<std::pair<uint32_t, uint32_t>> original = *html_to_text_map;
+struct RemapProgress {
+  size_t pi, qi, entry;
+  RemapProgress() : pi(0), qi(0), entry(0) {}
+};
 
-  size_t pi = 0, qi = 0, entry = 0;
-  const size_t n_entries = html_to_text_map->size();
+// The remap walks both texts forward only, so they can be read sequentially
+// and the walk can be resumed: it stops after `budget` compared bytes.
+template <class BeforeAt, class AfterAt>
+bool RemapAdvance(RemapProgress *p, size_t pre_len, size_t post_len,
+                  BeforeAt before, AfterAt after, size_t budget,
+                  std::vector<std::pair<uint32_t, uint32_t>> *map) {
+  size_t &pi = p->pi, &qi = p->qi, &entry = p->entry;
+  const size_t n_entries = map->size();
   while (entry < n_entries && pi <= pre_len && qi <= post_len) {
-    const uint32_t target = (*html_to_text_map)[entry].second;
+    const uint32_t target = (*map)[entry].second;
     if ((size_t)target <= pi) {
-      (*html_to_text_map)[entry].second =
-          (uint32_t)(qi - (pi - (size_t)target));
+      (*map)[entry].second = (uint32_t)(qi - (pi - (size_t)target));
       entry++;
       continue;
     }
     while (pi < (size_t)target && pi < pre_len && qi < post_len) {
+      if (!budget)
+        return false;
+      --budget;
       if (before(pi) == after(qi)) {
         pi++;
         qi++;
@@ -96,15 +104,25 @@ void RemapCore(size_t pre_len, size_t post_len, BeforeAt before, AfterAt after,
         pi++;
       }
     }
+    // The cleaned text ended before this target (trailing text was removed):
+    // the remaining entries map to its end. Without this the walk never ends.
+    if (pi < (size_t)target)
+      break;
   }
-  while (entry < n_entries) {
-    (*html_to_text_map)[entry].second = (uint32_t)post_len;
-    entry++;
-  }
+  return true;
+}
 
-  if (!LooksPlausible(*html_to_text_map, post_len)) {
-    *html_to_text_map = original;
-    ScaleHtmlToTextMap(pre_len, post_len, html_to_text_map);
+void RemapFinish(
+    RemapProgress *p, size_t pre_len, size_t post_len,
+    const std::vector<std::pair<uint32_t, uint32_t>> &original,
+    std::vector<std::pair<uint32_t, uint32_t>> *map) {
+  while (p->entry < map->size()) {
+    (*map)[p->entry].second = (uint32_t)post_len;
+    p->entry++;
+  }
+  if (!LooksPlausible(*map, post_len)) {
+    *map = original;
+    ScaleHtmlToTextMap(pre_len, post_len, map);
   }
 }
 
@@ -125,20 +143,59 @@ void RemapHtmlToTextAfterCleanup(
     std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map) {
   if (!html_to_text_map || html_to_text_map->empty())
     return;
+  const std::vector<std::pair<uint32_t, uint32_t>> original = *html_to_text_map;
   StringByte before = {&text_before_cleanup}, after = {&text_after_cleanup};
-  RemapCore(text_before_cleanup.size(), text_after_cleanup.size(), before,
-            after, html_to_text_map);
+  RemapProgress progress;
+  RemapAdvance(&progress, before.s->size(), after.s->size(), before, after,
+               (size_t)-1, html_to_text_map);
+  RemapFinish(&progress, before.s->size(), after.s->size(), original,
+              html_to_text_map);
 }
 
-void RemapHtmlToTextAfterCleanupStreamed(
+struct StreamRemap::State {
+  size_t pre_len, post_len;
+  CallbackByte before, after;
+  std::vector<std::pair<uint32_t, uint32_t>> *map;
+  std::vector<std::pair<uint32_t, uint32_t>> original;
+  RemapProgress progress;
+};
+StreamRemap::StreamRemap() : state_(NULL) {}
+StreamRemap::~StreamRemap() { delete state_; }
+bool StreamRemap::Begin(
     size_t pre_len, size_t post_len, ByteAtFn before_at, void *before_context,
     ByteAtFn after_at, void *after_context,
     std::vector<std::pair<uint32_t, uint32_t>> *html_to_text_map) {
-  if (!html_to_text_map || html_to_text_map->empty() || !before_at || !after_at)
-    return;
-  CallbackByte before = {before_at, before_context},
-               after = {after_at, after_context};
-  RemapCore(pre_len, post_len, before, after, html_to_text_map);
+  delete state_;
+  state_ = NULL;
+  if (!html_to_text_map || !before_at || !after_at)
+    return false;
+  state_ = new (std::nothrow) State;
+  if (!state_)
+    return false;
+  state_->pre_len = pre_len;
+  state_->post_len = post_len;
+  state_->before.fn = before_at;
+  state_->before.context = before_context;
+  state_->after.fn = after_at;
+  state_->after.context = after_context;
+  state_->map = html_to_text_map;
+  state_->original = *html_to_text_map;
+  return true;
+}
+bool StreamRemap::Step(size_t budget) {
+  if (!state_)
+    return true;
+  State &s = *state_;
+  if (!RemapAdvance(&s.progress, s.pre_len, s.post_len, s.before, s.after,
+                    budget, s.map))
+    return false;
+  RemapFinish(&s.progress, s.pre_len, s.post_len, s.original, s.map);
+  delete state_;
+  state_ = NULL;
+  return true;
+}
+size_t StreamRemap::Progress() const {
+  return state_ ? state_->progress.pi : 0;
 }
 
 } // namespace mobi_position_map

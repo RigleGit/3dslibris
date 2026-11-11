@@ -55,8 +55,13 @@ int main() {
     std::vector<std::pair<uint32_t, uint32_t> > whole = map, streamed = map;
     mobi_position_map::RemapHtmlToTextAfterCleanup(before, after, &whole);
     Cursor cb = {&before, 0, false}, ca = {&after, 0, false};
-    mobi_position_map::RemapHtmlToTextAfterCleanupStreamed(
-        before.size(), after.size(), At, &cb, At, &ca, &streamed);
+    mobi_position_map::StreamRemap remap;
+    test::ExpectTrue("begin", remap.Begin(before.size(), after.size(), At, &cb,
+                                          At, &ca, &streamed));
+    const size_t slice = 1 + Rand() % 50;
+    unsigned guard = 0;
+    while (!remap.Step(slice))
+      test::ExpectTrue("remap finishes", ++guard < 100000);
     test::ExpectTrue("same remap", whole == streamed);
     test::ExpectFalse("forward only before", cb.bad);
     test::ExpectFalse("forward only after", ca.bad);
