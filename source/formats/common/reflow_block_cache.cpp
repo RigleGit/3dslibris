@@ -197,6 +197,7 @@ struct Writer::State {
   u64 started, io_ms = 0, last_slow = 0;
   size_t calls;
   WriterStats stats;
+  bool compress = true;
   State()
       : book(NULL), fd(-1), result(Ready), logical(sizeof(Header)), first(0),
         end(0), next(0), document(0), words(0), kind(0), phase(Idle),
@@ -246,8 +247,13 @@ struct Writer::State {
       return true;
     }
     const uint64_t pack_begin = reflow_open_stats::NowUs();
-    if (blocks.size() >= 50000 ||
-        !compressor.Pack(encoded, &packed, &compressed)) {
+    bool packed_ok = blocks.size() < 50000;
+    if (packed_ok && !compress) {
+      packed = encoded;
+      compressed = false;
+    } else if (packed_ok)
+      packed_ok = compressor.Pack(encoded, &packed, &compressed);
+    if (!packed_ok) {
       result = NoMemory;
       return false;
     }
@@ -392,6 +398,10 @@ bool Writer::Begin(Book *book, const std::string &path, Format format) {
     return false;
   }
   return true;
+}
+void Writer::SetCompress(bool compress) {
+  if (state_)
+    state_->compress = compress;
 }
 bool Writer::AppendDocument(unsigned first, unsigned end) {
   if (!state_ || state_->phase != State::Idle || state_->result != Ready ||

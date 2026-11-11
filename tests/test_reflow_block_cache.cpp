@@ -203,6 +203,26 @@ void TestPartialLastBlockAndSingleDocument() {
   Check(LoadMatches(g, g.Path("all.mpc")), "single document loads");
 }
 
+void TestUncompressedBlocksStayReadable() {
+  Fixture f;
+  f.AddPages(200);
+  const std::string path = f.Path("raw.mpc");
+  reflow_block_cache::Writer w;
+  Require(w.Begin(&f.book, path, reflow_block_cache::Mobi), "begin");
+  w.SetCompress(false);
+  Require(w.AppendDocument(0, 200), "append");
+  Drain(w);
+  Require(w.Finish(), "finish");
+  Drain(w);
+  Check(w.GetResult() == reflow_block_cache::Complete, "raw publish");
+  w.Abort();
+  Check(LoadMatches(f, path), "uncompressed blocks load identically");
+  WriteBook(f, f.Path("z.mpc"), 200, 0);
+  struct stat a, b;
+  Require(!stat(path.c_str(), &a) && !stat(f.Path("z.mpc").c_str(), &b), "stat");
+  Check(a.st_size > b.st_size, "raw cache is larger than the compressed one");
+}
+
 void TestPolicy() {
   using namespace reflow_append_policy;
   Check(!ShouldAppend(0, 0, true, true), "nothing pending never appends");
@@ -272,6 +292,7 @@ void TestCancelLeavesNoPartialCache() {
 
 int main() {
   TestPolicy();
+  TestUncompressedBlocksStayReadable();
   TestBatchingFillsBlocksAndRoundtrips();
   TestPartialLastBlockAndSingleDocument();
   TestWriterSliceHonorsBudget();

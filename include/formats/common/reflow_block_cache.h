@@ -25,6 +25,8 @@ public:
   Writer();
   ~Writer();
   bool Begin(Book *book, const std::string &path, Format format = Epub);
+  // Blocks are stored raw (compressed=0, still readable) when false.
+  void SetCompress(bool compress);
   bool AppendDocument(unsigned first, unsigned end);
   // budget_ms bounds one cooperative slice (one physical write may overrun).
   Result Step(unsigned budget_ms = 50);
