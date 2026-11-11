@@ -9,6 +9,7 @@
 #include "formats/fb2/fb2_preparation.h"
 #include "formats/fb2/fb2_page_cache.h"
 #include "book/book.h"
+#include "book/page.h"
 #include "book/book_parse_deps.h"
 #include "shared/path_constants.h"
 #include "shared/string_utils.h"
@@ -47,7 +48,26 @@ struct ReflowPreparation::State {
   u64 started = 0;
   reflow_open_stats::Stats stats;
   reflow_block_cache::WriterStats wstats;
-  bool timing_logged = false;
+  bool timing_logged = false, checksummed = false;
+  unsigned long long page_words = 0;
+  unsigned page_hash = 2166136261u;
+  // Debug identity of the prepared content (before pages are released), so
+  // two builds can be compared page-for-page from the log alone.
+  void ChecksumPages() {
+#ifdef DSLIBRIS_DEBUG
+    if (checksummed)
+      return;
+    checksummed = true;
+    for (unsigned i = 0; i < book->GetPageCount(); ++i) {
+      Page *page = book->GetPage(i);
+      const int n = page ? page->GetLength() : 0;
+      page_hash = (page_hash ^ (unsigned)n) * 16777619u;
+      for (int j = 0; j < n; ++j)
+        page_hash = (page_hash ^ page->GetBuffer()[j]) * 16777619u;
+      page_words += n > 0 ? n : 0;
+    }
+#endif
+  }
   unsigned frames = 0, max_frame = 0, max_work = 0, splash_ms = 0,
            splash_draws = 0;
   u64 last_frame_ms = 0;
@@ -66,7 +86,7 @@ struct ReflowPreparation::State {
              "page_calls=%u pages_per_call=%u/%u frames=%u max_frame=%u "
              "max_work=%u splash_ms=%u/%u docs=%u blocks=%u avg_block=%llu "
              "max_block=%llu encode_ms=%llu deflate_ms=%llu crc_ms=%llu "
-             "io_ms=%llu writes=%u total=%llu",
+             "io_ms=%llu writes=%u words=%llu hash=%08x total=%llu",
              (unsigned)format, outcome, phases, book->GetPageCount(),
              stats.page_calls,
              stats.page_calls ? stats.pages_total / stats.page_calls : 0u,
@@ -75,6 +95,7 @@ struct ReflowPreparation::State {
              wstats.blocks ? wstats.packed_bytes / wstats.blocks : 0ULL,
              wstats.max_block, wstats.encode_us / 1000, wstats.deflate_us / 1000,
              wstats.crc_us / 1000, wstats.io_ms, wstats.write_calls,
+             page_words, page_hash,
              (unsigned long long)(osGetTime() - started));
   }
   void ReleaseParser() {
@@ -309,6 +330,8 @@ ReflowPreparation::Result ReflowPreparation::Step() {
     if (r != Pending && r != Complete)
       return s.result = r;
     s.parsed = r == Complete;
+    if (s.parsed)
+      s.ChecksumPages();
     if (s.writing && s.book->GetPageCount() > s.written) {
       const u64 append_begin = reflow_open_stats::NowUs();
       const bool appended =
