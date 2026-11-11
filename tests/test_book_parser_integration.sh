@@ -255,6 +255,7 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/epub/epub_page_cache.cpp" \
   "$TEST_ROOT/source/formats/common/reflow_block_cache.cpp" \
   "$TEST_ROOT/source/formats/common/reflow_preparation.cpp" \
+  "$TEST_ROOT/source/formats/common/reflow_open_profile.cpp" \
   "$TEST_ROOT/source/formats/fb2/fb2_preparation.cpp" \
   "$TEST_ROOT/source/formats/fb2/fb2_page_cache.cpp" \
   "$TEST_ROOT/source/formats/common/page_cache_codec.cpp" \

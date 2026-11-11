@@ -4,6 +4,7 @@
 #include "formats/common/reflow_block_cache.h"
 #include "formats/common/reflow_open_clock.h"
 #include "formats/common/reflow_open_stats.h"
+#include "formats/common/reflow_open_profile.h"
 #include "formats/common/reflow_append_policy.h"
 #include "formats/common/cache_memory_utils.h"
 #include "book/page.h"
@@ -50,6 +51,7 @@ struct ReflowPreparation::State {
   Result result = Pending;
   u64 started = 0;
   reflow_open_stats::Stats stats;
+  reflow_open_profile::Profile profile;
   reflow_block_cache::WriterStats wstats;
   bool timing_logged = false, checksummed = false;
   unsigned long long page_words = 0;
@@ -106,24 +108,29 @@ struct ReflowPreparation::State {
     if (timing_logged)
       return;
     timing_logged = true;
-    char phases[384];
+    char phases[256];
     stats.FormatPhases(phases, sizeof(phases));
+    // Each line stays under the 256-byte log payload.
     DBG_LOGF(book->GetStatusReporter(),
-             "REFLOW timing fmt=%u outcome=%s phases=[%s] pages=%u "
-             "page_calls=%u pages_per_call=%u/%u frames=%u max_frame=%u "
-             "max_work=%u splash_ms=%u/%u docs=%u blocks=%u avg_block=%llu "
-             "max_block=%llu encode_ms=%llu deflate_ms=%llu crc_ms=%llu "
-             "io_ms=%llu writes=%u words=%llu hash=%08x total=%llu",
-             (unsigned)format, outcome, phases, book->GetPageCount(),
+             "REFLOW timing fmt=%u tier=%s outcome=%s total=%llu pages=%u "
+             "words=%llu hash=%08x frames=%u max_frame=%u max_work=%u "
+             "splash_ms=%u/%u",
+             (unsigned)format, reflow_open_profile::TierName(profile.tier),
+             outcome, (unsigned long long)(osGetTime() - started),
+             book->GetPageCount(), page_words, page_hash, frames, max_frame,
+             max_work, splash_ms, splash_draws);
+    DBG_LOGF(book->GetStatusReporter(), "REFLOW phases ms/calls %s", phases);
+    DBG_LOGF(book->GetStatusReporter(),
+             "REFLOW pages calls=%u per_call=%u/%u docs=%u blocks=%u "
+             "avg_block=%llu max_block=%llu encode_ms=%llu deflate_ms=%llu "
+             "crc_ms=%llu io_ms=%llu writes=%u",
              stats.page_calls,
              stats.page_calls ? stats.pages_total / stats.page_calls : 0u,
-             stats.pages_max, frames, max_frame, max_work, splash_ms,
-             splash_draws, wstats.documents, wstats.blocks,
+             stats.pages_max, wstats.documents, wstats.blocks,
              wstats.blocks ? wstats.packed_bytes / wstats.blocks : 0ULL,
-             wstats.max_block, wstats.encode_us / 1000, wstats.deflate_us / 1000,
-             wstats.crc_us / 1000, wstats.io_ms, wstats.write_calls,
-             page_words, page_hash,
-             (unsigned long long)(osGetTime() - started));
+             wstats.max_block, wstats.encode_us / 1000,
+             wstats.deflate_us / 1000, wstats.crc_us / 1000, wstats.io_ms,
+             wstats.write_calls);
   }
   void ReleaseParser() {
     mobi.reset();
@@ -190,7 +197,7 @@ ReflowPreparation::~ReflowPreparation() {
   delete state_;
 }
 bool ReflowPreparation::Begin(Book *book, const std::string &source,
-                              size_t budget) {
+                              size_t budget, bool new3ds) {
   if (state_ && (GetResult() == Pending || GetResult() == Paused))
     Cancel();
   delete state_;
@@ -211,6 +218,18 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
     s.format = reflow_block_cache::Mobi;
   else if (HasExtCI(book->GetFileName(), ".fb2"))
     s.format = reflow_block_cache::Fb2;
+  {
+    reflow_open_profile::Inputs in;
+    in.format = (reflow_open_profile::Format)s.format;
+    in.file_size = (unsigned long long)s.identity.st_size;
+    in.new3ds = new3ds;
+    in.free_bytes = reflow_open_stats::FreeApplicationMemory();
+    s.profile = reflow_open_profile::Choose(in);
+    s.flush_words = s.profile.flush_words;
+    char line[240];
+    reflow_open_profile::Describe(line, sizeof(line), in, s.profile);
+    DBG_LOGF(book->GetStatusReporter(), "REFLOW profile %s", line);
+  }
   if (s.format == reflow_block_cache::Epub)
     return s.epub.Begin(book, source, budget);
   if (book->GetPageCount()) {

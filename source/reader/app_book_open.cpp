@@ -175,7 +175,8 @@ u8 ReaderController::OpenBook()
         !preparation_->Begin(selected_book, source,
                              debug_runtime::DisableReflowPageResidency() ? 0
                              : app_.IsNew3dsDevice() ? 2u * 1024u * 1024u
-                                                     : 512u * 1024u)) {
+                                                     : 512u * 1024u,
+                             app_.IsNew3dsDevice())) {
       cache_label_ = preparation_ ? preparation_->Label() : "not enough memory to prepare book";
       cache_label_ += "; B: back";
       if (preparation_) preparation_->Cancel();

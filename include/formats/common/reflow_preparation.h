@@ -17,7 +17,8 @@ public:
   };
   ReflowPreparation();
   ~ReflowPreparation();
-  bool Begin(Book *book, const std::string &source, size_t budget = 0);
+  bool Begin(Book *book, const std::string &source, size_t budget = 0,
+             bool new3ds = false);
   Result Step();
   void Cancel();
   void SignalPause();
