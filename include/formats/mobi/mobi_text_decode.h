@@ -16,6 +16,49 @@ class Book;
 
 namespace mobi_text_decode {
 
+enum DecodeMode { Copy, Mixed, Legacy, Utf16 };
+
+// Totals the decoder needs to pick a mode. Independent of how the input is
+// split into feeds.
+struct ScanScore {
+  size_t bytes = 0, invalid = 0, legacy_score = 0, mixed_score = 0;
+  // Output sizes the Mixed and Legacy conversions would produce.
+  size_t mixed_size = 0, legacy_size = 0;
+};
+
+// Feedable scan scorer. Feed() accepts the input in any split, including in
+// the middle of a UTF-8 sequence: an unfinished trailing sequence waits for
+// the next feed. The last feed must set `final`.
+class Scorer {
+public:
+  Scorer();
+  void Feed(const char *data, size_t n, bool final);
+  const ScanScore &Score() const { return score_; }
+private:
+  ScanScore score_;
+  std::string carry_, legacy_tail_, mixed_tail_;
+};
+
+struct ModeChoice {
+  DecodeMode mode;
+  bool guessed, legacy_guess;
+};
+// Mode for a non-UTF-16 encoding from the finished scan.
+ModeChoice ChooseMode(u32 encoding, const ScanScore &score);
+bool IsUtf16Encoding(u32 encoding);
+
+// Feedable converter to UTF-8 for a chosen mode; same output as converting the
+// whole input at once, for any split of the feeds.
+class Converter {
+public:
+  explicit Converter(DecodeMode mode);
+  void Feed(const char *data, size_t n, bool final, std::string *out);
+private:
+  DecodeMode mode_;
+  bool started_, little_;
+  std::string carry_;
+};
+
 class Session {
 public:
   Session();

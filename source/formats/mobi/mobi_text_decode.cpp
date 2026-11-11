@@ -16,7 +16,7 @@
 
 namespace mobi_text_decode {
 
-static bool IsUtf16Encoding(u32 encoding) {
+bool IsUtf16Encoding(u32 encoding) {
   return encoding == 1200 || encoding == 65002;
 }
 
@@ -205,11 +205,12 @@ struct Session::State {
   const std::string *source;
   std::string *output;
   u32 encoding;
-  size_t cursor = 0, invalid = 0, legacy_score = 0, mixed_score = 0;
-  std::string legacy_tail, mixed_tail;
+  size_t cursor = 0;
+  Scorer scorer;
   bool converting = false, done = false, guessed = false, legacy_guess = false,
        no_memory = false;
-  enum Mode { Copy, Mixed, Legacy, Utf16 } mode = Legacy;
+  typedef DecodeMode Mode;
+  Mode mode = Legacy;
 };
 namespace {
 size_t SafeEnd(const std::string &s, size_t from, size_t bytes) {
@@ -234,7 +235,136 @@ size_t ScoreChunk(std::string &tail, const std::string &chunk) {
   tail = joined.substr(joined.size() > 8 ? joined.size() - 8 : 0);
   return score;
 }
+// Walk boundary the whole-buffer scan would use: how many leading bytes of the
+// buffer form complete characters. With !final, a trailing sequence that is
+// still a valid prefix is held back for the next feed.
+size_t CompleteEnd(const char *p, size_t size, bool final) {
+  size_t i = 0;
+  while (i < size) {
+    const unsigned char c = p[i];
+    const size_t n = (c & 0xe0) == 0xc0   ? 2
+                     : (c & 0xf0) == 0xe0 ? 3
+                     : (c & 0xf8) == 0xf0 ? 4
+                                          : 1;
+    if (n == 1) {
+      ++i;
+      continue;
+    }
+    bool prefix = true;
+    for (size_t j = 1; prefix && j < n && i + j < size; ++j)
+      prefix = ((unsigned char)p[i + j] & 0xc0) == 0x80;
+    if (prefix && i + n <= size) {
+      i += n;
+      continue;
+    }
+    if (prefix && !final)
+      return i; // partial sequence: wait for more bytes
+    ++i;
+  }
+  return i;
+}
 } // namespace
+
+Scorer::Scorer() {}
+void Scorer::Feed(const char *data, size_t n, bool final) {
+  std::string work;
+  work.swap(carry_);
+  work.append(data, n);
+  const size_t end = CompleteEnd(work.data(), work.size(), final);
+  if (end < work.size())
+    carry_.assign(work, end, std::string::npos);
+  work.resize(end);
+  score_.bytes += end;
+  score_.invalid += CountUtf8InvalidLeadBytes(work);
+  const std::string legacy = DecodeLegacySingleByteToUtf8(work);
+  score_.legacy_size += legacy.size();
+  score_.legacy_score += ScoreChunk(legacy_tail_, legacy);
+  const std::string mixed = DecodeMostlyUtf8WithCp1252Fallback(work, NULL);
+  score_.mixed_size += mixed.size();
+  score_.mixed_score += ScoreChunk(mixed_tail_, mixed);
+}
+
+ModeChoice ChooseMode(u32 encoding, const ScanScore &score) {
+  ModeChoice c = {Legacy, false, false};
+  const bool valid = !score.invalid,
+             mostly = score.bytes && score.invalid * 1000 <= score.bytes * 2;
+  if (IsUtf8Encoding(encoding))
+    c.mode = valid ? Copy : Mixed;
+  else if (IsUnknownEncoding(encoding)) {
+    c.mode = valid ? Copy : mostly ? Mixed : Legacy;
+    c.guessed = valid || mostly;
+    c.legacy_guess = !c.guessed;
+  } else if ((valid || mostly) && score.legacy_score >= 2 &&
+             (valid || score.mixed_score + 1 < score.legacy_score)) {
+    c.mode = valid ? Copy : Mixed;
+    c.guessed = true;
+  }
+  return c;
+}
+
+Converter::Converter(DecodeMode mode)
+    : mode_(mode), started_(false), little_(true) {}
+void Converter::Feed(const char *data, size_t n, bool final,
+                     std::string *out) {
+  if (mode_ == Copy) {
+    out->append(data, n);
+    return;
+  }
+  if (mode_ == Legacy) {
+    *out += DecodeLegacySingleByteToUtf8(std::string(data, n));
+    return;
+  }
+  std::string work;
+  work.swap(carry_);
+  work.append(data, n);
+  if (mode_ == Mixed) {
+    const size_t end = CompleteEnd(work.data(), work.size(), final);
+    if (end < work.size())
+      carry_.assign(work, end, std::string::npos);
+    work.resize(end);
+    *out += DecodeMostlyUtf8WithCp1252Fallback(work, NULL);
+    return;
+  }
+  size_t i = 0;
+  if (!started_) {
+    if (work.size() < 2 && !final) {
+      carry_.swap(work);
+      return;
+    }
+    started_ = true;
+    if (work.size() >= 2) {
+      const unsigned char b0 = work[0], b1 = work[1];
+      if (b0 == 0xfe && b1 == 0xff) {
+        little_ = false;
+        i = 2;
+      } else if (b0 == 0xff && b1 == 0xfe)
+        i = 2;
+    }
+  }
+  auto word = [&](size_t at) {
+    return little_ ? (u16)((u8)work[at] | ((u16)(u8)work[at + 1] << 8))
+                   : (u16)(((u16)(u8)work[at] << 8) | (u8)work[at + 1]);
+  };
+  while (i + 1 < work.size()) {
+    u32 cp = word(i);
+    size_t used = 2;
+    if (cp >= 0xd800 && cp <= 0xdbff) {
+      if (i + 3 < work.size()) {
+        const u16 next = word(i + 2);
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          cp = 0x10000 + ((cp - 0xd800) << 10) + (next - 0xdc00);
+          used = 4;
+        }
+      } else if (!final)
+        break; // the low surrogate may be in the next feed
+    }
+    AppendUtf8Codepoint(out, cp);
+    i += used;
+  }
+  if (!final && i < work.size())
+    carry_.assign(work, i, std::string::npos);
+}
+
 Session::Session() : state_(NULL) {}
 Session::~Session() {
   delete state_;
@@ -251,7 +381,7 @@ bool Session::Begin(const std::string *source, u32 encoding,
   s.encoding = encoding;
   output->clear();
   if (IsUtf16Encoding(encoding)) {
-    s.mode = State::Utf16;
+    s.mode = Utf16;
     s.converting = true;
   }
   return true;
@@ -280,28 +410,14 @@ bool Session::Step(size_t bytes) {
   const std::string &in = *s.source;
   if (!s.converting) {
     const size_t end = SafeEnd(in, s.cursor, bytes);
-    const std::string part = in.substr(s.cursor, end - s.cursor);
-    s.invalid += CountUtf8InvalidLeadBytes(part);
-    s.legacy_score +=
-        ScoreChunk(s.legacy_tail, DecodeLegacySingleByteToUtf8(part));
-    s.mixed_score += ScoreChunk(s.mixed_tail,
-                                DecodeMostlyUtf8WithCp1252Fallback(part, NULL));
+    s.scorer.Feed(in.data() + s.cursor, end - s.cursor, end == in.size());
     s.cursor = end;
     if (end < in.size())
       return false;
-    const bool valid = !s.invalid,
-               mostly = !in.empty() && s.invalid * 1000 <= in.size() * 2;
-    if (IsUtf8Encoding(s.encoding))
-      s.mode = valid ? State::Copy : State::Mixed;
-    else if (IsUnknownEncoding(s.encoding)) {
-      s.mode = valid ? State::Copy : mostly ? State::Mixed : State::Legacy;
-      s.guessed = valid || mostly;
-      s.legacy_guess = !s.guessed;
-    } else if ((valid || mostly) && s.legacy_score >= 2 &&
-               (valid || s.mixed_score + 1 < s.legacy_score)) {
-      s.mode = valid ? State::Copy : State::Mixed;
-      s.guessed = true;
-    }
+    const ModeChoice choice = ChooseMode(s.encoding, s.scorer.Score());
+    s.mode = choice.mode;
+    s.guessed = choice.guessed;
+    s.legacy_guess = choice.legacy_guess;
     s.cursor = 0;
     s.converting = true;
     return false;
@@ -314,7 +430,7 @@ bool Session::Step(size_t bytes) {
     s.no_memory = true;
     return false;
   }
-  if (s.mode == State::Utf16) {
+  if (s.mode == Utf16) {
     bool little = true;
     if (in.size() >= 2 && (unsigned char)in[0] == 0xfe &&
         (unsigned char)in[1] == 0xff)
@@ -346,9 +462,9 @@ bool Session::Step(size_t bytes) {
   } else {
     const size_t end = SafeEnd(in, s.cursor, bytes);
     const std::string part = in.substr(s.cursor, end - s.cursor);
-    if (s.mode == State::Copy)
+    if (s.mode == Copy)
       *s.output += part;
-    else if (s.mode == State::Mixed)
+    else if (s.mode == Mixed)
       *s.output += DecodeMostlyUtf8WithCp1252Fallback(part, NULL);
     else
       *s.output += DecodeLegacySingleByteToUtf8(part);
