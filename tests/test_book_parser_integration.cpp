@@ -2329,6 +2329,96 @@ void TestMobiStreamIdentity() {
                        access((scratch + ".stream2.txt").c_str(), F_OK) != 0);
 }
 
+// A failed save after the Stream tier released pages must not complete (the
+// pages are gone); the same failure without a release still completes.
+struct PersistenceOutcome {
+  ReflowPreparation::Result result;
+  bool persistence_failed;
+  unsigned empty_pages; // pages without a buffer when the save is checked
+  std::string label;
+};
+
+PersistenceOutcome RunCorruptedValidate(const std::string &path,
+                                        const std::string &cache_dir) {
+  Text text;
+  BookContext ctx;
+  ctx.text = &text;
+  Book book(ctx);
+  const size_t slash = path.find_last_of('/');
+  book.SetFolderName(path.substr(0, slash).c_str());
+  book.SetFileName(path.substr(slash + 1).c_str());
+  ReflowPreparation prep;
+  PersistenceOutcome out = {ReflowPreparation::Pending, false, 0, ""};
+  test::ExpectTrue("begin preparation", prep.Begin(&book, path, 512 * 1024));
+  bool sabotaged = false;
+  unsigned steps = 0;
+  bool counted = false;
+  do {
+    if (!counted && std::string(prep.Label()) == "finalizing cache... B: cancel") {
+      // Before the cache reader touches any page.
+      for (int p = 1; p + 8 < book.GetPageCount(); ++p)
+        out.empty_pages += book.GetPage(p)->GetLength() == 0;
+      counted = true;
+    }
+    if (!sabotaged && std::string(prep.Label()) == "checking cache... B: cancel") {
+      const std::vector<std::string> caches = CacheFiles(cache_dir);
+      test::ExpectEq("one cache to corrupt", (int)caches.size(), 1);
+      const std::string good = ReadFileBytes(caches[0]);
+      WriteFileBytes(caches[0], std::string(good.size(), '\x5a'));
+      sabotaged = true;
+    }
+    out.result = prep.Step();
+    test::ExpectTrue("bounded progress", ++steps < 5000000);
+  } while (out.result == ReflowPreparation::Pending);
+  test::ExpectTrue("validation was reached", sabotaged);
+  out.persistence_failed = prep.PersistenceFailed();
+  out.label = prep.Label();
+  return out;
+}
+
+void TestStreamPersistenceFailure() {
+  const char *dir = getenv("TEST_MOBI_STREAM_DIR");
+  test::ExpectTrue("stream fixtures", dir != nullptr);
+  const std::string path = std::string(dir) + "/large-palmdoc.mobi";
+  const std::string cache_dir = std::string(dir) + "/persist-cache";
+  mkdir(cache_dir.c_str(), 0700);
+  mobi_page_cache::SetCacheDirForTest(cache_dir.c_str());
+  // The debug seams read these files relative to the working directory.
+  mkdir("sdmc:", 0700);
+  mkdir("sdmc:/3ds", 0700);
+  mkdir("sdmc:/3ds/3dslibris", 0700);
+  const std::string stream_flag = "sdmc:/3ds/3dslibris/reflow_stream.flag";
+  const std::string safe_flag = "sdmc:/3ds/3dslibris/reflow_safe.flag";
+  WriteFileBytes(stream_flag, "1");
+  const PersistenceOutcome stream = RunCorruptedValidate(path, cache_dir);
+  remove(stream_flag.c_str());
+  test::ExpectTrue("most pages were released before the failure", stream.empty_pages > 300);
+  test::ExpectTrue("a released book does not complete",
+                   stream.result == ReflowPreparation::IoError);
+  test::ExpectStrEq("released failure has its own label", stream.label.c_str(),
+                    "cannot save cache for this book");
+  test::ExpectTrue("no read prompt after release",
+                   stream.label.find("A: read") == std::string::npos);
+  for (const std::string &cache : CacheFiles(cache_dir))
+    remove(cache.c_str());
+  DIR *d = opendir(cache_dir.c_str());
+  while (dirent *e = readdir(d))
+    test::ExpectTrue("temporary text removed",
+                     std::string(e->d_name).find(".stream") == std::string::npos);
+  closedir(d);
+  // Control: the Safe tier keeps the pages, so it still completes unsaved.
+  WriteFileBytes(safe_flag, "1");
+  const PersistenceOutcome safe = RunCorruptedValidate(path, cache_dir);
+  remove(safe_flag.c_str());
+  test::ExpectTrue("safe keeps its pages", safe.empty_pages < 30);
+  test::ExpectTrue("safe still completes", safe.result == ReflowPreparation::Complete);
+  test::ExpectTrue("safe reports the failed save", safe.persistence_failed);
+  test::ExpectStrEq("safe keeps the read prompt", safe.label.c_str(),
+                    "cache unavailable; A: read / B: back");
+  mobi_page_cache::SetCacheDirForTest(nullptr);
+  printf("PASS: stream persistence failure after release is not Complete; safe unchanged\n");
+}
+
 int main(int argc, char **argv) {
   if(argc==2) {
     if(std::string(argv[1])=="mobi-lookahead") TestMobiLookaheadEnd();
@@ -2346,6 +2436,7 @@ int main(int argc, char **argv) {
     else if(std::string(argv[1])=="toc-cache") TestWarmEpubTocRepairIsDeferred();
     else if(std::string(argv[1])=="mobi-diagnostics") TestMobiParseCloseCachedReopenAndRecovery();
     else if(std::string(argv[1])=="mobi-stream") TestMobiStreamIdentity();
+    else if(std::string(argv[1])=="stream-persistence") TestStreamPersistenceFailure();
     else if(std::string(argv[1])=="page-alignment") {
       TestPageAlignmentRedrawMeasurements();
       TestPageAlignmentCacheInvalidation();

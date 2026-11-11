@@ -428,9 +428,10 @@ unsigned Preparation::ReleasableEnd(unsigned written) const {
   const unsigned end = count > 6 ? count - 6 : 0;
   return std::max(s.released, std::min(written, end));
 }
-void Preparation::ReleasePages(unsigned end, int keep) {
+bool Preparation::ReleasePages(unsigned end, int keep) {
   if (!state_ || !state_->stream || !state_->release_ok)
-    return;
+    return false;
+  bool freed = false;
   State &s = *state_;
   const std::vector<u32> &cursor = s.deferred.text_cursor_per_page;
   for (unsigned p = s.released; p < end && p < s.book->GetPageCount(); ++p) {
@@ -451,9 +452,11 @@ void Preparation::ReleasePages(unsigned end, int keep) {
       s.page_lines[(u16)p] =
           page_text_extract_utils::ExtractTextLinesFromPage(page);
     page->FreeBuffer();
+    freed = true;
   }
   if (end > s.released)
     s.released = end;
+  return freed;
 }
 unsigned long long Preparation::TextLength() const {
   return state_ && state_->phase > State::Header ? state_->header.text_len : 0;

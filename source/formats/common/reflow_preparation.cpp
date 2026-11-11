@@ -83,6 +83,11 @@ struct ReflowPreparation::State {
   reflow_open_profile::Profile profile;
   reflow_block_cache::WriterStats wstats;
   bool timing_logged = false;
+  // Stream tier freed written pages: the resident book is no longer readable
+  // without its cache, so a failed save cannot be tolerated.
+  bool pages_released = false;
+  // Debug seam reflow_safe.flag: the header-based refine must not leave Safe.
+  bool forced_safe = false;
   unsigned long long page_words = 0;
   unsigned page_hash = 2166136261u;
   // Debug identity of the prepared content (before pages are released), so
@@ -155,7 +160,8 @@ struct ReflowPreparation::State {
     if (keep < 0)
       keep = 0;
     ChecksumPages(end);
-    mobi->ReleasePages(end, keep);
+    if (mobi->ReleasePages(end, keep))
+      pages_released = true;
   }
   void SnapshotWriter() {
     if (writing)
@@ -235,6 +241,16 @@ struct ReflowPreparation::State {
     writer.Abort();
     writing = false;
     phase = Done;
+    if (persistence_failed && pages_released) {
+      result = IoError;
+      DBG_LOGF(book->GetStatusReporter(),
+               "Reflow preparation format=%u pages=%u saved=0 released=1 "
+               "total_ms=%llu",
+               (unsigned)format, book->GetPageCount(),
+               (unsigned long long)(osGetTime() - started));
+      LogTiming("unsaved-released");
+      return IoError;
+    }
     result = Complete;
     DBG_LOGF(book->GetStatusReporter(),
              "Reflow preparation format=%u pages=%u saved=%u total_ms=%llu",
@@ -320,8 +336,10 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
     // Console A/B seams: empty marker files next to the log force a tier or
     // disable compression for the next open. Debug builds only.
     const char *const base = "sdmc:/3ds/3dslibris/";
-    if (access((std::string(base) + "reflow_safe.flag").c_str(), F_OK) == 0)
+    if (access((std::string(base) + "reflow_safe.flag").c_str(), F_OK) == 0) {
       s.profile = reflow_open_profile::SafeProfile();
+      s.forced_safe = true;
+    }
     else if (access((std::string(base) + "reflow_stream.flag").c_str(), F_OK) ==
                  0 &&
              in.format == reflow_open_profile::Mobi) {
@@ -511,7 +529,8 @@ ReflowPreparation::Result ReflowPreparation::Step() {
         if (s.profile.tier == reflow_open_profile::Fast &&
             again.tier == reflow_open_profile::Safe)
           s.profile = reflow_open_profile::SafeProfile();
-        else if (s.profile.tier != reflow_open_profile::Stream &&
+        else if (!s.forced_safe &&
+                 s.profile.tier != reflow_open_profile::Stream &&
                  again.tier == reflow_open_profile::Stream) {
           // The real text size does not fit the resident pipeline either.
           s.profile = again;
@@ -665,6 +684,8 @@ const char *ReflowPreparation::Label() const {
     return s.epub.Label();
   if (s.result == NoMemory)
     return "not enough memory to prepare book";
+  if (s.result == IoError && s.pages_released)
+    return "cannot save cache for this book";
   if (s.result == IoError)
     return "cannot read book or cache";
   if (s.result == Failed)

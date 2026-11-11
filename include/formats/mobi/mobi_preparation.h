@@ -27,7 +27,8 @@ public:
   // ReleasableEnd returns the first page index that may NOT be released yet
   // (== released() when nothing can be).
   unsigned ReleasableEnd(unsigned written) const;
-  void ReleasePages(unsigned end, int keep);
+  // True when at least one page buffer was actually freed.
+  bool ReleasePages(unsigned end, int keep);
   // Uncompressed text length from record 0; 0 until the header was parsed.
   unsigned long long TextLength() const;
 
