@@ -16,13 +16,25 @@ inline uint64_t NowUs() {
 }
 } // namespace reflow_open_stats
 
+#include <stdlib.h>
+#include "formats/common/reflow_open_profile.h"
+
 namespace reflow_open_stats {
-// Free bytes in the application memory region (0 off-device).
-inline unsigned long long FreeApplicationMemory() {
+// Largest malloc block, probed without touching memory. Kernel region-free
+// cannot be used: libctru commits the application region to the heap at start.
+inline bool MallocProbe(unsigned long long bytes, void *) {
+  void *p = malloc((size_t)bytes);
+  if (!p)
+    return false;
+  free(p);
+  return true;
+}
+inline unsigned long long HeapHeadroom() {
 #ifndef __arm__
-  return 0;
+  return 0; // host builds never probe huge blocks
 #else
-  return (unsigned long long)osGetMemRegionFree(MEMREGION_APPLICATION);
+  return reflow_open_profile::LargestBlock(64ULL << 20, 1ULL << 20,
+                                           MallocProbe, 0);
 #endif
 }
 } // namespace reflow_open_stats

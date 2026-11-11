@@ -22,7 +22,9 @@ struct Inputs {
   // MOBI record-0 text length (0 when unknown / not MOBI / not yet parsed).
   unsigned long long text_len = 0;
   bool new3ds = false;
-  // Bytes the allocator can still provide (caller's probe; 0 = unknown/none).
+  // Largest block malloc can still provide (LargestBlock probe, a conservative
+  // stand-in for the free heap; 0 = unknown/none). Kernel region-free is not
+  // usable: the heap already holds the whole application region.
   unsigned long long free_bytes = 0;
 };
 
@@ -42,6 +44,16 @@ struct Profile {
   unsigned long long estimated_peak = 0; // Fast estimate, for the log
   unsigned long long required = 0;       // Fast estimate plus safety margin
 };
+
+// Largest block (multiple of `resolution`, at most `cap`) for which probe()
+// succeeds, found by binary search. The probe must not touch the memory it
+// allocates and must be monotone (a smaller request never fails when a larger
+// one succeeded). Typical cost: one call when `cap` fits, else about
+// log2(cap / resolution) + 1 calls.
+typedef bool (*ProbeFn)(unsigned long long bytes, void *context);
+unsigned long long LargestBlock(unsigned long long cap,
+                                unsigned long long resolution, ProbeFn probe,
+                                void *context);
 
 // Estimated peak working set of the Fast path for these inputs.
 unsigned long long EstimateFastPeak(const Inputs &in);

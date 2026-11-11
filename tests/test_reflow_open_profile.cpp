@@ -17,7 +17,41 @@ static Inputs MkMobi(unsigned long long file, unsigned long long text, bool nw,
   return in;
 }
 
+struct FakeHeap {
+  unsigned long long limit;
+  unsigned calls;
+};
+static bool FakeProbe(unsigned long long bytes, void *ctx) {
+  FakeHeap *h = static_cast<FakeHeap *>(ctx);
+  ++h->calls;
+  return bytes <= h->limit;
+}
+
 int main() {
+  {
+    const unsigned long long cap = 64 * MiB;
+    FakeHeap all = {1ULL << 40, 0};
+    test::ExpectEqU64("cap fits in one probe",
+                      LargestBlock(cap, MiB, FakeProbe, &all), cap);
+    test::ExpectEqU("one probe when the cap fits", all.calls, 1);
+    FakeHeap mid = {23 * MiB + 12345, 0};
+    const unsigned long long got = LargestBlock(cap, MiB, FakeProbe, &mid);
+    test::ExpectEq("largest block within one resolution step",
+                   got <= mid.limit && mid.limit - got <= MiB, 1);
+    test::ExpectEq("bounded probe count", mid.calls <= 8, 1);
+    FakeHeap none = {0, 0};
+    test::ExpectEqU64("nothing fits", LargestBlock(cap, MiB, FakeProbe, &none), 0);
+    test::ExpectEqU64("no probe function", LargestBlock(cap, MiB, 0, 0), 0);
+    test::ExpectEqU64("zero cap", LargestBlock(0, MiB, FakeProbe, &all), 0);
+    // The probed value drives the tier: the reference book needs ~29 MB.
+    const Inputs ref = MkMobi(4143096, 2671319, false, 0);
+    FakeHeap old_tight = {20 * MiB, 0}, old_roomy = {40 * MiB, 0};
+    Inputs a = ref, b = ref;
+    a.free_bytes = LargestBlock(cap, MiB, FakeProbe, &old_tight);
+    b.free_bytes = LargestBlock(cap, MiB, FakeProbe, &old_roomy);
+    test::ExpectEq("20 MB block keeps the reference book safe", Choose(a).tier == Safe, 1);
+    test::ExpectEq("40 MB block allows fast on old", Choose(b).tier == Fast, 1);
+  }
   // A Promised Land sized book (4.1 MB file, 2.7 MB text).
   const Inputs book = MkMobi(4143096, 2671319, false, 0);
   const unsigned long long need = RequiredFor(book);

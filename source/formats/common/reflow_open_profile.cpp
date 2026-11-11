@@ -16,6 +16,26 @@ const unsigned long long kFloorNew = 8 * kMiB, kFloorOld = 6 * kMiB;
 const unsigned long long kMaxFast = 24 * kMiB;
 } // namespace
 
+unsigned long long LargestBlock(unsigned long long cap,
+                                unsigned long long resolution, ProbeFn probe,
+                                void *context) {
+  if (!probe || !cap)
+    return 0;
+  if (!resolution)
+    resolution = 1;
+  if (probe(cap, context))
+    return cap;
+  unsigned long long low = 0, high = cap; // low fits (or 0), high does not
+  while (high - low > resolution) {
+    const unsigned long long mid = low + (high - low) / 2;
+    if (probe(mid, context))
+      low = mid;
+    else
+      high = mid;
+  }
+  return low;
+}
+
 unsigned long long EstimateFastPeak(const Inputs &in) {
   const unsigned long long file = in.file_size;
   // MOBI: text_len is the uncompressed text; otherwise assume the file size

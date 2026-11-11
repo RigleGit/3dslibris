@@ -228,7 +228,8 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
     in.format = (reflow_open_profile::Format)s.format;
     in.file_size = (unsigned long long)s.identity.st_size;
     in.new3ds = new3ds;
-    in.free_bytes = reflow_open_stats::FreeApplicationMemory();
+    const unsigned long long headroom = reflow_open_stats::HeapHeadroom();
+    in.free_bytes = headroom;
     s.profile = reflow_open_profile::Choose(in);
 #ifdef DSLIBRIS_DEBUG
     // Console A/B seams: empty marker files next to the log force a tier or
@@ -242,7 +243,7 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
       if (!had) {
         in.free_bytes = ~0ULL;
         s.profile = reflow_open_profile::Choose(in);
-        in.free_bytes = reflow_open_stats::FreeApplicationMemory();
+        in.free_bytes = headroom;
       }
     }
     if (access((std::string(base) + "reflow_nocompress.flag").c_str(), F_OK) == 0)
@@ -406,7 +407,10 @@ ReflowPreparation::Result ReflowPreparation::Step() {
         // downgrade is applied; the read stage already ran with the first pick.
         s.refined = true;
         s.inputs.text_len = text_len;
-        s.inputs.free_bytes = reflow_open_stats::FreeApplicationMemory();
+        // The source is already resident; the estimate counts it again, so
+        // add it back to what is free now.
+        s.inputs.free_bytes =
+            reflow_open_stats::HeapHeadroom() + s.inputs.file_size;
         const auto again = reflow_open_profile::Choose(s.inputs);
         char line[240];
         reflow_open_profile::Describe(line, sizeof(line), s.inputs, again);
