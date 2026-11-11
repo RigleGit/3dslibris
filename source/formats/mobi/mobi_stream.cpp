@@ -2,6 +2,7 @@
 
 #include "formats/common/cache_memory_utils.h"
 #include "formats/common/plain_text_stream.h"
+#include "formats/common/reflow_open_clock.h"
 
 #include <algorithm>
 #include <fcntl.h>
@@ -139,11 +140,15 @@ Status Decoder::FinishScan() {
   return Done;
 }
 
-Status Decoder::ScanStep(size_t budget) {
+Status Decoder::ScanStep(size_t budget, unsigned budget_ms) {
   if (scan_done_)
     return Done;
+  const uint64_t begin = reflow_open_stats::NowUs();
   size_t done = 0;
   while (done < budget) {
+    if (done && budget_ms &&
+        reflow_open_stats::NowUs() - begin >= (uint64_t)budget_ms * 1000)
+      break;
     const Status st = NextText();
     if (st == Done) {
       if (utf16_) {
@@ -203,11 +208,15 @@ Status Decoder::FeedExtractor(bool final) {
   return Write(chunk_);
 }
 
-Status Decoder::ConvertStep(size_t budget) {
+Status Decoder::ConvertStep(size_t budget, unsigned budget_ms) {
   if (!scan_done_)
     return Failed;
+  const uint64_t begin = reflow_open_stats::NowUs();
   size_t done = 0;
   while (done < budget) {
+    if (done && budget_ms &&
+        reflow_open_stats::NowUs() - begin >= (uint64_t)budget_ms * 1000)
+      break;
     const Status st = NextText();
     if (st == Done) {
       utf8_.clear();
@@ -335,7 +344,8 @@ bool Cleaner::FlushOut(bool force) {
   return ok;
 }
 
-Status Cleaner::Pump(bool scan_only, size_t budget) {
+Status Cleaner::Pump(bool scan_only, size_t budget, unsigned budget_ms) {
+  const uint64_t begin = reflow_open_stats::NowUs();
   size_t done = 0;
   do {
     const size_t want =
@@ -360,13 +370,16 @@ Status Cleaner::Pump(bool scan_only, size_t budget) {
     done += (size_t)n;
     if (final)
       return Done;
+    if (budget_ms &&
+        reflow_open_stats::NowUs() - begin >= (uint64_t)budget_ms * 1000)
+      break;
   } while (done < budget);
   return Pending;
 }
 
-Status Cleaner::Step(size_t budget) {
+Status Cleaner::Step(size_t budget, unsigned budget_ms) {
   if (stage_ == Scan) {
-    const Status st = Pump(true, budget);
+    const Status st = Pump(true, budget, budget_ms);
     if (st != Done)
       return st;
     track_ = !cleanup_->IdsBefore().empty();
@@ -377,7 +390,7 @@ Status Cleaner::Step(size_t budget) {
     return Pending;
   }
   if (stage_ == Run) {
-    const Status st = Pump(false, budget);
+    const Status st = Pump(false, budget, budget_ms);
     if (st != Done)
       return st;
     const bool rollback = track_ && !rolled_back_ &&

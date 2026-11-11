@@ -762,7 +762,7 @@ ReflowPreparation::Result Preparation::StepStream() {
       return s.result;
     }
     // Pass 1: scan.
-    const mobi_stream::Status st = s.stream_decoder.ScanStep(32768);
+    const mobi_stream::Status st = s.stream_decoder.ScanStep(131072, s.profile ? s.profile->page_budget_ms : 20);
     if (st == mobi_stream::Done) {
       sample("scan");
       s.phase = State::Markup;
@@ -770,7 +770,7 @@ ReflowPreparation::Result Preparation::StepStream() {
       return s.result = map_status(st);
   } else if (s.phase == State::Markup) {
     // Pass 2: convert and extract into the text file.
-    const mobi_stream::Status st = s.stream_decoder.ConvertStep(32768);
+    const mobi_stream::Status st = s.stream_decoder.ConvertStep(131072, s.profile ? s.profile->page_budget_ms : 20);
     if (st == mobi_stream::Done) {
       sample("extract");
       s.phase = State::Cleanup;
@@ -793,7 +793,7 @@ ReflowPreparation::Result Preparation::StepStream() {
         return s.result = R::IoError;
       s.cleaner_started = true;
     }
-    const mobi_stream::Status st = s.stream_cleaner.Step(65536);
+    const mobi_stream::Status st = s.stream_cleaner.Step(65536, s.profile ? s.profile->page_budget_ms : 20);
     if (st == mobi_stream::Done) {
       sample("cleanup");
       s.phase = State::TocPrepare;
