@@ -40,6 +40,7 @@ int main() {
   const Profile fast = Choose(rich), safe = SafeProfile();
   test::ExpectEq("rich is fast", fast.tier == Fast, 1);
   test::ExpectEq("fast reads more per call", fast.read_chunk > safe.read_chunk, 1);
+  test::ExpectEq("fast read stays bounded for a frame", fast.read_chunk <= 256 * 1024, 1);
   test::ExpectEq("fast has no page cap", fast.page_budget_pages == 0, 1);
   test::ExpectEq("safe keeps the 3.1 page cap", safe.page_budget_pages == 8, 1);
   test::ExpectEq("safe keeps 64 KiB reads", safe.read_chunk == 65536, 1);

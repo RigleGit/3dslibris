@@ -21,6 +21,7 @@
 #include <memory>
 #include <new>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <cstdio>
 
 struct ReflowPreparation::State {
@@ -76,8 +77,9 @@ struct ReflowPreparation::State {
   unsigned frames = 0, max_frame = 0, max_work = 0, splash_ms = 0,
            splash_draws = 0;
   u64 last_frame_ms = 0;
-  unsigned scanned = 0, pending_words = 0, flush_words =
-      reflow_append_policy::kDefaultFlushWords;
+  unsigned scanned = 0, pending_words = 0;
+  reflow_open_profile::Inputs inputs;
+  bool refined = false;
   u64 last_probe_ms = 0;
   // Closed pages are batched so the writer builds full blocks. Pages stay
   // resident until validation either way, so batching does not raise the peak.
@@ -98,7 +100,7 @@ struct ReflowPreparation::State {
     }
     return reflow_append_policy::ShouldAppend(
         count > written ? count - written : 0, pending_words, parsed,
-        low_memory, flush_words);
+        low_memory, profile.flush_words);
   }
   void SnapshotWriter() {
     if (writing)
@@ -188,6 +190,8 @@ struct ReflowPreparation::State {
     writing = writer.Begin(book, path, format);
     if (!writing)
       WriterFailed();
+    else
+      writer.SetCompress(profile.compress);
     return writing;
   }
 };
@@ -227,7 +231,25 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
     in.new3ds = new3ds;
     in.free_bytes = reflow_open_stats::FreeApplicationMemory();
     s.profile = reflow_open_profile::Choose(in);
-    s.flush_words = s.profile.flush_words;
+#ifdef DSLIBRIS_DEBUG
+    // Console A/B seams: empty marker files next to the log force a tier or
+    // disable compression for the next open. Debug builds only.
+    const char *const base = "sdmc:/3ds/3dslibris/";
+    if (access((std::string(base) + "reflow_safe.flag").c_str(), F_OK) == 0)
+      s.profile = reflow_open_profile::SafeProfile();
+    else if (access((std::string(base) + "reflow_fast.flag").c_str(), F_OK) == 0 &&
+             in.format != reflow_open_profile::Epub) {
+      const bool had = s.profile.tier == reflow_open_profile::Fast;
+      if (!had) {
+        in.free_bytes = ~0ULL;
+        s.profile = reflow_open_profile::Choose(in);
+        in.free_bytes = reflow_open_stats::FreeApplicationMemory();
+      }
+    }
+    if (access((std::string(base) + "reflow_nocompress.flag").c_str(), F_OK) == 0)
+      s.profile.compress = false;
+#endif
+    s.inputs = in;
     char line[240];
     reflow_open_profile::Describe(line, sizeof(line), in, s.profile);
     DBG_LOGF(book->GetStatusReporter(), "REFLOW profile %s", line);
@@ -378,6 +400,23 @@ ReflowPreparation::Result ReflowPreparation::Step() {
     if (r != Pending && r != Complete)
       return s.result = r;
     s.parsed = r == Complete;
+    if (!s.refined && s.mobi) {
+      const unsigned long long text_len = s.mobi->TextLength();
+      if (text_len) {
+        // The header gives the real text size: re-evaluate once. Only a
+        // downgrade is applied; the read stage already ran with the first pick.
+        s.refined = true;
+        s.inputs.text_len = text_len;
+        s.inputs.free_bytes = reflow_open_stats::FreeApplicationMemory();
+        const auto again = reflow_open_profile::Choose(s.inputs);
+        char line[240];
+        reflow_open_profile::Describe(line, sizeof(line), s.inputs, again);
+        DBG_LOGF(s.book->GetStatusReporter(), "REFLOW profile refined %s", line);
+        if (s.profile.tier == reflow_open_profile::Fast &&
+            again.tier == reflow_open_profile::Safe)
+          s.profile = reflow_open_profile::SafeProfile();
+      }
+    }
     if (s.parsed)
       s.ChecksumPages();
     if (s.writing && s.book->GetPageCount() > s.written &&

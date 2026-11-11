@@ -18,6 +18,8 @@ public:
   const char *Label() const;
   unsigned Progress() const;
   unsigned Total() const;
+  // Uncompressed text length from record 0; 0 until the header was parsed.
+  unsigned long long TextLength() const;
 
 private:
   ReflowPreparation::Result StepPhase();

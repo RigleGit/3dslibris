@@ -28,10 +28,10 @@ struct Inputs {
 
 struct Profile {
   Tier tier = Safe;
-  unsigned read_chunk = 64 * 1024;       // bytes per source read call
+  // Bytes per source read call; kept small enough that one SD read cannot
+  // push a frame past ~100 ms on Old 3DS.
+  unsigned read_chunk = 64 * 1024;
   bool reserve_raw = false;              // reserve the raw buffer up front
-  unsigned decode_bytes = 32768;         // decoder / markup extractor step size
-  unsigned merge_records = 1;            // MOBI records merged per step
   unsigned xml_feed_bytes = 8192;        // FB2 bytes fed to Expat per step
   unsigned page_budget_ms = 20;          // ContinueState time budget
   unsigned page_budget_pages = 8;        // ContinueState page cap (0 = none)

@@ -335,6 +335,7 @@ struct Preparation::State {
   bool toc_started = false;
   reflow_open_stats::Stats *stats = NULL;
   reflow_open_profile::Profile *profile = NULL;
+  bool raw_reserved = false;
   std::vector<ChapterEntry> fallback;
   enum Phase {
     Read,
@@ -386,6 +387,9 @@ bool Preparation::Begin(Book *book, const std::string &source,
 ReflowPreparation::Result Preparation::GetResult() const {
   return state_ ? state_->result : ReflowPreparation::NoMemory;
 }
+unsigned long long Preparation::TextLength() const {
+  return state_ && state_->phase > State::Header ? state_->header.text_len : 0;
+}
 void Preparation::SetProfile(reflow_open_profile::Profile *profile) {
   if (state_)
     state_->profile = profile;
@@ -418,7 +422,21 @@ ReflowPreparation::Result Preparation::StepPhase() {
   if (s.result != ReflowPreparation::Pending)
     return s.result;
   if (s.phase == State::Read) {
-    const size_t n = std::min<size_t>(65536, s.file_size - s.read_bytes);
+    if (s.profile && s.profile->reserve_raw && !s.raw_reserved) {
+      // One exact allocation instead of doubling growth (which would hold up
+      // to twice the file while reading). Without headroom, fall back to Safe.
+      s.raw_reserved = true;
+      if (cache_memory::HasHeadroom(s.file_size, 512 * 1024))
+        s.raw.reserve(s.file_size);
+      else {
+        *s.profile = reflow_open_profile::SafeProfile();
+        DBG_LOGF(s.deps.reporter,
+                 "REFLOW profile degraded to safe: no headroom for raw=%u",
+                 (unsigned)s.file_size);
+      }
+    }
+    const size_t n = std::min<size_t>(
+        s.profile ? s.profile->read_chunk : 65536, s.file_size - s.read_bytes);
     if (s.raw.size() + n > s.raw.capacity() &&
         !cache_memory::HasHeadroom(
             std::max(s.raw.size() + n, s.raw.capacity() * 2), 512 * 1024))

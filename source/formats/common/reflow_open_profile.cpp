@@ -63,10 +63,8 @@ Profile Choose(const Inputs &in) {
       in.free_bytes < p.required)
     return p;
   p.tier = Fast;
-  p.read_chunk = in.new3ds ? 1024 * 1024 : 512 * 1024;
+  p.read_chunk = 256 * 1024;
   p.reserve_raw = true;
-  p.decode_bytes = 131072;
-  p.merge_records = 16;
   p.xml_feed_bytes = 16384;
   p.page_budget_ms = 25;
   p.page_budget_pages = 0;
