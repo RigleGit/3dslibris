@@ -32,6 +32,8 @@ public:
   // the frame timestamp, and report splash redraw cost separately.
   void NoteFrame(unsigned long long now_ms, unsigned work_ms);
   void NoteSplash(unsigned ms);
+  // Time the opening loop may spend in Step() per frame (profile dependent).
+  unsigned FrameBudgetMs() const;
 
 private:
   struct State;

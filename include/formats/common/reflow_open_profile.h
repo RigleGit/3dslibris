@@ -37,6 +37,7 @@ struct Profile {
   unsigned page_budget_pages = 8;        // ContinueState page cap (0 = none)
   unsigned flush_words = 65536;          // pages handed to the writer per batch
   unsigned writer_budget_ms = 50;        // writer slice per Step
+  unsigned frame_budget_ms = 30;         // Step loop time per opening frame
   bool compress = true;                  // zlib level 1 per block
   Validation validation = FullReread;
   unsigned long long estimated_peak = 0; // Fast estimate, for the log

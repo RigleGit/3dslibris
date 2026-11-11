@@ -432,7 +432,7 @@ bool Writer::Finish() {
     state_->result = Pending;
   return state_->result == Pending;
 }
-Result Writer::Step() {
+Result Writer::Step(unsigned budget_ms) {
   if (!state_ || state_->result != Pending)
     return GetResult();
   State &s = *state_;
@@ -559,7 +559,7 @@ Result Writer::Step() {
                (unsigned long long)(osGetTime() - s.started),
                (unsigned long long)s.io_ms, (unsigned)s.refs.size());
     }
-  } while (s.result == Pending && osGetTime() - start < 50);
+  } while (s.result == Pending && osGetTime() - start < budget_ms);
   return s.result;
 }
 

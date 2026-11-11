@@ -25,6 +25,7 @@ struct Preparation::State {
   std::unique_ptr<char[]> buffer;
   bool paused = false, suspended = false, final = false, structured = false;
   reflow_open_stats::Stats *stats = NULL;
+  const reflow_open_profile::Profile *profile = NULL;
   enum Phase { Xml, Fallback, Done } phase = Xml;
   ReflowPreparation::Result result = ReflowPreparation::Pending;
   unsigned page = 0, line_page = 0;
@@ -153,6 +154,10 @@ void Preparation::SignalResume() {
 ReflowPreparation::Result Preparation::GetResult() const {
   return state_ ? state_->result : ReflowPreparation::NoMemory;
 }
+void Preparation::SetProfile(const reflow_open_profile::Profile *profile) {
+  if (state_)
+    state_->profile = profile;
+}
 void Preparation::SetStats(reflow_open_stats::Stats *stats) {
   if (state_)
     state_->stats = stats;
@@ -201,7 +206,8 @@ ReflowPreparation::Result Preparation::StepPhase() {
         s.available = n;
         return ReflowPreparation::Pending;
       }
-      const size_t n = std::min<size_t>(8192, s.available - s.cursor);
+      const size_t n = std::min<size_t>(
+          s.profile ? s.profile->xml_feed_bytes : 8192, s.available - s.cursor);
       s.final = s.fed + n == s.size;
       status = XML_Parse(s.parser, s.buffer.get() + s.cursor, n, s.final);
       s.cursor += n;

@@ -46,6 +46,9 @@ int main() {
   test::ExpectEq("fast flushes more per batch", fast.flush_words > safe.flush_words, 1);
   test::ExpectEq("fast frame slice stays under 100 ms",
                  fast.page_budget_ms + fast.writer_budget_ms <= 100, 1);
+  test::ExpectEq("fast frame budget plus one slice stays under 100 ms",
+                 fast.frame_budget_ms + fast.page_budget_ms + 20 <= 100, 1);
+  test::ExpectEq("safe frame budget unchanged", safe.frame_budget_ms == 30, 1);
   test::ExpectEq("compression default stays on", fast.compress && safe.compress, 1);
 
   // Old needs a larger floor than New for the same book.

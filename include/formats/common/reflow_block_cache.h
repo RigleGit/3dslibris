@@ -26,7 +26,8 @@ public:
   ~Writer();
   bool Begin(Book *book, const std::string &path, Format format = Epub);
   bool AppendDocument(unsigned first, unsigned end);
-  Result Step();
+  // budget_ms bounds one cooperative slice (one physical write may overrun).
+  Result Step(unsigned budget_ms = 50);
   bool Finish();
   void Abort();
   Result GetResult() const;

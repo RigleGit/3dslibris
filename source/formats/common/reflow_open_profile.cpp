@@ -72,6 +72,9 @@ Profile Choose(const Inputs &in) {
   p.page_budget_pages = 0;
   p.flush_words = 131072;
   p.writer_budget_ms = 25;
+  // One slice may overrun the budget by its own length (25 ms), keeping a
+  // frame near 70 ms before the splash redraw.
+  p.frame_budget_ms = 45;
   return p;
 }
 
@@ -83,10 +86,11 @@ size_t Describe(char *out, size_t size, const Inputs &in, const Profile &p) {
   const int n = snprintf(
       out, size,
       "tier=%s fmt=%u dev=%s file=%llu text=%llu free=%llu est=%llu need=%llu "
-      "read=%u pages=%u/%u flush=%u comp=%u val=%u",
+      "read=%u pages=%u/%u flush=%u frame=%u comp=%u val=%u",
       TierName(p.tier), (unsigned)in.format, in.new3ds ? "new" : "old",
       in.file_size, in.text_len, in.free_bytes, p.estimated_peak, p.required,
       p.read_chunk, p.page_budget_ms, p.page_budget_pages, p.flush_words,
+      p.frame_budget_ms,
       p.compress ? 1u : 0u, (unsigned)p.validation);
   return n < 0 ? 0 : (size_t)n < size ? (size_t)n : size - 1;
 }

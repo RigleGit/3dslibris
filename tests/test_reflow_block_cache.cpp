@@ -217,6 +217,36 @@ void TestPolicy() {
   Check(ShouldAppend(1, 5000, false, false, 4000), "custom threshold");
 }
 
+// Each osGetTime() call advances the stub clock by dslibris_test_clock_step ms,
+// so a Step budget translates into a bounded amount of writer work.
+void TestWriterSliceHonorsBudget() {
+  Fixture f;
+  f.AddPages(300);
+  auto steps_for = [&](unsigned budget) {
+    reflow_block_cache::Writer w;
+    Require(w.Begin(&f.book, f.Path("budget.mpc"), reflow_block_cache::Mobi),
+            "begin");
+    Require(w.AppendDocument(0, 300), "append");
+    unsigned steps = 0;
+    while (w.Step(budget) == reflow_block_cache::Pending && ++steps < 1000000) {
+    }
+    Check(w.GetResult() == reflow_block_cache::Ready, "document ready");
+    ++steps;
+    w.Abort();
+    return steps;
+  };
+#ifdef DSLIBRIS_TEST_CLOCK
+  dslibris_test_clock_step = 1;
+  const unsigned fine = steps_for(2), coarse = steps_for(200);
+  Check(fine > coarse * 4, "a small slice budget yields far more often");
+  dslibris_test_clock_step = 0;
+  Check(steps_for(25) >= 1, "zero-cost clock still completes");
+  dslibris_test_clock_step = 1;
+#else
+  (void)steps_for;
+#endif
+}
+
 void TestCancelLeavesNoPartialCache() {
   Fixture f;
   f.AddPages(300);
@@ -244,6 +274,7 @@ int main() {
   TestPolicy();
   TestBatchingFillsBlocksAndRoundtrips();
   TestPartialLastBlockAndSingleDocument();
+  TestWriterSliceHonorsBudget();
   TestCancelLeavesNoPartialCache();
   if (failures)
     fprintf(stderr, "%d failure(s)\n", failures);

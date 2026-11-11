@@ -4,7 +4,7 @@ source "$(dirname "$0")/test_build.sh"
 
 "${CXX:-c++}" -std=c++11 \
   ${CXXFLAGS:-} \
-  -DDSLIBRIS_HOST_TEST \
+  -DDSLIBRIS_HOST_TEST -DDSLIBRIS_TEST_CLOCK \
   "-I$TEST_ROOT/tests/stubs" \
   "-I$TEST_ROOT/include" \
   "-I$TEST_ROOT/third_party/utf8proc" \

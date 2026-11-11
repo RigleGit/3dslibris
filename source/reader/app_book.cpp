@@ -261,7 +261,8 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
   do {
     result = preparation_->Step();
   } while (result == ReflowPreparation::Pending &&
-           osGetTime() - work_begin < 30 && !app_.ShouldAbortWork());
+           osGetTime() - work_begin < preparation_->FrameBudgetMs() &&
+           !app_.ShouldAbortWork());
   preparation_->NoteFrame(input.timestamp_ms,
                           (unsigned)(osGetTime() - work_begin));
   if (app_.ShouldAbortWork())

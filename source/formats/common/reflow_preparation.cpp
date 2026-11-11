@@ -148,6 +148,7 @@ struct ReflowPreparation::State {
         return false;
       }
       mobi->SetStats(&stats);
+      mobi->SetProfile(&profile);
       return true;
     }
     fb2.reset(new (std::nothrow) fb2_parser::Preparation);
@@ -160,6 +161,7 @@ struct ReflowPreparation::State {
       return false;
     }
     fb2->SetStats(&stats);
+    fb2->SetProfile(&profile);
     return true;
   }
   void WriterFailed() {
@@ -403,7 +405,7 @@ ReflowPreparation::Result ReflowPreparation::Step() {
     }
   } else if (s.phase == State::Append) {
     const u64 append_begin = reflow_open_stats::NowUs();
-    const auto r = s.writer.Step();
+    const auto r = s.writer.Step(s.profile.writer_budget_ms);
     s.stats.Add(reflow_open_stats::Append,
                 reflow_open_stats::NowUs() - append_begin);
     if (r == reflow_block_cache::Pending)
@@ -422,7 +424,7 @@ ReflowPreparation::Result ReflowPreparation::Step() {
       s.phase = State::Parse;
   } else if (s.phase == State::Commit) {
     const u64 commit_begin = reflow_open_stats::NowUs();
-    const auto r = s.writer.Step();
+    const auto r = s.writer.Step(s.profile.writer_budget_ms);
     s.stats.Add(reflow_open_stats::Commit,
                 reflow_open_stats::NowUs() - commit_begin);
     if (r == reflow_block_cache::Pending)
@@ -587,4 +589,7 @@ void ReflowPreparation::NoteSplash(unsigned ms) {
     return;
   state_->splash_ms += ms;
   ++state_->splash_draws;
+}
+unsigned ReflowPreparation::FrameBudgetMs() const {
+  return state_ ? state_->profile.frame_budget_ms : 30u;
 }

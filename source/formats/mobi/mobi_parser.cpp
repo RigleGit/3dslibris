@@ -334,6 +334,7 @@ struct Preparation::State {
   mobi_toc_apply::Session toc;
   bool toc_started = false;
   reflow_open_stats::Stats *stats = NULL;
+  reflow_open_profile::Profile *profile = NULL;
   std::vector<ChapterEntry> fallback;
   enum Phase {
     Read,
@@ -384,6 +385,10 @@ bool Preparation::Begin(Book *book, const std::string &source,
 }
 ReflowPreparation::Result Preparation::GetResult() const {
   return state_ ? state_->result : ReflowPreparation::NoMemory;
+}
+void Preparation::SetProfile(reflow_open_profile::Profile *profile) {
+  if (state_)
+    state_->profile = profile;
 }
 void Preparation::SetStats(reflow_open_stats::Stats *stats) {
   if (state_)
@@ -506,7 +511,9 @@ ReflowPreparation::Result Preparation::StepPhase() {
   } else if (s.phase == State::Pages) {
     const size_t before = s.deferred.stream.text_bytes_fed;
     const bool done = plain_text_stream::ContinueState(
-        &s.deferred.stream, s.deferred.text_utf8, 20, 8, 0,
+        &s.deferred.stream, s.deferred.text_utf8,
+        s.profile ? s.profile->page_budget_ms : 20,
+        (u16)(s.profile ? s.profile->page_budget_pages : 8), 0,
         &s.deferred.text_cursor_per_page, NULL,
         s.hooks.make_plain_continue_callbacks());
     if (done)
