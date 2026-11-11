@@ -7,6 +7,7 @@
 #include "formats/common/plain_text_stream.h"
 
 #include "book/book_xml.h"
+#include "formats/common/cache_memory_utils.h"
 #include "formats/mobi/mobi_heading_markers.h"
 #include "shared/text_token_constants.h"
 
@@ -17,13 +18,22 @@ using plain_text_perf_utils::FillPlainTextStreamPerf;
 using plain_text_perf_utils::PlainTextPerfBaseline;
 using plain_text_perf_utils::PlainTextStreamPerf;
 
-static PlainLineChunk ReadNextLineChunk(const std::string &text, size_t *cursor) {
+// With !final, a line without its newline is incomplete: *pending is set and
+// the cursor stays put.
+static PlainLineChunk ReadNextLineChunk(const std::string &text, size_t *cursor,
+                                        bool final, bool *pending) {
   PlainLineChunk out = {nullptr, 0, false, false};
+  *pending = false;
   if (!cursor || *cursor > text.size())
     return out;
 
   const size_t start = *cursor;
   const size_t end = text.find('\n', start);
+  if (end == std::string::npos && !final) {
+    *pending = true;
+    out.data = nullptr;
+    return out;
+  }
   out.data = text.data() + start;
   if (end == std::string::npos) {
     out.size = text.size() - start;
@@ -50,15 +60,61 @@ void InitState(State *state, const parsedata_t &base_parsedata,
   state->initialized = false;
   state->completed = false;
   state->text_bytes_fed = 0;
+  state->window_final = true;
+  state->curr_pending = state->next_pending = false;
+  state->wants_data = false;
   state->curr_scratch.clear();
   state->next_scratch.clear();
   state->curr = {nullptr, 0, false, false};
   state->next = {nullptr, 0, false, false};
   parse_push(&state->parsedata, TAG_PRE);
 
-  state->curr = ReadNextLineChunk(text_utf8, &state->cursor);
-  state->next = ReadNextLineChunk(text_utf8, &state->cursor);
+  bool pending = false;
+  state->curr = ReadNextLineChunk(text_utf8, &state->cursor, true, &pending);
+  state->next = ReadNextLineChunk(text_utf8, &state->cursor, true, &pending);
   state->initialized = true;
+}
+
+void InitStateWindowed(State *state, const parsedata_t &base_parsedata,
+                       bool detect_heuristic_headings) {
+  if (!state)
+    return;
+  const std::string empty;
+  InitState(state, base_parsedata, empty, detect_heuristic_headings);
+  state->cursor = 0;
+  state->curr = {nullptr, 0, false, false};
+  state->next = {nullptr, 0, false, false};
+  state->window_final = false;
+  state->curr_pending = true;
+  state->next_pending = false;
+}
+
+bool AppendWindow(State *state, std::string *window, const char *more,
+                  size_t n, bool final) {
+  if (!state || !window)
+    return false;
+  const char *const base = window->data();
+  size_t drop = state->cursor < window->size() ? state->cursor : window->size();
+  size_t curr_off = 0, next_off = 0;
+  if (state->curr.valid) {
+    curr_off = (size_t)(state->curr.data - base);
+    drop = curr_off;
+  } else if (state->next.valid)
+    drop = (size_t)(state->next.data - base);
+  if (state->next.valid)
+    next_off = (size_t)(state->next.data - base);
+  // Growing must be possible before anything is dropped or moved.
+  if (!cache_memory::CanAppend(*window, n))
+    return false;
+  window->erase(0, drop);
+  window->append(more, n);
+  state->cursor = state->cursor > drop ? state->cursor - drop : 0;
+  if (state->curr.valid)
+    state->curr.data = window->data() + (curr_off - drop);
+  if (state->next.valid)
+    state->next.data = window->data() + (next_off - drop);
+  state->window_final = final;
+  return true;
 }
 
 bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
@@ -83,7 +139,28 @@ bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
   PlainTextPerfBaseline perf_baseline;
   CapturePlainTextPerfBaseline(state->parsedata, &perf_baseline);
 
-  while (state->curr.valid) {
+  state->wants_data = false;
+  for (;;) {
+    if (state->curr_pending) {
+      state->curr = ReadNextLineChunk(text_utf8, &state->cursor,
+                                      state->window_final, &state->curr_pending);
+      if (state->curr_pending) {
+        state->wants_data = true;
+        break;
+      }
+      state->next = ReadNextLineChunk(text_utf8, &state->cursor,
+                                      state->window_final, &state->next_pending);
+    } else if (state->next_pending) {
+      state->next = ReadNextLineChunk(text_utf8, &state->cursor,
+                                      state->window_final, &state->next_pending);
+    }
+    // The next line is the lookahead of the heading heuristics.
+    if (state->next_pending) {
+      state->wants_data = true;
+      break;
+    }
+    if (!state->curr.valid)
+      break;
     bool curr_blank = false;
     bool next_blank = false;
     bool curr_candidate = false;
@@ -205,7 +282,8 @@ bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
     state->prev_blank = heuristic_headings ? curr_blank : false;
     state->prev_candidate = heuristic_headings ? curr_candidate : false;
     state->curr = state->next;
-    state->next = ReadNextLineChunk(text_utf8, &state->cursor);
+    state->next = ReadNextLineChunk(text_utf8, &state->cursor,
+                                    state->window_final, &state->next_pending);
 
     const u16 pages_done = state->parsedata.book->GetPageCount() - page_start;
     const bool have_min_pages =
@@ -216,7 +294,7 @@ bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
       break;
   }
 
-  if (!state->curr.valid) {
+  if (!state->wants_data && !state->curr.valid) {
     parse_pop(&state->parsedata);
     callbacks.finalize_plain_page(&state->parsedata);
     if (state->detect_heuristic_headings)

@@ -38,6 +38,13 @@ struct State {
   bool initialized;
   bool completed;
   size_t text_bytes_fed;
+  // Windowed mode: text_utf8 is a window onto a longer text that the caller
+  // refills with AppendWindow. A line that is not complete inside the window
+  // (no newline yet) is not consumed unless the window is final.
+  bool window_final;
+  bool curr_pending, next_pending;
+  // Set by ContinueState when it stopped for lack of input (not budget).
+  bool wants_data;
   std::string curr_scratch;
   std::string next_scratch;
 };
@@ -58,6 +65,16 @@ struct ContinueCallbacks {
 
 void InitState(State *state, const parsedata_t &base_parsedata,
                const std::string &text_utf8, bool detect_heuristic_headings);
+
+// Starts a windowed stream over an initially empty window.
+void InitStateWindowed(State *state, const parsedata_t &base_parsedata,
+                       bool detect_heuristic_headings);
+
+// Drops the consumed prefix of *window, appends n more bytes and keeps the
+// state's lines valid. `final` says the text ends with these bytes. Returns
+// false (nothing changed) when the window cannot grow.
+bool AppendWindow(State *state, std::string *window, const char *more,
+                  size_t n, bool final);
 
 bool ContinueState(State *state, const std::string &text_utf8, u32 budget_ms,
                    u16 page_budget, u16 min_pages_before_stop,
