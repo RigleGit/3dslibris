@@ -14,6 +14,8 @@ public:
   void SetStats(reflow_open_stats::Stats *stats);
   // The profile is owned by the caller and may be downgraded while open.
   void SetProfile(reflow_open_profile::Profile *profile);
+  // Prefix of the temporary files of the stream tier (default: the source path).
+  void SetScratchBase(const std::string &base);
   ReflowPreparation::Result GetResult() const;
   const char *Label() const;
   unsigned Progress() const;
@@ -23,6 +25,8 @@ public:
 
 private:
   ReflowPreparation::Result StepPhase();
+  ReflowPreparation::Result StepStream();
+  ReflowPreparation::Result StepToc();
   struct State;
   State *state_;
   Preparation(const Preparation &);

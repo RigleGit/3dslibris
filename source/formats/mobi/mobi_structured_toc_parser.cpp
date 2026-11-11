@@ -452,5 +452,19 @@ bool ParseStructuredToc(const std::string &raw, const std::vector<u32> &offsets,
   return !out->empty();
 }
 
+bool NcxLastRecord(const std::string &main_record, u32 ncx_index,
+                   size_t record_count, u32 *last_record) {
+  MobiIndxHeader hdr;
+  if (!last_record || !ParseMobiIndxHeader((const u8 *)main_record.data(),
+                                           main_record.size(), &hdr) ||
+      hdr.count == 0 || (size_t)ncx_index + (size_t)hdr.count + 1 >= record_count)
+    return false;
+  u64 last = (u64)ncx_index + hdr.count;
+  if (hdr.ncncx > 0)
+    last += hdr.ncncx;
+  *last_record = last >= record_count ? (u32)(record_count - 1) : (u32)last;
+  return true;
+}
+
 } // namespace mobi_structured_toc_parser
 

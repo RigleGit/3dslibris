@@ -49,6 +49,23 @@ private:
   MergeSession &operator=(const MergeSession &);
 };
 
+// Decodes one text record at a time (trailing entries removed, then stored,
+// PalmDOC or HUFF/CDIC), as MergeSession does for each record. For HUFF/CDIC
+// the records raw/offsets expose must include the HUFF and CDIC records.
+class TextRecordDecoder {
+public:
+  TextRecordDecoder();
+  ~TextRecordDecoder();
+  bool Begin(const std::string &raw, const std::vector<uint32_t> &offsets,
+             const MobiRecord0Header &header);
+  bool Decode(const uint8_t *data, size_t len, std::string *out);
+private:
+  struct State;
+  State *state_;
+  TextRecordDecoder(const TextRecordDecoder &);
+  TextRecordDecoder &operator=(const TextRecordDecoder &);
+};
+
 bool BuildMergedText(const std::string &raw, const std::vector<uint32_t> &offsets,
                      const MobiRecord0Header &header, std::string *merged);
 

@@ -399,6 +399,32 @@ int MergeSession::Step() {
   }
   return 1;
 }
+struct TextRecordDecoder::State {
+  MobiRecord0Header header;
+  HuffCdicDecoder huff;
+};
+TextRecordDecoder::TextRecordDecoder() : state_(NULL) {}
+TextRecordDecoder::~TextRecordDecoder() { delete state_; }
+bool TextRecordDecoder::Begin(const std::string &raw,
+                              const std::vector<uint32_t> &offsets,
+                              const MobiRecord0Header &header) {
+  delete state_;
+  state_ = new (std::nothrow) State;
+  if (!state_)
+    return false;
+  state_->header = header;
+  return header.compression != 17480 ||
+         InitHuffCdicDecoder(raw, offsets, header, &state_->huff);
+}
+bool TextRecordDecoder::Decode(const uint8_t *data, size_t len,
+                               std::string *out) {
+  return state_ &&
+         DecodeTextRecord(data, len, state_->header,
+                          state_->header.compression == 17480 ? &state_->huff
+                                                              : NULL,
+                          out);
+}
+
 bool BuildMergedText(const std::string &raw, const std::vector<uint32_t> &offsets,
                      const MobiRecord0Header &header, std::string *merged) {
   MergeSession session;

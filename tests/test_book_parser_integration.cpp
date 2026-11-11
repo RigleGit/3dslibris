@@ -17,6 +17,8 @@
 #include "formats/common/plain_parser.h"
 #include "expat.h"
 #include "formats/mobi/mobi_text_decode.h"
+#include "formats/mobi/mobi_preparation.h"
+#include "formats/common/reflow_open_profile.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/epub/epub_page_cache.h"
 #include <unistd.h>
@@ -2198,6 +2200,135 @@ static void TestMobiLookaheadEnd() {
   mobi_page_cache::SetCacheDirForTest(nullptr);
 }
 
+
+// Every MOBI fixture opened through the Safe and the Stream tier must give the
+// same pages, chapters and title, with the wrap fix off and on.
+struct StreamOutcome {
+  int result = -1;
+  PageData pages;
+  std::vector<ChapterEntry> chapters;
+  std::string title;
+};
+
+StreamOutcome OpenMobiTier(const std::string &path, bool stream, bool wrap,
+                           const std::string &scratch, unsigned stop_after = 0,
+                           bool *scratch_seen = nullptr) {
+  StreamOutcome out;
+  Text text;
+  CancelReporter reporter;
+  BookContext ctx;
+  ctx.text = &text;
+  ctx.status_reporter = &reporter;
+  Book book(ctx);
+  const size_t slash = path.find_last_of('/');
+  book.SetFolderName(path.substr(0, slash).c_str());
+  book.SetFileName(path.substr(slash + 1).c_str());
+  book.SetMobiLineWrapFix(wrap);
+  book.PrepareForOpen();
+  book.CaptureEbookImageSetting();
+  mobi_parser::Preparation prep;
+  reflow_open_profile::Profile profile = stream
+                                             ? reflow_open_profile::StreamProfile()
+                                             : reflow_open_profile::SafeProfile();
+  if (!prep.Begin(&book, path))
+    return out;
+  prep.SetProfile(&profile);
+  prep.SetScratchBase(scratch);
+  ReflowPreparation::Result r;
+  unsigned steps = 0;
+  do {
+    r = prep.Step();
+    ++steps;
+    if (scratch_seen && access((scratch + ".stream.txt").c_str(), F_OK) == 0)
+      *scratch_seen = true;
+    if (stop_after && steps == stop_after)
+      return out; // cancelled: the preparation is destroyed on return
+  } while (r == ReflowPreparation::Pending && steps < 5000000);
+  out.result = r == ReflowPreparation::Complete ? 0 : (int)r + 1;
+  if (r == ReflowPreparation::Complete) {
+    out.pages = CapturePageData(&book);
+    out.chapters = book.GetChapters();
+    out.title = book.GetTitle();
+  }
+  return out;
+}
+
+void CheckStreamIdentity(const std::string &path) {
+  const std::string name = path.substr(path.find_last_of('/') + 1);
+  const std::string scratch = path + ".scratch";
+  for (int wrap = 0; wrap < 2; ++wrap) {
+    const std::string label = name + (wrap ? " wrap" : " plain");
+    bool seen = false;
+    const StreamOutcome safe = OpenMobiTier(path, false, wrap != 0, scratch);
+    const StreamOutcome stream =
+        OpenMobiTier(path, true, wrap != 0, scratch, 0, &seen);
+    test::ExpectEq((label + ": safe result").c_str(), safe.result, 0);
+    test::ExpectEq((label + ": stream result").c_str(), stream.result, 0);
+    test::ExpectTrue((label + ": the stream tier wrote its text file").c_str(), seen);
+    test::ExpectEq((label + ": page count").c_str(), (int)stream.pages.size(),
+                   (int)safe.pages.size());
+    test::ExpectTrue((label + ": every page codepoint").c_str(), stream.pages == safe.pages);
+    test::ExpectStrEq((label + ": title").c_str(), stream.title.c_str(), safe.title.c_str());
+    test::ExpectEq((label + ": chapter count").c_str(), (int)stream.chapters.size(),
+                   (int)safe.chapters.size());
+    for (size_t i = 0; i < safe.chapters.size() && i < stream.chapters.size(); ++i) {
+      test::ExpectEq((label + ": chapter page").c_str(), stream.chapters[i].page, safe.chapters[i].page);
+      test::ExpectStrEq((label + ": chapter title").c_str(), stream.chapters[i].title.c_str(),
+                        safe.chapters[i].title.c_str());
+      test::ExpectEq((label + ": chapter level").c_str(), stream.chapters[i].level, safe.chapters[i].level);
+    }
+    test::ExpectTrue((label + ": temporary files removed").c_str(),
+                     access((scratch + ".stream.txt").c_str(), F_OK) != 0 &&
+                         access((scratch + ".stream2.txt").c_str(), F_OK) != 0);
+    printf("PASS: stream == safe for %s (%d pages, %d chapters)\n", label.c_str(),
+           (int)safe.pages.size(), (int)safe.chapters.size());
+  }
+}
+
+void TestMobiStreamIdentity() {
+  std::vector<std::string> paths;
+  for (const char *env : {"TEST_MOBI_STREAM_DIR", "TEST_MOBI_READING_DIR",
+                          "TEST_IMAGE_VIEWER_DIR", "TEST_MOBI_EXTRA_DIR"}) {
+    const char *dir = getenv(env);
+    if (!dir)
+      continue;
+    DIR *d = opendir(dir);
+    if (!d)
+      continue;
+    while (dirent *e = readdir(d)) {
+      const std::string name = e->d_name;
+      if (name.size() > 5 && name.substr(name.size() - 5) == ".mobi" &&
+          name.compare(0, 10, "truncated-") != 0)
+        paths.push_back(std::string(dir) + "/" + name);
+    }
+    closedir(d);
+  }
+  test::ExpectTrue("MOBI fixtures for the tier comparison", paths.size() >= 12);
+  std::sort(paths.begin(), paths.end());
+  for (const std::string &path : paths)
+    CheckStreamIdentity(path);
+
+  // Cancelling inside the conversion pass leaves no temporary file behind.
+  const char *dir = getenv("TEST_MOBI_STREAM_DIR");
+  const std::string path = std::string(dir) + "/large-palmdoc.mobi";
+  const std::string scratch = path + ".cancel";
+  bool seen = false;
+  OpenMobiTier(path, true, true, scratch, 40, &seen);
+  test::ExpectTrue("the cancelled open had started its text file", seen);
+  test::ExpectTrue("cancel removes the temporary text",
+                   access((scratch + ".stream.txt").c_str(), F_OK) != 0 &&
+                       access((scratch + ".stream2.txt").c_str(), F_OK) != 0);
+  // A stale temporary file from an interrupted run is replaced.
+  WriteFileBytes(scratch + ".stream.txt", "stale");
+  WriteFileBytes(scratch + ".stream2.txt", "stale");
+  const StreamOutcome safe = OpenMobiTier(path, false, true, scratch);
+  const StreamOutcome again = OpenMobiTier(path, true, true, scratch);
+  test::ExpectTrue("stale temporary text does not leak into the pages", again.pages == safe.pages);
+  test::ExpectTrue("stale temporary files are gone",
+                   access((scratch + ".stream.txt").c_str(), F_OK) != 0 &&
+                       access((scratch + ".stream2.txt").c_str(), F_OK) != 0);
+}
+
 int main(int argc, char **argv) {
   if(argc==2) {
     if(std::string(argv[1])=="mobi-lookahead") TestMobiLookaheadEnd();
@@ -2214,6 +2345,7 @@ int main(int argc, char **argv) {
     else if(std::string(argv[1])=="image-widths") TestRepeatedImageWidthsRemainPerOccurrence();
     else if(std::string(argv[1])=="toc-cache") TestWarmEpubTocRepairIsDeferred();
     else if(std::string(argv[1])=="mobi-diagnostics") TestMobiParseCloseCachedReopenAndRecovery();
+    else if(std::string(argv[1])=="mobi-stream") TestMobiStreamIdentity();
     else if(std::string(argv[1])=="page-alignment") {
       TestPageAlignmentRedrawMeasurements();
       TestPageAlignmentCacheInvalidation();

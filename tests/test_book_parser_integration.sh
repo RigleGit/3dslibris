@@ -298,6 +298,8 @@ PYFIXTURE
   "$TEST_ROOT/source/formats/common/zip_read_utils.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_parser.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_stream.cpp" \
+  "$TEST_ROOT/source/formats/mobi/mobi_record_reader.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_parse_book.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_book_hooks.cpp" \
   "$TEST_ROOT/source/formats/mobi/mobi_safe_markup_extract.cpp" \

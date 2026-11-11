@@ -103,9 +103,49 @@ int main() {
   // 10 MB MOBI on Old with modest memory: Safe (pages alone need ~5x text).
   Inputs ten = MkMobi(10 * MiB, 9 * MiB, false, 40 * MiB);
   test::ExpectEq("10 MB on old with 40 MB free is safe", Choose(ten).tier == Safe, 1);
-  // Low memory.
-  test::ExpectEq("low memory is safe",
-                 Choose(MkMobi(4143096, 2671319, true, 8 * MiB)).tier == Safe, 1);
+  // Low memory: Safe would not fit either, so MOBI streams its records.
+  test::ExpectEq("low memory streams a MOBI",
+                 Choose(MkMobi(4143096, 2671319, true, 8 * MiB)).tier == Stream, 1);
+  {
+    // The Old 3DS case: a 10 MB MOBI against about 22 MiB of heap.
+    const Inputs old_huge = MkMobi(10146352, 9003026, false, 22 * MiB);
+    const Profile p = Choose(old_huge);
+    test::ExpectEq("huge MOBI on a 22 MiB heap streams", p.tier == Stream, 1);
+    test::ExpectEq("stream keeps the Safe batch sizes",
+                   p.read_chunk == SafeProfile().read_chunk &&
+                       p.page_budget_ms == SafeProfile().page_budget_ms &&
+                       p.page_budget_pages == SafeProfile().page_budget_pages &&
+                       p.frame_budget_ms == SafeProfile().frame_budget_ms,
+                   1);
+    test::ExpectEq("stream does not reserve the source", !p.reserve_raw, 1);
+    test::ExpectEq("stream reports the estimate it refused",
+                   p.estimated_peak == EstimateFastPeak(old_huge), 1);
+    // Boundary: exactly what Safe needs stays Safe, one byte less streams.
+    Inputs edge = old_huge;
+    edge.free_bytes = RequiredForSafe(edge);
+    test::ExpectEq("exact Safe fit is safe", Choose(edge).tier == Safe, 1);
+    edge.free_bytes = RequiredForSafe(edge) - 1;
+    test::ExpectEq("one byte short of Safe streams", Choose(edge).tier == Stream, 1);
+    test::ExpectEq("Safe estimate is not above Fast",
+                   EstimateSafePeak(old_huge) <= EstimateFastPeak(old_huge), 1);
+    // Only MOBI streams, and an unknown heap never does.
+    Inputs fb2_low = old_huge;
+    fb2_low.format = reflow_open_profile::Fb2;
+    test::ExpectEq("FB2 never streams", Choose(fb2_low).tier == Safe, 1);
+    Inputs epub_low = old_huge;
+    epub_low.format = reflow_open_profile::Epub;
+    test::ExpectEq("EPUB never streams", Choose(epub_low).tier == Safe, 1);
+    Inputs unknown = old_huge;
+    unknown.free_bytes = 0;
+    test::ExpectEq("unknown heap does not stream", Choose(unknown).tier == Safe, 1);
+    // Fast is untouched: plenty of memory still picks it.
+    test::ExpectEq("rich MOBI stays fast",
+                   Choose(MkMobi(4143096, 2671319, true, 64 * MiB)).tier == Fast, 1);
+    test::ExpectStrEq("stream tier name", TierName(Stream), "stream");
+    char line[256];
+    Describe(line, sizeof(line), old_huge, p);
+    test::ExpectEq("describe names the stream tier", strstr(line, "tier=stream") != NULL, 1);
+  }
 
   // Small book fits everywhere with modest memory.
   Inputs small = MkMobi(300 * 1024, 200 * 1024, false, 16 * MiB);

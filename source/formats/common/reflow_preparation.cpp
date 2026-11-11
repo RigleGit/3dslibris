@@ -18,11 +18,37 @@
 #include "shared/path_constants.h"
 #include "shared/string_utils.h"
 #include "shared/debug_log.h"
+#include <dirent.h>
 #include <memory>
 #include <new>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
+
+namespace {
+// Temporary text of a stream-tier preparation that was interrupted (crash,
+// power loss) is left next to the cache: remove it on the next start.
+void RemoveStaleStreamScratch(const std::string &cache_path) {
+  const size_t slash = cache_path.find_last_of('/');
+  if (slash == std::string::npos)
+    return;
+  const std::string dir = cache_path.substr(0, slash);
+  DIR *d = opendir(dir.c_str());
+  if (!d)
+    return;
+  const char *const suffixes[] = {".stream.txt", ".stream2.txt"};
+  while (struct dirent *e = readdir(d)) {
+    const std::string name = e->d_name;
+    for (unsigned i = 0; i < 2; ++i) {
+      const std::string suffix = suffixes[i];
+      if (name.size() > suffix.size() &&
+          name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0)
+        unlink((dir + "/" + name).c_str());
+    }
+  }
+  closedir(d);
+}
+} // namespace
 
 struct ReflowPreparation::State {
   epub_parser::Preparation epub;
@@ -151,6 +177,8 @@ struct ReflowPreparation::State {
       }
       mobi->SetStats(&stats);
       mobi->SetProfile(&profile);
+      mobi->SetScratchBase(path);
+      RemoveStaleStreamScratch(path);
       return true;
     }
     fb2.reset(new (std::nothrow) fb2_parser::Preparation);
@@ -237,7 +265,15 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
     const char *const base = "sdmc:/3ds/3dslibris/";
     if (access((std::string(base) + "reflow_safe.flag").c_str(), F_OK) == 0)
       s.profile = reflow_open_profile::SafeProfile();
-    else if (access((std::string(base) + "reflow_fast.flag").c_str(), F_OK) == 0 &&
+    else if (access((std::string(base) + "reflow_stream.flag").c_str(), F_OK) ==
+                 0 &&
+             in.format == reflow_open_profile::Mobi) {
+      const unsigned long long estimate = s.profile.estimated_peak,
+                               required = s.profile.required;
+      s.profile = reflow_open_profile::StreamProfile();
+      s.profile.estimated_peak = estimate;
+      s.profile.required = required;
+    } else if (access((std::string(base) + "reflow_fast.flag").c_str(), F_OK) == 0 &&
              in.format != reflow_open_profile::Epub) {
       const bool had = s.profile.tier == reflow_open_profile::Fast;
       if (!had) {
@@ -418,6 +454,14 @@ ReflowPreparation::Result ReflowPreparation::Step() {
         if (s.profile.tier == reflow_open_profile::Fast &&
             again.tier == reflow_open_profile::Safe)
           s.profile = reflow_open_profile::SafeProfile();
+        else if (s.profile.tier != reflow_open_profile::Stream &&
+                 again.tier == reflow_open_profile::Stream) {
+          // The real text size does not fit the resident pipeline either.
+          s.profile = again;
+          DBG_LOGF(s.book->GetStatusReporter(),
+                   "REFLOW profile degraded to stream: text=%llu does not fit",
+                   text_len);
+        }
       }
     }
     if (s.parsed)

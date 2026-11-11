@@ -9,7 +9,7 @@
 #include <cstddef>
 
 namespace reflow_open_profile {
-enum Tier { Safe = 0, Fast = 1 };
+enum Tier { Safe = 0, Fast = 1, Stream = 2 };
 enum Format { Epub = 0, Mobi = 1, Fb2 = 2 };
 enum Validation {
   FullReread = 0,  // re-read the whole cache after publishing (current)
@@ -60,7 +60,15 @@ unsigned long long EstimateFastPeak(const Inputs &in);
 // Required free bytes for Fast: estimate times the safety factor plus a floor
 // reserved for the rest of the application. Old 3DS keeps a larger floor.
 unsigned long long RequiredFor(const Inputs &in);
+// Estimated peak of the Safe path (the same stages as Fast, without the
+// batching headroom), and the free bytes Safe needs: the estimate plus a small
+// reserve for the rest of the application.
+unsigned long long EstimateSafePeak(const Inputs &in);
+unsigned long long RequiredForSafe(const Inputs &in);
 Profile Choose(const Inputs &in);
+// The Stream parameter set: MOBI read through a file-backed record reader, so
+// the peak does not follow the size of the book.
+Profile StreamProfile();
 // The Safe parameter set, used when Fast must be abandoned mid-open.
 Profile SafeProfile();
 const char *TierName(Tier tier);

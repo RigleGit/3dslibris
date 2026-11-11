@@ -35,5 +35,11 @@ bool ParseStructuredToc(const std::string &raw, const std::vector<u32> &offsets,
                         std::vector<MobiStructuredTocEntry> *out,
                         IStatusReporter *reporter);
 
+// Highest record index ParseStructuredToc reads for this NCX main record: the
+// INDX records and the CNCX records that follow it. False when the record is
+// not a usable index (the parse would fail too).
+bool NcxLastRecord(const std::string &main_record, u32 ncx_index,
+                   size_t record_count, u32 *last_record);
+
 } // namespace mobi_structured_toc_parser
 

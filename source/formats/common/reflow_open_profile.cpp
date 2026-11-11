@@ -12,6 +12,8 @@ const unsigned long long kWriterScratch = 512ULL * 1024ULL;
 // string growth by doubling make a tight fit unsafe.
 const unsigned kMarginNum = 3, kMarginDen = 2;
 const unsigned long long kFloorNew = 8 * kMiB, kFloorOld = 6 * kMiB;
+// What Safe leaves for the rest of the application.
+const unsigned long long kSafeReserve = 2 * kMiB;
 // Largest source for which the up-front estimate is trusted.
 const unsigned long long kMaxFast = 24 * kMiB;
 } // namespace
@@ -67,6 +69,28 @@ unsigned long long RequiredFor(const Inputs &in) {
          (in.new3ds ? kFloorNew : kFloorOld);
 }
 
+unsigned long long EstimateSafePeak(const Inputs &in) {
+  // The stages Stream removes: source, merged text and UTF-8 text resident
+  // together. The page tokens that follow are needed by every tier, so they
+  // do not decide between Safe and Stream.
+  const unsigned long long file = in.file_size;
+  const unsigned long long text = in.text_len ? in.text_len : file;
+  const unsigned long long utf8 = text + text / 4;
+  const unsigned long long decode = file + (in.format == Mobi ? text : 0) + utf8;
+  const unsigned long long markup = file + utf8 + text;
+  return decode > markup ? decode : markup;
+}
+
+unsigned long long RequiredForSafe(const Inputs &in) {
+  return EstimateSafePeak(in) + kSafeReserve;
+}
+
+Profile StreamProfile() {
+  Profile p;
+  p.tier = Stream;
+  return p;
+}
+
 Profile SafeProfile() {
   Profile p;
   p.tier = Safe;
@@ -79,9 +103,18 @@ Profile Choose(const Inputs &in) {
   p.required = RequiredFor(in);
   if (in.format == Epub)
     return p; // EPUB keeps its own pipeline; only the tier is reported
+  // Safe does not fit either: MOBI streams its records from the file instead.
+  const bool stream = in.format == Mobi && in.file_size && in.free_bytes &&
+                      in.free_bytes < RequiredForSafe(in);
   if (!in.file_size || in.file_size > kMaxFast || !in.free_bytes ||
-      in.free_bytes < p.required)
-    return p;
+      in.free_bytes < p.required) {
+    if (!stream)
+      return p;
+    Profile sp = StreamProfile();
+    sp.estimated_peak = p.estimated_peak;
+    sp.required = p.required;
+    return sp;
+  }
   p.tier = Fast;
   p.read_chunk = 256 * 1024;
   p.reserve_raw = true;
@@ -95,7 +128,9 @@ Profile Choose(const Inputs &in) {
   return p;
 }
 
-const char *TierName(Tier tier) { return tier == Fast ? "fast" : "safe"; }
+const char *TierName(Tier tier) {
+  return tier == Fast ? "fast" : tier == Stream ? "stream" : "safe";
+}
 
 size_t Describe(char *out, size_t size, const Inputs &in, const Profile &p) {
   if (!out || !size)

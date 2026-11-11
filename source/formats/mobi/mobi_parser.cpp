@@ -25,6 +25,9 @@
 #include "formats/mobi/mobi_position_map.h"
 #include "formats/mobi/mobi_text_cleanup.h"
 #include "formats/mobi/mobi_text_decode.h"
+#include "formats/mobi/mobi_stream.h"
+#include "formats/mobi/mobi_record_reader.h"
+#include "formats/common/reflow_open_stats.h"
 #include "parse.h"
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
@@ -33,6 +36,9 @@
 #include <new>
 #include <3ds.h>
 #include <stdio.h>
+#ifdef __arm__
+#include <malloc.h>
+#endif
 #include <sys/param.h>
 #include <utility>
 #include <vector>
@@ -336,6 +342,17 @@ struct Preparation::State {
   reflow_open_stats::Stats *stats = NULL;
   reflow_open_profile::Profile *profile = NULL;
   bool raw_reserved = false;
+  // Stream tier (see mobi_stream.h): the book is read record by record.
+  bool stream = false, records_ready = false, cleaner_started = false;
+  std::string source_path, scratch_base, sparse;
+  std::vector<u32> sparse_offsets;
+  mobi_record_reader::RecordReader reader;
+  mobi_record_decode::TextRecordDecoder records;
+  mobi_stream::Decoder stream_decoder;
+  mobi_stream::Cleaner stream_cleaner;
+  mobi_stream::Window stream_window;
+  std::string window;
+  unsigned heap_peak = 0, steps = 0;
   std::vector<ChapterEntry> fallback;
   enum Phase {
     Read,
@@ -354,6 +371,8 @@ struct Preparation::State {
   ~State() {
     if (fd >= 0)
       close(fd);
+    if (stream)
+      mobi_stream::RemoveScratch(scratch_base);
   }
 };
 Preparation::Preparation() : state_(NULL) {}
@@ -370,6 +389,8 @@ bool Preparation::Begin(Book *book, const std::string &source,
   s.book = book;
   s.deps = BuildBookParseDeps(book);
   s.hooks = hooks ? *hooks : mobi_book_hooks::Make();
+  s.source_path = source;
+  s.scratch_base = source;
   s.fd = open(source.c_str(), O_RDONLY);
   struct stat info;
   if (s.fd < 0 || fstat(s.fd, &info) != 0) {
@@ -389,6 +410,10 @@ ReflowPreparation::Result Preparation::GetResult() const {
 }
 unsigned long long Preparation::TextLength() const {
   return state_ && state_->phase > State::Header ? state_->header.text_len : 0;
+}
+void Preparation::SetScratchBase(const std::string &base) {
+  if (state_ && !base.empty())
+    state_->scratch_base = base;
 }
 void Preparation::SetProfile(reflow_open_profile::Profile *profile) {
   if (state_)
@@ -421,6 +446,33 @@ ReflowPreparation::Result Preparation::StepPhase() {
   State &s = *state_;
   if (s.result != ReflowPreparation::Pending)
     return s.result;
+  if (!s.stream && s.profile &&
+      s.profile->tier == reflow_open_profile::Stream &&
+      ((s.phase == State::Read && s.read_bytes == 0) ||
+       (s.phase == State::Merge && s.merger.Progress() == 0))) {
+    // Nothing is decoded yet: drop the resident source and read records from
+    // the file instead.
+    s.stream = true;
+    if (s.fd < 0)
+      s.fd = open(s.source_path.c_str(), O_RDONLY);
+    if (s.fd < 0)
+      return s.result = ReflowPreparation::IoError;
+    if (s.phase == State::Merge) {
+      std::string().swap(s.raw);
+      if (!s.reader.Adopt(s.fd, s.file_size, s.header.offsets))
+        return s.result = ReflowPreparation::Failed;
+    } else if (!s.reader.Open(s.fd, s.file_size))
+      return s.result = ReflowPreparation::Failed;
+  }
+  if (s.stream) {
+    const ReflowPreparation::Result r = StepStream();
+    if (r != ReflowPreparation::Pending) {
+      // Finished either way: the temporary text is no longer needed.
+      s.stream_window.Close();
+      mobi_stream::RemoveScratch(s.scratch_base);
+    }
+    return r;
+  }
   if (s.phase == State::Read) {
     if (s.profile && s.profile->reserve_raw && !s.raw_reserved) {
       // One exact allocation instead of doubling growth (which would hold up
@@ -539,42 +591,297 @@ ReflowPreparation::Result Preparation::StepPhase() {
     else if (before == s.deferred.stream.text_bytes_fed)
       return s.result = ReflowPreparation::Failed;
   } else if (s.phase == State::Toc) {
-    const auto callbacks = s.hooks.make_finalize_callbacks();
-    const bool apply =
-        s.deferred.have_structured_toc &&
-        mobi_toc_finalize_policy::ShouldApplyStructuredToc(
-            s.deferred.html_to_text_map, s.deferred.text_cursor_per_page);
-    if (apply) {
-      if (!s.toc_started) {
-        s.fallback = s.book->GetChapters();
-        s.book->ClearChapters();
-        mobi_toc_apply::BuildCallbacks build = {
-            callbacks.normalize_heading_needle,
-            callbacks.page_has_heading_needle,
-            callbacks.add_chapter_at_page_if_unique};
-        if (!s.toc.Begin(s.book, &s.deferred.structured_toc,
-                         s.deferred.text_len_for_pos,
-                         !s.deferred.structured_from_filepos,
-                         &s.deferred.html_to_text_map,
-                         &s.deferred.text_cursor_per_page, build))
-          return s.result = ReflowPreparation::NoMemory;
-        s.toc_started = true;
-      }
-      if (!s.toc.Step())
-        return ReflowPreparation::Pending;
-    }
-    mobi_toc_finalize::FinalizePreparedToc(
-        s.book, s.deps.reporter, s.deferred.structured_toc,
-        s.deferred.have_structured_toc, s.deferred.structured_from_filepos,
-        s.deferred.heading_hints, s.deferred.text_len_for_pos,
-        s.deferred.html_to_text_map, s.deferred.text_cursor_per_page, callbacks,
-        NULL, apply ? s.toc.Mapped() : static_cast<size_t>(-1), s.toc.Direct(),
-        apply ? &s.fallback : NULL);
-    s.book->MarkMobiRenderSettingsApplied(s.deferred.line_wrap_fix_applied);
-    s.phase = State::Done;
-    s.result = s.book->GetPageCount() ? ReflowPreparation::Complete
-                                      : ReflowPreparation::Failed;
+    return StepToc();
   }
+  return s.result;
+}
+
+// Stream tier: the same phases as the resident path, but the book is read
+// record by record, the extracted text lives in a temporary file and
+// pagination reads it through a window.
+ReflowPreparation::Result Preparation::StepStream() {
+  State &s = *state_;
+  typedef ReflowPreparation R;
+  const unsigned long long kSparseCap = 8u * 1024u * 1024u;
+  const size_t kWindowChunk = 128 * 1024, kWindowCap = 32u * 1024u * 1024u;
+  auto map_status = [&](mobi_stream::Status st) -> R::Result {
+    switch (st) {
+    case mobi_stream::NoMemory:
+      return R::NoMemory;
+    case mobi_stream::IoError:
+      return R::IoError;
+    default:
+      return R::Failed;
+    }
+  };
+#ifdef DSLIBRIS_DEBUG
+  auto sample = [&](const char *where) {
+#ifdef __arm__
+    const unsigned used = (unsigned)mallinfo().uordblks;
+    if (used > s.heap_peak)
+      s.heap_peak = used;
+    if (where)
+      DBG_LOGF(s.deps.reporter,
+               "REFLOW stream %s heap_used=%u peak=%u largest=%u", where, used,
+               s.heap_peak,
+               (unsigned)reflow_open_stats::HeapHeadroom());
+#else
+    (void)where;
+#endif
+  };
+#else
+  auto sample = [&](const char *) {};
+#endif
+  if (s.phase == State::Read) {
+    // The record table was read when the stream was entered.
+    sample("read");
+    s.phase = State::Header;
+  } else if (s.phase == State::Header || s.phase == State::Merge) {
+    if (!s.records_ready) {
+      if (s.phase == State::Header) {
+        std::string rec0;
+        const auto rs = s.reader.Read(0, &rec0);
+        if (rs == mobi_record_reader::RecordReader::NoMemory)
+          return s.result = R::NoMemory;
+        if (rs == mobi_record_reader::RecordReader::IoError)
+          return s.result = R::IoError;
+        if (rs != mobi_record_reader::RecordReader::Ok)
+          return s.result = R::Failed;
+        s.header.offsets = s.reader.Offsets();
+        if (s.header.offsets.size() < 3 ||
+            mobi_parser_core::ParseMobiHeaderRecord0(
+                (const u8 *)rec0.data(), rec0.size(), &s.header) != 0)
+          return s.result = R::Failed;
+        mobi_text_decode::ApplyEmbeddedTitleFromRecord0(
+            s.book, (const u8 *)rec0.data(), rec0.size(), s.header);
+      }
+      mobi_record_decode::MobiRecord0Header h;
+      h.compression = s.header.compression;
+      h.text_len = s.header.text_len;
+      h.text_rec_count = s.header.text_rec_count;
+      h.trailing_flags = s.header.trailing_flags;
+      h.huffcdic_record_index = s.header.huffcdic_record_index;
+      h.num_huffcdic_records = s.header.num_huffcdic_records;
+      if (h.compression == 17480) {
+        // Only the HUFF and CDIC records are needed to decode.
+        std::vector<std::pair<uint32_t, uint32_t>> ranges;
+        if (h.huffcdic_record_index && h.num_huffcdic_records &&
+            h.huffcdic_record_index != mobi_record_decode::kNullIndex)
+          ranges.push_back(std::make_pair(
+              h.huffcdic_record_index,
+              h.huffcdic_record_index + h.num_huffcdic_records - 1));
+        const auto ls = s.reader.LoadSparse(ranges, kSparseCap, &s.sparse,
+                                            &s.sparse_offsets);
+        if (ls == mobi_record_reader::RecordReader::NoMemory)
+          return s.result = R::NoMemory;
+        if (ls != mobi_record_reader::RecordReader::Ok)
+          return s.result = R::IoError;
+      } else {
+        s.sparse.clear();
+        s.sparse_offsets.clear();
+      }
+      if (!s.records.Begin(s.sparse, s.sparse_offsets, h))
+        return s.result = R::Failed;
+      std::string().swap(s.sparse);
+      std::vector<u32>().swap(s.sparse_offsets);
+      mobi_stream::Decoder::Setup setup;
+      setup.reader = &s.reader;
+      setup.header = &s.header;
+      setup.records = &s.records;
+      setup.text_path = mobi_stream::RawPath(s.scratch_base);
+      setup.map = &s.deferred.html_to_text_map;
+      if (s.book->GetEbookImagesEnabled()) {
+        setup.images.user_data = s.book;
+        setup.images.register_inline_image = [](void *b,
+                                                const std::string &path) {
+          return static_cast<Book *>(b)->RegisterInlineImage(path);
+        };
+      }
+      setup.on_convert = [](void *b) {
+        static_cast<Book *>(b)->ClearInlineImages();
+      };
+      setup.context = s.book;
+      mobi_stream::RemoveScratch(s.scratch_base);
+      if (!s.stream_decoder.Begin(setup))
+        return s.result = R::NoMemory;
+      s.records_ready = true;
+      sample("header");
+    }
+    if (s.phase == State::Header) {
+      s.phase = State::Merge;
+      return s.result;
+    }
+    // Pass 1: scan.
+    const mobi_stream::Status st = s.stream_decoder.ScanStep(32768);
+    if (st == mobi_stream::Done) {
+      sample("scan");
+      s.phase = State::Markup;
+    } else if (st != mobi_stream::Pending)
+      return s.result = map_status(st);
+  } else if (s.phase == State::Markup) {
+    // Pass 2: convert and extract into the text file.
+    const mobi_stream::Status st = s.stream_decoder.ConvertStep(32768);
+    if (st == mobi_stream::Done) {
+      sample("extract");
+      s.phase = State::Cleanup;
+    } else if (st != mobi_stream::Pending)
+      return s.result = map_status(st);
+    else if ((++s.steps & 63) == 0)
+      sample(NULL);
+  } else if (s.phase == State::Cleanup) {
+    if (!s.cleaner_started) {
+      mobi_stream::Cleaner::Setup setup;
+      setup.raw_path = mobi_stream::RawPath(s.scratch_base);
+      setup.clean_path = mobi_stream::CleanPath(s.scratch_base);
+      setup.raw_size = s.stream_decoder.TextSize();
+      setup.has_cr = s.stream_decoder.HasCarriageReturn();
+      setup.has_mojibake_marker = s.stream_decoder.HasMojibakeMarker();
+      setup.wrap_fix = s.deferred.line_wrap_fix_applied;
+      setup.has_tokens_pre = !s.stream_decoder.TokenIds().empty();
+      setup.map = &s.deferred.html_to_text_map;
+      if (!s.stream_cleaner.Begin(setup))
+        return s.result = R::IoError;
+      s.cleaner_started = true;
+    }
+    const mobi_stream::Status st = s.stream_cleaner.Step(65536);
+    if (st == mobi_stream::Done) {
+      sample("cleanup");
+      s.phase = State::TocPrepare;
+    } else if (st != mobi_stream::Pending)
+      return s.result = map_status(st);
+  } else if (s.phase == State::TocPrepare) {
+    s.deferred.text_len_for_pos = s.header.text_len
+                                      ? s.header.text_len
+                                      : (u32)s.stream_decoder.MarkupSize();
+    // The NCX index and its CNCX strings are the only records the structured
+    // TOC reads; load them alone, with the table shape kept.
+    std::vector<std::pair<uint32_t, uint32_t>> ranges;
+    const u32 ncx = s.header.ncx_index;
+    if (ncx != mobi_structured_toc_parser::kMobiNullIndex &&
+        (size_t)ncx + 1 < s.header.offsets.size()) {
+      std::string main;
+      u32 last = 0;
+      if (s.reader.Read(ncx, &main) ==
+              mobi_record_reader::RecordReader::Ok &&
+          mobi_structured_toc_parser::NcxLastRecord(
+              main, ncx, s.header.offsets.size(), &last))
+        ranges.push_back(std::make_pair(ncx, last));
+    }
+    if (s.reader.LoadSparse(ranges, kSparseCap, &s.sparse,
+                            &s.sparse_offsets) !=
+        mobi_record_reader::RecordReader::Ok) {
+      // Past the cap there is no structured TOC; the inline TOC still runs.
+      s.sparse.clear();
+      s.sparse_offsets = s.header.offsets;
+    }
+    s.deferred.have_structured_toc = mobi_toc_prepare::Prepare(
+        s.sparse, s.sparse_offsets, s.header.ncx_index, s.header.encoding,
+        s.stream_decoder.Prefix(), s.deferred.text_len_for_pos,
+        s.hooks.make_structured_toc_callbacks(),
+        s.hooks.make_inline_title_callbacks(), &s.deferred.structured_toc,
+        &s.deferred.structured_from_filepos, s.deps.reporter);
+    std::string().swap(s.sparse);
+    std::vector<u32>().swap(s.sparse_offsets);
+    std::string().swap(*s.stream_decoder.Prefix());
+    sample("tocprep");
+    s.phase = State::Init;
+  } else if (s.phase == State::Init) {
+    parse_init(&s.deferred.stream.parsedata);
+    s.deferred.stream.parsedata.reporter = s.deps.reporter;
+    s.deferred.stream.parsedata.ts = s.deps.ts;
+    s.deferred.stream.parsedata.prefs = s.deps.prefs;
+    s.deferred.stream.parsedata.book = s.book;
+    plain_text_stream::InitStateWindowed(&s.deferred.stream,
+                                         s.deferred.stream.parsedata, false);
+    if (!s.stream_window.Begin(s.stream_cleaner.FinalPath(),
+                               s.stream_cleaner.FinalSize()))
+      return s.result = R::IoError;
+    s.book->MarkMobiRenderSettingsApplied(s.deferred.line_wrap_fix_applied);
+    s.phase = State::Pages;
+  } else if (s.phase == State::Pages) {
+    // Pages are the one allocation that grows with the text: stop cleanly
+    // instead of failing inside the layout.
+    if (!cache_memory::HasHeadroom(512 * 1024, 0))
+      return s.result = R::NoMemory;
+    const u64 t0 = osGetTime();
+    const unsigned budget = s.profile ? s.profile->page_budget_ms : 20;
+    for (;;) {
+      const size_t before = s.deferred.stream.text_bytes_fed;
+      const bool done = plain_text_stream::ContinueState(
+          &s.deferred.stream, s.window, budget,
+          (u16)(s.profile ? s.profile->page_budget_pages : 8), 0,
+          &s.deferred.text_cursor_per_page, NULL,
+          s.hooks.make_plain_continue_callbacks());
+      if (done) {
+        sample("pages");
+        s.phase = State::Toc;
+        break;
+      }
+      if (!s.deferred.stream.wants_data) {
+        if (before == s.deferred.stream.text_bytes_fed)
+          return s.result = R::Failed;
+        break; // page budget reached: yield
+      }
+      if (s.stream_window.AtEnd())
+        return s.result = R::Failed;
+      if (s.window.size() > kWindowCap)
+        return s.result = R::NoMemory; // a line longer than the window cap
+      const mobi_stream::Status st = s.stream_window.Fill(
+          &s.deferred.stream, &s.window, kWindowChunk);
+      if (st != mobi_stream::Done)
+        return s.result = map_status(st);
+      if (osGetTime() - t0 >= budget)
+        break;
+    }
+    if ((++s.steps & 63) == 0)
+      sample(NULL);
+  } else if (s.phase == State::Toc) {
+    const R::Result r = StepToc();
+    if (s.phase == State::Done) {
+      std::string().swap(s.window);
+      sample("done");
+    }
+    return r;
+  }
+  return s.result;
+}
+ReflowPreparation::Result Preparation::StepToc() {
+  State &s = *state_;
+  const auto callbacks = s.hooks.make_finalize_callbacks();
+  const bool apply =
+      s.deferred.have_structured_toc &&
+      mobi_toc_finalize_policy::ShouldApplyStructuredToc(
+          s.deferred.html_to_text_map, s.deferred.text_cursor_per_page);
+  if (apply) {
+    if (!s.toc_started) {
+      s.fallback = s.book->GetChapters();
+      s.book->ClearChapters();
+      mobi_toc_apply::BuildCallbacks build = {
+          callbacks.normalize_heading_needle,
+          callbacks.page_has_heading_needle,
+          callbacks.add_chapter_at_page_if_unique};
+      if (!s.toc.Begin(s.book, &s.deferred.structured_toc,
+                       s.deferred.text_len_for_pos,
+                       !s.deferred.structured_from_filepos,
+                       &s.deferred.html_to_text_map,
+                       &s.deferred.text_cursor_per_page, build))
+        return s.result = ReflowPreparation::NoMemory;
+      s.toc_started = true;
+    }
+    if (!s.toc.Step())
+      return ReflowPreparation::Pending;
+  }
+  mobi_toc_finalize::FinalizePreparedToc(
+      s.book, s.deps.reporter, s.deferred.structured_toc,
+      s.deferred.have_structured_toc, s.deferred.structured_from_filepos,
+      s.deferred.heading_hints, s.deferred.text_len_for_pos,
+      s.deferred.html_to_text_map, s.deferred.text_cursor_per_page, callbacks,
+      NULL, apply ? s.toc.Mapped() : static_cast<size_t>(-1), s.toc.Direct(),
+      apply ? &s.fallback : NULL);
+  s.book->MarkMobiRenderSettingsApplied(s.deferred.line_wrap_fix_applied);
+  s.phase = State::Done;
+  s.result = s.book->GetPageCount() ? ReflowPreparation::Complete
+                                    : ReflowPreparation::Failed;
   return s.result;
 }
 const char *Preparation::Label() const {
@@ -603,6 +910,21 @@ unsigned Preparation::Progress() const {
   if (!state_)
     return 0;
   const State &s = *state_;
+  if (s.stream) {
+    switch (s.phase) {
+    case State::Merge:
+    case State::Markup:
+      return s.stream_decoder.Record();
+    case State::Cleanup:
+      return (unsigned)s.stream_cleaner.Progress();
+    case State::Pages:
+      return s.deferred.stream.text_bytes_fed;
+    case State::Toc:
+      return s.toc.Progress();
+    default:
+      return 0;
+    }
+  }
   switch (s.phase) {
   case State::Read:
     return s.read_bytes;
@@ -624,6 +946,21 @@ unsigned Preparation::Total() const {
   if (!state_)
     return 0;
   const State &s = *state_;
+  if (s.stream) {
+    switch (s.phase) {
+    case State::Merge:
+    case State::Markup:
+      return s.header.text_rec_count;
+    case State::Cleanup:
+      return (unsigned)s.stream_decoder.TextSize();
+    case State::Pages:
+      return (unsigned)s.stream_window.Size();
+    case State::Toc:
+      return s.deferred.structured_toc.size();
+    default:
+      return 0;
+    }
+  }
   switch (s.phase) {
   case State::Read:
     return s.file_size;
