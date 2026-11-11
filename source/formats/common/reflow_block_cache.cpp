@@ -2,6 +2,7 @@
 #include "formats/common/page_cache_codec.h"
 #include "formats/common/cache_memory_utils.h"
 #include "formats/common/page_cache_utils.h"
+#include "formats/common/reflow_open_clock.h"
 #include "book/book.h"
 #include "book/page.h"
 #include "book/page_buffer_utils.h"
@@ -195,6 +196,7 @@ struct Writer::State {
   bool compressed, finishing;
   u64 started, io_ms = 0, last_slow = 0;
   size_t calls;
+  WriterStats stats;
   State()
       : book(NULL), fd(-1), result(Ready), logical(sizeof(Header)), first(0),
         end(0), next(0), document(0), words(0), kind(0), phase(Idle),
@@ -243,16 +245,25 @@ struct Writer::State {
       phase = after;
       return true;
     }
+    const uint64_t pack_begin = reflow_open_stats::NowUs();
     if (blocks.size() >= 50000 ||
         !compressor.Pack(encoded, &packed, &compressed)) {
       result = NoMemory;
       return false;
     }
+    const uint64_t crc_begin = reflow_open_stats::NowUs();
+    const uint32_t crc = Crc(encoded.data(), encoded.size());
+    stats.deflate_us += crc_begin - pack_begin;
+    stats.crc_us += reflow_open_stats::NowUs() - crc_begin;
+    ++stats.blocks;
+    stats.packed_bytes += packed.size();
+    if (packed.size() > stats.max_block)
+      stats.max_block = packed.size();
     Block block = {logical,
                    (uint32_t)packed.size(),
                    (uint32_t)encoded.size(),
                    words,
-                   Crc(encoded.data(), encoded.size()),
+                   crc,
                    (uint16_t)document,
                    (uint8_t)compressed,
                    (uint8_t)kind};
@@ -339,6 +350,15 @@ Result Writer::GetResult() const {
 unsigned Writer::Progress() const {
   return state_ ? state_->completed_records / 2 : 0;
 }
+WriterStats Writer::GetStats() const {
+  WriterStats stats;
+  if (state_) {
+    stats = state_->stats;
+    stats.io_ms = state_->io_ms;
+    stats.write_calls = (unsigned)state_->calls;
+  }
+  return stats;
+}
 bool Writer::Begin(Book *book, const std::string &path, Format format) {
   Abort();
   state_ = new (std::nothrow) State;
@@ -379,6 +399,7 @@ bool Writer::AppendDocument(unsigned first, unsigned end) {
       end > state_->book->GetPageCount())
     return false;
   State &s = *state_;
+  ++s.stats.documents;
   s.refs.resize(end);
   s.first = first;
   s.end = end;
@@ -454,8 +475,11 @@ Result Writer::Step() {
         s.result = Corrupt;
         break;
       }
-      if (s.words + count > kBytes / 4 ||
-          !page_cache_codec::Append(data, count, &s.encoded)) {
+      const uint64_t encode_begin = reflow_open_stats::NowUs();
+      const bool fits = s.words + count <= kBytes / 4 &&
+                        page_cache_codec::Append(data, count, &s.encoded);
+      s.stats.encode_us += reflow_open_stats::NowUs() - encode_begin;
+      if (!fits) {
         s.FlushBlock(State::Records);
         continue;
       }

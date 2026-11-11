@@ -6,6 +6,7 @@
 #include "formats/mobi/mobi_book_hooks.h"
 #include "formats/mobi/mobi_safe_markup_extract.h"
 #include "formats/common/cache_memory_utils.h"
+#include "formats/common/reflow_open_clock.h"
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -332,6 +333,7 @@ struct Preparation::State {
   mobi_safe_markup_extract::Session extractor;
   mobi_toc_apply::Session toc;
   bool toc_started = false;
+  reflow_open_stats::Stats *stats = NULL;
   std::vector<ChapterEntry> fallback;
   enum Phase {
     Read,
@@ -383,7 +385,28 @@ bool Preparation::Begin(Book *book, const std::string &source,
 ReflowPreparation::Result Preparation::GetResult() const {
   return state_ ? state_->result : ReflowPreparation::NoMemory;
 }
+void Preparation::SetStats(reflow_open_stats::Stats *stats) {
+  if (state_)
+    state_->stats = stats;
+}
 ReflowPreparation::Result Preparation::Step() {
+  if (!state_ || !state_->stats || state_->result != ReflowPreparation::Pending)
+    return StepPhase();
+  State &s = *state_;
+  // State::Phase order matches reflow_open_stats::Slot up to Toc.
+  const unsigned slot = (unsigned)s.phase;
+  const unsigned pages_before = s.book->GetPageCount();
+  const uint64_t begin = reflow_open_stats::NowUs();
+  const ReflowPreparation::Result r = StepPhase();
+  if (slot <= (unsigned)reflow_open_stats::Toc) {
+    s.stats->Add((reflow_open_stats::Slot)slot,
+                 reflow_open_stats::NowUs() - begin);
+    if (slot == (unsigned)reflow_open_stats::Pages)
+      s.stats->NotePages(s.book->GetPageCount() - pages_before);
+  }
+  return r;
+}
+ReflowPreparation::Result Preparation::StepPhase() {
   if (!state_)
     return ReflowPreparation::Failed;
   State &s = *state_;

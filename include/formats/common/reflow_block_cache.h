@@ -15,6 +15,11 @@ enum Result : int {
   IoError,
   NoMemory
 };
+struct WriterStats {
+  unsigned blocks = 0, documents = 0, write_calls = 0;
+  unsigned long long packed_bytes = 0, max_block = 0, encode_us = 0,
+                     deflate_us = 0, crc_us = 0, io_ms = 0;
+};
 class Writer {
 public:
   Writer();
@@ -26,6 +31,7 @@ public:
   void Abort();
   Result GetResult() const;
   unsigned Progress() const;
+  WriterStats GetStats() const;
 
 private:
   struct State;

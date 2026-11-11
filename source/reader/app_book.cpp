@@ -249,8 +249,10 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
   if (!cache_draw_ms_ || input.timestamp_ms - cache_draw_ms_ >= 100) {
     if (label != cache_label_)
       DBG_LOGF(&app_, "Reflow preparation stage=%s", label.c_str());
+    const u64 splash_begin = osGetTime();
     DrawOpeningSplashImpl(&app_, preparation_->Progress(),
                           preparation_->Total(), label.c_str());
+    preparation_->NoteSplash((unsigned)(osGetTime() - splash_begin));
     cache_draw_ms_ = input.timestamp_ms;
     cache_label_ = label;
   }
@@ -260,6 +262,8 @@ bool ReaderController::AdvanceCachePreparation(const FrameInput &input) {
     result = preparation_->Step();
   } while (result == ReflowPreparation::Pending &&
            osGetTime() - work_begin < 30 && !app_.ShouldAbortWork());
+  preparation_->NoteFrame(input.timestamp_ms,
+                          (unsigned)(osGetTime() - work_begin));
   if (app_.ShouldAbortWork())
     return true;
   if (result == ReflowPreparation::Pending || result == ReflowPreparation::Paused)

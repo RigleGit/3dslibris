@@ -2,6 +2,8 @@
 #include "formats/common/reflow_preparation.h"
 #include "formats/epub/epub_preparation.h"
 #include "formats/common/reflow_block_cache.h"
+#include "formats/common/reflow_open_clock.h"
+#include "formats/common/reflow_open_stats.h"
 #include "formats/mobi/mobi_preparation.h"
 #include "formats/mobi/mobi_page_cache.h"
 #include "formats/fb2/fb2_preparation.h"
@@ -43,6 +45,38 @@ struct ReflowPreparation::State {
   } phase = Cache;
   Result result = Pending;
   u64 started = 0;
+  reflow_open_stats::Stats stats;
+  reflow_block_cache::WriterStats wstats;
+  bool timing_logged = false;
+  unsigned frames = 0, max_frame = 0, max_work = 0, splash_ms = 0,
+           splash_draws = 0;
+  u64 last_frame_ms = 0;
+  void SnapshotWriter() {
+    if (writing)
+      wstats = writer.GetStats();
+  }
+  void LogTiming(const char *outcome) {
+    if (timing_logged)
+      return;
+    timing_logged = true;
+    char phases[384];
+    stats.FormatPhases(phases, sizeof(phases));
+    DBG_LOGF(book->GetStatusReporter(),
+             "REFLOW timing fmt=%u outcome=%s phases=[%s] pages=%u "
+             "page_calls=%u pages_per_call=%u/%u frames=%u max_frame=%u "
+             "max_work=%u splash_ms=%u/%u docs=%u blocks=%u avg_block=%llu "
+             "max_block=%llu encode_ms=%llu deflate_ms=%llu crc_ms=%llu "
+             "io_ms=%llu writes=%u total=%llu",
+             (unsigned)format, outcome, book->GetPageCount(),
+             stats.page_calls,
+             stats.page_calls ? stats.pages_total / stats.page_calls : 0u,
+             stats.pages_max, frames, max_frame, max_work, splash_ms,
+             splash_draws, wstats.documents, wstats.blocks,
+             wstats.blocks ? wstats.packed_bytes / wstats.blocks : 0ULL,
+             wstats.max_block, wstats.encode_us / 1000, wstats.deflate_us / 1000,
+             wstats.crc_us / 1000, wstats.io_ms, wstats.write_calls,
+             (unsigned long long)(osGetTime() - started));
+  }
   void ReleaseParser() {
     mobi.reset();
     fb2.reset();
@@ -58,6 +92,7 @@ struct ReflowPreparation::State {
         result = mobi->GetResult();
         return false;
       }
+      mobi->SetStats(&stats);
       return true;
     }
     fb2.reset(new (std::nothrow) fb2_parser::Preparation);
@@ -69,6 +104,7 @@ struct ReflowPreparation::State {
       result = fb2->GetResult();
       return false;
     }
+    fb2->SetStats(&stats);
     return true;
   }
   void WriterFailed() {
@@ -79,6 +115,7 @@ struct ReflowPreparation::State {
   }
   Result Finish() {
     ReleaseParser();
+    SnapshotWriter();
     writer.Abort();
     writing = false;
     phase = Done;
@@ -87,6 +124,7 @@ struct ReflowPreparation::State {
              "Reflow preparation format=%u pages=%u saved=%u total_ms=%llu",
              (unsigned)format, book->GetPageCount(), persistence_failed ? 0 : 1,
              (unsigned long long)(osGetTime() - started));
+    LogTiming(persistence_failed ? "unsaved" : "saved");
     return Complete;
   }
   bool BeginWriter() {
@@ -211,8 +249,12 @@ ReflowPreparation::Result ReflowPreparation::Step() {
     return Paused;
   if (s.result == Cancelled)
     return Cancelled;
-  if (s.format == reflow_block_cache::Epub)
-    return static_cast<Result>(s.epub.Step());
+  if (s.format == reflow_block_cache::Epub) {
+    const Result r = static_cast<Result>(s.epub.Step());
+    if (r == Complete)
+      s.LogTiming(s.epub.PersistenceFailed() ? "unsaved" : "saved");
+    return r;
+  }
   if (s.result != Pending)
     return s.result;
   if (s.phase == State::Cache || s.phase == State::Legacy) {
@@ -258,14 +300,22 @@ ReflowPreparation::Result ReflowPreparation::Step() {
       s.phase = State::Parse;
     }
   } else if (s.phase == State::Parse) {
+    const u64 parse_begin = reflow_open_stats::NowUs();
     const Result r = s.mobi ? s.mobi->Step() : s.fb2->Step();
+    s.stats.Add(reflow_open_stats::Parse,
+                reflow_open_stats::NowUs() - parse_begin);
     if (r == Paused)
       return Paused;
     if (r != Pending && r != Complete)
       return s.result = r;
     s.parsed = r == Complete;
     if (s.writing && s.book->GetPageCount() > s.written) {
-      if (s.writer.AppendDocument(s.written, s.book->GetPageCount())) {
+      const u64 append_begin = reflow_open_stats::NowUs();
+      const bool appended =
+          s.writer.AppendDocument(s.written, s.book->GetPageCount());
+      s.stats.Add(reflow_open_stats::Append,
+                  reflow_open_stats::NowUs() - append_begin);
+      if (appended) {
         s.written = s.book->GetPageCount();
         s.phase = State::Append;
       } else
@@ -281,7 +331,10 @@ ReflowPreparation::Result ReflowPreparation::Step() {
       }
     }
   } else if (s.phase == State::Append) {
+    const u64 append_begin = reflow_open_stats::NowUs();
     const auto r = s.writer.Step();
+    s.stats.Add(reflow_open_stats::Append,
+                reflow_open_stats::NowUs() - append_begin);
     if (r == reflow_block_cache::Pending)
       return Pending;
     if (r != reflow_block_cache::Ready)
@@ -297,13 +350,17 @@ ReflowPreparation::Result ReflowPreparation::Step() {
     } else
       s.phase = State::Parse;
   } else if (s.phase == State::Commit) {
+    const u64 commit_begin = reflow_open_stats::NowUs();
     const auto r = s.writer.Step();
+    s.stats.Add(reflow_open_stats::Commit,
+                reflow_open_stats::NowUs() - commit_begin);
     if (r == reflow_block_cache::Pending)
       return Pending;
     if (r != reflow_block_cache::Complete) {
       s.WriterFailed();
       return s.Finish();
     }
+    s.SnapshotWriter();
     s.writer.Abort();
     s.writing = false;
     if (!s.budget)
@@ -316,7 +373,10 @@ ReflowPreparation::Result ReflowPreparation::Step() {
     }
     s.phase = State::Validate;
   } else if (s.phase == State::Validate) {
+    const u64 validate_begin = reflow_open_stats::NowUs();
     const auto r = s.reader->Step();
+    s.stats.Add(reflow_open_stats::Validate,
+                reflow_open_stats::NowUs() - validate_begin);
     if (r == reflow_block_cache::Pending)
       return Pending;
     if (r != reflow_block_cache::Complete ||
@@ -346,6 +406,10 @@ void ReflowPreparation::Cancel() {
     return;
   State &s = *state_;
   s.paused = s.resume = s.source_error = false;
+  if (s.result == Pending)
+    s.SnapshotWriter();
+  if (s.result == Pending)
+    s.LogTiming("cancelled");
   s.result = Cancelled;
   if (s.format == reflow_block_cache::Epub) {
     s.epub.Cancel();
@@ -428,4 +492,22 @@ bool ReflowPreparation::PersistenceFailed() const {
   return state_ && (state_->format == reflow_block_cache::Epub
                         ? state_->epub.PersistenceFailed()
                         : state_->persistence_failed);
+}
+void ReflowPreparation::NoteFrame(unsigned long long now_ms,
+                                  unsigned work_ms) {
+  if (!state_)
+    return;
+  State &s = *state_;
+  ++s.frames;
+  if (s.last_frame_ms && now_ms - s.last_frame_ms > s.max_frame)
+    s.max_frame = (unsigned)(now_ms - s.last_frame_ms);
+  s.last_frame_ms = now_ms;
+  if (work_ms > s.max_work)
+    s.max_work = work_ms;
+}
+void ReflowPreparation::NoteSplash(unsigned ms) {
+  if (!state_)
+    return;
+  state_->splash_ms += ms;
+  ++state_->splash_draws;
 }

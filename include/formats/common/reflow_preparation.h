@@ -27,6 +27,10 @@ public:
   unsigned Progress() const;
   unsigned Total() const;
   bool PersistenceFailed() const;
+  // Debug accounting from the opening loop: call once per opening frame with
+  // the frame timestamp, and report splash redraw cost separately.
+  void NoteFrame(unsigned long long now_ms, unsigned work_ms);
+  void NoteSplash(unsigned ms);
 
 private:
   struct State;

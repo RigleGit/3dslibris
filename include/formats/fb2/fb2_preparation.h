@@ -1,5 +1,6 @@
 #pragma once
 #include "formats/common/reflow_preparation.h"
+#include "formats/common/reflow_open_stats.h"
 class Book;
 namespace fb2_parser {
 class Preparation {
@@ -8,6 +9,7 @@ public:
   ~Preparation();
   bool Begin(Book *book, const std::string &source);
   ReflowPreparation::Result Step();
+  void SetStats(reflow_open_stats::Stats *stats);
   ReflowPreparation::Result GetResult() const;
   void SignalPause();
   void SignalResume();
@@ -16,6 +18,7 @@ public:
   unsigned Total() const;
 
 private:
+  ReflowPreparation::Result StepPhase();
   struct State;
   State *state_;
   Preparation(const Preparation &);

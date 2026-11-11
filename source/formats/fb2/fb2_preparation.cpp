@@ -1,4 +1,5 @@
 #include "formats/fb2/fb2_preparation.h"
+#include "formats/common/reflow_open_clock.h"
 #include "book/book.h"
 #include "book/book_parse_deps.h"
 #include "book/book_xml.h"
@@ -23,6 +24,7 @@ struct Preparation::State {
          available = 0;
   std::unique_ptr<char[]> buffer;
   bool paused = false, suspended = false, final = false, structured = false;
+  reflow_open_stats::Stats *stats = NULL;
   enum Phase { Xml, Fallback, Done } phase = Xml;
   ReflowPreparation::Result result = ReflowPreparation::Pending;
   unsigned page = 0, line_page = 0;
@@ -151,7 +153,31 @@ void Preparation::SignalResume() {
 ReflowPreparation::Result Preparation::GetResult() const {
   return state_ ? state_->result : ReflowPreparation::NoMemory;
 }
+void Preparation::SetStats(reflow_open_stats::Stats *stats) {
+  if (state_)
+    state_->stats = stats;
+}
 ReflowPreparation::Result Preparation::Step() {
+  if (!state_ || !state_->stats || state_->paused ||
+      state_->result != ReflowPreparation::Pending)
+    return StepPhase();
+  State &s = *state_;
+  // Raw read calls are counted under Read, XML feeding under Xml.
+  const bool xml = s.phase == State::Xml;
+  const bool reading = xml && !s.suspended && s.cursor == s.available &&
+                       s.read_bytes < s.size;
+  const unsigned pages_before = s.book->GetPageCount();
+  const uint64_t begin = reflow_open_stats::NowUs();
+  const ReflowPreparation::Result r = StepPhase();
+  s.stats->Add(reading ? reflow_open_stats::Read
+                       : xml ? reflow_open_stats::Xml
+                             : reflow_open_stats::Fallback,
+               reflow_open_stats::NowUs() - begin);
+  if (xml && !reading)
+    s.stats->NotePages(s.book->GetPageCount() - pages_before);
+  return r;
+}
+ReflowPreparation::Result Preparation::StepPhase() {
   if (!state_)
     return ReflowPreparation::Failed;
   State &s = *state_;

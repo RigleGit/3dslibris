@@ -1,5 +1,6 @@
 #pragma once
 #include "formats/common/reflow_preparation.h"
+#include "formats/common/reflow_open_stats.h"
 class Book;
 namespace mobi_parser {
 struct Hooks;
@@ -9,12 +10,14 @@ public:
   ~Preparation();
   bool Begin(Book *book, const std::string &source, const Hooks *hooks = NULL);
   ReflowPreparation::Result Step();
+  void SetStats(reflow_open_stats::Stats *stats);
   ReflowPreparation::Result GetResult() const;
   const char *Label() const;
   unsigned Progress() const;
   unsigned Total() const;
 
 private:
+  ReflowPreparation::Result StepPhase();
   struct State;
   State *state_;
   Preparation(const Preparation &);
