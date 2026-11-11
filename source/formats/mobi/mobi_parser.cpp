@@ -909,6 +909,10 @@ ReflowPreparation::Result Preparation::StepStream() {
     if (s.phase == State::Done) {
       std::string().swap(s.window);
       sample("done");
+      DBG_LOGF(s.deps.reporter,
+               "REFLOW stream io text_writes=%u clean_writes=%u disk_reads=%u",
+               s.stream_decoder.WriteCalls(), s.stream_cleaner.WriteCalls(),
+               s.reader.DiskReads());
     }
     return r;
   }

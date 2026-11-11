@@ -16,6 +16,8 @@ namespace {
 const size_t kMaxTotalBytes = 64u * 1024u * 1024u;
 const size_t kPrefixLimit = 1024u * 1024u;
 const size_t kPumpChunk = 64u * 1024u;
+// SD writes are slow per call on Old 3DS: hand the card large blocks.
+const size_t kFlushBytes = 128u * 1024u;
 
 bool WriteAll(int fd, const char *data, size_t n) {
   while (n) {
@@ -48,7 +50,7 @@ Decoder::Decoder()
       markup_size_(0), text_size_(0), fed_(0), prefix_cap_(0),
       scan_done_(false), utf16_(false), utf16_size_(0), counter_(NULL),
       converter_(NULL), fd_(-1), has_cr_(false), has_c383_(false),
-      last_byte_(0) {}
+      last_byte_(0), write_calls_(0) {}
 Decoder::~Decoder() {
   delete counter_;
   delete converter_;
@@ -175,8 +177,17 @@ Status Decoder::Write(const std::string &chunk) {
     last_byte_ = b;
   }
   tokens_.Feed(chunk.data(), chunk.size(), false);
-  if (!chunk.empty() && !WriteAll(fd_, chunk.data(), chunk.size()))
-    return IoError;
+  wbuf_.append(chunk);
+  return wbuf_.size() >= kFlushBytes ? Flush() : Pending;
+}
+
+Status Decoder::Flush() {
+  if (!wbuf_.empty()) {
+    ++write_calls_;
+    if (!WriteAll(fd_, wbuf_.data(), wbuf_.size()))
+      return IoError;
+    wbuf_.clear();
+  }
   return Pending;
 }
 
@@ -206,6 +217,10 @@ Status Decoder::ConvertStep(size_t budget) {
         return fed;
       tokens_.Feed("", 0, true);
       text_size_ = extractor_.OutputBytes();
+      // Everything must be on the card before the file is read back.
+      const Status flushed = Flush();
+      if (flushed != Pending)
+        return flushed;
       close(fd_);
       fd_ = -1;
       // The map sampling interval came from the pass 1 size.
@@ -249,6 +264,7 @@ struct Cleaner::Source {
 Cleaner::Cleaner()
     : stage_(Finished), final_size_(0), raw_is_final_(true), track_(false),
       rolled_back_(false), moj_(false), wrap_(false), in_fd_(-1), out_fd_(-1),
+      write_calls_(0),
       in_read_(0), cleanup_(NULL), buffer_(kPumpChunk), before_(NULL),
       after_(NULL) {}
 Cleaner::~Cleaner() {
@@ -277,6 +293,7 @@ bool Cleaner::OpenRun() {
   out_fd_ = OpenForWrite(setup_.clean_path);
   in_read_ = 0;
   final_size_ = 0;
+  wbuf_.clear();
   stage_ = Run;
   return cleanup_ && in_fd_ >= 0 && out_fd_ >= 0;
 }
@@ -309,6 +326,15 @@ bool Cleaner::Begin(const Setup &setup) {
 }
 
 // Feeds up to `budget` bytes of the raw file; true when all were fed.
+bool Cleaner::FlushOut(bool force) {
+  if (wbuf_.empty() || (!force && wbuf_.size() < kFlushBytes))
+    return true;
+  ++write_calls_;
+  const bool ok = WriteAll(out_fd_, wbuf_.data(), wbuf_.size());
+  wbuf_.clear();
+  return ok;
+}
+
 Status Cleaner::Pump(bool scan_only, size_t budget) {
   size_t done = 0;
   do {
@@ -326,9 +352,10 @@ Status Cleaner::Pump(bool scan_only, size_t budget) {
     out_.clear();
     cleanup_->Feed(buffer_.data(), (size_t)n, final, &out_);
     if (!scan_only) {
-      if (!out_.empty() && !WriteAll(out_fd_, out_.data(), out_.size()))
-        return IoError;
+      wbuf_.append(out_);
       final_size_ += out_.size();
+      if (!FlushOut(final))
+        return IoError;
     }
     done += (size_t)n;
     if (final)

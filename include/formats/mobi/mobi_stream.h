@@ -54,6 +54,7 @@ public:
   // Each processes about `budget` decoded bytes per call.
   Status ScanStep(size_t budget);
   Status ConvertStep(size_t budget);
+  unsigned WriteCalls() const { return write_calls_; }
   uint32_t Record() const { return next_record_ - 1; }
   size_t MarkupSize() const { return markup_size_; }
   size_t TextSize() const { return text_size_; }
@@ -70,6 +71,9 @@ private:
   Status FinishScan();
   Status FeedExtractor(bool final);
   Status Write(const std::string &chunk);
+  Status Flush();
+  std::string wbuf_;
+  unsigned write_calls_;
   Setup setup_;
   uint32_t next_record_;
   size_t raw_total_, used_;
@@ -108,6 +112,7 @@ public:
   };
   bool Begin(const Setup &setup);
   Status Step(size_t budget);
+  unsigned WriteCalls() const { return write_calls_; }
   // The text to paginate (the raw file when no cleanup was needed).
   const std::string &FinalPath() const { return final_path_; }
   size_t FinalSize() const { return final_size_; }
@@ -118,6 +123,9 @@ private:
   enum Stage { Scan, Run, Remap, Finished };
   bool OpenRun();
   Status Pump(bool scan_only, size_t budget);
+  bool FlushOut(bool force);
+  std::string wbuf_;
+  unsigned write_calls_;
   Setup setup_;
   Stage stage_;
   std::string final_path_;
