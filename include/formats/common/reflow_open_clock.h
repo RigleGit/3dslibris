@@ -16,18 +16,15 @@ inline uint64_t NowUs() {
 }
 } // namespace reflow_open_stats
 
-#include <stdlib.h>
+#include "formats/common/cache_memory_utils.h"
 #include "formats/common/reflow_open_profile.h"
 
 namespace reflow_open_stats {
 // Largest malloc block, probed without touching memory. Kernel region-free
 // cannot be used: libctru commits the application region to the heap at start.
 inline bool MallocProbe(unsigned long long bytes, void *) {
-  void *p = malloc((size_t)bytes);
-  if (!p)
-    return false;
-  free(p);
-  return true;
+  return bytes <= (unsigned long long)~(size_t)0 &&
+         cache_memory::ProbeAlloc((size_t)bytes);
 }
 inline unsigned long long HeapHeadroom() {
 #ifndef __arm__
