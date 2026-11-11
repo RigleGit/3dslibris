@@ -26,12 +26,16 @@
 #include "formats/mobi/mobi_text_cleanup.h"
 #include "formats/mobi/mobi_text_decode.h"
 #include "formats/mobi/mobi_stream.h"
+#include "book/page.h"
+#include "formats/common/page_text_extract_utils.h"
 #include "formats/mobi/mobi_record_reader.h"
 #include "formats/common/reflow_open_stats.h"
 #include "parse.h"
 #include "shared/open_cancel_poll.h"
 #include "shared/status_reporter.h"
 
+#include <algorithm>
+#include <map>
 #include <memory>
 #include <new>
 #include <3ds.h>
@@ -352,6 +356,12 @@ struct Preparation::State {
   mobi_stream::Cleaner stream_cleaner;
   mobi_stream::Window stream_window;
   std::string window;
+  // Page release (stream tier): the text positions the structured TOC will
+  // look at, and the lines of those pages captured before release.
+  bool release_ok = false;
+  unsigned released = 0;
+  std::vector<u32> toc_text_pos;
+  std::map<u16, std::vector<std::string> > page_lines;
   unsigned heap_peak = 0, steps = 0;
   std::vector<ChapterEntry> fallback;
   enum Phase {
@@ -407,6 +417,43 @@ bool Preparation::Begin(Book *book, const std::string &source,
 }
 ReflowPreparation::Result Preparation::GetResult() const {
   return state_ ? state_->result : ReflowPreparation::NoMemory;
+}
+unsigned Preparation::ReleasableEnd(unsigned written) const {
+  if (!state_ || !state_->stream || !state_->release_ok)
+    return 0;
+  const State &s = *state_;
+  // Pages near the newest one are still being laid out, and the TOC window of
+  // an entry reaches four pages either way.
+  const unsigned count = s.book->GetPageCount();
+  const unsigned end = count > 6 ? count - 6 : 0;
+  return std::max(s.released, std::min(written, end));
+}
+void Preparation::ReleasePages(unsigned end, int keep) {
+  if (!state_ || !state_->stream || !state_->release_ok)
+    return;
+  State &s = *state_;
+  const std::vector<u32> &cursor = s.deferred.text_cursor_per_page;
+  for (unsigned p = s.released; p < end && p < s.book->GetPageCount(); ++p) {
+    if ((int)p == keep)
+      continue;
+    // Needed when some entry maps to a page within four of this one.
+    bool needed = false;
+    if (!s.toc_text_pos.empty() && p < cursor.size()) {
+      const u32 low = cursor[p >= 4 ? p - 4 : 0];
+      const unsigned high_page = p + 5;
+      const u32 high = high_page < cursor.size() ? cursor[high_page] : 0xffffffffu;
+      const std::vector<u32>::const_iterator it = std::lower_bound(
+          s.toc_text_pos.begin(), s.toc_text_pos.end(), low);
+      needed = it != s.toc_text_pos.end() && *it < high;
+    }
+    Page *page = s.book->GetPage(p);
+    if (needed)
+      s.page_lines[(u16)p] =
+          page_text_extract_utils::ExtractTextLinesFromPage(page);
+    page->FreeBuffer();
+  }
+  if (end > s.released)
+    s.released = end;
 }
 unsigned long long Preparation::TextLength() const {
   return state_ && state_->phase > State::Header ? state_->header.text_len : 0;
@@ -783,6 +830,25 @@ ReflowPreparation::Result Preparation::StepStream() {
     std::string().swap(s.sparse);
     std::vector<u32>().swap(s.sparse_offsets);
     std::string().swap(*s.stream_decoder.Prefix());
+    // Pages can go once written, provided the TOC only ever looks at pages
+    // near a known text position.
+    s.release_ok = true;
+    if (s.deferred.have_structured_toc) {
+      const std::vector<std::pair<u32, u32> > one(1, std::make_pair(0u, 0u));
+      const std::vector<u32> zero(1, 0u);
+      for (size_t i = 0; s.release_ok && i < s.deferred.structured_toc.size();
+           ++i) {
+        const u32 pos = s.deferred.structured_toc[i].pos;
+        u32 text_pos = 0;
+        if (pos == mobi_structured_toc_parser::kMobiNullIndex ||
+            mobi_toc_apply::HtmlPosToPage(pos, s.deferred.html_to_text_map,
+                                          zero, &text_pos) < 0)
+          s.release_ok = false;
+        else
+          s.toc_text_pos.push_back(text_pos);
+      }
+      std::sort(s.toc_text_pos.begin(), s.toc_text_pos.end());
+    }
     sample("tocprep");
     s.phase = State::Init;
   } else if (s.phase == State::Init) {
@@ -866,6 +932,7 @@ ReflowPreparation::Result Preparation::StepToc() {
                        &s.deferred.html_to_text_map,
                        &s.deferred.text_cursor_per_page, build))
         return s.result = ReflowPreparation::NoMemory;
+      s.toc.SetPageLines(&s.page_lines);
       s.toc_started = true;
     }
     if (!s.toc.Step())

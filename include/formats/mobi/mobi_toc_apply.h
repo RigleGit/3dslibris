@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -42,6 +43,9 @@ public:
             *entries,
         u32 text_len, bool refine, const std::vector<std::pair<u32, u32>> *map,
         const std::vector<u32> *cursors, const BuildCallbacks &callbacks);
+  // Lines captured from pages before their buffers were released; heading
+  // checks prefer them and read the live page otherwise.
+  void SetPageLines(const std::map<u16, std::vector<std::string> > *lines);
   bool Step();
   size_t Mapped() const;
   size_t Direct() const;

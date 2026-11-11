@@ -82,17 +82,17 @@ struct ReflowPreparation::State {
   reflow_open_stats::Stats stats;
   reflow_open_profile::Profile profile;
   reflow_block_cache::WriterStats wstats;
-  bool timing_logged = false, checksummed = false;
+  bool timing_logged = false;
   unsigned long long page_words = 0;
   unsigned page_hash = 2166136261u;
   // Debug identity of the prepared content (before pages are released), so
   // two builds can be compared page-for-page from the log alone.
-  void ChecksumPages() {
+  unsigned hashed = 0;
+  void ChecksumPages(unsigned end = ~0u) {
 #ifdef DSLIBRIS_DEBUG
-    if (checksummed)
-      return;
-    checksummed = true;
-    for (unsigned i = 0; i < book->GetPageCount(); ++i) {
+    if (end > book->GetPageCount())
+      end = book->GetPageCount();
+    for (unsigned i = hashed; i < end; ++i) {
       Page *page = book->GetPage(i);
       const int n = page ? page->GetLength() : 0;
       page_hash = (page_hash ^ (unsigned)n) * 16777619u;
@@ -100,6 +100,8 @@ struct ReflowPreparation::State {
         page_hash = (page_hash ^ page->GetBuffer()[j]) * 16777619u;
       page_words += n > 0 ? n : 0;
     }
+    if (end > hashed)
+      hashed = end;
 #endif
   }
   unsigned frames = 0, max_frame = 0, max_work = 0, splash_ms = 0,
@@ -138,6 +140,22 @@ struct ReflowPreparation::State {
     return reflow_append_policy::ShouldAppend(
         count > written ? count - written : 0, pending_words, parsed,
         low_memory, profile.flush_words);
+  }
+  // Stream tier: pages the writer finished give their buffers back. The page
+  // the reader will activate stays, and the debug hash folds in first.
+  void ReleaseWrittenPages() {
+    // Only when the cache reader will bring pages back (a budget): without
+    // one the parsed pages are the book.
+    if (!mobi || !budget || profile.tier != reflow_open_profile::Stream)
+      return;
+    const unsigned end = mobi->ReleasableEnd(written);
+    if (!end)
+      return;
+    int keep = book->GetPosition();
+    if (keep < 0)
+      keep = 0;
+    ChecksumPages(end);
+    mobi->ReleasePages(end, keep);
   }
   void SnapshotWriter() {
     if (writing)
@@ -537,6 +555,9 @@ ReflowPreparation::Result ReflowPreparation::Step() {
       return Pending;
     if (r != reflow_block_cache::Ready)
       s.WriterFailed();
+    else {
+      s.ReleaseWrittenPages();
+    }
     if (s.parsed) {
       s.ReleaseParser();
       if (s.writing && s.writer.Finish())

@@ -118,7 +118,15 @@ struct Session::State {
   int best = -1;
   std::string clean, needle;
   std::set<u16> used;
+  const std::map<u16, std::vector<std::string> > *page_lines = NULL;
   bool Matches(unsigned page) {
+    if (page_lines) {
+      const std::map<u16, std::vector<std::string> >::const_iterator it =
+          page_lines->find((u16)page);
+      if (it != page_lines->end())
+        return callbacks.page_has_heading_needle &&
+               callbacks.page_has_heading_needle(it->second, needle);
+    }
     return callbacks.page_has_heading_needle &&
            callbacks.page_has_heading_needle(
                page_text_extract_utils::ExtractTextLinesFromPage(
@@ -156,6 +164,11 @@ bool Session::Begin(Book *book,
   if (entries->empty() || !s.count)
     s.phase = State::Done;
   return true;
+}
+void Session::SetPageLines(
+    const std::map<u16, std::vector<std::string> > *lines) {
+  if (state_)
+    state_->page_lines = lines;
 }
 size_t Session::Mapped() const {
   return state_ ? state_->mapped : 0;

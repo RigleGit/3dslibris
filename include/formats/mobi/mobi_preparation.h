@@ -20,6 +20,14 @@ public:
   const char *Label() const;
   unsigned Progress() const;
   unsigned Total() const;
+  // Stream tier only: pages the writer has finished with may give their token
+  // buffers back, so memory does not follow the length of the book. The
+  // structured TOC still checks headings on nearby pages, so the lines of the
+  // pages it will look at are captured first. `keep` stays resident.
+  // ReleasableEnd returns the first page index that may NOT be released yet
+  // (== released() when nothing can be).
+  unsigned ReleasableEnd(unsigned written) const;
+  void ReleasePages(unsigned end, int keep);
   // Uncompressed text length from record 0; 0 until the header was parsed.
   unsigned long long TextLength() const;
 
