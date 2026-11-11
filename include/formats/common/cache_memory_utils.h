@@ -11,6 +11,11 @@ inline bool HasHeadroom(size_t bytes, size_t reserve = 2u * 1024u * 1024u) {
   if (bytes > std::numeric_limits<size_t>::max() - reserve)
     return false;
   void *probe = std::malloc(bytes + reserve);
+#if defined(__GNUC__) || defined(__clang__)
+  // Without this the compiler folds malloc/free of an unused pointer into
+  // "return true" (observed with devkitARM -O2), turning the probe into a no-op.
+  __asm__ __volatile__("" : : "r"(probe) : "memory");
+#endif
   if (!probe)
     return false;
   std::free(probe);
