@@ -24,6 +24,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
+#include <cstdlib>
+#include <vector>
 
 namespace {
 // Temporary text of a stream-tier preparation that was interrupted (crash,
@@ -105,6 +107,15 @@ struct ReflowPreparation::State {
   u64 last_frame_ms = 0;
   unsigned scanned = 0, pending_words = 0;
   reflow_open_profile::Inputs inputs;
+  // Debug heap ballast (reflow_ballast_mb.txt): 1 MiB blocks kept until the
+  // opening ends, to reproduce the Old 3DS heap limit on an emulator.
+  std::vector<void *> ballast;
+  void ReleaseBallast() {
+    for (size_t i = 0; i < ballast.size(); ++i)
+      free(ballast[i]);
+    ballast.clear();
+  }
+  ~State() { ReleaseBallast(); }
   bool refined = false;
   u64 last_probe_ms = 0;
   // Closed pages are batched so the writer builds full blocks. Pages stay
@@ -200,6 +211,7 @@ struct ReflowPreparation::State {
     persistence_failed = true;
   }
   Result Finish() {
+    ReleaseBallast();
     ReleaseParser();
     SnapshotWriter();
     writer.Abort();
@@ -256,6 +268,33 @@ bool ReflowPreparation::Begin(Book *book, const std::string &source,
     in.format = (reflow_open_profile::Format)s.format;
     in.file_size = (unsigned long long)s.identity.st_size;
     in.new3ds = new3ds;
+#ifdef DSLIBRIS_DEBUG
+    {
+      FILE *fp = fopen("sdmc:/3ds/3dslibris/reflow_ballast_mb.txt", "rb");
+      unsigned long long limit = 0;
+      if (fp) {
+        char digits[24] = {0};
+        fread(digits, 1, sizeof(digits) - 1, fp);
+        fclose(fp);
+        limit = strtoull(digits, NULL, 10);
+      }
+      if (limit) {
+        for (unsigned i = 0; i < 128; ++i) {
+          const unsigned long long largest = reflow_open_stats::HeapHeadroom();
+          if (!largest || largest <= (limit << 20))
+            break;
+          void *block = malloc(1u << 20);
+          if (!block)
+            break;
+          s.ballast.push_back(block);
+        }
+        DBG_LOGF(book->GetStatusReporter(),
+                 "REFLOW ballast blocks=%u largest=%llu limit_mb=%llu",
+                 (unsigned)s.ballast.size(),
+                 (unsigned long long)reflow_open_stats::HeapHeadroom(), limit);
+      }
+    }
+#endif
     const unsigned long long headroom = reflow_open_stats::HeapHeadroom();
     in.free_bytes = headroom;
     s.profile = reflow_open_profile::Choose(in);
@@ -578,6 +617,7 @@ void ReflowPreparation::Cancel() {
   s.reader.reset();
   s.legacy.reset();
   s.ReleaseParser();
+  s.ReleaseBallast();
   s.book->Close();
   s.result = Cancelled;
 }
