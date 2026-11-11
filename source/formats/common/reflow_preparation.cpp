@@ -67,7 +67,7 @@ struct ReflowPreparation::State {
              "max_work=%u splash_ms=%u/%u docs=%u blocks=%u avg_block=%llu "
              "max_block=%llu encode_ms=%llu deflate_ms=%llu crc_ms=%llu "
              "io_ms=%llu writes=%u total=%llu",
-             (unsigned)format, outcome, book->GetPageCount(),
+             (unsigned)format, outcome, phases, book->GetPageCount(),
              stats.page_calls,
              stats.page_calls ? stats.pages_total / stats.page_calls : 0u,
              stats.pages_max, frames, max_frame, max_work, splash_ms,
