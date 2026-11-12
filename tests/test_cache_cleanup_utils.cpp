@@ -54,6 +54,26 @@ int main() {
   test::ExpectFalse("missing cache directory not opened", result.opened);
   test::ExpectEq("missing cache directory removes nothing", result.removed, 0);
 
+  // A full cache directory (page caches, stream scratch, metadata) is
+  // emptied in one call.
+  for (int i = 0; i < 64; i++) {
+    char name[64];
+    snprintf(name, sizeof(name), "/%08x.cache", i * 2654435761u);
+    WriteFile(base + name);
+  }
+  WriteFile(base + "/794210e7.stream.txt");
+  result = settings::DeleteCacheDirectoryContents(base.c_str());
+  test::ExpectEq("every cache file removed in one pass", result.removed, 65);
+  test::ExpectEq("full cleanup has no failures", result.failed, 0);
+  int left = 0;
+  DIR *listing = opendir(base.c_str());
+  test::ExpectNotNull("reopen cache directory", listing);
+  while (struct dirent *e = readdir(listing))
+    if (e->d_name[0] != '.')
+      left++;
+  closedir(listing);
+  test::ExpectEq("no cache file left behind", left, 0);
+
   remove((base + "/.keep").c_str());
   rmdir(base.c_str());
   return 0;

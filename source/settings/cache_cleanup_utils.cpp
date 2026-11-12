@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <string>
+#include <vector>
+
 #include "utf8proc.h"
 
 namespace settings {
@@ -38,16 +41,23 @@ CacheCleanupResult DeleteCacheDirectoryContents(const char *directory) {
     return result;
   result.opened = true;
 
+  // List first and delete after closing the directory: removing entries
+  // while the SD card directory is being read can make it skip files.
+  std::vector<std::string> names;
   struct dirent *entry;
   while ((entry = readdir(dir)) != nullptr) {
     if (entry->d_name[0] == '.')
       continue;
-    if (RemoveCacheEntry(directory, entry->d_name))
+    names.push_back(entry->d_name);
+  }
+  closedir(dir);
+
+  for (size_t i = 0; i < names.size(); i++) {
+    if (RemoveCacheEntry(directory, names[i].c_str()))
       result.removed++;
     else
       result.failed++;
   }
-  closedir(dir);
   return result;
 }
 
