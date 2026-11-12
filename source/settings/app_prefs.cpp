@@ -1175,6 +1175,11 @@ void SettingsController::PrefsRefreshButton(int index) {
 }
 
 void SettingsController::ClearAllCaches() {
+  // The book left open behind the library keeps its page cache file open,
+  // and the 3DS SD card refuses to delete open files. Close it first so its
+  // cache is really removed and the next open rebuilds it.
+  if (app_.GetCurrentBook())
+    app_.CloseBook();
   for (int i = 0; i < app_.BookCount(); i++) {
     Book *b = app_.books[i];
     if (!b)
