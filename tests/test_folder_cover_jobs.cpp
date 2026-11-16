@@ -146,6 +146,20 @@ int main() {
   const size_t before_bare=test_decodes;
   controller.TickBrowserWarmup(); controller.ProcessJobs(3);
   Expect(test_decodes==before_bare && controller.job_queue_.empty() && RetainedBytes(app)==0,"coverless folder does not allocate or queue decode");
+  // Issue #185: a cover stored inside the folder is accepted; a sibling wins.
+  const std::string inside=root+"/inside-folder";
+  mkdir(inside.c_str(),0777); Write(inside+"/book.epub","fixture"); Write(inside+"/inside-folder.png",png);
+  AppendTestFolder(&app,root,"inside-folder",&seen);
+  Book *inside_book=app.books.back();
+  Expect(inside_book->GetBrowserFolderCoverPath()==inside+"/inside-folder.png","inside-only folder cover resolves");
+  app.page_start=129; app.selected=inside_book; controller.PauseBrowserJobs();
+  controller.LoadVisibleBrowserCoverCaches(); controller.TickBrowserWarmup(); controller.ProcessJobs(3);
+  Expect(inside_book->coverPixels && inside_book->coverWidth==85 && inside_book->coverHeight==115,"inside-folder cover decodes");
+  const std::string both=root+"/both-folder";
+  mkdir(both.c_str(),0777); Write(both+"/book.epub","fixture");
+  Write(both+"/both-folder.png",png); Write(root+"/both-folder.png",png);
+  AppendTestFolder(&app,root,"both-folder",&seen);
+  Expect(app.books.back()->GetBrowserFolderCoverPath()==root+"/both-folder.png","sibling cover wins over inside cover");
   for(Book *book:app.books) delete book;
   puts("folder cover integration passed");
 }

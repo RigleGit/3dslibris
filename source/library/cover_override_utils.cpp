@@ -12,6 +12,22 @@ std::vector<std::string> BuildStemCandidates(const std::string &stem_path) {
   return result;
 }
 
+std::vector<std::string> BuildFolderCandidates(const std::string &folder_path) {
+  std::string folder = folder_path;
+  while (!folder.empty() && folder[folder.size() - 1] == '/')
+    folder.erase(folder.size() - 1);
+  if (folder.empty())
+    return std::vector<std::string>();
+  std::vector<std::string> result = BuildStemCandidates(folder);
+  const size_t slash = folder.find_last_of('/');
+  const std::string base =
+      slash == std::string::npos ? folder : folder.substr(slash + 1);
+  const std::vector<std::string> inside =
+      BuildStemCandidates(folder + "/" + base);
+  result.insert(result.end(), inside.begin(), inside.end());
+  return result;
+}
+
 std::vector<std::string> BuildBookCandidates(const std::string &book_path) {
   const size_t slash = book_path.find_last_of('/');
   const size_t dot = book_path.find_last_of('.');

@@ -132,6 +132,10 @@ Fixed-layout documents (`PDF` / `CBZ` / `XPS`):
 - `SELECT`: open `BOOK` settings
 - `START`: return to library
 
+## Folder Covers
+
+A library folder can show a cover image. Put an image named after the folder either next to it (`book/Foo.jpg`) or inside it (`book/Foo/Foo.jpg`). If both exist, the one next to the folder is used. Supported image types are `jpg`, `jpeg` and `png`.
+
 ## Supported Formats
 
 Strong support:

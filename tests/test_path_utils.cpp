@@ -103,9 +103,32 @@ void TestBookCoverSidecarPaths() {
   }
 }
 
+void TestFolderCoverCandidatePaths() {
+  const char *extensions[] = {".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"};
+  const std::vector<std::string> candidates =
+      cover_override_utils::BuildFolderCandidates("sdmc:/books/Foo");
+  test::ExpectEqU("folder candidates count", candidates.size(), 12u);
+  for (size_t i = 0; i < 6 && candidates.size() == 12; ++i) {
+    test::ExpectTrue("folder sibling candidate first",
+                     candidates[i] ==
+                         std::string("sdmc:/books/Foo") + extensions[i]);
+    test::ExpectTrue("folder inside candidate second",
+                     candidates[6 + i] ==
+                         std::string("sdmc:/books/Foo/Foo") + extensions[i]);
+  }
+  test::ExpectTrue("trailing slash matches plain path",
+                   cover_override_utils::BuildFolderCandidates(
+                       "sdmc:/books/Foo/") == candidates);
+  test::ExpectTrue("empty folder path yields no candidates",
+                   cover_override_utils::BuildFolderCandidates("").empty());
+  test::ExpectTrue("slash-only folder path yields no candidates",
+                   cover_override_utils::BuildFolderCandidates("/").empty());
+}
+
 } // namespace
 
 int main() {
+  TestFolderCoverCandidatePaths();
   TestFallbackFontConfigurationAtRuntimeMatcher();
   TestBookCoverSidecarPaths();
   ExpectNonEmpty("GetSdmcBase exists", paths::GetSdmcBase());
