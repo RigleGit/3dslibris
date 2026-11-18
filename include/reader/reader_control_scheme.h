@@ -258,6 +258,19 @@ inline ReaderControls BuildReaderControls(ControlScheme scheme, bool landscape,
   return c;
 }
 
+// D-pad keys bound to focus_hold (none in Default). One-handed uses the same
+// key to leave the image viewer opened from link focus, so the thumb can stay
+// on the D-pad; the viewer stops panning with it and keeps the Circle Pad.
+template <typename KeyMap>
+inline uint32_t FocusHoldDpadKeys(ControlScheme scheme, bool landscape,
+                                  const KeyMap &key)
+{
+  const uint32_t dpad =
+      LBM(LB_DUP) | LBM(LB_DDOWN) | LBM(LB_DLEFT) | LBM(LB_DRIGHT);
+  return ResolveButtons(
+      GetSchemeTable(scheme, landscape).buttons[RA_FOCUS_HOLD] & dpad, key);
+}
+
 template <typename KeyMap>
 inline ReaderControls BuildPortraitControls(const KeyMap &key)
 {

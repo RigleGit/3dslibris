@@ -163,6 +163,13 @@ static void TestOneHandedMasks() {
                   key.b | key.y | key.l | key.r | key.dleft);
   test::ExpectEqU("landscape link exit", l.link_exit,
                   key.b | key.y | key.l | key.r | key.dup);
+  test::ExpectEqU("portrait viewer d-pad exit",
+                  FocusHoldDpadKeys(CONTROL_SCHEME_ONE_HANDED, false, key), key.dleft);
+  test::ExpectEqU("landscape viewer d-pad exit",
+                  FocusHoldDpadKeys(CONTROL_SCHEME_ONE_HANDED, true, key), key.dup);
+  test::ExpectEqU("default viewer d-pad exit",
+                  FocusHoldDpadKeys(CONTROL_SCHEME_DEFAULT, false, key) |
+                      FocusHoldDpadKeys(CONTROL_SCHEME_DEFAULT, true, key), 0u);
   test::ExpectTrue("portrait one-handed valid", ValidateScheme(p));
   test::ExpectTrue("landscape one-handed valid", ValidateScheme(l));
   // Swapped handedness: L/R exit follows the swapped physical masks.

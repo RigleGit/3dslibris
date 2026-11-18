@@ -5,6 +5,7 @@
 #include "app/app_mode.h"
 #include "formats/common/fixed_layout_screen_constants.h"
 #include "shared/orientation_utils.h"
+#include "reader/reader_control_scheme.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -131,12 +132,18 @@ struct Book {
 bool HasExtCI(const char *, const char *) {
   return true;
 }
+struct Prefs {
+  int control_scheme_portrait = 0, control_scheme_landscape = 0;
+};
 struct App {
   Book book;
   std::unique_ptr<Text> ts{new Text};
+  std::unique_ptr<Prefs> prefs{new Prefs};
   struct Keys {
     u32 a = KEY_A, b = KEY_B, x = KEY_X, y = KEY_Y, start = KEY_START,
-        select = KEY_SELECT;
+        select = KEY_SELECT, l = KEY_L, r = KEY_R, zl = 0, zr = 0,
+        dup = KEY_DUP, ddown = KEY_DDOWN, dleft = KEY_DLEFT,
+        dright = KEY_DRIGHT, up = 0, down = 0, left = 0, right = 0;
   } key;
   reader::ReaderLayoutState reader_layout;
   AppMode mode = AppMode::Book;
@@ -513,7 +520,44 @@ void TestRectangularRotationScale() {
   assert(std::abs(viewer_gpu_viewport.height-2.f/3.f)<1e-5f);
   viewer_gpu_available=false;
 }
+// One-handed: the D-pad key that enters link focus also closes the viewer and
+// no longer pans; the other D-pad keys keep panning (issue #183).
+void TestOneHandedDpadExit() {
+  for (unsigned char orientation : {0, 1, 2}) {
+    const bool landscape = orientation == 2;
+    const u32 exit_key = landscape ? KEY_DUP : KEY_DLEFT;
+    const u32 pan_key = landscape ? KEY_DDOWN : KEY_DRIGHT;
+    {
+      Fixture f(orientation);
+      f.app.prefs->control_scheme_portrait = CONTROL_SCHEME_ONE_HANDED;
+      f.app.prefs->control_scheme_landscape = CONTROL_SCHEME_ONE_HANDED;
+      auto &s = *f.reader.image_viewer_;
+      s.viewport.zoom_index = 4;
+      f.Draw();
+      // Holding the exit key from a previous frame must not pan.
+      f.Input(0, exit_key);
+      assert(!s.viewport.interaction_active);
+      assert(s.viewport.center_x == 0.5f && s.viewport.center_y == 0.5f);
+      f.Input(pan_key, pan_key);
+      assert(s.viewport.interaction_active);
+      f.Input(0);
+      f.Input(exit_key, exit_key);
+      assert(f.app.mode == AppMode::Book && !f.reader.image_viewer_);
+    }
+    {
+      // Default scheme: the same key pans and keeps the viewer open.
+      Fixture f(orientation);
+      auto &s = *f.reader.image_viewer_;
+      s.viewport.zoom_index = 4;
+      f.Draw();
+      f.Input(exit_key, exit_key);
+      assert(f.app.mode == AppMode::ImageViewer && f.reader.image_viewer_);
+      assert(s.viewport.interaction_active);
+    }
+  }
+}
 int main(int argc, char **argv) {
+  TestOneHandedDpadExit();
   TestRectangularRotationScale();
   TestRotation();
   TestGpuOnlyViewer();

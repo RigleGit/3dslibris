@@ -7,6 +7,8 @@
 #include "formats/common/fixed_layout_blit_utils.h"
 #include "formats/common/fixed_layout_screen_constants.h"
 #include "reader/book_page_nav.h"
+#include "reader/reader_control_scheme.h"
+#include "settings/prefs.h"
 #include "shared/debug_log.h"
 #include "shared/string_utils.h"
 #include "shared/orientation_utils.h"
@@ -545,7 +547,12 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
       s.touch_panning = true;
   } else if (!(held & KEY_TOUCH))
     s.touch_panning = false;
-  if ((keys & app_.key.y) || control == ReaderImageViewerSession::Back) {
+  const bool landscape =
+      orientation_utils::IsLandscape(app_.reader_layout.orientation);
+  const u32 dpad_exit = FocusHoldDpadKeys(
+      SelectedControlScheme(app_.prefs.get(), landscape), landscape, app_.key);
+  if ((keys & (app_.key.y | dpad_exit)) ||
+      control == ReaderImageViewerSession::Back) {
     CloseImageViewer();
     return;
   }
@@ -611,13 +618,14 @@ void ReaderController::RunImageViewerFrame(const FrameInput &input) {
   hidCircleRead(&circle);
   float x = std::abs(circle.dx) > 15 ? circle.dx * 0.0003f : 0;
   float y = std::abs(circle.dy) > 15 ? -circle.dy * 0.0003f : 0;
-  if (held & KEY_DLEFT)
+  const u32 dpad_pan = held & ~dpad_exit;
+  if (dpad_pan & KEY_DLEFT)
     x -= 0.025f;
-  if (held & KEY_DRIGHT)
+  if (dpad_pan & KEY_DRIGHT)
     x += 0.025f;
-  if (held & KEY_DUP)
+  if (dpad_pan & KEY_DUP)
     y -= 0.025f;
-  if (held & KEY_DDOWN)
+  if (dpad_pan & KEY_DDOWN)
     y += 0.025f;
   bool moving = x != 0 || y != 0;
   if ((held & KEY_TOUCH) && s.touch_panning) {
