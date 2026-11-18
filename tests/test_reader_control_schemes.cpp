@@ -158,12 +158,18 @@ static void TestOneHandedMasks() {
   test::ExpectEqU("landscape link prev", l.link_prev, key.dleft);
   test::ExpectEqU("portrait link activate", p.link_activate, key.a | key.dright);
   test::ExpectEqU("landscape link activate", l.link_activate, key.a | key.ddown);
-  test::ExpectEqU("portrait link exit", p.link_exit, key.b | key.y | key.l | key.r);
-  test::ExpectEqU("landscape link exit", l.link_exit, key.b | key.y | key.l | key.r);
+  // The D-pad key that enters link focus also leaves it (issue #183).
+  test::ExpectEqU("portrait link exit", p.link_exit,
+                  key.b | key.y | key.l | key.r | key.dleft);
+  test::ExpectEqU("landscape link exit", l.link_exit,
+                  key.b | key.y | key.l | key.r | key.dup);
+  test::ExpectTrue("portrait one-handed valid", ValidateScheme(p));
+  test::ExpectTrue("landscape one-handed valid", ValidateScheme(l));
   // Swapped handedness: L/R exit follows the swapped physical masks.
   KeyMap sw = Handed(true);
   const ReaderControls ps = BuildReaderControls(CONTROL_SCHEME_ONE_HANDED, false, sw);
-  test::ExpectEqU("swapped link exit", ps.link_exit, sw.b | sw.y | sw.l | sw.r);
+  test::ExpectEqU("swapped link exit", ps.link_exit,
+                  sw.b | sw.y | sw.l | sw.r | sw.dleft);
   test::ExpectEqU("clamp high", ClampControlScheme(2), CONTROL_SCHEME_DEFAULT);
   test::ExpectEqU("clamp negative", ClampControlScheme(-1), CONTROL_SCHEME_DEFAULT);
   test::ExpectEqU("clamp one-handed", ClampControlScheme(1), CONTROL_SCHEME_ONE_HANDED);

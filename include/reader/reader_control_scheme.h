@@ -111,7 +111,7 @@ static const SchemeTable kSchemeDefaultLandscape = {{
 // a second D-pad key so the thumb never leaves the D-pad/Circle Pad.
 //   focus_hold: Y | DLEFT (tap = bookmark, hold = link focus)
 //   bookmark jump: Circle Pad left/right only (D-pad keys are taken)
-//   link focus: DDOWN/DUP move, A | DRIGHT activate, L/R also leave focus
+//   link focus: DDOWN/DUP move, A | DRIGHT activate, L/R/DLEFT also leave focus
 static const SchemeTable kSchemeOneHandedPortrait = {{
     /* RA_PAGE_NEXT */ LBM(LB_A) | LBM(LB_R) | LBM(LB_CDOWN) | LBM(LB_DDOWN) | LBM(LB_ZL),
     /* RA_PAGE_PREV */ LBM(LB_B) | LBM(LB_L) | LBM(LB_CUP) | LBM(LB_DUP) | LBM(LB_ZR),
@@ -133,7 +133,7 @@ static const SchemeTable kSchemeOneHandedPortrait = {{
     /* RA_OPEN_SETTINGS */ LBM(LB_SELECT),
     /* RA_FOCUS_HOLD */ LBM(LB_Y) | LBM(LB_DLEFT),
     /* RA_LINK_ACTIVATE */ LBM(LB_A) | LBM(LB_DRIGHT),
-    /* RA_LINK_EXIT */ LBM(LB_B) | LBM(LB_Y) | LBM(LB_L) | LBM(LB_R),
+    /* RA_LINK_EXIT */ LBM(LB_B) | LBM(LB_Y) | LBM(LB_L) | LBM(LB_R) | LBM(LB_DLEFT),
     /* RA_LINK_FOLLOW_IMAGE */ LBM(LB_X),
     /* RA_COLOR_CYCLE */ LBM(LB_X),
     /* RA_FIXED_SHOULDER_NEXT */ LBM(LB_R) | LBM(LB_ZL),
@@ -143,7 +143,7 @@ static const SchemeTable kSchemeOneHandedPortrait = {{
 // One-handed, landscape. Page turns already live on DRIGHT/DLEFT.
 //   focus_hold: Y | DUP
 //   bookmark jump: Circle Pad down/up only
-//   link focus: DRIGHT/DLEFT move, A | DDOWN activate, L/R also leave focus
+//   link focus: DRIGHT/DLEFT move, A | DDOWN activate, L/R/DUP also leave focus
 static const SchemeTable kSchemeOneHandedLandscape = {{
     /* RA_PAGE_NEXT */ LBM(LB_A) | LBM(LB_R) | LBM(LB_CRIGHT) | LBM(LB_DRIGHT) | LBM(LB_ZL),
     /* RA_PAGE_PREV */ LBM(LB_B) | LBM(LB_L) | LBM(LB_CLEFT) | LBM(LB_DLEFT) | LBM(LB_ZR),
@@ -165,7 +165,7 @@ static const SchemeTable kSchemeOneHandedLandscape = {{
     /* RA_OPEN_SETTINGS */ LBM(LB_SELECT),
     /* RA_FOCUS_HOLD */ LBM(LB_Y) | LBM(LB_DUP),
     /* RA_LINK_ACTIVATE */ LBM(LB_A) | LBM(LB_DDOWN),
-    /* RA_LINK_EXIT */ LBM(LB_B) | LBM(LB_Y) | LBM(LB_L) | LBM(LB_R),
+    /* RA_LINK_EXIT */ LBM(LB_B) | LBM(LB_Y) | LBM(LB_L) | LBM(LB_R) | LBM(LB_DUP),
     /* RA_LINK_FOLLOW_IMAGE */ LBM(LB_X),
     /* RA_COLOR_CYCLE */ LBM(LB_X),
     /* RA_FIXED_SHOULDER_NEXT */ LBM(LB_R) | LBM(LB_ZL),
